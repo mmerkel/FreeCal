@@ -4,14 +4,23 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A Rust core library, a Tauri shell exposing the core as commands and forwarding Signals as Tauri events, and a Svelte 5 frontend (runes only, plain Vite, no SvelteKit); the shipped binary embeds the compiled frontend
-- [ ] The Local Store is a SQLite database in the XDG data directory (ADR 0004)
-- [ ] The Local Account exists from the first launch and cannot be removed (the core refuses)
-- [ ] `CalendarGrid` wraps FullCalendar v7 (standard edition), only displays the Occurrences it's given and reports user actions; it shows an empty month view on today
-- [ ] All UI strings go through an i18n layer (English only)
-- [ ] Core test harness: real SQLite in a temporary directory, a controllable clock, a recording Signal subscriber
-- [ ] Frontend test harness: Vitest component tests against a fake core interface that can also emit Signals
-- [ ] `CLAUDE.md` gains the rule that Svelte code uses Svelte 5 runes only
-- [ ] All dependencies are GPLv3-compatible (ADR 0003)
+- [x] A Rust core library, a Tauri shell exposing the core as commands and forwarding Signals as Tauri events, and a Svelte 5 frontend (runes only, plain Vite, no SvelteKit); the shipped binary embeds the compiled frontend
+- [x] The Local Store is a SQLite database in the XDG data directory (ADR 0004)
+- [x] The Local Account exists from the first launch and cannot be removed (the core refuses)
+- [x] `CalendarGrid` wraps FullCalendar v7 (standard edition), only displays the Occurrences it's given and reports user actions; it shows an empty month view on today
+- [x] All UI strings go through an i18n layer (English only)
+- [x] Core test harness: real SQLite in a temporary directory, a controllable clock, a recording Signal subscriber
+- [x] Frontend test harness: Vitest component tests against a fake core interface that can also emit Signals
+- [x] `CLAUDE.md` gains the rule that Svelte code uses Svelte 5 runes only
+- [x] All dependencies are GPLv3-compatible (ADR 0003)
+
+## Comments
+
+Implemented. Notes for later tickets:
+
+- The core's `Signal` enum is empty; each ticket adds the Signal it first sends. The frontend does not subscribe yet: ticket 02 adds subscribe-before-read.
+- `CalendarGrid` takes only `today` for now. The Occurrences prop and the user-action callbacks arrive with ticket 03.
+- FullCalendar's own labels (month title, weekday names) come from its default locale, not from `t`. Ticket 06 should wire FullCalendar's locale.
+- The app identifier `org.freecal.FreeCal` sets the data directory (`~/.local/share/org.freecal.FreeCal`). Settle it before the first release (ticket 28, Flathub).

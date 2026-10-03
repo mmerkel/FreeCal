@@ -1,1 +1,5 @@
 .idea
+/target
+/src-tauri/gen/schemas
+/dist
+/node_modules

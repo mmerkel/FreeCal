@@ -1,12 +1,14 @@
 {
+  "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
-    "target": "es2016",
-    "module": "commonjs",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": true,
+    "noEmit": true,
     "skipLibCheck": true,
-    "outDir": "dist"
+    "isolatedModules": true,
+    "types": ["@testing-library/jest-dom"]
   },
-  "include": ["src"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
 }

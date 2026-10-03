@@ -1,0 +1,15 @@
+[package]
+name = "freecal-core"
+description = "FreeCal's domain logic and Local Store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
