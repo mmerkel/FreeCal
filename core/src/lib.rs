@@ -6,8 +6,12 @@
 mod account;
 mod calendar;
 mod clock;
+mod description;
+mod event;
 mod signal;
 mod store;
+#[cfg(test)]
+mod typescript;
 
 use std::path::Path;
 
@@ -17,10 +21,13 @@ use std::sync::{Arc, Mutex};
 pub use account::{Account, AccountId, Provider};
 pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
+pub use description::{Description, Piece, link_allowed};
+pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use signal::{Signal, SignalSink};
 
 use calendar::calendar_name;
-use store::Store;
+use event::{StoredRange, StoredWhen};
+use store::{EventFields, StoredEvent, Store};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -32,6 +39,14 @@ pub enum CoreError {
     AccountNotFound(AccountId),
     #[error("there is no Calendar {0:?}")]
     CalendarNotFound(CalendarId),
+    #[error("Calendar {0:?} is read-only")]
+    CalendarReadOnly(CalendarId),
+    #[error("there is no Event {0:?}")]
+    EventNotFound(EventId),
+    #[error("an Event can't end before it starts")]
+    EndBeforeStart,
+    #[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
+    UnreadableEventTime(String),
     #[error("a Calendar needs a name")]
     EmptyCalendarName,
     #[error("{0:?} is not a colour of the form #rrggbb")]
@@ -150,9 +165,153 @@ impl Core {
         Ok(())
     }
 
+    /// The Occurrences of shown Calendars on the dates `from` up to `to`
+    /// (exclusive), in the Display Time Zone and ordered by start.
+    pub fn occurrences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Occurrence>> {
+        let zone = self.clock.time_zone();
+        let events = self
+            .store()
+            .shown_events_in(&StoredRange::new(from, to, zone))?;
+        let mut occurrences = events
+            .into_iter()
+            .map(|event| {
+                Ok(Occurrence {
+                    event_id: event.id,
+                    calendar_id: event.calendar_id,
+                    title: event.title,
+                    when: event.when.to_when(zone)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Occurrence::order(&mut occurrences);
+        Ok(occurrences)
+    }
+
+    /// An Event with everything its details and editor show.
+    pub fn event(&self, id: EventId) -> Result<Event> {
+        let stored = self.store().find_event(id)?;
+        self.to_event(id, stored)
+    }
+
+    /// Creates an Event in a writable Calendar.
+    pub fn create_event(&self, draft: EventDraft) -> Result<Event> {
+        let calendar_id = draft.calendar_id;
+        let created = {
+            let store = self.store();
+            writable(&store, calendar_id)?;
+            let fields = EventFields {
+                title: draft.title,
+                when: StoredWhen::from_when(draft.when, self.clock.time_zone())?,
+                location: draft.location,
+                description: draft.description,
+                description_html: false,
+            };
+            let id = store.insert_event(calendar_id, &fields)?;
+            (id, StoredEvent {
+                calendar_id,
+                fields,
+            })
+        };
+        self.signals.send(Signal::OccurrencesChanged {
+            calendar_ids: vec![calendar_id],
+        });
+        self.to_event(created.0, created.1)
+    }
+
+    /// Changes an Event, possibly moving it to another writable Calendar.
+    /// What the user left as it was stays exactly as stored: an unchanged
+    /// time keeps its time zone and an unchanged description its original
+    /// bytes, even if it was HTML.
+    pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Event> {
+        let zone = self.clock.time_zone();
+        let (before, after) = {
+            let store = self.store();
+            let before = store.find_event(id)?;
+            writable(&store, before.calendar_id)?;
+            writable(&store, draft.calendar_id)?;
+
+            let old = &before.fields;
+            let when = if old.when.to_when(zone).ok() == Some(draft.when) {
+                old.when.clone()
+            } else {
+                StoredWhen::from_when(draft.when, zone)?
+            };
+            let (description, description_html) =
+                if draft.description == description_of(old).text {
+                    (old.description.clone(), old.description_html)
+                } else {
+                    (draft.description, false)
+                };
+            let after = StoredEvent {
+                calendar_id: draft.calendar_id,
+                fields: EventFields {
+                    title: draft.title,
+                    when,
+                    location: draft.location,
+                    description,
+                    description_html,
+                },
+            };
+            store.update_event(id, &after)?;
+            (before.calendar_id, after)
+        };
+        let mut calendar_ids = vec![before];
+        if after.calendar_id != before {
+            calendar_ids.push(after.calendar_id);
+        }
+        self.signals
+            .send(Signal::OccurrencesChanged { calendar_ids });
+        self.to_event(id, after)
+    }
+
+    /// Deletes an Event from a writable Calendar.
+    pub fn delete_event(&self, id: EventId) -> Result<()> {
+        let calendar_id = {
+            let store = self.store();
+            let calendar_id = store.find_event(id)?.calendar_id;
+            writable(&store, calendar_id)?;
+            store.delete_event(id)?;
+            calendar_id
+        };
+        self.signals.send(Signal::OccurrencesChanged {
+            calendar_ids: vec![calendar_id],
+        });
+        Ok(())
+    }
+
+    fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
+        let description = description_of(&stored.fields);
+        let fields = stored.fields;
+        Ok(Event {
+            id,
+            calendar_id: stored.calendar_id,
+            title: fields.title,
+            when: fields.when.to_when(self.clock.time_zone())?,
+            location: fields.location,
+            description,
+        })
+    }
+
     /// The Local Store, locked. Signals are sent only after the lock is
     /// released, so a subscriber can read straight away.
     fn store(&self) -> std::sync::MutexGuard<'_, Store> {
         self.store.lock().unwrap()
+    }
+}
+
+/// Refuses changes to the Events of a missing or Read-only Calendar.
+fn writable(store: &Store, id: CalendarId) -> Result<()> {
+    if store.find_calendar(id)?.read_only {
+        Err(CoreError::CalendarReadOnly(id))
+    } else {
+        Ok(())
+    }
+}
+
+fn description_of(fields: &EventFields) -> Description {
+    if fields.description_html {
+        Description::from_html(&fields.description)
+    } else {
+        Description::from_plain_text(&fields.description)
     }
 }

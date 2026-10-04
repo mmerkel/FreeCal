@@ -185,6 +185,11 @@ body {
   font: inherit;
 }
 
+/* Checkboxes take the neutral solid colour, not the system's accent. */
+input[type='checkbox'] {
+  accent-color: var(--solid);
+}
+
 /* Menus: a raised card of items, labels and separators (see Menu.svelte). */
 .menu {
   box-sizing: border-box;

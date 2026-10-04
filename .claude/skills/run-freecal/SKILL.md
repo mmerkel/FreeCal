@@ -43,7 +43,8 @@ $R stop                          # stops FreeCal and Xvfb
 | `stop` | stop FreeCal and Xvfb |
 | `shot NAME [GEOM]` | screenshot to `/tmp/freecal-run/shots/NAME.png`; `GEOM` crops (`WxH+X+Y`) |
 | `click X Y`, `dblclick X Y`, `rightclick X Y`, `move X Y` | mouse, in screen pixels |
-| `type TEXT` | types characters (upper case and `#:<>!…` use Shift) |
+| `drag X1 Y1 X2 Y2` | press, move in steps, release: drag-to-create across days |
+| `type TEXT` | types printable ASCII, with Shift wherever the keyboard map needs it |
 | `key NAME` | one key by X keysym: `Return`, `Escape`, `Tab`, `ctrl+a`, `shift+Tab` |
 | `sql QUERY` | `sqlite3` on the Local Store |
 | `log` | the app's stdout and stderr |
@@ -51,6 +52,8 @@ $R stop                          # stops FreeCal and Xvfb
 `FREECAL_RUN_DIR` (default `/tmp/freecal-run`) and `FREECAL_DISPLAY` (default `:97`) override the locations.
 
 **Finding coordinates:** there is no DOM access, so take a full screenshot, read it, and click by pixel. The window sits at 0,0 and is 1200×800 on the 1280×800 screen. Layout as of ticket 32: the sidebar's account heading is at y≈27, with its "+" (New calendar) at x≈200. Calendar rows start at y≈56 and are 28 px apart; clicking a row shows or hides it. Each row's ⋮ button is at x≈200. Its menu opens below the row: from the Home row (y≈56), the 24 swatches are in three rows at y≈108, 127 and 145 (x≈55 to 193, 20 px apart), Rename at y≈182, Show only this at y≈212 and Delete at y≈251. While a menu is open, a click or right-click anywhere outside it only closes it. Shift+F10 on a focused row opens the same menu. The delete dialog's Cancel and Delete are at about 660,447 and 740,447. The grid starts at x≈236.
+
+As of ticket 03, in the month view of October 2026 (first launch on 4 October): each day column is 136 px wide from x≈236 and each week row is 122 px tall from y≈53, so 5 October is at about 440,240. Clicking a day or dragging across days (`drag 560 240 830 240`) opens the "New event" editor, and `key c` opens it at the next full hour. With no writable Calendar, either one shows the "No calendar for new events" hint (OK at 750,447). The editor's Title has focus, and Save is at about 745,628 and Cancel at 671,628. Clicking a chip opens the Event's details, which are centred and as tall as their content, so take a screenshot before clicking Delete (left), Edit or Close (right). A title with a line break or a description stored as HTML can't be entered through the window; to check those, insert an `event` row with `sqlite3` (fields from `fixtures/hostile-event.json`, `description_html = 1`) and `restart`.
 
 ## Run (human path)
 

@@ -3,11 +3,13 @@
 
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use freecal_core::{
-    Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Signal, SignalSink,
-    SystemClock,
+    Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
+    Occurrence, Signal, SignalSink, SystemClock, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 /// The Tauri event on which Signals reach the frontend.
 const SIGNAL_EVENT: &str = "freecal://signal";
@@ -83,8 +85,51 @@ fn show_only_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
     core.show_only_calendar(CalendarId(id)).map_err(to_message)
 }
 
+#[tauri::command]
+fn list_occurrences(
+    core: State<Core>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> CommandResult<Vec<Occurrence>> {
+    core.occurrences(from, to).map_err(to_message)
+}
+
+#[tauri::command]
+fn event(core: State<Core>, id: EventId) -> CommandResult<Event> {
+    core.event(id).map_err(to_message)
+}
+
+#[tauri::command]
+fn create_event(core: State<Core>, draft: EventDraft) -> CommandResult<Event> {
+    core.create_event(draft).map_err(to_message)
+}
+
+#[tauri::command]
+fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResult<Event> {
+    core.edit_event(id, draft).map_err(to_message)
+}
+
+#[tauri::command]
+fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
+    core.delete_event(id).map_err(to_message)
+}
+
+/// Opens a link from a description in the system browser. The scheme is
+/// checked again here, so that the window can't open anything else even if
+/// it asks to.
+#[tauri::command]
+fn open_link(app: AppHandle, url: String) -> CommandResult<()> {
+    if !link_allowed(&url) {
+        return Err(format!("FreeCal opens only http, https and mailto links: {url:?}"));
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
@@ -103,6 +148,12 @@ fn main() {
             delete_calendar,
             set_calendar_shown,
             show_only_calendar,
+            list_occurrences,
+            event,
+            create_event,
+            edit_event,
+            delete_event,
+            open_link,
         ])
         .run(tauri::generate_context!())
         .expect("FreeCal failed to start");

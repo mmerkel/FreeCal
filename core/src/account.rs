@@ -1,11 +1,13 @@
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(type = "number"))]
 #[serde(transparent)]
 pub struct AccountId(pub i64);
 
 /// A kind of calendar service FreeCal can talk to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Local,
@@ -27,6 +29,7 @@ impl Provider {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Account {
     pub id: AccountId,
     pub provider: Provider,

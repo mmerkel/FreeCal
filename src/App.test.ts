@@ -22,3 +22,24 @@ test('opens an empty month view on the core’s today', async () => {
     'date',
   );
 });
+
+test('the grid shows the core’s Occurrences and follows “Occurrences changed”', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({
+    calendarId: home.id,
+    title: 'Dentist',
+    when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
+  });
+
+  render(App, { core });
+
+  expect(await screen.findByText('Dentist')).toBeInTheDocument();
+  core.addEvent({
+    calendarId: home.id,
+    title: 'Holiday',
+    when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' },
+  });
+  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+  expect(await screen.findByText('Holiday')).toBeInTheDocument();
+});

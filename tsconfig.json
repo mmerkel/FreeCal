@@ -10,6 +10,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "isolatedModules": true,
+    // For the hostile test Event, shared with the Rust tests.
+    "resolveJsonModule": true,
     "types": ["@testing-library/jest-dom"]
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]

@@ -1,0 +1,108 @@
+{
+  "purpose": "The hostile test Event (spec: Testing Decisions). Every path that shows, writes or sends Event text runs it through. `expected` is the structured description the core builds from `description`, read as plain text and as HTML; both seams use it.",
+  "title": "<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com",
+  "location": "../../.bashrc & <i>Room</i> %s ${HOME}",
+  "description": "<p>Agenda <img src=x onerror=alert(3)></p><script>alert(4)</script>\r\nATTENDEE:mailto:evil@example.com<br><a href=\"javascript:alert(5)\">click me</a> <a href=\"https://example.com/agenda\">the agenda</a> <a href=\"file:///etc/passwd\">passwords</a> data:text/html,<b>x</b> https://example.org/plain mailto:someone@example.com",
+  "expected": {
+    "plainText": {
+      "paragraphs": [
+        [
+          {
+            "kind": "text",
+            "text": "<p>Agenda <img src=x onerror=alert(3)></p><script>alert(4)</script>"
+          }
+        ],
+        [
+          {
+            "kind": "text",
+            "text": "ATTENDEE:"
+          },
+          {
+            "kind": "link",
+            "text": "mailto:evil@example.com",
+            "url": "mailto:evil@example.com"
+          },
+          {
+            "kind": "text",
+            "text": "<br><a href=\"javascript:alert(5)\">click me</a> <a href=\""
+          },
+          {
+            "kind": "link",
+            "text": "https://example.com/agenda",
+            "url": "https://example.com/agenda"
+          },
+          {
+            "kind": "text",
+            "text": "\">the agenda</a> <a href=\"file:///etc/passwd\">passwords</a> data:text/html,<b>x</b> "
+          },
+          {
+            "kind": "link",
+            "text": "https://example.org/plain",
+            "url": "https://example.org/plain"
+          },
+          {
+            "kind": "text",
+            "text": " "
+          },
+          {
+            "kind": "link",
+            "text": "mailto:someone@example.com",
+            "url": "mailto:someone@example.com"
+          }
+        ]
+      ],
+      "text": "<p>Agenda <img src=x onerror=alert(3)></p><script>alert(4)</script>\nATTENDEE:mailto:evil@example.com<br><a href=\"javascript:alert(5)\">click me</a> <a href=\"https://example.com/agenda\">the agenda</a> <a href=\"file:///etc/passwd\">passwords</a> data:text/html,<b>x</b> https://example.org/plain mailto:someone@example.com"
+    },
+    "html": {
+      "paragraphs": [
+        [
+          {
+            "kind": "text",
+            "text": "Agenda"
+          }
+        ],
+        [
+          {
+            "kind": "text",
+            "text": "alert(4) ATTENDEE:"
+          },
+          {
+            "kind": "link",
+            "text": "mailto:evil@example.com",
+            "url": "mailto:evil@example.com"
+          }
+        ],
+        [
+          {
+            "kind": "text",
+            "text": "click me "
+          },
+          {
+            "kind": "link",
+            "text": "the agenda",
+            "url": "https://example.com/agenda"
+          },
+          {
+            "kind": "text",
+            "text": " passwords data:text/html,x "
+          },
+          {
+            "kind": "link",
+            "text": "https://example.org/plain",
+            "url": "https://example.org/plain"
+          },
+          {
+            "kind": "text",
+            "text": " "
+          },
+          {
+            "kind": "link",
+            "text": "mailto:someone@example.com",
+            "url": "mailto:someone@example.com"
+          }
+        ]
+      ],
+      "text": "Agenda\nalert(4) ATTENDEE:mailto:evil@example.com\nclick me the agenda (https://example.com/agenda) passwords data:text/html,x https://example.org/plain mailto:someone@example.com"
+    }
+  }
+}

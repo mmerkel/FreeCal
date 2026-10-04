@@ -6,7 +6,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
+use chrono_tz::Tz;
 use freecal_core::{Clock, Core, CoreError, Signal, SignalSink};
 use tempfile::TempDir;
 
@@ -51,25 +52,39 @@ impl Harness {
     }
 }
 
+/// A clock that stands still where a test puts it, in a system time zone the
+/// test chooses (Europe/Berlin unless it chooses one).
 pub struct TestClock {
-    now: Mutex<DateTime<FixedOffset>>,
+    now: Mutex<DateTime<Utc>>,
+    zone: Mutex<Tz>,
 }
 
 impl TestClock {
     pub fn at(rfc3339: &str) -> Self {
         Self {
-            now: Mutex::new(parse(rfc3339)),
+            now: Mutex::new(parse(rfc3339).with_timezone(&Utc)),
+            zone: Mutex::new(Tz::Europe__Berlin),
         }
     }
 
     pub fn set(&self, rfc3339: &str) {
-        *self.now.lock().unwrap() = parse(rfc3339);
+        *self.now.lock().unwrap() = parse(rfc3339).with_timezone(&Utc);
+    }
+
+    /// Changes the system time zone, as when travelling.
+    pub fn set_time_zone(&self, name: &str) {
+        *self.zone.lock().unwrap() = name.parse().expect("a known time zone");
     }
 }
 
 impl Clock for TestClock {
     fn now(&self) -> DateTime<FixedOffset> {
-        *self.now.lock().unwrap()
+        let zone = *self.zone.lock().unwrap();
+        self.now.lock().unwrap().with_timezone(&zone).fixed_offset()
+    }
+
+    fn time_zone(&self) -> Tz {
+        *self.zone.lock().unwrap()
     }
 }
 

@@ -21,7 +21,7 @@ usage: $0 COMMAND
   restart            relaunch FreeCal on the same Local Store
   stop               stop FreeCal and Xvfb
   shot NAME [GEOM]   screenshot to $RUN_DIR/shots/NAME.png; GEOM crops, e.g. 260x200+0+0
-  click X Y | dblclick X Y | rightclick X Y | move X Y | type TEXT | key NAME
+  click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | move X Y | type TEXT | key NAME
   sql QUERY          query the Local Store with sqlite3
   log                the app's output
 EOF
@@ -81,7 +81,7 @@ case "$command" in
     if [ -n "${2:-}" ]; then import -window root -crop "$2" "$out"; else import -window root "$out"; fi
     echo "$out"
     ;;
-  click | dblclick | rightclick | move | type | key) input "$command" "$@" ;;
+  click | dblclick | rightclick | drag | move | type | key) input "$command" "$@" ;;
   sql) sqlite3 "$STORE" "$@" ;;
   log) grep -v '^libEGL warning' "$RUN_DIR/app.log" || true ;;
   *) usage ;;

@@ -58,3 +58,37 @@ test('the Calendar commands pass their arguments under the names the shell expec
     ['delete_calendar', { id: 2 }],
   ]);
 });
+
+test('the Event commands pass their arguments under the names the shell expects', async () => {
+  const invoked: [string, unknown][] = [];
+  mockIPC((command, args) => {
+    invoked.push([command, args]);
+    return command === 'list_occurrences' ? [] : undefined;
+  });
+  const draft = {
+    calendarId: 2,
+    title: 'Dentist',
+    when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
+    location: '',
+    description: '',
+  } as const;
+
+  await tauriCore.listOccurrences(
+    Temporal.PlainDate.from('2026-09-28'),
+    Temporal.PlainDate.from('2026-11-09'),
+  );
+  await tauriCore.event(7);
+  await tauriCore.createEvent(draft);
+  await tauriCore.editEvent(7, draft);
+  await tauriCore.deleteEvent(7);
+  await tauriCore.openLink('https://example.com');
+
+  expect(invoked).toEqual([
+    ['list_occurrences', { from: '2026-09-28', to: '2026-11-09' }],
+    ['event', { id: 7 }],
+    ['create_event', { draft }],
+    ['edit_event', { id: 7, draft }],
+    ['delete_event', { id: 7 }],
+    ['open_link', { url: 'https://example.com' }],
+  ]);
+});

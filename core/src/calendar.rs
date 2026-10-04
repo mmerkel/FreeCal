@@ -1,14 +1,16 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, CoreError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(type = "number"))]
 #[serde(transparent)]
 pub struct CalendarId(pub i64);
 
 /// A Calendar's colour, always `#rrggbb` in lower case, so that it can only
 /// ever be a colour wherever it is used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(type = "string"))]
 #[serde(transparent)]
 pub struct Colour(String);
 
@@ -35,6 +37,7 @@ impl Default for Colour {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Calendar {
     pub id: CalendarId,
@@ -43,6 +46,9 @@ pub struct Calendar {
     pub colour: Colour,
     /// Whether the user shows this Calendar's Events or has hidden them.
     pub shown: bool,
+    /// A Read-only Calendar: FreeCal never changes its Events. Setting it
+    /// comes with ticket 17.
+    pub read_only: bool,
 }
 
 /// A Calendar name as the user typed it, without surrounding whitespace.

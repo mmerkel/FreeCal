@@ -1,7 +1,7 @@
 """Sends mouse and keyboard input to an X display through XTEST.
 
 Usage (DISPLAY must be set):
-    xinput.py click X Y | dblclick X Y | rightclick X Y | move X Y | type TEXT | key NAME
+    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | move X Y | type TEXT | key NAME
 
 NAME is an X keysym (Return, Escape, Tab, BackSpace, ...), optionally with
 modifiers: ctrl+a, shift+Tab.
@@ -14,12 +14,6 @@ from Xlib import X, XK, display
 from Xlib.ext import xtest
 
 MODIFIERS = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
-# Characters whose keysym name differs from the character itself.
-CHARACTER_KEYSYMS = {
-    " ": "space", "#": "numbersign", "-": "minus", ".": "period", ",": "comma",
-    "/": "slash", ":": "colon", "'": "apostrophe", "<": "less", ">": "greater",
-}
-SHIFTED = set('#:<>!"$%&()*+?@^_{}|~')
 
 d = display.Display()
 
@@ -52,12 +46,14 @@ def key(spec):
 
 
 def type_text(text):
+    # A printable ASCII character's keysym is its code point. The keyboard map
+    # says which key makes it and whether Shift is needed (index 1).
     for ch in text:
-        name = CHARACTER_KEYSYMS.get(ch, ch)
-        if ch.isupper() or ch in SHIFTED:
-            press([keycode("Shift_L"), keycode(name if ch in SHIFTED else ch.lower())])
-        else:
-            press([keycode(name)])
+        options = [(i, code) for code, i in d.keysym_to_keycodes(ord(ch)) if i in (0, 1)]
+        if not options:
+            sys.exit(f"can't type {ch!r}")
+        index, code = min(options)
+        press(([keycode("Shift_L")] if index else []) + [code])
 
 
 def move(x, y):
@@ -74,6 +70,18 @@ def click(x, y, times=1, button=1):
         flush()
 
 
+def drag(x1, y1, x2, y2, steps=10):
+    """Presses at one point, moves in steps to the other and releases there."""
+    move(x1, y1)
+    xtest.fake_input(d, X.ButtonPress, 1)
+    flush()
+    for step in range(1, steps + 1):
+        move(x1 + (x2 - x1) * step // steps, y1 + (y2 - y1) * step // steps)
+        time.sleep(0.03)
+    xtest.fake_input(d, X.ButtonRelease, 1)
+    flush()
+
+
 command, *args = sys.argv[1:] or ["help"]
 if command == "click":
     click(int(args[0]), int(args[1]))
@@ -81,6 +89,8 @@ elif command == "dblclick":
     click(int(args[0]), int(args[1]), times=2)
 elif command == "rightclick":
     click(int(args[0]), int(args[1]), button=3)
+elif command == "drag":
+    drag(*map(int, args[:4]))
 elif command == "move":
     move(int(args[0]), int(args[1]))
 elif command == "type":

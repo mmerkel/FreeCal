@@ -20,4 +20,11 @@ export const tauriCore: CoreApi = {
   deleteCalendar: (id) => invoke('delete_calendar', { id }),
   setCalendarShown: (id, shown) => invoke('set_calendar_shown', { id, shown }),
   showOnlyCalendar: (id) => invoke('show_only_calendar', { id }),
+  listOccurrences: (from, to) =>
+    invoke('list_occurrences', { from: from.toString(), to: to.toString() }),
+  event: (id) => invoke('event', { id }),
+  createEvent: (draft) => invoke('create_event', { draft }),
+  editEvent: (id, draft) => invoke('edit_event', { id, draft }),
+  deleteEvent: (id) => invoke('delete_event', { id }),
+  openLink: (url) => invoke('open_link', { url }),
 };
