@@ -195,7 +195,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   The v1 Signals are:
   - **Sync status changed** (status): the new Sync Status of an Account or Calendar, with the time and outcome of the last finished sync and the number of local changes not yet sent.
   - **Occurrences changed** (change): the Events of one or more Calendars changed, for any reason (remote pull, local edit, import, undo, Snapshot restore, Conflict resolution). It carries the affected Calendar IDs.
-  - **Calendars changed** (change): Accounts or Calendars were added, removed, renamed or recoloured, or their writability changed (for example the user adding a server Calendar, or a server permission change).
+  - **Calendars changed** (change): Accounts or Calendars were added, removed, renamed, recoloured, shown or hidden, or their writability changed (for example the user adding a server Calendar, or a server permission change).
   - **Problems changed** (change): a Conflict or Sync Error was raised or resolved. The tray and the notifications query the core for details; they run in the shell next to the core.
   - **Display Time Zone changed** (status): the system time zone changed, for example after travelling. It carries the new zone. The frontend redraws the visible range and the time zone label. An open editor keeps its draft, including the draft's own time zone.
   - **Waiting imports changed** (change): files waiting to be imported were added or one was dismissed or imported. The frontend re-reads the list and opens the preview for the first one when no modal dialog is showing.

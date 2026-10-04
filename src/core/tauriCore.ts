@@ -12,4 +12,11 @@ export const tauriCore: CoreApi = {
   // The shell sends dates as ISO strings (YYYY-MM-DD).
   today: async () => Temporal.PlainDate.from(await invoke<string>('today')),
   listAccounts: () => invoke('list_accounts'),
+  listCalendars: () => invoke('list_calendars'),
+  createCalendar: (accountId, name, colour) =>
+    invoke('create_calendar', { accountId, name, colour }),
+  renameCalendar: (id, name) => invoke('rename_calendar', { id, name }),
+  recolourCalendar: (id, colour) => invoke('recolour_calendar', { id, colour }),
+  deleteCalendar: (id) => invoke('delete_calendar', { id }),
+  setCalendarShown: (id, shown) => invoke('set_calendar_shown', { id, shown }),
 };

@@ -1,4 +1,4 @@
-import type { Account, Signal } from './types';
+import type { Account, AccountId, Calendar, CalendarId, Signal } from './types';
 
 /** The core application interface. The frontend talks only to this. */
 export interface CoreApi {
@@ -7,4 +7,13 @@ export interface CoreApi {
   /** The current local date. */
   today(): Promise<Temporal.PlainDate>;
   listAccounts(): Promise<Account[]>;
+  /** Every Calendar of every Account, in the order they were added. */
+  listCalendars(): Promise<Calendar[]>;
+  /** Creates a Calendar in the Local Account. `colour` is `#rrggbb`. */
+  createCalendar(accountId: AccountId, name: string, colour: string): Promise<Calendar>;
+  renameCalendar(id: CalendarId, name: string): Promise<void>;
+  recolourCalendar(id: CalendarId, colour: string): Promise<void>;
+  /** Deletes a Local Calendar with all its Events. */
+  deleteCalendar(id: CalendarId): Promise<void>;
+  setCalendarShown(id: CalendarId, shown: boolean): Promise<void>;
 }

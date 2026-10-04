@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CoreApi } from './core/CoreApi';
-  import type { Account } from './core/types';
+  import type { Account, Calendar, Signal } from './core/types';
   import { t } from './i18n';
   import CalendarGrid from './lib/CalendarGrid.svelte';
   import Sidebar from './lib/Sidebar.svelte';
@@ -11,31 +11,71 @@
 
   let { core }: Props = $props();
 
-  interface AppState {
-    today: Temporal.PlainDate;
+  interface Directory {
     accounts: Account[];
+    calendars: Calendar[];
   }
 
-  async function start(): Promise<AppState> {
-    const [today, accounts] = await Promise.all([core.today(), core.listAccounts()]);
-    return { today, accounts };
-  }
+  let today = $state<Temporal.PlainDate>();
+  let directory = $state<Directory>();
+  let startFailure = $state<string>();
+  let readFailure = $state<string>();
 
-  const started = start();
+  $effect(() => {
+    let stopped = false;
+    let unsubscribe: (() => void) | undefined;
+    // Reads can overtake each other; only the latest one may land.
+    let latestRead = 0;
+
+    async function readDirectory() {
+      const read = ++latestRead;
+      const [accounts, calendars] = await Promise.all([core.listAccounts(), core.listCalendars()]);
+      if (!stopped && read === latestRead) {
+        directory = { accounts, calendars };
+        readFailure = undefined;
+      }
+    }
+
+    function onSignal(signal: Signal) {
+      switch (signal.kind) {
+        case 'calendarsChanged':
+          readDirectory().catch((error) => (readFailure = String(error)));
+          break;
+      }
+    }
+
+    async function start() {
+      // Subscribe first, then read, so that no change falls in the gap.
+      const stop = await core.subscribe(onSignal);
+      if (stopped) return stop();
+      unsubscribe = stop;
+      const [currentDate] = await Promise.all([core.today(), readDirectory()]);
+      today = currentDate;
+    }
+
+    start().catch((error) => (startFailure = String(error)));
+    return () => {
+      stopped = true;
+      unsubscribe?.();
+    };
+  });
 </script>
 
-{#await started}
-  <p>{t('app.loading')}</p>
-{:then state}
+{#if startFailure}
+  <p role="alert">{t('app.loadFailed', { error: startFailure })}</p>
+{:else if today && directory}
   <div class="app">
-    <Sidebar accounts={state.accounts} />
+    <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
     <main class="grid">
-      <CalendarGrid today={state.today} />
+      {#if readFailure}
+        <p role="alert">{t('app.readFailed', { error: readFailure })}</p>
+      {/if}
+      <CalendarGrid {today} />
     </main>
   </div>
-{:catch error}
-  <p role="alert">{t('app.loadFailed', { error: String(error) })}</p>
-{/await}
+{:else}
+  <p>{t('app.loading')}</p>
+{/if}
 
 <style>
   .app {

@@ -32,3 +32,27 @@ test('subscribe receives the Signals the shell forwards until unsubscribed', asy
 
   expect(received).toEqual([{ kind: 'first' }]);
 });
+
+test('the Calendar commands pass their arguments under the names the shell expects', async () => {
+  const invoked: [string, unknown][] = [];
+  mockIPC((command, args) => {
+    invoked.push([command, args]);
+    return command === 'list_calendars' ? [] : undefined;
+  });
+
+  await tauriCore.listCalendars();
+  await tauriCore.createCalendar(1, 'Home', '#3366cc');
+  await tauriCore.renameCalendar(2, 'Family');
+  await tauriCore.recolourCalendar(2, '#ff8800');
+  await tauriCore.setCalendarShown(2, false);
+  await tauriCore.deleteCalendar(2);
+
+  expect(invoked).toEqual([
+    ['list_calendars', {}],
+    ['create_calendar', { accountId: 1, name: 'Home', colour: '#3366cc' }],
+    ['rename_calendar', { id: 2, name: 'Family' }],
+    ['recolour_calendar', { id: 2, colour: '#ff8800' }],
+    ['set_calendar_shown', { id: 2, shown: false }],
+    ['delete_calendar', { id: 2 }],
+  ]);
+});
