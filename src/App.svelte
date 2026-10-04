@@ -3,7 +3,15 @@
   import type { Account, Calendar, Signal } from './core/types';
   import { t } from './i18n';
   import CalendarGrid from './lib/CalendarGrid.svelte';
-  import Sidebar from './lib/Sidebar.svelte';
+  import PrototypeSwitcher from './lib/prototype-sidebar/PrototypeSwitcher.svelte';
+  import VariantA from './lib/prototype-sidebar/VariantA.svelte';
+  import VariantB from './lib/prototype-sidebar/VariantB.svelte';
+  import VariantC from './lib/prototype-sidebar/VariantC.svelte';
+
+  // PROTOTYPE: sidebar style variants, see src/lib/prototype-sidebar/README.md.
+  const VARIANTS: [string, string][] = [['A', 'GNOME/libadwaita'], ['B', 'Google Calendar'], ['C', 'Neutral flat']];
+  const THEMES: Record<string, 'pulse' | 'monarch' | 'breezy'> = { A: 'pulse', B: 'monarch', C: 'breezy' };
+  let variant = $state(new URLSearchParams(location.search).get('variant') ?? 'A');
 
   interface Props {
     core: CoreApi;
@@ -65,12 +73,15 @@
   <p role="alert">{t('app.loadFailed', { error: startFailure })}</p>
 {:else if today && directory}
   <div class="app">
-    <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
+    {#if variant === 'A'}<VariantA {core} accounts={directory.accounts} calendars={directory.calendars} />
+    {:else if variant === 'B'}<VariantB {core} accounts={directory.accounts} calendars={directory.calendars} />
+    {:else}<VariantC {core} accounts={directory.accounts} calendars={directory.calendars} />{/if}
+    <PrototypeSwitcher variants={VARIANTS} bind:current={variant} />
     <main class="grid">
       {#if readFailure}
         <p role="alert">{t('app.readFailed', { error: readFailure })}</p>
       {/if}
-      <CalendarGrid {today} />
+      {#key variant}<CalendarGrid {today} theme={THEMES[variant]} />{/key}
     </main>
   </div>
 {:else}
