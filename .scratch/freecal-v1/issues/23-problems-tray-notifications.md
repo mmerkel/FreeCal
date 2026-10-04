@@ -11,3 +11,4 @@
 - [ ] With the window closed, one notification per new Conflict or Sync Error
 - [ ] An open window shows new Conflicts and Sync Errors as soon as "Problems changed" arrives
 - [ ] Tested with the recording fake tray and notifier
+- [ ] Tray labels escape `_` and notification bodies are escaped: problem lines naming the hostile test Event or a hostile Calendar name show literally (checked with the recording fakes)

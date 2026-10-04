@@ -9,3 +9,4 @@
 - [ ] A notification is shown when a reminder stored on an Event (or Occurrence) becomes due (tested with the controllable clock and a recording fake notifier)
 - [ ] Snooze re-shows the notification later; dismiss stops it
 - [ ] No Signals are used for reminders
+- [ ] Notification bodies are escaped: the hostile test Event shows its title and place literally, with no markup interpreted (checked with the recording fake notifier)

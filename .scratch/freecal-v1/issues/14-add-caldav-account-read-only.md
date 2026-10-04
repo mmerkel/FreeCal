@@ -19,3 +19,5 @@
 - [ ] Removing the Account removes its Calendars and deletes its credentials from the keyring
 - [ ] Several CalDAV Accounts can be connected side by side
 - [ ] Tests run against a real Radicale server started per test run, with a recording fake keyring
+- [ ] CalDAV XML requests are built with an XML writer, never from strings; Calendar names, Event fields and server error text from the server are treated as untrusted and shown only as text
+- [ ] Radicale serving the hostile test Event: it is pulled, stored and shown without running or rendering anything

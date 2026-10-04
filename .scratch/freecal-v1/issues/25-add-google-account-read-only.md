@@ -12,3 +12,4 @@
 - [ ] Server permissions decide read-only; before 1.0 newly added Google Calendars default to read-only
 - [ ] Removing the Account removes its Calendars and its tokens from the keyring
 - [ ] Tested against a fake Google HTTP server that mimics the REST API (sync tokens, ETags, 410, permissions), exercising the real Google Provider code
+- [ ] Google HTML descriptions go through the core's conversion to plain text and link pieces; the fake Google server serving the hostile test Event shows it is pulled, stored and shown without running or rendering anything

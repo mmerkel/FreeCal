@@ -18,4 +18,5 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 - The core's push messages are always called Signals, never "events" (calendar Events) or "notifications" (desktop notifications).
 - Every UI string goes through the i18n layer (`t` in `src/i18n`).
 - Every dependency must be GPLv3-compatible (ADR 0003).
+- Treat every stored field as untrusted: no `{@html}` or `innerHTML`, no `.ics`, XML or SQL built from strings, and never loosen the CSP for scripts or remote content. See "Untrusted content" in `.scratch/freecal-v1/spec.md`.
 - Checks: `cargo test`, `cargo clippy --all-targets`, `npm run check`, `npm test`.

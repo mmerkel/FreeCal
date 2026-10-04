@@ -12,3 +12,5 @@
 - [ ] Import is not offered for Read-only Calendars
 - [ ] The import is recorded as one Change Journal unit holding each Event's previous version, and can be undone in one step, restoring the Calendar exactly
 - [ ] The import runs under the modal "Working…" dialog and sends "Occurrences changed" for the affected Calendars
+- [ ] `.zip` contents are read in memory and never extracted, within fixed limits on unpacked size and number of entries (choose the numbers here, sized for a Google Takeout export); exceeding them makes a translated error entry
+- [ ] Importing an `.ics` holding the hostile test Event stores it without running or rendering anything; HTML descriptions are shown as converted plain text
