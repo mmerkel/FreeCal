@@ -49,4 +49,4 @@ A Flatpak build doesn't use Tauri's bundler: the Flatpak manifest installs the i
 share/icons/hicolor/scalable/apps/<app-id>.svg
 ```
 
-The file must be named after the app ID. That ID is still open (`org.freecal.FreeCal` for now). Check Flathub's current icon requirements when doing ticket 28.
+The file must be named after the app ID, `io.github.mmerkel.FreeCal` (ADR 0006). Check Flathub's current icon requirements when doing ticket 28.

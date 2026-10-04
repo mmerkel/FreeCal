@@ -33,7 +33,7 @@ fn list_accounts(core: State<Core>) -> CommandResult<Vec<Account>> {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            // The XDG data directory, e.g. ~/.local/share/org.freecal.FreeCal (ADR 0004).
+            // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
             let core = Core::open(&data_dir, Arc::new(SystemClock), signals)?;

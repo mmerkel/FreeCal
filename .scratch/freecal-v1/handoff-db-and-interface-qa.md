@@ -5,7 +5,7 @@ Repo: `/home/mmpi/Code/FreeCal`, branch `main`, at `879e713`. Ticket 01 (app ske
 Read first:
 - Ticket 01 and its leftover notes (under `## Comments`): `.scratch/freecal-v1/issues/01-app-skeleton-local-account.md`
 - Spec, especially "Implementation Decisions" (including the new "Untrusted content") and "Testing Decisions": `.scratch/freecal-v1/spec.md`
-- `GLOSSARY.md`, `docs/adr/0001`–`0005`, `CLAUDE.md` (code conventions and check commands)
+- `GLOSSARY.md`, `docs/adr/0001`–`0006`, `CLAUDE.md` (code conventions and check commands)
 - Ticket 29, which depends on part of this QA: `.scratch/freecal-v1/issues/29-one-running-freecal-per-local-store.md`
 - The code: `git show a8d0683 --stat`, `git show 8cd8b53`
 
@@ -35,7 +35,7 @@ Deliberately deferred; don't flag these as bugs:
 - `CalendarGrid` takes only `today`. Ticket 03 adds the Occurrences prop and the user-action callbacks.
 - `main.rs` aborts with "FreeCal failed to start" when `Core::open` fails. Ticket 29 replaces this with the startup error screen.
 
-Decision still open with the user: the app identifier `org.freecal.FreeCal`, which sets the data directory and matters for Flathub. Don't change it without asking.
+The app identifier is settled: `io.github.mmerkel.FreeCal` (ADR 0006).
 
 ## Checks
 
@@ -53,4 +53,4 @@ Decision still open with the user: the app identifier `org.freecal.FreeCal`, whi
 - 2026-10-04: Task 1 is done in `8cd8b53`. The open point "serialise `CoreError` as a code the frontend can translate" is no longer optional: ticket 29's startup error screen needs it (see `.scratch/freecal-v1/issues/29-one-running-freecal-per-local-store.md` and ADR 0005).
 - 2026-10-04: Recommendations put to the user, not yet answered: (1) generate the TypeScript types from Rust with ts-rs (MIT), with command names and the Signal channel name staying hand-written; (2) keep `"YYYY-MM-DD"` on the wire and convert to `Temporal.PlainDate` in the `tauriCore` adapter, with `CoreApi.today()` and the fake returning `PlainDate`; (3) `CoreError` codes stay with ticket 29; (4) check the window visually with the `run` skill. Work test-first once agreed.
 - 2026-10-04: Unrelated to this QA, the same session added `ICONS.md` (`8b90ca5`) and settled untrusted content (`879e713`: spec section "Untrusted content", a `CLAUDE.md` convention, and criteria in tickets 03, 09, 10, 12, 14, 23 and 25). For this QA it means descriptions will cross the interface as structured content from ticket 03 on, which argues for generated types.
-- 2026-10-04: Task 2 is done. Decisions: (1) the types stay hand-written for now; whether to generate them is decided in ticket 03 (see its Comments); (2) dates stay `"YYYY-MM-DD"` on the wire, `tauriCore` turns them into `Temporal.PlainDate`, and `CoreApi`, the fake and `CalendarGrid` use `PlainDate`; (3) `CoreError` codes stay with ticket 29. Hardening: `mockIPC` tests for `tauriCore` (`src/core/tauriCore.test.ts`); an unknown Provider in the Local Store is `CoreError::UnknownProvider`, not a panic; the window's capability is narrowed to event listen/unlisten. The real window was checked: Local Account in the sidebar, month grid on today, no errors. A page scrollbar (default body margin) was fixed with `src/app.css`; only the sidebar scrolls now. The collapsible, resizable sidebar became ticket 31 and user story 122. Still open with the user: the app identifier `org.freecal.FreeCal`.
+- 2026-10-04: Task 2 is done. Decisions: (1) the types stay hand-written for now; whether to generate them is decided in ticket 03 (see its Comments); (2) dates stay `"YYYY-MM-DD"` on the wire, `tauriCore` turns them into `Temporal.PlainDate`, and `CoreApi`, the fake and `CalendarGrid` use `PlainDate`; (3) `CoreError` codes stay with ticket 29. Hardening: `mockIPC` tests for `tauriCore` (`src/core/tauriCore.test.ts`); an unknown Provider in the Local Store is `CoreError::UnknownProvider`, not a panic; the window's capability is narrowed to event listen/unlisten. The real window was checked: Local Account in the sidebar, month grid on today, no errors. A page scrollbar (default body margin) was fixed with `src/app.css`; only the sidebar scrolls now. The collapsible, resizable sidebar became ticket 31 and user story 122.

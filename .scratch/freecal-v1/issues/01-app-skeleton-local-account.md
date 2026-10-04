@@ -23,4 +23,4 @@ Implemented. Notes for later tickets:
 - The core's `Signal` enum is empty; each ticket adds the Signal it first sends. The frontend does not subscribe yet: ticket 02 adds subscribe-before-read.
 - `CalendarGrid` takes only `today` for now. The Occurrences prop and the user-action callbacks arrive with ticket 03.
 - FullCalendar's own labels (month title, weekday names) come from its default locale, not from `t`. Ticket 06 should wire FullCalendar's locale.
-- The app identifier `org.freecal.FreeCal` sets the data directory (`~/.local/share/org.freecal.FreeCal`). Settle it before the first release (ticket 28, Flathub).
+- The app identifier sets the data directory. It was `org.freecal.FreeCal` at first and is now `io.github.mmerkel.FreeCal` (`~/.local/share/io.github.mmerkel.FreeCal`, ADR 0006).
