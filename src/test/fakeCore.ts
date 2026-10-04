@@ -84,6 +84,13 @@ export class FakeCore implements CoreApi {
     this.change(id, { shown });
   }
 
+  async showOnlyCalendar(id: CalendarId) {
+    this.calls.push('showOnlyCalendar');
+    this.calendar(id);
+    for (const calendar of this.calendars) calendar.shown = calendar.id === id;
+    this.emit({ kind: 'calendarsChanged' });
+  }
+
   private calendar(id: CalendarId): Calendar {
     const found = this.calendars.find((calendar) => calendar.id === id);
     if (!found) throw new Error(`there is no Calendar ${id}`);

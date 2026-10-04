@@ -19,4 +19,5 @@ export const tauriCore: CoreApi = {
   recolourCalendar: (id, colour) => invoke('recolour_calendar', { id, colour }),
   deleteCalendar: (id) => invoke('delete_calendar', { id }),
   setCalendarShown: (id, shown) => invoke('set_calendar_shown', { id, shown }),
+  showOnlyCalendar: (id) => invoke('show_only_calendar', { id }),
 };

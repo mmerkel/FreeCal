@@ -16,4 +16,6 @@ export interface CoreApi {
   /** Deletes a Local Calendar with all its Events. */
   deleteCalendar(id: CalendarId): Promise<void>;
   setCalendarShown(id: CalendarId, shown: boolean): Promise<void>;
+  /** Shows this Calendar and hides every other Calendar in all Accounts. */
+  showOnlyCalendar(id: CalendarId): Promise<void>;
 }

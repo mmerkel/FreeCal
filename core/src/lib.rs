@@ -143,6 +143,13 @@ impl Core {
         Ok(())
     }
 
+    /// Shows one Calendar and hides every other Calendar in all Accounts.
+    pub fn show_only_calendar(&self, id: CalendarId) -> Result<()> {
+        self.store().show_only_calendar(id)?;
+        self.signals.send(Signal::CalendarsChanged);
+        Ok(())
+    }
+
     /// The Local Store, locked. Signals are sent only after the lock is
     /// released, so a subscriber can read straight away.
     fn store(&self) -> std::sync::MutexGuard<'_, Store> {

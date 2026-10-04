@@ -119,6 +119,19 @@ impl Store {
         self.update_calendar("UPDATE calendar SET shown = ?2 WHERE id = ?1", id, shown)
     }
 
+    /// Shows `id` and hides every other Calendar, in one statement so that
+    /// nothing changes when `id` doesn't exist.
+    pub fn show_only_calendar(&self, id: CalendarId) -> Result<()> {
+        match self.conn.execute(
+            "UPDATE calendar SET shown = (id = ?1) \
+             WHERE EXISTS (SELECT 1 FROM calendar WHERE id = ?1)",
+            [id.0],
+        )? {
+            0 => Err(CoreError::CalendarNotFound(id)),
+            _ => Ok(()),
+        }
+    }
+
     pub fn delete_calendar(&self, id: CalendarId) -> Result<()> {
         match self
             .conn

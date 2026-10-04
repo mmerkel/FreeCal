@@ -45,6 +45,7 @@ test('the Calendar commands pass their arguments under the names the shell expec
   await tauriCore.renameCalendar(2, 'Family');
   await tauriCore.recolourCalendar(2, '#ff8800');
   await tauriCore.setCalendarShown(2, false);
+  await tauriCore.showOnlyCalendar(2);
   await tauriCore.deleteCalendar(2);
 
   expect(invoked).toEqual([
@@ -53,6 +54,7 @@ test('the Calendar commands pass their arguments under the names the shell expec
     ['rename_calendar', { id: 2, name: 'Family' }],
     ['recolour_calendar', { id: 2, colour: '#ff8800' }],
     ['set_calendar_shown', { id: 2, shown: false }],
+    ['show_only_calendar', { id: 2 }],
     ['delete_calendar', { id: 2 }],
   ]);
 });

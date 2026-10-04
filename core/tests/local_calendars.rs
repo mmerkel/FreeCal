@@ -189,6 +189,41 @@ fn hiding_and_showing_a_calendar_is_recorded_and_signalled() {
 }
 
 #[test]
+fn showing_only_one_calendar_hides_all_others_with_one_signal() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let local = local_account(&core);
+    let home = core
+        .create_calendar(local, "Home", colour("#3366cc"))
+        .unwrap();
+    let work = core
+        .create_calendar(local, "Work", colour("#dc3912"))
+        .unwrap();
+    let birthdays = core
+        .create_calendar(local, "Birthdays", colour("#ff9900"))
+        .unwrap();
+    core.set_calendar_shown(work.id, false).unwrap();
+    let before = harness.signals.received().len();
+
+    core.show_only_calendar(work.id).unwrap();
+
+    let shown: Vec<_> = core
+        .list_calendars()
+        .unwrap()
+        .into_iter()
+        .map(|calendar| (calendar.id, calendar.shown))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![(home.id, false), (work.id, true), (birthdays.id, false)]
+    );
+    assert_eq!(
+        harness.signals.received()[before..],
+        [Signal::CalendarsChanged]
+    );
+}
+
+#[test]
 fn changing_an_unknown_calendar_is_refused_without_a_signal() {
     let harness = Harness::new();
     let core = harness.open();
@@ -199,6 +234,7 @@ fn changing_an_unknown_calendar_is_refused_without_a_signal() {
         core.recolour_calendar(missing, colour("#3366cc")),
         core.delete_calendar(missing),
         core.set_calendar_shown(missing, false),
+        core.show_only_calendar(missing),
     ];
 
     for result in results {

@@ -5,10 +5,12 @@
 <script lang="ts">
   import { Calendar } from 'fullcalendar';
   import dayGridPlugin from 'fullcalendar/daygrid';
-  import classicThemePlugin from 'fullcalendar/themes/classic';
+  import breezyThemePlugin from 'fullcalendar/themes/breezy';
   import 'fullcalendar/skeleton.css';
-  import 'fullcalendar/themes/classic/theme.css';
-  import 'fullcalendar/themes/classic/palette.css';
+  // The palette has light and dark values and switches on `data-color-scheme`
+  // like the rest of the window (spec: "Visual style").
+  import 'fullcalendar/themes/breezy/theme.css';
+  import 'fullcalendar/themes/breezy/palettes/indigo.css';
 
   interface Props {
     /** The local date that the view opens on and highlights. */
@@ -21,7 +23,7 @@
 
   $effect(() => {
     const calendar = new Calendar(element, {
-      plugins: [dayGridPlugin, classicThemePlugin],
+      plugins: [dayGridPlugin, breezyThemePlugin],
       initialView: 'dayGridMonth',
       initialDate: today.toString(),
       now: today.toString(),

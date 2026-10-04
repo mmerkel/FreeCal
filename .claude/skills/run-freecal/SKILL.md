@@ -25,7 +25,7 @@ Rebuild after every frontend or Rust change; the binary embeds the compiled fron
 R=.claude/skills/run-freecal/freecal.sh
 $R start --fresh                 # Xvfb on :97, FreeCal with an empty Local Store
 $R shot start                    # → /tmp/freecal-run/shots/start.png — Read it and look
-$R click 60 52                   # "New calendar"
+$R click 200 27                  # "+" (New calendar) next to the account heading
 $R type "Home" && $R key Return
 $R move 600 700                  # park the mouse so no row shows its hover actions
 $R shot sidebar 260x200+0+0      # crop to the sidebar
@@ -42,7 +42,7 @@ $R stop                          # stops FreeCal and Xvfb
 | `restart` | relaunch FreeCal, keeping the Local Store |
 | `stop` | stop FreeCal and Xvfb |
 | `shot NAME [GEOM]` | screenshot to `/tmp/freecal-run/shots/NAME.png`; `GEOM` crops (`WxH+X+Y`) |
-| `click X Y`, `dblclick X Y`, `move X Y` | mouse, in screen pixels |
+| `click X Y`, `dblclick X Y`, `rightclick X Y`, `move X Y` | mouse, in screen pixels |
 | `type TEXT` | types characters (upper case and `#:<>!…` use Shift) |
 | `key NAME` | one key by X keysym: `Return`, `Escape`, `Tab`, `ctrl+a`, `shift+Tab` |
 | `sql QUERY` | `sqlite3` on the Local Store |
@@ -50,7 +50,7 @@ $R stop                          # stops FreeCal and Xvfb
 
 `FREECAL_RUN_DIR` (default `/tmp/freecal-run`) and `FREECAL_DISPLAY` (default `:97`) override the locations.
 
-**Finding coordinates:** there is no DOM access, so take a full screenshot, read it, and click by pixel. The window sits at 0,0 and is 1200×800 on the 1280×800 screen. Layout as of ticket 02: the sidebar's account heading is at y≈21. Calendar rows start at y≈48 and are 28 px apart; the "New calendar" button is below the last row. Each row's colour swatch, ✎ (rename) and ✕ (delete) are at x≈187, 208 and 227. The grid starts at x≈260.
+**Finding coordinates:** there is no DOM access, so take a full screenshot, read it, and click by pixel. The window sits at 0,0 and is 1200×800 on the 1280×800 screen. Layout as of ticket 32: the sidebar's account heading is at y≈27, with its "+" (New calendar) at x≈200. Calendar rows start at y≈56 and are 28 px apart; clicking a row shows or hides it. Each row's ⋮ button is at x≈200. Its menu opens below the row: from the Home row (y≈56), the 24 swatches are in three rows at y≈108, 127 and 145 (x≈55 to 193, 20 px apart), Rename at y≈182, Show only this at y≈212 and Delete at y≈251. While a menu is open, a click or right-click anywhere outside it only closes it. Shift+F10 on a focused row opens the same menu. The delete dialog's Cancel and Delete are at about 660,447 and 740,447. The grid starts at x≈236.
 
 ## Run (human path)
 
@@ -68,8 +68,9 @@ cargo test --workspace && cargo clippy --workspace --all-targets && npm run chec
 
 ## Gotchas
 
-- **Row actions are invisible until hovered** (`opacity: 0`). They still take clicks, but `move` over the row first if a screenshot should show them, and park the mouse elsewhere (`move 600 700`) for clean shots.
-- **`<input type="color">` opens a GTK colour chooser dialog**, not a web popup. It is centred over the window (Cancel ≈ 705,528, Select ≈ 794,528, swatch grid from ≈ 392,276 in 52 px steps). Screenshot it before clicking.
+- **The ⋮ button is invisible until its row is hovered** (`opacity: 0`). It still takes clicks, but `move` over the row first if a screenshot should show them, and park the mouse elsewhere (`move 600 700`) for clean shots.
+- **Dark mode:** WebKitGTK takes `prefers-color-scheme` from the GTK theme. Start with `GTK_THEME=Adwaita:dark $R restart` to see the dark look.
+- **Another system font:** point `FONTCONFIG_FILE` at a config that prepends the family (e.g. DejaVu Sans, the widest common one) and restart, to check that nothing overflows.
 - **Rename fields open with the name selected**, so typing replaces it; `ctrl+a` is not needed.
 - **Never stop the app with `pkill -f target/debug/freecal`**: the pattern also matches the shell running the command, which kills it (exit code 144). The driver uses `pkill -x freecal`.
 - **python-xlib's `Display.sync()` fails on Xvfb** with `AttributeError: 'BadRRModeError' object has no attribute 'sequence_number'`. `xinput.py` uses `flush()` plus a short pause instead.

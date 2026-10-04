@@ -86,6 +86,6 @@
   .grid {
     flex: 1;
     min-width: 0;
-    padding: 0.75rem;
+    padding: var(--space-6);
   }
 </style>

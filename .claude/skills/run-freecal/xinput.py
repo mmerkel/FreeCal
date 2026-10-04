@@ -1,7 +1,7 @@
 """Sends mouse and keyboard input to an X display through XTEST.
 
 Usage (DISPLAY must be set):
-    xinput.py click X Y | dblclick X Y | move X Y | type TEXT | key NAME
+    xinput.py click X Y | dblclick X Y | rightclick X Y | move X Y | type TEXT | key NAME
 
 NAME is an X keysym (Return, Escape, Tab, BackSpace, ...), optionally with
 modifiers: ctrl+a, shift+Tab.
@@ -65,12 +65,12 @@ def move(x, y):
     flush()
 
 
-def click(x, y, times=1):
+def click(x, y, times=1, button=1):
     move(x, y)
     for _ in range(times):
-        xtest.fake_input(d, X.ButtonPress, 1)
+        xtest.fake_input(d, X.ButtonPress, button)
         flush()
-        xtest.fake_input(d, X.ButtonRelease, 1)
+        xtest.fake_input(d, X.ButtonRelease, button)
         flush()
 
 
@@ -79,6 +79,8 @@ if command == "click":
     click(int(args[0]), int(args[1]))
 elif command == "dblclick":
     click(int(args[0]), int(args[1]), times=2)
+elif command == "rightclick":
+    click(int(args[0]), int(args[1]), button=3)
 elif command == "move":
     move(int(args[0]), int(args[1]))
 elif command == "type":

@@ -1,7 +1,242 @@
+/* The shared base: design tokens and the controls every part of the window
+   uses (spec: "Visual style"). Components use these tokens, never their own
+   colour values; Calendar colours are the only strong colours. */
+
+:root {
+  color-scheme: light;
+
+  /* Neutral surfaces and text */
+  --background: #ffffff;
+  --surface: #fafafa;
+  --surface-raised: #ffffff;
+  --hover: #f0f0f0;
+  --hover-strong: #e5e5e5;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --foreground: #171717;
+  --foreground-muted: #737373;
+  --foreground-faint: #a3a3a3;
+
+  /* Solid buttons */
+  --solid: #171717;
+  --solid-hover: #404040;
+  --solid-foreground: #fafafa;
+
+  /* Destructive actions */
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: #fef2f2;
+  --danger-foreground: #ffffff;
+
+  --focus-ring: #a3a3a3;
+  --backdrop: #00000066;
+  --shadow-menu: 0 0.25rem 0.75rem #0000001a;
+  --shadow-dialog: 0 0.625rem 1.875rem #0000002e;
+
+  /* Spacing for padding, margins and gaps: --space-N is N × 2px */
+  --space-1: 0.125rem;
+  --space-2: 0.25rem;
+  --space-3: 0.375rem;
+  --space-4: 0.5rem;
+  --space-5: 0.625rem;
+  --space-6: 0.75rem;
+  --space-7: 0.875rem;
+  --space-10: 1.25rem;
+  --space-12: 1.5rem;
+
+  /* Sizes */
+  --font-family: system-ui, sans-serif;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --radius-sm: 0.3125rem;
+  --radius: 0.375rem;
+  --radius-lg: 0.625rem;
+  --control-height: 2.125rem;
+  --icon-button-size: 1.375rem;
+}
+
+/* Dark values. `data-color-scheme` on the root element is the one switch:
+   it follows the system now, and a setting can override it later. FullCalendar's
+   palettes switch on the same attribute. */
+:root[data-color-scheme='dark'] {
+  color-scheme: dark;
+
+  --background: #0a0a0a;
+  --surface: #141414;
+  --surface-raised: #1c1c1c;
+  --hover: #232323;
+  --hover-strong: #2e2e2e;
+  --border: #262626;
+  --border-strong: #404040;
+  --foreground: #fafafa;
+  --foreground-muted: #a3a3a3;
+  --foreground-faint: #5c5c5c;
+
+  --solid: #fafafa;
+  --solid-hover: #d4d4d4;
+  --solid-foreground: #171717;
+
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-soft: #450a0a;
+  --danger-foreground: #ffffff;
+
+  --focus-ring: #737373;
+  --backdrop: #000000a6;
+  --shadow-menu: 0 0.25rem 0.75rem #00000066;
+  --shadow-dialog: 0 0.625rem 1.875rem #00000099;
+}
+
 /* Page-wide rules. The window shows exactly one screen: the page never
    scrolls; only regions inside it, such as the sidebar, may. */
 html,
 body {
   margin: 0;
   height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Buttons. `.button` takes one of the variants outline, solid or danger.
+   `.icon-button` is the ghost button that holds a single icon. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: var(--control-height);
+  padding: 0 var(--space-7);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button.outline {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--foreground);
+}
+
+.button.outline:hover {
+  background: var(--hover);
+}
+
+.button.solid {
+  background: var(--solid);
+  color: var(--solid-foreground);
+}
+
+.button.solid:hover {
+  background: var(--solid-hover);
+}
+
+.button.danger {
+  background: var(--danger);
+  color: var(--danger-foreground);
+}
+
+.button.danger:hover {
+  background: var(--danger-hover);
+}
+
+.icon-button {
+  display: inline-grid;
+  flex: none;
+  place-content: center;
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--foreground-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--hover-strong);
+  color: var(--foreground);
+}
+
+.input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: var(--icon-button-size);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--foreground);
+  font: inherit;
+}
+
+/* Menus: a raised card of items, labels and separators (see Menu.svelte). */
+.menu {
+  box-sizing: border-box;
+  min-width: 11.25rem;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-menu);
+  color: var(--foreground);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  outline: none;
+  background: var(--hover);
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
+.menu-item.danger:hover,
+.menu-item.danger:focus-visible {
+  background: var(--danger-soft);
+}
+
+.menu-label {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  color: var(--foreground-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.menu-separator {
+  margin: var(--space-2) calc(-1 * var(--space-2));
+  border: none;
+  border-top: 1px solid var(--border);
 }

@@ -1,7 +1,15 @@
 <script lang="ts">
+  import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+  import Eye from '@lucide/svelte/icons/eye';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import Plus from '@lucide/svelte/icons/plus';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
   import type { CoreApi } from '../core/CoreApi';
   import type { Account, AccountId, Calendar, CalendarId } from '../core/types';
   import { t } from '../i18n';
+  import Dialog from './Dialog.svelte';
+  import Menu from './Menu.svelte';
+  import { newCalendarColour, SWATCHES } from './palette';
 
   interface Props {
     core: CoreApi;
@@ -11,25 +19,15 @@
 
   let { core, accounts, calendars }: Props = $props();
 
-  /** New Calendars take these colours in turn; the user can recolour them. */
-  const NEW_CALENDAR_COLOURS = [
-    '#3366cc',
-    '#dc3912',
-    '#ff9900',
-    '#109618',
-    '#990099',
-    '#0099c6',
-    '#dd4477',
-    '#66aa00',
-  ];
-
   /** What the user is in the middle of, if anything. Only one at a time. */
   type Editing =
     | { kind: 'creating'; accountId: AccountId }
     | { kind: 'renaming'; id: CalendarId }
-    | { kind: 'confirmingDelete'; id: CalendarId };
+    | { kind: 'confirmingDelete'; calendar: Calendar };
 
   let editing = $state<Editing>();
+  /** The Calendar whose menu is open. */
+  let menuFor = $state<CalendarId>();
   let failure = $state<string>();
 
   function accountName(account: Account): string {
@@ -59,7 +57,7 @@
   }
 
   async function create(accountId: AccountId, name: string) {
-    const colour = NEW_CALENDAR_COLOURS[calendars.length % NEW_CALENDAR_COLOURS.length];
+    const colour = newCalendarColour(calendars);
     if (await change(() => core.createCalendar(accountId, name, colour))) editing = undefined;
   }
 
@@ -71,22 +69,42 @@
     if (await change(() => core.deleteCalendar(id))) editing = undefined;
   }
 
-  async function setShown(calendar: Calendar, input: HTMLInputElement) {
-    if (!(await change(() => core.setCalendarShown(calendar.id, input.checked)))) {
-      input.checked = calendar.shown;
-    }
-  }
-
-  async function recolour(calendar: Calendar, input: HTMLInputElement) {
-    if (!(await change(() => core.recolourCalendar(calendar.id, input.value)))) {
-      input.value = calendar.colour;
-    }
-  }
-
   /** Stops what the user is in the middle of, with its report if it failed. */
   function cancel() {
     editing = undefined;
     failure = undefined;
+  }
+
+  function openMenu(calendar: Calendar) {
+    editing = undefined;
+    menuFor = calendar.id;
+  }
+
+  /** Closes a Calendar's menu, unless another Calendar's menu has opened since. */
+  function closeMenu(id: CalendarId) {
+    if (menuFor === id) menuFor = undefined;
+  }
+
+  /** Runs a menu item's action: the menu closes first, so focus returns to its button. */
+  function choose(id: CalendarId, action: () => void) {
+    closeMenu(id);
+    action();
+  }
+
+  /** Right-click, the context-menu key and Shift+F10 on a row's buttons open its menu. */
+  function menuOpeners(calendar: Calendar) {
+    return {
+      oncontextmenu(clicked: MouseEvent) {
+        clicked.preventDefault();
+        openMenu(calendar);
+      },
+      onkeydown(key: KeyboardEvent) {
+        if (key.key === 'ContextMenu' || (key.key === 'F10' && key.shiftKey)) {
+          key.preventDefault();
+          openMenu(calendar);
+        }
+      },
+    };
   }
 
   function focus(element: HTMLElement) {
@@ -95,16 +113,18 @@
   }
 </script>
 
-{#snippet nameForm(initialName: string, save: (name: string) => void)}
+{#snippet nameForm(initialName: string, colour: string, save: (name: string) => void)}
   <form
-    class="name-form"
+    class="row name-form"
     onsubmit={(submitted) => {
       submitted.preventDefault();
       const name = new FormData(submitted.currentTarget).get('name');
       save(String(name));
     }}
   >
+    <span class="dot" style:--colour={colour} aria-hidden="true"></span>
     <input
+      class="input"
       name="name"
       aria-label={t('calendar.name')}
       value={initialName}
@@ -125,115 +145,246 @@
   {#each accounts as account (account.id)}
     {@const headingId = `sidebar-account-${account.id}`}
     <section>
-      <h2 id={headingId}>{accountName(account)}</h2>
+      <div class="account">
+        <h2 id={headingId} title={accountName(account)}>{accountName(account)}</h2>
+        {#if account.provider === 'local'}
+          <button
+            type="button"
+            class="icon-button"
+            aria-label={t('sidebar.newCalendar')}
+            title={t('sidebar.newCalendar')}
+            onclick={() => (editing = { kind: 'creating', accountId: account.id })}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+        {/if}
+      </div>
+
       <ul aria-labelledby={headingId}>
         {#each calendarsOf(account) as calendar (calendar.id)}
-          <li>
+          {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
+          <li
+            class:open={menuFor === calendar.id}
+            class:hidden={!calendar.shown}
+          >
             {#if editing?.kind === 'renaming' && editing.id === calendar.id}
-              {@render nameForm(calendar.name, (name) => rename(calendar.id, name))}
+              {@render nameForm(calendar.name, calendar.colour, (name) =>
+                rename(calendar.id, name),
+              )}
             {:else}
-              <label class="calendar">
-                <input
-                  type="checkbox"
-                  checked={calendar.shown}
-                  style:accent-color={calendar.colour}
-                  onchange={(changed) => setShown(calendar, changed.currentTarget)}
-                />
-                <span class="name">{calendar.name}</span>
-              </label>
-              <span class="actions">
-                <input
-                  type="color"
-                  aria-label={t('calendar.colourOf', { name: calendar.name })}
-                  title={t('calendar.colourOf', { name: calendar.name })}
-                  value={calendar.colour}
-                  onchange={(changed) => recolour(calendar, changed.currentTarget)}
-                />
-                <button
-                  type="button"
-                  aria-label={t('calendar.renameNamed', { name: calendar.name })}
-                  title={t('calendar.renameNamed', { name: calendar.name })}
-                  onclick={() => (editing = { kind: 'renaming', id: calendar.id })}
-                >
-                  <span aria-hidden="true">✎</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={t('calendar.deleteNamed', { name: calendar.name })}
-                  title={t('calendar.deleteNamed', { name: calendar.name })}
-                  onclick={() => (editing = { kind: 'confirmingDelete', id: calendar.id })}
-                >
-                  <span aria-hidden="true">✕</span>
-                </button>
-              </span>
+              <button
+                type="button"
+                class="row toggle"
+                role="switch"
+                aria-checked={calendar.shown}
+                {...menuOpeners(calendar)}
+                onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
+              >
+                <span class="dot" style:--colour={calendar.colour} aria-hidden="true"></span>
+                <span class="name" title={calendar.name}>{calendar.name}</span>
+              </button>
+              <button
+                type="button"
+                class="icon-button more"
+                aria-label={optionsLabel}
+                title={optionsLabel}
+                aria-haspopup="menu"
+                aria-expanded={menuFor === calendar.id}
+                {...menuOpeners(calendar)}
+                onclick={() =>
+                  menuFor === calendar.id ? closeMenu(calendar.id) : openMenu(calendar)}
+              >
+                <EllipsisVertical size={14} aria-hidden="true" />
+              </button>
             {/if}
 
-            {#if editing?.kind === 'confirmingDelete' && editing.id === calendar.id}
-              {@const questionId = `sidebar-delete-${calendar.id}`}
-              <div class="confirm" role="alertdialog" aria-labelledby={questionId}>
-                <p id={questionId}>{t('calendar.deleteConfirm', { name: calendar.name })}</p>
-                <button type="button" onclick={() => remove(calendar.id)}>
-                  {t('calendar.delete')}
-                </button>
-                <button type="button" onclick={cancel} {@attach focus}>
-                  {t('common.cancel')}
-                </button>
+            {#if menuFor === calendar.id}
+              {@const colourLabelId = `sidebar-colour-${calendar.id}`}
+              <div class="menu-anchor">
+                <Menu label={optionsLabel} onclose={() => closeMenu(calendar.id)}>
+                  <div class="menu-label" id={colourLabelId}>{t('calendar.colour')}</div>
+                  <div class="swatches" role="group" aria-labelledby={colourLabelId}>
+                    {#each SWATCHES as swatch (swatch.colour)}
+                      <button
+                        type="button"
+                        class="swatch"
+                        role="menuitemradio"
+                        aria-checked={swatch.colour === calendar.colour}
+                        aria-label={t(swatch.name)}
+                        title={t(swatch.name)}
+                        style:--colour={swatch.colour}
+                        onclick={() =>
+                          choose(calendar.id, () =>
+                            change(() => core.recolourCalendar(calendar.id, swatch.colour)),
+                          )}
+                      ></button>
+                    {/each}
+                  </div>
+                  <hr class="menu-separator" />
+                  <button
+                    type="button"
+                    class="menu-item"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => (editing = { kind: 'renaming', id: calendar.id }))}
+                  >
+                    <Pencil size={14} aria-hidden="true" />
+                    {t('calendar.rename')}
+                  </button>
+                  <button
+                    type="button"
+                    class="menu-item"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () =>
+                        change(() => core.showOnlyCalendar(calendar.id)),
+                      )}
+                  >
+                    <Eye size={14} aria-hidden="true" />
+                    {t('calendar.showOnly')}
+                  </button>
+                  <hr class="menu-separator" />
+                  <button
+                    type="button"
+                    class="menu-item danger"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    {t('calendar.delete')}
+                  </button>
+                </Menu>
               </div>
             {/if}
           </li>
         {/each}
-      </ul>
 
-      {#if account.provider === 'local'}
         {#if editing?.kind === 'creating' && editing.accountId === account.id}
-          {@render nameForm('', (name) => create(account.id, name))}
-        {:else}
-          <button
-            type="button"
-            class="new-calendar"
-            onclick={() => (editing = { kind: 'creating', accountId: account.id })}
-          >
-            {t('sidebar.newCalendar')}
-          </button>
+          <li>
+            {@render nameForm('', newCalendarColour(calendars), (name) => create(account.id, name))}
+          </li>
         {/if}
-      {/if}
+      </ul>
     </section>
   {/each}
 </nav>
 
+{#if editing?.kind === 'confirmingDelete'}
+  {@const doomed = editing.calendar}
+  <Dialog
+    role="alertdialog"
+    title={t('calendar.deleteTitle', { name: doomed.name })}
+    onclose={cancel}
+  >
+    <p>{t('calendar.deleteBody')}</p>
+    {#snippet actions()}
+      <button type="button" class="button outline" data-initial-focus onclick={cancel}>
+        {t('common.cancel')}
+      </button>
+      <button type="button" class="button danger" onclick={() => remove(doomed.id)}>
+        {t('calendar.delete')}
+      </button>
+    {/snippet}
+  </Dialog>
+{/if}
+
 <style>
   .sidebar {
+    box-sizing: border-box;
+    flex: none;
     width: 14rem;
-    padding: 0.75rem;
+    padding: var(--space-6) var(--space-4);
     overflow-y: auto;
-    border-right: 1px solid #ddd;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .account {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
   }
 
   h2 {
-    margin: 0 0 0.25rem;
-    font-size: 0.9rem;
+    margin: 0;
+    overflow: hidden;
+    color: var(--foreground-muted);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
   }
 
   ul {
     list-style: none;
-    margin: 0;
+    margin: 0 0 var(--space-6);
     padding: 0;
   }
 
   li {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 0.25rem;
+    gap: var(--space-4);
     min-height: 1.75rem;
+    padding: 0 var(--space-1) 0 var(--space-4);
+    border-radius: var(--radius);
   }
 
-  .calendar {
+  li:hover,
+  li.open {
+    background: var(--hover);
+  }
+
+  .row {
     display: flex;
     flex: 1;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-5);
     min-width: 0;
+  }
+
+  .toggle {
+    align-self: stretch;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  /* Filled when shown, a ring when hidden. Drawn as radial gradients with a
+     soft edge, which look rounder at this size than a rounded box does. */
+  .dot {
+    flex: none;
+    width: 0.625rem;
+    height: 0.625rem;
+    background: radial-gradient(
+      circle closest-side,
+      var(--colour) calc(100% - 1px),
+      transparent 100%
+    );
+  }
+
+  li.hidden .dot {
+    background: radial-gradient(
+      circle closest-side,
+      transparent calc(100% - 2.5px),
+      var(--colour) calc(100% - 1.75px),
+      var(--colour) calc(100% - 0.75px),
+      transparent 100%
+    );
+  }
+
+  li.hidden .name {
+    color: var(--foreground-faint);
   }
 
   .name {
@@ -242,61 +393,59 @@
     white-space: nowrap;
   }
 
-  /* The row's actions appear on hover and keyboard focus. Opacity, not
-     visibility, so that they stay reachable by keyboard and screen readers. */
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: 0.1rem;
+  /* Opacity, not visibility, so that the button stays reachable by keyboard
+     and screen readers. */
+  .more {
     opacity: 0;
   }
 
-  li:hover .actions,
-  li:focus-within .actions {
+  li:hover .more,
+  li.open .more,
+  li:has(:focus-visible) .more {
     opacity: 1;
   }
 
-  .actions button {
-    border: none;
-    background: none;
-    padding: 0 0.2rem;
-    cursor: pointer;
+  .name-form .input {
+    flex: 1;
+    margin: var(--space-1) 0;
   }
 
-  input[type='color'] {
-    width: 1.25rem;
-    height: 1.25rem;
+  /* The menu opens below its row, inside the sidebar, so it isn't clipped. */
+  .menu-anchor {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+  }
+
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-4) var(--space-3);
+  }
+
+  .swatch {
+    width: 0.875rem;
+    height: 0.875rem;
     padding: 0;
     border: none;
-    background: none;
+    border-radius: 50%;
+    background: var(--colour);
     cursor: pointer;
   }
 
-  .name-form {
-    flex: 1;
-    margin: 0.25rem 0;
-  }
-
-  .name-form input {
-    box-sizing: border-box;
-    width: 100%;
-  }
-
-  .confirm {
-    flex-basis: 100%;
-    margin-bottom: 0.5rem;
-  }
-
-  .confirm p {
-    margin: 0.25rem 0;
-  }
-
-  .new-calendar {
-    margin-top: 0.25rem;
+  .swatch[aria-checked='true'],
+  .swatch:hover,
+  .swatch:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--surface-raised),
+      0 0 0 3px var(--foreground);
   }
 
   .failure {
-    margin: 0 0 0.5rem;
-    color: #b00020;
+    margin: 0 var(--space-4) var(--space-4);
+    color: var(--danger);
   }
 </style>

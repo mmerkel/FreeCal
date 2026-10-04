@@ -78,6 +78,11 @@ fn set_calendar_shown(core: State<Core>, id: i64, shown: bool) -> CommandResult<
         .map_err(to_message)
 }
 
+#[tauri::command]
+fn show_only_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
+    core.show_only_calendar(CalendarId(id)).map_err(to_message)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -97,6 +102,7 @@ fn main() {
             recolour_calendar,
             delete_calendar,
             set_calendar_shown,
+            show_only_calendar,
         ])
         .run(tauri::generate_context!())
         .expect("FreeCal failed to start");
