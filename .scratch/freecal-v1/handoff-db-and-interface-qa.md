@@ -49,3 +49,7 @@ Decision still open with the user: the app identifier `org.freecal.FreeCal`, whi
 - `code-review`: review the work against `a8d0683` when done.
 - `domain-modeling`: "Local Store" is used throughout but is missing from `GLOSSARY.md`.
 - `run`: to see the real Tauri window, if the screen is available.
+
+## Comments
+
+- 2026-10-04: Task 1 is done in `8cd8b53`. The open point "serialise `CoreError` as a code the frontend can translate" is no longer optional: ticket 29's startup error screen needs it (see `.scratch/freecal-v1/issues/29-one-running-freecal-per-local-store.md` and ADR 0005).

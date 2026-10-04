@@ -160,8 +160,17 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 115. As a user of any distribution, I want an AppImage, so that I can run FreeCal without installing it.
 116. As a future Flathub user, I want FreeCal built to use desktop portals for autostart, keyring and file dialogs, so that a sandboxed version works without loss of function.
 
+### Running and opening files
+
+117. As a user with FreeCal in the tray, I want starting FreeCal again to bring the running FreeCal to the front, so that I never end up with two copies that disagree or sync twice.
+118. As a user, I want to open an `.ics` or `.zip` file with FreeCal, from the command line or with "Open with" (for example an invitation attached to an email), so that I can import it without first starting an import by hand.
+119. As a user opening a file while FreeCal is busy or already showing an import preview, I want the file to wait its turn, so that nothing I started is thrown away and no file is lost.
+120. As a user opening several files at once, I want one import per file, so that each can go into its own Calendar and be undone on its own.
+121. As a user, if FreeCal can't start (its data was written by a newer FreeCal, it is already running and couldn't be reached, or its data is damaged), I want a window that tells me why, so that it doesn't just fail to appear.
+
 ## Implementation Decisions
 
+- **Platforms**: v1 targets Linux, but Windows and macOS stay possible. The core stays platform-neutral, and desktop-specific pieces (tray detection, D-Bus, autostart, the file hand-off) sit behind shell interfaces so that they can be ported.
 - **Architecture** (ADR 0001): a Rust core library that holds all domain logic, a Tauri shell exposing the core to the frontend as commands, and a Svelte 5 frontend (runes only, plain Vite, no SvelteKit). Vite is used only for development and the build; the shipped binary embeds the compiled frontend.
 - **Core application interface**: the core exposes one application-level interface, which is also the main test seam. Its operations cover:
   - Accounts: add, remove, re-authenticate
@@ -171,7 +180,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Sync: sync now (per Account, or for all); get the current sync status of every Account and Calendar
   - Problems: list and resolve Conflicts, list Sync Errors, approve or reject a paused Calendar
   - Change Journal: list entries, undo one entry, undo everything since a given time, undo an import
-  - Import/export: preview an import, run it, export
+  - Import/export: add files waiting to be imported, list them, dismiss one, preview an import, run it, export
   - Snapshots: take, list, restore
   - App state and settings: last-used view, background mode, autostart
   The frontend talks only to this interface.
@@ -185,6 +194,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - **Calendars changed** (change): Accounts or Calendars were added, removed, renamed or recoloured, or their writability changed (for example the user adding a server Calendar, or a server permission change).
   - **Problems changed** (change): a Conflict or Sync Error was raised or resolved. The tray and the notifications query the core for details; they run in the shell next to the core.
   - **Display Time Zone changed** (status): the system time zone changed, for example after travelling. It carries the new zone. The frontend redraws the visible range and the time zone label. An open editor keeps its draft, including the draft's own time zone.
+  - **Waiting imports changed** (change): files waiting to be imported were added or one was dismissed or imported. The frontend re-reads the list and opens the preview for the first one when no modal dialog is showing.
   - **Date changed** (status): the local date changed, at midnight or on waking up on a new day. It carries the new date. The frontend moves the today highlight, and jumps to the new today if it is tracking today (see View state). The core sends it because it already detects waking from sleep and owns the clock that tests control.
 
   There are no Signals for reminders, which are desktop notifications only, or for the progress of long operations (import, export, Snapshot restore). While such a command runs, the window shows a modal "Working…" dialog that blocks it until the command finishes, so edits can't interleave with an import or restore. A non-blocking version can come later if large imports turn out to be slow.
@@ -193,7 +203,9 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 
   Signals are batched: an incremental sync sends at most one "Occurrences changed" per Calendar, when that Calendar's changes are committed. A Calendar's first sync is different: it commits page by page and sends one "Occurrences changed" per committed page, so Events appear as they load. Its "Sync status changed" marks it as a first sync. Signals are fire-and-forget: with no window open, they are dropped. When the frontend starts, or the window is re-created after running in the background, it subscribes first and then reads the current state, so nothing falls in the gap. The tray and the background desktop notifications use the same Signals inside the shell, so the window and the tray never disagree.
 - **Provider interface** (internal, not a test seam): one implementation per Provider: Local, CalDAV and Google (REST, ADR 0002). It covers discovering Calendars, incremental fetching (CalDAV `sync-collection`/ETags, Google sync tokens with 410 handling), and conditional create, update and delete. The interface must allow Microsoft Graph and ICS feeds to be added later without changing the sync engine.
-- **Local Store** (ADR 0004): one SQLite database in the XDG data directory. For each Event it holds the original server data exactly as received, next to the fields FreeCal uses, so that unknown fields are preserved byte-for-byte on writes. It also holds the pending-change queue, the Change Journal, Conflicts, Sync Errors, settings and app state. Snapshots are compressed `.ics` files in the same directory.
+- **Local Store** (ADR 0004): one SQLite database in the XDG data directory. For each Event it holds the original server data exactly as received, next to the fields FreeCal uses, so that unknown fields are preserved byte-for-byte on writes. It also holds the pending-change queue, the Change Journal, Conflicts, Sync Errors, settings and app state. Snapshots are compressed `.ics` files in the same directory. Only one running FreeCal opens a Local Store at a time (ADR 0005).
+- **One running FreeCal** (ADR 0005): the core holds an exclusive file lock on the Local Store for its lifetime and refuses a locked one with `LocalStoreInUse`. The shell uses `tauri-plugin-single-instance`: a second launch hands its arguments to the running FreeCal, which comes to the front, and exits. In prose, say "second launch" or "another running FreeCal", never a bare "instance", which the glossary reserves against Occurrences.
+- **Startup failures**: when the core can't open (a newer Local Store, `LocalStoreInUse`, a damaged Local Store), the window still opens and shows an error screen, translated from an error code through the i18n layer. Closing it quits FreeCal.
 - **Sync engine**:
   - It applies local changes to the Local Store immediately and queues them.
   - It pushes queued changes with conditional requests and pulls remote changes incrementally.
@@ -215,6 +227,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Google-only fields are written as `X-` properties and read back on import.
   - Existing UIDs trigger one update / skip / copy choice per import.
   - Importing into Read-only Calendars is not offered.
+  - **Opening files**: FreeCal accepts `.ics` and `.zip` files as command-line arguments (macOS: open-file events) and registers as a handler for `text/calendar` in its `.desktop` file. Each file goes through the normal import flow (choose a Calendar, preview, confirm) and is one undoable import. The core reads a file's contents as soon as it arrives, because mail clients may delete their temporary copy, and holds it as a waiting import until it is imported or dismissed. Waiting imports keep their arrival order; a file that can't be read or parsed becomes an entry with a translated error naming it, and doesn't stop the others.
 - **Time zones and locale**:
   - The Display Time Zone is the system time zone and is shown in the UI. New Events default to it, and each Event can have its own time zone.
   - Locale defaults (first day of week, 12/24-hour clock, date format) are read from the system.
@@ -241,6 +254,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - **Tray**: StatusNotifierItem through Tauri. The menu is the only interaction (Linux gives no click events). One icon showing the overall status (see Sync engine). The menu offers Open FreeCal, Sync now, problem lines and Quit.
   - **Tray detection**: a D-Bus check for a StatusNotifierWatcher with a registered host, made at every window close.
   - **Autostart**: through the Background portal where available; off by default.
+  - **File hand-off**: forwarded arguments from a second launch, and open-file events on macOS, both feed the same "add waiting imports" core operation.
   - **Network status**: the NetworkMonitor portal (it also works outside Flatpak).
 - **Google OAuth**: browser-based login with a loopback redirect and PKCE.
   - The shared FreeCal client is set to "In production", unverified, for the developer and testers. Unverified clients have a lifetime cap of 100 users.
@@ -258,9 +272,9 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - A real SQLite database in a temporary directory, never mocked.
   - A controllable clock for polling, reminders, Journal retention and Snapshot timing.
   - Recording fakes for the keyring, notifications and tray, a controllable fake network status and system time zone, and a recording Signal subscriber.
-  - Covered here: offline queueing and replay, every Conflict scenario, the Mass-Change Guard thresholds and approval, Change Journal undo (single entry, since a given time, whole import), Snapshot creation, skipping and restore, read-only enforcement (server-reported, user-set, the pre-1.0 default, "has guests"), byte-preservation of unknown fields across edits, recurrence scopes and Exceptions, moves across Accounts and their warning condition, import update / skip / copy, export round-trips including Google `X-` properties, Display Time Zone conversion, tray state priority, the Signals each operation and sync sends (one "Occurrences changed" per Calendar per incremental sync, one per page on a first sync, "Date changed" at midnight and on waking up on a new day, "Display Time Zone changed"), the overall status including the case with no server Accounts, and the sync triggered and the polls skipped on network changes.
+  - Covered here: offline queueing and replay, every Conflict scenario, the Mass-Change Guard thresholds and approval, Change Journal undo (single entry, since a given time, whole import), Snapshot creation, skipping and restore, read-only enforcement (server-reported, user-set, the pre-1.0 default, "has guests"), byte-preservation of unknown fields across edits, recurrence scopes and Exceptions, moves across Accounts and their warning condition, import update / skip / copy, export round-trips including Google `X-` properties, Display Time Zone conversion, tray state priority, the Signals each operation and sync sends (one "Occurrences changed" per Calendar per incremental sync, one per page on a first sync, "Date changed" at midnight and on waking up on a new day, "Display Time Zone changed"), the overall status including the case with no server Accounts, the sync triggered and the polls skipped on network changes, a second open of a locked Local Store being refused, and waiting imports (contents read on arrival, arrival order, error entries, "Waiting imports changed").
   - Conflict and Mass-Change Guard scenarios are written test-first.
-- **Seam 2: the frontend against a fake core interface**. Thin Svelte component tests (Vitest) for `CalendarGrid` and the Event editor. They check that user actions (click and drag to create, drag to move or resize, the recurrence scope prompt including cancel-reverts, keyboard shortcuts, disabled editing for read-only and "has guests" Events, including the message on a refused drag) produce the right core calls. The fake core can also emit Signals, so tests check that the view re-fetches on "Occurrences changed", that the status indicator and sidebar markers follow "Sync status changed", that an open editor's draft survives a re-fetch, that the dashed outline for unsent changes follows its delay rule, and that tracking today starts, ends and reacts to "Date changed" as specified.
+- **Seam 2: the frontend against a fake core interface**. Thin Svelte component tests (Vitest) for `CalendarGrid` and the Event editor. They check that user actions (click and drag to create, drag to move or resize, the recurrence scope prompt including cancel-reverts, keyboard shortcuts, disabled editing for read-only and "has guests" Events, including the message on a refused drag) produce the right core calls. The fake core can also emit Signals, so tests check that the view re-fetches on "Occurrences changed", that the status indicator and sidebar markers follow "Sync status changed", that an open editor's draft survives a re-fetch, that an import preview for a waiting import opens only when no modal dialog is showing, that the dashed outline for unsent changes follows its delay rule, and that tracking today starts, ends and reacts to "Date changed" as specified.
 - **The Provider interface is not a test seam.** Tests never replace a Provider.
 - **No end-to-end tests of the real Tauri window in v1.** A manual release checklist is run against a real Google test account before each release; Nextcloud tests come later.
 - **Prior art**: none. This is a new codebase, so these tests set the pattern.
@@ -275,7 +289,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - Translations other than English.
 - Tasks (VTODO / Google Tasks) and contacts (CardDAV / Google People).
 - Google OAuth verification of the shared client (after 1.0).
-- The Flathub release (at 1.0), Snap, AUR packaging by the project, and macOS and Windows as targets.
+- The Flathub release (at 1.0), Snap and AUR packaging by the project.
 - FullCalendar Premium features (timeline, print).
 - Automatic backups beyond Snapshots; system backups are expected to cover the data directory.
 
@@ -284,5 +298,6 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - Build order: the **Local** vertical slice first (grid, editor, Local Store, Change Journal, Snapshots, import/export), then **CalDAV** (developed and tested against Radicale), then **Google**.
 - Expected disk usage is about 30 MB for a typical user (about 3,000 Events) and about 150 MB for a heavy user (about 15,000 Events), dominated by Snapshots.
 - The Flathub manifest will need permission to talk to `org.kde.StatusNotifierWatcher` over D-Bus.
+- The second-launch hand-off and macOS open-file events are checked by hand in the real app; their code is plumbing into the "add waiting imports" operation, which is tested at the core seam.
 - Once frontend code exists, add a rule to `CLAUDE.md` that Svelte code uses Svelte 5 runes only, because AI-generated code often slips into Svelte 4 syntax.
 - The pre-1.0 read-only default and the shared unverified Google client are temporary measures with explicit end points (1.0 and verification).

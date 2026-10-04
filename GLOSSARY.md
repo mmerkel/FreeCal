@@ -48,6 +48,12 @@ _Avoid_: Override, modified instance, detached occurrence
 The time zone in which FreeCal currently shows Events; the system time zone unless the user overrides it. New Events get it by default.
 _Avoid_: Local time, current time zone, home time zone
 
+## Storage
+
+**Local Store**:
+The one place on this computer where FreeCal keeps everything it knows: the local copy of every Calendar, the changes not yet sent, the Change Journal and the settings.
+_Avoid_: Database, cache, local copy
+
 ## Sync
 
 **Conflict**:
