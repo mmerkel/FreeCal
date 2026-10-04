@@ -9,6 +9,7 @@
 - [ ] The core returns the Occurrences in a date range
 - [ ] Clicking an empty slot or dragging across a range opens the editor prefilled with that time
 - [ ] The editor offers only writable Calendars
+- [ ] With no writable Calendar, clicking a slot, dragging or the shortcut doesn't open the editor but points to "+" next to the Local Account (a Local Store starts with Home and Work, ticket 34, but the user can delete them)
 - [ ] Event details show title, time, place, description and Calendar
 - [ ] Edit and delete work and are persisted in the Local Store
 - [ ] Every change sends "Occurrences changed" with the affected Calendar IDs; the frontend re-fetches the visible range and keeps the current selection
