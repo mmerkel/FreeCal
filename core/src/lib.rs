@@ -29,6 +29,11 @@ pub enum CoreError {
     AccountNotFound(AccountId),
     #[error("the Local Account cannot be removed")]
     LocalAccountCannotBeRemoved,
+    #[error(
+        "the Local Store was written by a newer FreeCal \
+         (schema {found}, this build knows {known})"
+    )]
+    NewerLocalStore { found: i64, known: i64 },
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

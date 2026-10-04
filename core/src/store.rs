@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
-use crate::{Account, AccountId, Provider, Result};
+use crate::{Account, AccountId, CoreError, Provider, Result};
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
 /// have run.
@@ -47,8 +47,18 @@ impl Store {
 }
 
 fn migrate(conn: &mut Connection) -> Result<()> {
-    let applied: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let tx = conn.transaction()?;
+    // IMMEDIATE takes the write lock before `user_version` is read, so two
+    // FreeCal processes opening a fresh Local Store at once can't both see
+    // version 0 and both try to create the schema.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let applied: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let known = MIGRATIONS.len() as i64;
+    if applied > known {
+        return Err(CoreError::NewerLocalStore {
+            found: applied,
+            known,
+        });
+    }
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
         tx.execute_batch(migration)?;
         tx.pragma_update(None, "user_version", index as i64 + 1)?;

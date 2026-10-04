@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, FixedOffset};
-use freecal_core::{Clock, Core, Signal, SignalSink};
+use freecal_core::{Clock, Core, CoreError, Signal, SignalSink};
 use tempfile::TempDir;
 
 pub struct Harness {
@@ -28,12 +28,26 @@ impl Harness {
     /// Opens the core on this harness's data directory, like launching FreeCal.
     /// Opening again on the same harness is a relaunch on the same Local Store.
     pub fn open(&self) -> Core {
+        self.try_open().expect("open core")
+    }
+
+    /// Like [`Harness::open`], for tests where launching is expected to fail.
+    pub fn try_open(&self) -> Result<Core, CoreError> {
         Core::open(
             self.data_dir.path(),
             self.clock.clone(),
             self.signals.clone(),
         )
-        .expect("open core")
+    }
+
+    /// Arranges the Local Store's state before a launch by running `sql`
+    /// directly on its file. Only for putting the file into a state the
+    /// interface can't produce; tests verify through the interface, never here.
+    pub fn arrange_local_store(&self, sql: &str) {
+        let path = self.data_dir.path().join("freecal.sqlite3");
+        rusqlite::Connection::open(path)
+            .and_then(|conn| conn.execute_batch(sql))
+            .expect("arrange the Local Store");
     }
 }
 
