@@ -2,7 +2,7 @@
 
 **What to build:** The user can hide the sidebar completely and show it again, with a button at the left end of the toolbar or with F9, and can change its width by dragging its right edge. FreeCal remembers both across launches. Spec: user story 122, "App state and settings" in the core application interface.
 
-**Blocked by:** 02, 04
+**Blocked by:** 02, 04, 32
 
 **Status:** ready-for-agent
 
@@ -21,3 +21,7 @@
 - [ ] Dragging is checked by hand in the real app (jsdom has no layout)
 
 Out of scope: remembering the window's own size and position (possibly a separate ticket); the sidebar's contents (tickets 02, 14, 15, 18).
+
+## Comments
+
+2026-10-04: Checked against ticket 32's look. Nothing conflicts: 32's sidebar default width is also 14rem, the drag handle sits on its 1px right border, and the ☰ button should be a ghost button from the shared base with a Lucide icon. Blocked by 32 so that it is built on the shared base.
