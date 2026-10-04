@@ -34,6 +34,8 @@ pub enum CoreError {
          (schema {found}, this build knows {known})"
     )]
     NewerLocalStore { found: i64, known: i64 },
+    #[error("the Local Store has an Account with an unknown Provider {0:?}")]
+    UnknownProvider(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

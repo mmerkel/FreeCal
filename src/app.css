@@ -1,0 +1,7 @@
+/* Page-wide rules. The window shows exactly one screen: the page never
+   scrolls; only regions inside it, such as the sidebar, may. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}

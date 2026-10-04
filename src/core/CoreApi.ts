@@ -4,7 +4,7 @@ import type { Account, Signal } from './types';
 export interface CoreApi {
   /** Starts receiving Signals. Subscribe before reading state, so that nothing falls in the gap. */
   subscribe(onSignal: (signal: Signal) => void): Promise<() => void>;
-  /** The current local date as YYYY-MM-DD. */
-  today(): Promise<string>;
+  /** The current local date. */
+  today(): Promise<Temporal.PlainDate>;
   listAccounts(): Promise<Account[]>;
 }

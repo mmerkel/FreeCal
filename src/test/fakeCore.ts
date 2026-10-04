@@ -4,7 +4,7 @@ import type { Account, Signal } from '../core/types';
 /** A fake core interface for component tests. It can also emit Signals. */
 export class FakeCore implements CoreApi {
   accounts: Account[] = [{ id: 1, provider: 'local' }];
-  currentDate = '2026-10-03';
+  currentDate = Temporal.PlainDate.from('2026-10-03');
   private subscribers = new Set<(signal: Signal) => void>();
 
   async subscribe(onSignal: (signal: Signal) => void) {

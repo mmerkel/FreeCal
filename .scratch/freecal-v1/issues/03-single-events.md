@@ -18,3 +18,7 @@
 - [ ] Descriptions cross to the frontend as structured content (paragraphs of text and link pieces), built in the core; HTML is converted as in "Untrusted content" in the spec, and the editor edits the plain-text form. An untouched description keeps its original bytes
 - [ ] Only `http(s)://` and `mailto:` become links; clicking one opens the system browser through the shell, which checks the scheme again in Rust; a link whose text differs from its URL asks "Open <full URL> in your browser?" first
 - [ ] The hostile test Event is created at both seams and runs through the core, the grid, Event details and the editor: nothing in it runs or is rendered as HTML, and disallowed links are plain text
+
+## Comments
+
+- 2026-10-04: Decide here whether to generate the TypeScript types from the Rust ones. The interface QA after ticket 01 kept them hand-written because the surface was tiny (`Account`, `Provider`, an empty `Signal`). This ticket adds Occurrences, the "Occurrences changed" Signal and structured descriptions, which is where hand copies start to drift. Candidates: ts-rs (MIT, stable; can be a dev-dependency via `#[cfg_attr(test, derive(TS))]`) or tauri-specta (MIT, also generates command wrappers, release candidate at the time). Generated files need a check that they are up to date. Command names stay covered by the `mockIPC` test of `tauriCore` either way.

@@ -31,18 +31,18 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare("SELECT id, provider FROM account ORDER BY id")?;
-        let accounts = stmt
-            .query_map([], |row| {
-                let provider: String = row.get(1)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<(i64, String)>>>()?;
+        rows.into_iter()
+            .map(|(id, provider)| {
                 Ok(Account {
-                    id: AccountId(row.get(0)?),
-                    provider: Provider::parse(&provider).unwrap_or_else(|| {
-                        panic!("unknown Provider in the Local Store: {provider}")
-                    }),
+                    id: AccountId(id),
+                    provider: Provider::parse(&provider)
+                        .ok_or(CoreError::UnknownProvider(provider))?,
                 })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(accounts)
+            })
+            .collect()
     }
 }
 

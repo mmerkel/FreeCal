@@ -168,6 +168,10 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 120. As a user opening several files at once, I want one import per file, so that each can go into its own Calendar and be undone on its own.
 121. As a user, if FreeCal can't start (its data was written by a newer FreeCal, it is already running and couldn't be reached, or its data is damaged), I want a window that tells me why, so that it doesn't just fail to appear.
 
+### Window layout
+
+122. As a user, I want to hide the sidebar and change its width, and have FreeCal remember both, so that the grid gets the room I want for it.
+
 ## Implementation Decisions
 
 - **Platforms**: v1 targets Linux, but Windows and macOS stay possible. The core stays platform-neutral, and desktop-specific pieces (tray detection, D-Bus, autostart, the file hand-off) sit behind shell interfaces so that they can be ported.
@@ -182,7 +186,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Change Journal: list entries, undo one entry, undo everything since a given time, undo an import
   - Import/export: add files waiting to be imported, list them, dismiss one, preview an import, run it, export
   - Snapshots: take, list, restore
-  - App state and settings: last-used view, background mode, autostart
+  - App state and settings: last-used view, sidebar shown or hidden and its width, background mode, autostart
   The frontend talks only to this interface.
 - **Signals (core → frontend)**: besides answering requests, the core pushes Signals: messages saying that something changed. The Tauri shell forwards them to the frontend as Tauri events. In code and docs they are always called Signals, never "events" (that word means calendar Events) or "notifications" (those are desktop notifications). There are two kinds:
   - A **status Signal** carries the new state itself, because it is small and the state is the whole message.

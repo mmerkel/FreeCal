@@ -11,8 +11,8 @@
   import 'fullcalendar/themes/classic/palette.css';
 
   interface Props {
-    /** The local date, as YYYY-MM-DD, that the view opens on and highlights. */
-    today: string;
+    /** The local date that the view opens on and highlights. */
+    today: Temporal.PlainDate;
   }
 
   let { today }: Props = $props();
@@ -23,8 +23,8 @@
     const calendar = new Calendar(element, {
       plugins: [dayGridPlugin, classicThemePlugin],
       initialView: 'dayGridMonth',
-      initialDate: today,
-      now: today,
+      initialDate: today.toString(),
+      now: today.toString(),
       headerToolbar: false,
       height: '100%',
     });

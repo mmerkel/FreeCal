@@ -9,6 +9,7 @@ const SIGNAL_EVENT = 'freecal://signal';
 /** The core application interface, reached through the Tauri shell's commands. */
 export const tauriCore: CoreApi = {
   subscribe: (onSignal) => listen<Signal>(SIGNAL_EVENT, (message) => onSignal(message.payload)),
-  today: () => invoke('today'),
+  // The shell sends dates as ISO strings (YYYY-MM-DD).
+  today: async () => Temporal.PlainDate.from(await invoke<string>('today')),
   listAccounts: () => invoke('list_accounts'),
 };

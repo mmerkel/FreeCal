@@ -28,6 +28,7 @@
   .sidebar {
     width: 14rem;
     padding: 0.75rem;
+    overflow-y: auto;
     border-right: 1px solid #ddd;
   }
 

@@ -12,7 +12,7 @@ test('the sidebar shows the Local Account', async () => {
 
 test('opens an empty month view on the core’s today', async () => {
   const core = new FakeCore();
-  core.currentDate = '2027-02-14';
+  core.currentDate = Temporal.PlainDate.from('2027-02-14');
 
   render(App, { core });
 

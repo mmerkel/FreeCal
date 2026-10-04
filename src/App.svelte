@@ -12,7 +12,7 @@
   let { core }: Props = $props();
 
   interface AppState {
-    today: string;
+    today: Temporal.PlainDate;
     accounts: Account[];
   }
 
