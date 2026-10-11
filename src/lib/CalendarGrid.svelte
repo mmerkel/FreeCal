@@ -18,6 +18,7 @@
   import { t } from '../i18n';
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
+  import { firstWeekdayNumber } from './week.svelte';
   import { plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
   interface Props {
@@ -57,6 +58,9 @@
       eventTitleClass: 'event-title',
       initialView: 'dayGridMonth',
       initialDate: date,
+      // The effect below follows changes; reading it here only saves the
+      // first render a wrong range.
+      firstDay: untrack(firstWeekdayNumber),
       now: date,
       headerToolbar: false,
       height: '100%',
@@ -91,6 +95,12 @@
       shown?.setOption('eventTimeFormat', format);
       shown?.setOption('slotHeaderFormat', format);
     });
+  });
+
+  $effect(() => {
+    const firstDay = firstWeekdayNumber();
+    const shown = grid;
+    untrack(() => shown?.setOption('firstDay', firstDay));
   });
 
   $effect(() => {

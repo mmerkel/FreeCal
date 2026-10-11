@@ -6,10 +6,14 @@ import type { Calendar, Occurrence } from '../core/types';
 import { accountId, calendarId, eventId } from '../test/ids';
 import CalendarGrid from './CalendarGrid.svelte';
 import { setClockHours } from './clock.svelte';
+import { setFirstDayOfWeek } from './week.svelte';
 
 const today = Temporal.PlainDate.from('2026-10-03');
 
-afterEach(() => setClockHours(24));
+afterEach(() => {
+  setClockHours(24);
+  setFirstDayOfWeek('monday');
+});
 
 const home: Calendar = {
   id: calendarId(1),
@@ -53,8 +57,31 @@ test('reports the dates it shows', async () => {
 
   await waitFor(() => expect(onrangechange).toHaveBeenCalled());
   const range = onrangechange.mock.lastCall![0];
-  expect(range.from.toString()).toBe('2026-09-27');
-  expect(range.to.toString()).toBe('2026-11-08');
+  expect(range.from.toString()).toBe('2026-09-28');
+  expect(range.to.toString()).toBe('2026-11-09');
+});
+
+/** The weekday names over the month view's columns, in order. */
+function weekdays(): string[] {
+  return screen.getAllByRole('columnheader').map((header) => header.textContent ?? '');
+}
+
+// The tests run in `en-US`, whose own weeks start on Sunday.
+test('starts weeks on Monday, and on Sunday or Saturday when set', async () => {
+  const onrangechange = vi.fn();
+  render(CalendarGrid, { today, occurrences: [], calendars: [], onrangechange });
+
+  expect(weekdays()[0]).toMatch(/^Mon/);
+
+  setFirstDayOfWeek('sunday');
+
+  await waitFor(() => expect(weekdays()[0]).toMatch(/^Sun/));
+  expect(onrangechange.mock.lastCall![0].from.toString()).toBe('2026-09-27');
+
+  setFirstDayOfWeek('saturday');
+
+  await waitFor(() => expect(weekdays()[0]).toMatch(/^Sat/));
+  expect(onrangechange.mock.lastCall![0].from.toString()).toBe('2026-09-26');
 });
 
 test('shows the Occurrences it is given in their Calendar’s colour', async () => {
