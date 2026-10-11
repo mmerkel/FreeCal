@@ -295,6 +295,11 @@
   .app {
     display: flex;
     height: 100vh;
+    /* The window's minimum size from `tauri.conf.json`. KWin on X11 lets a
+       tiled window get smaller than that; the page then scrolls rather than
+       squeezing the layout (ticket 39). */
+    min-width: 880px;
+    min-height: 560px;
   }
 
   .grid {

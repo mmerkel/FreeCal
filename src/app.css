@@ -114,8 +114,9 @@
   --fc-classic-button-foreground: var(--solid-foreground);
 }
 
-/* Page-wide rules. The window shows exactly one screen: the page never
-   scrolls; only regions inside it, such as the sidebar, may. */
+/* Page-wide rules. The window shows exactly one screen: the page doesn't
+   scroll, only regions inside it, such as the sidebar, do. The exception is a
+   window below its minimum size (see `.app` in `App.svelte`). */
 html,
 body {
   margin: 0;

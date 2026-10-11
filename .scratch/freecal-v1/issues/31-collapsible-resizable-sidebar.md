@@ -20,7 +20,7 @@
 - [ ] Component tests against the fake core cover the button, F9, keyboard resizing with its limits and the hide below the minimum, restoring the state at launch and saving it on change
 - [ ] Dragging is checked by hand in the real app (jsdom has no layout)
 
-Out of scope: remembering the window's own size and position (possibly a separate ticket); the sidebar's contents (tickets 02, 14, 15, 18).
+Out of scope: remembering the window's own size and position (possibly a separate ticket); the sidebar's contents (tickets 02, 14, 15, 18); collapsing the sidebar in a window below its minimum size (ticket 45).
 
 ## Comments
 
