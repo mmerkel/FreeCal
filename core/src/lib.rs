@@ -218,19 +218,19 @@ impl Core {
         let events = self
             .store()
             .shown_events_in(&StoredRange::new(from, to, zone))?;
-        let mut occurrences = events
+        let occurrences = events
             .into_iter()
             .map(|event| {
-                Ok(Occurrence {
+                let occurrence = Occurrence {
                     event_id: event.id,
                     calendar_id: event.calendar_id,
                     title: event.title,
                     when: event.when.to_when(zone)?,
-                })
+                };
+                Ok((event.start_utc, occurrence))
             })
             .collect::<Result<Vec<_>>>()?;
-        Occurrence::order(&mut occurrences);
-        Ok(occurrences)
+        Ok(Occurrence::ordered(occurrences))
     }
 
     /// An Event with everything its details and editor show.
@@ -247,7 +247,7 @@ impl Core {
             writable(&store, calendar_id)?;
             let fields = EventFields {
                 title: draft.title,
-                when: StoredWhen::from_when(draft.when, self.clock.time_zone())?,
+                when: StoredWhen::new(draft.when, self.clock.time_zone())?,
                 location: draft.location,
                 description: draft.description,
                 description_html: false,
@@ -268,9 +268,9 @@ impl Core {
     }
 
     /// Changes an Event, possibly moving it to another writable Calendar.
-    /// What the user left as it was stays exactly as stored: an unchanged
-    /// time keeps its time zone and an unchanged description its original
-    /// bytes, even if it was HTML.
+    /// A timed Event keeps its Event Time Zones, and what the user left as
+    /// it was stays exactly as stored: an unchanged time its wall time and an
+    /// unchanged description its original bytes, even if it was HTML.
     pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Event> {
         let zone = self.clock.time_zone();
         let (before, after) = {
@@ -280,11 +280,7 @@ impl Core {
             writable(&store, draft.calendar_id)?;
 
             let old = &before.fields;
-            let when = if old.when.to_when(zone).ok() == Some(draft.when) {
-                old.when.clone()
-            } else {
-                StoredWhen::from_when(draft.when, zone)?
-            };
+            let when = old.when.edit(draft.when, zone)?;
             let (description, description_html) = if draft.description == description_of(old).text {
                 (old.description.clone(), old.description_html)
             } else {

@@ -1,48 +1,14 @@
 mod support;
 
-use chrono::{NaiveDate, NaiveDateTime};
 use freecal_core::{
-    Calendar, CalendarId, Colour, Core, CoreError, EventDraft, EventId, Piece, Signal, When,
-    link_allowed,
+    Calendar, CalendarId, Colour, Core, CoreError, EventDraft, EventId, Piece, Signal, link_allowed,
 };
-use support::Harness;
+use support::{Harness, all_day, date, draft, timed};
 
 fn calendar(core: &Core, name: &str) -> Calendar {
     let local = core.list_accounts().unwrap()[0].id;
     core.create_calendar(local, name, Colour::parse("#3366cc").unwrap())
         .unwrap()
-}
-
-fn date(text: &str) -> NaiveDate {
-    text.parse().unwrap()
-}
-
-fn time(text: &str) -> NaiveDateTime {
-    text.parse().unwrap()
-}
-
-fn timed(start: &str, end: &str) -> When {
-    When::Timed {
-        start: time(start),
-        end: time(end),
-    }
-}
-
-fn all_day(start: &str, end: &str) -> When {
-    When::AllDay {
-        start: date(start),
-        end: date(end),
-    }
-}
-
-fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
-    EventDraft {
-        calendar_id,
-        title: title.to_owned(),
-        when,
-        location: String::new(),
-        description: String::new(),
-    }
 }
 
 /// The titles of the Occurrences on the dates `from` up to `to` (exclusive).

@@ -6,9 +6,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
-use freecal_core::{Clock, Core, CoreError, Signal, SignalSink};
+use freecal_core::{CalendarId, Clock, Core, CoreError, EventDraft, Signal, SignalSink, When};
 use tempfile::TempDir;
 
 pub struct Harness {
@@ -106,5 +106,39 @@ impl RecordingSignals {
 impl SignalSink for RecordingSignals {
     fn send(&self, signal: Signal) {
         self.received.lock().unwrap().push(signal);
+    }
+}
+
+// Events and their times, written as text.
+
+pub fn date(text: &str) -> NaiveDate {
+    text.parse().unwrap()
+}
+
+pub fn time(text: &str) -> NaiveDateTime {
+    text.parse().unwrap()
+}
+
+pub fn timed(start: &str, end: &str) -> When {
+    When::Timed {
+        start: time(start),
+        end: time(end),
+    }
+}
+
+pub fn all_day(start: &str, end: &str) -> When {
+    When::AllDay {
+        start: date(start),
+        end: date(end),
+    }
+}
+
+pub fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
+    EventDraft {
+        calendar_id,
+        title: title.to_owned(),
+        when,
+        location: String::new(),
+        description: String::new(),
     }
 }
