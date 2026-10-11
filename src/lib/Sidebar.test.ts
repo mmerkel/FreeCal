@@ -86,7 +86,7 @@ test('creates a Calendar in the Local Account', async () => {
 test('a new Calendar takes the next colour in turn that no Calendar uses yet', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
-  core.addCalendar({ name: 'Home', colour: '#d50000' });
+  core.addCalendar({ name: 'Home', colour: '#ad1457' });
   await showApp(core);
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
@@ -97,9 +97,9 @@ test('a new Calendar takes the next colour in turn that no Calendar uses yet', a
   await screen.findByRole('switch', { name: 'Birthdays' });
 
   expect(core.calendars.map((calendar) => calendar.colour)).toEqual([
-    '#d50000',
-    '#039be5',
-    '#f6bf26',
+    '#ad1457',
+    '#3f51b5',
+    '#c0ca33',
   ]);
 });
 

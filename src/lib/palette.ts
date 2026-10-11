@@ -46,14 +46,17 @@ export const SWATCHES: Swatch[] = Object.entries(COLOURS).map(([name, colour]) =
 }));
 
 /**
- * The order new Calendars take the colours in. Each is as far as possible,
- * in OKLab, from all before it, so the first few Calendars are easy to tell
- * apart. The browns and greys come last.
+ * The order new Calendars take the colours in. First come the colours whose
+ * Event text (see `textColourOn`) reaches a contrast ratio of at least 6.5:1,
+ * then the others, then the browns and greys. Within each group, each colour
+ * is as far as possible, in OKLab, from all before it, so the first few
+ * Calendars are easy to tell apart. The bluest and the reddest readable
+ * colours, indigo and raspberry, start.
  */
 const NEW_CALENDAR_ORDER: ColourName[] = [
-  'lightBlue', 'red', 'yellow', 'purple', 'green', 'pink', 'pistachio', 'lilac',
-  'indigo', 'mauve', 'raspberry', 'amber', 'teal', 'orange', 'lavender', 'rose',
-  'lime', 'lightGreen', 'blue', 'pumpkin', 'mustard', 'brown', 'stone', 'grey',
+  'indigo', 'raspberry', 'lime', 'lilac', 'lightGreen', 'purple', 'amber', 'yellow',
+  'pistachio', 'mustard', 'green', 'blue', 'mauve', 'orange', 'red', 'teal',
+  'pink', 'rose', 'lavender', 'lightBlue', 'pumpkin', 'brown', 'stone', 'grey',
 ];
 
 /** The colour for a new Calendar: the first in turn that the fewest `calendars` have. */
