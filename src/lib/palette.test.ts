@@ -19,4 +19,3 @@ test('works out a colour it has never seen, such as one from CalDAV', () => {
   expect(textColourOn('#fff3a0')).toBe(DARK);
   expect(textColourOn('#1a237e')).toBe(WHITE);
 });
-

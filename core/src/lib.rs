@@ -29,7 +29,7 @@ pub use view::View;
 
 use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
-use store::{EventFields, StoredEvent, Store};
+use store::{EventFields, Store, StoredEvent};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -237,10 +237,13 @@ impl Core {
                 description_html: false,
             };
             let id = store.insert_event(calendar_id, &fields)?;
-            (id, StoredEvent {
-                calendar_id,
-                fields,
-            })
+            (
+                id,
+                StoredEvent {
+                    calendar_id,
+                    fields,
+                },
+            )
         };
         self.signals.send(Signal::OccurrencesChanged {
             calendar_ids: vec![calendar_id],
@@ -266,12 +269,11 @@ impl Core {
             } else {
                 StoredWhen::from_when(draft.when, zone)?
             };
-            let (description, description_html) =
-                if draft.description == description_of(old).text {
-                    (old.description.clone(), old.description_html)
-                } else {
-                    (draft.description, false)
-                };
+            let (description, description_html) = if draft.description == description_of(old).text {
+                (old.description.clone(), old.description_html)
+            } else {
+                (draft.description, false)
+            };
             let after = StoredEvent {
                 calendar_id: draft.calendar_id,
                 fields: EventFields {

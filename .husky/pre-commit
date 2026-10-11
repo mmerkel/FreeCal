@@ -1,0 +1,5 @@
+npx lint-staged
+npm run check
+npm test
+cargo clippy --all-targets -- -D warnings
+cargo test

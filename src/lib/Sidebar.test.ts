@@ -325,9 +325,7 @@ test('deletes a Calendar only after confirming in a dialog', async () => {
 
   menu = await openMenu(user, 'Home');
   await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
-  await user.click(
-    within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
-  );
+  await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
   await waitFor(() =>
     expect(screen.queryByRole('switch', { name: 'Home' })).not.toBeInTheDocument(),

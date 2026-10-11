@@ -163,10 +163,7 @@
       <ul aria-labelledby={headingId}>
         {#each calendarsOf(account) as calendar (calendar.id)}
           {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
-          <li
-            class:open={menuFor === calendar.id}
-            class:hidden={!calendar.shown}
-          >
+          <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
             {#if editing?.kind === 'renaming' && editing.id === calendar.id}
               {@render nameForm(calendar.name, calendar.colour, (name) =>
                 rename(calendar.id, name),
@@ -236,9 +233,7 @@
                     class="menu-item"
                     role="menuitem"
                     onclick={() =>
-                      choose(calendar.id, () =>
-                        change(() => core.showOnlyCalendar(calendar.id)),
-                      )}
+                      choose(calendar.id, () => change(() => core.showOnlyCalendar(calendar.id)))}
                   >
                     <Eye size={14} aria-hidden="true" />
                     {t('calendar.showOnly')}

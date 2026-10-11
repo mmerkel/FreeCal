@@ -1,0 +1,10 @@
+# Generated from the Rust core; see core/src/typescript.rs.
+src/core/*.generated.ts
+# Tickets, specs and docs are prose, wrapped by hand.
+*.md
+package-lock.json
+target/
+dist/
+# Skills are installed from elsewhere (skills-lock.json).
+.claude/
+.scratch/

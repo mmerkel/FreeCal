@@ -27,6 +27,7 @@
 <div class="description">
   {#each description.paragraphs as paragraph, index (index)}
     <!-- One line, so that no whitespace gets between the pieces. -->
+    <!-- prettier-ignore -->
     <p>{#each paragraph as piece, at (at)}{#if piece.kind === 'link'}<button type="button" class="link" title={piece.url} onclick={() => open(piece.text, piece.url)}>{piece.text}</button>{:else}{piece.text}{/if}{/each}</p>
   {/each}
 </div>

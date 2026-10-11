@@ -183,8 +183,7 @@
 
   /** Opens the editor for a new Event, or says where to create a Calendar first. */
   function startCreating(when: When) {
-    const target =
-      writableCalendars.find((calendar) => calendar.shown) ?? writableCalendars[0];
+    const target = writableCalendars.find((calendar) => calendar.shown) ?? writableCalendars[0];
     if (!target) {
       open = { kind: 'noCalendar' };
       return;

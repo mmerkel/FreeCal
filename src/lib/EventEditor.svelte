@@ -97,12 +97,7 @@
         />
       {/if}
       <span class="label">{t('event.ends')}</span>
-      <input
-        class="input"
-        type="date"
-        aria-label={t('event.endDate')}
-        bind:value={times.endDate}
-      />
+      <input class="input" type="date" aria-label={t('event.endDate')} bind:value={times.endDate} />
       {#if !times.allDay}
         <input
           class="input"

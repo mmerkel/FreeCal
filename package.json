@@ -10,7 +10,10 @@
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "format": "prettier --write . && cargo fmt",
+    "format:check": "prettier --check . && cargo fmt --check",
+    "prepare": "husky"
   },
   "dependencies": {
     "@lucide/svelte": "^1.52.0",
@@ -26,7 +29,11 @@
     "@testing-library/svelte": "^5.4.2",
     "@testing-library/user-event": "^14.6.7",
     "@tsconfig/svelte": "^5.0.8",
+    "husky": "^9.1.7",
     "jsdom": "^29.1.1",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^4.1.1",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
     "vite": "^8.3.2",

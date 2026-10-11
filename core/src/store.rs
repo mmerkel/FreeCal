@@ -120,11 +120,9 @@ impl Store {
     }
 
     pub fn list_calendars(&self) -> Result<Vec<Calendar>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, account_id, name, colour, shown, read_only FROM calendar ORDER BY id",
-            )?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, account_id, name, colour, shown, read_only FROM calendar ORDER BY id",
+        )?;
         let calendars = stmt
             .query_map([], |row| {
                 Ok(Calendar {
@@ -281,7 +279,10 @@ impl Store {
     }
 
     pub fn delete_event(&self, id: EventId) -> Result<()> {
-        match self.conn.execute("DELETE FROM event WHERE id = ?1", [id.0])? {
+        match self
+            .conn
+            .execute("DELETE FROM event WHERE id = ?1", [id.0])?
+        {
             0 => Err(CoreError::EventNotFound(id)),
             _ => Ok(()),
         }

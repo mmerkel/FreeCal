@@ -136,7 +136,9 @@ fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
 #[tauri::command]
 fn open_link(app: AppHandle, url: String) -> CommandResult<()> {
     if !link_allowed(&url) {
-        return Err(format!("FreeCal opens only http, https and mailto links: {url:?}"));
+        return Err(format!(
+            "FreeCal opens only http, https and mailto links: {url:?}"
+        ));
     }
     app.opener()
         .open_url(url, None::<&str>)

@@ -27,12 +27,15 @@
     { view: 'month', label: 'view.month', keys: 'M' },
   ];
 
-  const previous = $derived(
-    t(({ day: 'nav.previousDay', week: 'nav.previousWeek', month: 'nav.previousMonth' } as const)[view]),
-  );
-  const next = $derived(
-    t(({ day: 'nav.nextDay', week: 'nav.nextWeek', month: 'nav.nextMonth' } as const)[view]),
-  );
+  /** The names of the previous and next buttons in each view. */
+  const steps: Record<View, { previous: MessageKey; next: MessageKey }> = {
+    day: { previous: 'nav.previousDay', next: 'nav.nextDay' },
+    week: { previous: 'nav.previousWeek', next: 'nav.nextWeek' },
+    month: { previous: 'nav.previousMonth', next: 'nav.nextMonth' },
+  };
+
+  const previous = $derived(t(steps[view].previous));
+  const next = $derived(t(steps[view].next));
 
   function hint(action: string, keys: string) {
     return t('shortcut.hint', { action, keys });

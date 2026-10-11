@@ -86,13 +86,6 @@
   }
 </script>
 
-<div
-  class="menu"
-  role="menu"
-  aria-label={label}
-  tabindex="-1"
-  onkeydown={move}
-  {@attach open}
->
+<div class="menu" role="menu" aria-label={label} tabindex="-1" onkeydown={move} {@attach open}>
   {@render children()}
 </div>

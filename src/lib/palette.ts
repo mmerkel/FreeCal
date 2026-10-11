@@ -53,6 +53,7 @@ export const SWATCHES: Swatch[] = Object.entries(COLOURS).map(([name, colour]) =
  * Calendars are easy to tell apart. The bluest and the reddest readable
  * colours, indigo and raspberry, start.
  */
+// prettier-ignore
 const NEW_CALENDAR_ORDER: ColourName[] = [
   'indigo', 'raspberry', 'lime', 'lilac', 'lightGreen', 'purple', 'amber', 'yellow',
   'pistachio', 'mustard', 'green', 'blue', 'mauve', 'orange', 'red', 'teal',

@@ -7,8 +7,22 @@ import { accountId, calendarId } from '../test/ids';
 import EventEditor from './EventEditor.svelte';
 
 const calendars: Calendar[] = [
-  { id: calendarId(1), accountId: accountId(1), name: 'Home', colour: '#3366cc', shown: true, readOnly: false },
-  { id: calendarId(2), accountId: accountId(1), name: 'Work', colour: '#dc3912', shown: false, readOnly: false },
+  {
+    id: calendarId(1),
+    accountId: accountId(1),
+    name: 'Home',
+    colour: '#3366cc',
+    shown: true,
+    readOnly: false,
+  },
+  {
+    id: calendarId(2),
+    accountId: accountId(1),
+    name: 'Work',
+    colour: '#dc3912',
+    shown: false,
+    readOnly: false,
+  },
 ];
 
 const initial: EventDraft = {
