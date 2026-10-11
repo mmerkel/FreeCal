@@ -1,0 +1,20 @@
+# 37: Event details with icon buttons, ✕ on dialogs, safer delete and close
+
+**What to build:** The Event details get Google-style icon buttons at the top right: Edit, Delete and ✕. Every plain dialog gets a ✕. Deleting an Event asks first, and closing the editor after changing something asks "Discard changes?". Spec: user stories 132–134, "Dialog close button", "Event details" and "Event editor" under Frontend.
+
+**Blocked by:** none
+
+**Status:** ready-for-agent
+
+- [ ] `Dialog` shows a ✕ ghost icon button at the top right for `role="dialog"` that calls `onclose`, like Escape; `alertdialog` shows none
+- [ ] `Dialog` has a maximum height within the window and its body scrolls
+- [ ] The details stay a centred modal `Dialog`. Above the title, a row of icon buttons at the top right: Edit (pencil), Delete (trash), Close (✕), Lucide icons; for Events of Read-only Calendars only ✕. The text button row is gone
+- [ ] Each icon button has a tooltip and an `aria-label` through `t`
+- [ ] A click on the backdrop closes the details (not the editor or confirmations)
+- [ ] Delete opens an `alertdialog` "Delete this Event?" naming the Event, with Cancel focused and a danger Delete; only Delete calls the core
+- [ ] The editor keeps its text Cancel and Save buttons. ✕, Cancel and Escape close it straight away when the draft is unchanged, and otherwise ask "Discard changes?" (Keep editing focused, Discard)
+- [ ] Focus on opening the details goes to ✕; focus returns afterwards as before
+- [ ] Component tests: icons per writable/read-only Event, ✕ and backdrop close, delete only after confirming, cancel keeps the Event, discard prompt only for a changed draft
+- [ ] Checked by hand in the real app with `run-freecal`
+
+Out of scope: a popover anchored to the Event chip; an "Event deleted · Undo" toast instead of the confirmation, which needs undo for deletes (ticket 19 or later).
