@@ -8,6 +8,7 @@ mod calendar;
 mod clock;
 mod description;
 mod event;
+mod settings;
 mod signal;
 mod store;
 #[cfg(test)]
@@ -24,6 +25,7 @@ pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use description::{Description, Piece, link_allowed};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
+pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use signal::{Signal, SignalSink};
 pub use view::View;
 
@@ -120,6 +122,20 @@ impl Core {
 
     pub fn set_last_used_view(&self, view: View) -> Result<()> {
         self.store().set_last_used_view(view)
+    }
+
+    pub fn settings(&self) -> Result<Settings> {
+        self.store().settings()
+    }
+
+    /// Changes the settings `update` gives and keeps the others. Returns the
+    /// settings as they are now.
+    pub fn update_settings(&self, update: SettingsUpdate) -> Result<Settings> {
+        let store = self.store();
+        if let Some(appearance) = update.appearance {
+            store.set_appearance(appearance)?;
+        }
+        store.settings()
     }
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {

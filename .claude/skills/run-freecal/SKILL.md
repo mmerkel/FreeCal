@@ -55,6 +55,8 @@ $R stop                          # stops FreeCal and Xvfb
 
 As of ticket 04, a toolbar sits over the grid at y≈30: Today at x≈268 (pressed while tracking today), previous and next at 329 and 366, the period title from x≈396, and Day, Week and Month at 1034, 1090 and 1154. The shortcuts `d`, `w`, `m`, `j`, `k` and `t` are often easier than clicks. The view is stored in `app_state` (`sql 'select view from app_state'`), so `start --fresh` opens in month view and `restart` reopens the last one.
 
+As of ticket 33, the ⋮ main menu is at 1170,30. Its items are Settings… at 1070,72, About FreeCal at 1070,101 and Quit at 1070,140; `key ctrl+comma` also opens Settings. In Settings, Appearance's System, Light and Dark are at 484, 600 and 716 on y≈403, and Close at 742,458. The appearance is stored in `app_state` too (`sql 'select appearance from app_state'`). The window starts hidden and appears once the frontend knows the appearance, so its X window only exists from then on.
+
 In the month view of October 2026 (weeks start on Monday): each day column is 136 px wide from x≈236 and each week row is 117 px tall from y≈85, so 5 October is at about 304,260. In the week and day views the all-day row is at y≈103 and the time grid shows 06:00 at y≈136, 48 px per hour; week columns are 128 px wide from x≈291. Clicking a day number opens that day in day view. In day and week view, clicking a month name in the title opens that month in month view. Clicking a day or slot, or dragging across days (`drag 440 260 712 260`), opens the "New event" editor, and `key c` opens it at the next full hour. With no writable Calendar, either one shows the "No calendar for new events" hint (OK at 750,447). The editor's Title has focus, and Return there saves, like Save at about 745,628; Cancel is at 671,628. Clicking a chip opens the Event's details, which are centred and as tall as their content, so take a screenshot before clicking Delete (left), Edit or Close (right). A title with a line break or a description stored as HTML can't be entered through the window; to check those, insert an `event` row with `sqlite3` (fields from `fixtures/hostile-event.json`, `description_html = 1`) and `restart`.
 
 A ticket that moves the layout updates the coordinates here.
@@ -76,7 +78,7 @@ cargo test --workspace && cargo clippy --workspace --all-targets && npm run chec
 ## Gotchas
 
 - **The ⋮ button is invisible until its row is hovered** (`opacity: 0`). It still takes clicks, but `move` over the row first if a screenshot should show them, and park the mouse elsewhere (`move 600 700`) for clean shots.
-- **Dark mode:** WebKitGTK takes `prefers-color-scheme` from the GTK theme. Start with `GTK_THEME=Adwaita:dark $R restart` to see the dark look.
+- **Dark mode:** choose Dark in Settings, or `sql "update app_state set appearance = 'dark'"` and `restart`. With Appearance on System, WebKitGTK takes `prefers-color-scheme` from the GTK theme: start with `GTK_THEME=Adwaita:dark $R restart`.
 - **Another system font:** point `FONTCONFIG_FILE` at a config that prepends the family (e.g. DejaVu Sans, the widest common one) and restart, to check that nothing overflows.
 - **Rename fields open with the name selected**, so typing replaces it; `ctrl+a` is not needed.
 - **Never stop the app with `pkill -f target/debug/freecal`**: the pattern also matches the shell running the command, which kills it (exit code 144). The driver uses `pkill -x freecal`.

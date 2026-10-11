@@ -93,3 +93,25 @@ test('the Event commands pass their arguments under the names the shell expects'
     ['open_link', { url: 'https://example.com' }],
   ]);
 });
+
+test('the app commands pass their arguments under the names the shell expects', async () => {
+  const invoked: [string, unknown][] = [];
+  mockIPC((command, args) => {
+    invoked.push([command, args]);
+    return command === 'version' ? '0.1.0' : { appearance: 'dark' };
+  });
+
+  await tauriCore.settings();
+  await tauriCore.updateSettings({ appearance: 'dark' });
+  expect(await tauriCore.version()).toBe('0.1.0');
+  await tauriCore.showWindow();
+  await tauriCore.quit();
+
+  expect(invoked).toEqual([
+    ['settings', {}],
+    ['update_settings', { update: { appearance: 'dark' } }],
+    ['version', {}],
+    ['show_window', {}],
+    ['quit', {}],
+  ]);
+});

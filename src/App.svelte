@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { CoreApi } from './core/CoreApi';
   import type {
     Account,
@@ -7,12 +8,16 @@
     EventDraft,
     EventId,
     Occurrence,
+    Settings,
+    SettingsUpdate,
     Signal,
     View,
     When,
   } from './core/types';
   import { t } from './i18n';
+  import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
+  import { followAppearance } from './lib/colourScheme';
   import Dialog from './lib/Dialog.svelte';
   import EventDetails from './lib/EventDetails.svelte';
   import EventEditor from './lib/EventEditor.svelte';
@@ -28,6 +33,9 @@
     toggleToday,
     type Navigation,
   } from './lib/navigation';
+  import { DEFAULT_SETTINGS } from './lib/settings';
+  import SettingsDialog from './lib/SettingsDialog.svelte';
+  import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import { whenForShortcut, type VisibleRange } from './lib/when';
@@ -51,11 +59,18 @@
     | { kind: 'details'; id: EventId }
     | { kind: 'editing'; id: EventId; draft: EventDraft }
     | { kind: 'creating'; draft: EventDraft }
-    | { kind: 'noCalendar' };
+    | { kind: 'noCalendar' }
+    | { kind: 'settings' }
+    | { kind: 'about' };
 
+  let settings = $state<Settings>({ ...DEFAULT_SETTINGS });
+  let settingsFailure = $state<string>();
+  /** FreeCal's version, read when About first opens. */
+  let version = $state<string>();
   let today = $state<Temporal.PlainDate>();
   let navigation = $state<Navigation>();
   let viewSaveFailure = $state<string>();
+  let quitFailure = $state<string>();
   let directory = $state<Directory>();
   let startFailure = $state<string>();
   let readFailure = $state<string>();
@@ -64,7 +79,8 @@
   let open = $state<Open>();
   /** The Event whose details are open, as last read from the core. */
   let opened = $state<Event>();
-  let detailsFailure = $state<string>();
+  /** Why an action in the open details or About dialog failed. */
+  let dialogFailure = $state<string>();
   /** Counts editor sessions, so that each one starts from its own draft. */
   let session = $state(0);
 
@@ -138,6 +154,16 @@
     }
   }
 
+  $effect(() => followAppearance(settings.appearance));
+
+  /**
+   * Shows the window, which starts hidden. Should that fail, the shell shows
+   * it a few seconds later anyway.
+   */
+  function showWindow() {
+    core.showWindow().catch(() => {});
+  }
+
   $effect(() => {
     let stopped = false;
     let unsubscribe: (() => void) | undefined;
@@ -149,6 +175,11 @@
       });
       if (stopped) return stop();
       unsubscribe = stop;
+      // The window shows once its appearance is known, so that it never
+      // flashes the wrong theme.
+      settings = await core.settings();
+      await tick();
+      showWindow();
       const [currentDate, view] = await Promise.all([
         core.today(),
         core.lastUsedView(),
@@ -159,7 +190,11 @@
       navigation = opening(view, today);
     }
 
-    start().catch((error) => (startFailure = String(error)));
+    start().catch((error) => {
+      // Drawn with the default settings.
+      startFailure = String(error);
+      showWindow();
+    });
     return () => {
       stopped = true;
       unsubscribe?.();
@@ -198,7 +233,7 @@
 
   function openDetails(id: EventId) {
     opened = undefined;
-    detailsFailure = undefined;
+    dialogFailure = undefined;
     open = { kind: 'details', id };
     readOpenedEvent();
   }
@@ -221,7 +256,7 @@
   function close() {
     open = undefined;
     opened = undefined;
-    detailsFailure = undefined;
+    dialogFailure = undefined;
   }
 
   async function saveNew(draft: EventDraft) {
@@ -239,7 +274,7 @@
       await core.deleteEvent(id);
       close();
     } catch (error) {
-      detailsFailure = t('event.deleteFailed', { error: String(error) });
+      dialogFailure = t('event.deleteFailed', { error: String(error) });
     }
   }
 
@@ -247,45 +282,82 @@
     try {
       await core.openLink(url);
     } catch (error) {
-      detailsFailure = t('link.openFailed', { error: String(error) });
+      dialogFailure = t('link.openFailed', { error: String(error) });
     }
   }
 
-  /** Google Calendar's shortcuts, which act on the grid. */
-  const shortcuts: Record<string, () => void> = {
-    c: () => startCreating(whenForShortcut(Temporal.Now.plainDateTimeISO())),
-    d: () => showView('day'),
-    '1': () => showView('day'),
-    w: () => showView('week'),
-    '2': () => showView('week'),
-    m: () => showView('month'),
-    '3': () => showView('month'),
-    j: () => navigate(step(navigation!, 1)),
-    n: () => navigate(step(navigation!, 1)),
-    k: () => navigate(step(navigation!, -1)),
-    p: () => navigate(step(navigation!, -1)),
+  /** Writes one changed setting; it has taken effect before the core answers. */
+  function changeSettings(update: SettingsUpdate) {
+    settings = { ...settings, ...update };
+    core.updateSettings(update).then(
+      () => (settingsFailure = undefined),
+      (error) => {
+        settingsFailure = t('settings.saveFailed', { error: String(error) });
+        // Back to what the Local Store kept, so that the window doesn't show
+        // a setting it won't open with next time.
+        core.settings().then(
+          (stored) => (settings = stored),
+          () => {},
+        );
+      },
+    );
+  }
+
+  function openSettings() {
+    settingsFailure = undefined;
+    open = { kind: 'settings' };
+  }
+
+  function openAbout() {
+    dialogFailure = undefined;
+    open = { kind: 'about' };
+    // Without the version About still says everything else.
+    if (version === undefined)
+      core.version().then(
+        (read) => (version = read),
+        () => {},
+      );
+  }
+
+  function quit() {
+    core.quit().catch((error) => (quitFailure = t('app.quitFailed', { error: String(error) })));
+  }
+
+  /** What each keyboard shortcut does (see `shortcuts.ts` for the keys). */
+  const shortcutActions: Record<ShortcutAction, () => void> = {
+    create: () => startCreating(whenForShortcut(Temporal.Now.plainDateTimeISO())),
+    day: () => showView('day'),
+    week: () => showView('week'),
+    month: () => showView('month'),
+    next: () => navigate(step(navigation!, 1)),
+    previous: () => navigate(step(navigation!, -1)),
     // Unlike the Today button, `t` doesn't toggle: it always goes to today.
-    t: () => navigate(goToToday(navigation!, today!)),
+    today: () => navigate(goToToday(navigation!, today!)),
+    settings: openSettings,
   };
 
   function showView(view: View) {
     navigate(switchView(navigation!, view));
   }
 
-  /** Shortcuts act unless the user is typing or a dialog or menu is open. */
+  /**
+   * Shortcuts act unless a dialog or menu is open. Those without Ctrl also
+   * wait while the user is typing.
+   */
   function onkeydown(key: KeyboardEvent) {
-    const shortcut = Object.hasOwn(shortcuts, key.key) ? shortcuts[key.key] : undefined;
-    if (!shortcut || key.ctrlKey || key.altKey || key.metaKey || key.repeat) return;
+    const shortcut = shortcutFor(key);
+    if (!shortcut) return;
     if (!navigation || open || document.querySelector('dialog[open]')) return;
     const target = key.target;
+    const typing = 'input, textarea, select, [contenteditable]';
     if (
       target instanceof Element &&
-      target.closest('input, textarea, select, [contenteditable], [role="menu"]')
+      target.closest(shortcut.ctrl ? '[role="menu"]' : `${typing}, [role="menu"]`)
     ) {
       return;
     }
     key.preventDefault();
-    shortcut();
+    shortcutActions[shortcut.action]();
   }
 </script>
 
@@ -306,12 +378,18 @@
         onstep={(by) => navigate(step(shown, by))}
         onview={(view) => navigate(switchView(shown, view))}
         onmonth={(month) => navigate(openMonth(shown, month))}
+        onsettings={openSettings}
+        onabout={openAbout}
+        onquit={quit}
       />
       {#if readFailure}
         <p role="alert">{t('app.readFailed', { error: readFailure })}</p>
       {/if}
       {#if viewSaveFailure}
         <p role="alert">{viewSaveFailure}</p>
+      {/if}
+      {#if quitFailure}
+        <p role="alert">{quitFailure}</p>
       {/if}
       <CalendarGrid
         view={shown.view}
@@ -333,7 +411,7 @@
     <EventDetails
       {event}
       calendar={directory.calendars.find((calendar) => calendar.id === event.calendarId)}
-      failure={detailsFailure}
+      failure={dialogFailure}
       onedit={() => startEditing(event)}
       ondelete={() => remove(event.id)}
       onclose={close}
@@ -351,6 +429,15 @@
         oncancel={() => (editing.kind === 'editing' ? openDetails(editing.id) : close())}
       />
     {/key}
+  {:else if open?.kind === 'settings'}
+    <SettingsDialog
+      {settings}
+      failure={settingsFailure}
+      onchange={changeSettings}
+      onclose={close}
+    />
+  {:else if open?.kind === 'about'}
+    <AboutDialog {version} failure={dialogFailure} onopenlink={openLink} onclose={close} />
   {:else if open?.kind === 'noCalendar'}
     <Dialog title={t('event.noCalendarTitle')} onclose={close}>
       <p>{t('event.noCalendarBody', { account: t('account.local') })}</p>

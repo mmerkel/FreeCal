@@ -58,7 +58,7 @@
 }
 
 /* Dark values. `data-color-scheme` on the root element is the one switch:
-   it follows the system now, and a setting can override it later. FullCalendar's
+   it follows the Appearance setting (see `colourScheme.ts`). FullCalendar's
    palette switches on the same attribute. */
 :root[data-color-scheme='dark'] {
   color-scheme: dark;

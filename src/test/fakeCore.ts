@@ -8,10 +8,13 @@ import type {
   Event,
   EventDraft,
   EventId,
+  Settings,
+  SettingsUpdate,
   Signal,
   View,
   When,
 } from '../core/types';
+import { DEFAULT_SETTINGS } from '../lib/settings';
 import { accountId, calendarId, eventId } from './ids';
 
 /**
@@ -26,6 +29,18 @@ export class FakeCore implements CoreApi {
   events: Event[] = [];
   currentDate = Temporal.PlainDate.from('2026-10-03');
   lastView: View = 'month';
+  /** The settings as the Local Store keeps them. */
+  storedSettings: Settings = { ...DEFAULT_SETTINGS };
+  /** The updates written with `updateSettings`, in order. */
+  settingsUpdates: SettingsUpdate[] = [];
+  /**
+   * Set to make the core fail to start, as when it can't open the Local
+   * Store: every read rejects with it.
+   */
+  startupFailure?: string;
+  /** Whether the window has been shown; it starts hidden. */
+  windowShown = false;
+  hasQuit = false;
   /** The names of the interface methods called, in order. */
   calls: string[] = [];
   /** The links opened in the browser. */
@@ -83,6 +98,7 @@ export class FakeCore implements CoreApi {
 
   async today() {
     this.calls.push('today');
+    this.started();
     return this.currentDate;
   }
 
@@ -94,6 +110,7 @@ export class FakeCore implements CoreApi {
 
   async lastUsedView() {
     this.calls.push('lastUsedView');
+    this.started();
     return this.lastView;
   }
 
@@ -102,13 +119,28 @@ export class FakeCore implements CoreApi {
     this.lastView = view;
   }
 
+  async settings() {
+    this.calls.push('settings');
+    this.started();
+    return { ...this.storedSettings };
+  }
+
+  async updateSettings(update: SettingsUpdate) {
+    this.calls.push('updateSettings');
+    this.settingsUpdates.push({ ...update });
+    this.storedSettings = { ...this.storedSettings, ...update };
+    return { ...this.storedSettings };
+  }
+
   async listAccounts() {
     this.calls.push('listAccounts');
+    this.started();
     return structuredClone(this.accounts);
   }
 
   async listCalendars() {
     this.calls.push('listCalendars');
+    this.started();
     return structuredClone(this.calendars);
   }
 
@@ -206,6 +238,25 @@ export class FakeCore implements CoreApi {
   async openLink(url: string) {
     this.calls.push('openLink');
     this.openedLinks.push(url);
+  }
+
+  async version() {
+    this.calls.push('version');
+    return '0.1.0';
+  }
+
+  async showWindow() {
+    this.calls.push('showWindow');
+    this.windowShown = true;
+  }
+
+  async quit() {
+    this.calls.push('quit');
+    this.hasQuit = true;
+  }
+
+  private started() {
+    if (this.startupFailure !== undefined) throw new Error(this.startupFailure);
   }
 
   private findEvent(id: EventId): Event {

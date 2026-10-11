@@ -7,7 +7,7 @@ use std::time::Duration;
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
-    Occurrence, Signal, SignalSink, SystemClock, View, link_allowed,
+    Occurrence, Settings, SettingsUpdate, Signal, SignalSink, SystemClock, View, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -19,6 +19,14 @@ const SIGNAL_EVENT: &str = "freecal://signal";
 /// thread doesn't count the time the computer was suspended, so a short
 /// period also catches waking up on a new day soon.
 const DATE_CHECK_PERIOD: Duration = Duration::from_secs(10);
+
+/// The window starts hidden and the frontend shows it once it knows the
+/// appearance, so that it never flashes the wrong theme. Should the frontend
+/// never get that far, the window is shown after this time anyway.
+const SHOW_WINDOW_FALLBACK: Duration = Duration::from_secs(5);
+
+/// The label of FreeCal's one window in `tauri.conf.json`.
+const MAIN_WINDOW: &str = "main";
 
 struct ForwardToFrontend(AppHandle);
 
@@ -48,6 +56,16 @@ fn last_used_view(core: State<Core>) -> CommandResult<View> {
 #[tauri::command]
 fn set_last_used_view(core: State<Core>, view: View) -> CommandResult<()> {
     core.set_last_used_view(view).map_err(to_message)
+}
+
+#[tauri::command]
+fn settings(core: State<Core>) -> CommandResult<Settings> {
+    core.settings().map_err(to_message)
+}
+
+#[tauri::command]
+fn update_settings(core: State<Core>, update: SettingsUpdate) -> CommandResult<Settings> {
+    core.update_settings(update).map_err(to_message)
 }
 
 #[tauri::command]
@@ -145,6 +163,34 @@ fn open_link(app: AppHandle, url: String) -> CommandResult<()> {
         .map_err(|error| error.to_string())
 }
 
+/// FreeCal's version, for the About dialog.
+#[tauri::command]
+fn version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Shows the window, which starts hidden.
+#[tauri::command]
+fn show_window(app: AppHandle) -> CommandResult<()> {
+    show_main_window(&app).map_err(|error| error.to_string())
+}
+
+/// Ends FreeCal, also when it would otherwise keep running in the background.
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
+fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
+    match app.get_webview_window(MAIN_WINDOW) {
+        Some(window) if !window.is_visible()? => {
+            window.show()?;
+            window.set_focus()
+        }
+        _ => Ok(()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -161,12 +207,19 @@ fn main() {
                     handle.state::<Core>().check_date();
                 }
             });
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(SHOW_WINDOW_FALLBACK);
+                let _ = show_main_window(&handle);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             today,
             last_used_view,
             set_last_used_view,
+            settings,
+            update_settings,
             list_accounts,
             list_calendars,
             create_calendar,
@@ -181,6 +234,9 @@ fn main() {
             edit_event,
             delete_event,
             open_link,
+            version,
+            show_window,
+            quit,
         ])
         .run(tauri::generate_context!())
         .expect("FreeCal failed to start");

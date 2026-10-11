@@ -152,6 +152,22 @@ export const samples = {
     "week",
     "month"
   ],
+  Appearance: [
+    "system",
+    "light",
+    "dark"
+  ],
+  Settings: [
+    {
+      "appearance": "dark"
+    }
+  ],
+  SettingsUpdate: [
+    {},
+    {
+      "appearance": "light"
+    }
+  ],
 } satisfies Samples;
 
 type Samples = {
@@ -170,4 +186,7 @@ type Samples = {
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
   View: Unbranded<T.View>[];
+  Appearance: Unbranded<T.Appearance>[];
+  Settings: Unbranded<T.Settings>[];
+  SettingsUpdate: Unbranded<T.SettingsUpdate>[];
 };

@@ -14,8 +14,8 @@ use serde::Serialize;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
-    Account, AccountId, Calendar, CalendarId, Colour, Description, Event, EventDraft, EventId,
-    Occurrence, Piece, Provider, Signal, View, When,
+    Account, AccountId, Appearance, Calendar, CalendarId, Colour, Description, Event, EventDraft,
+    EventId, Occurrence, Piece, Provider, Settings, SettingsUpdate, Signal, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -64,6 +64,8 @@ fn types() -> (String, Vec<String>) {
     types.visit::<EventDraft>();
     types.visit::<Signal>();
     types.visit::<View>();
+    types.visit::<Settings>();
+    types.visit::<SettingsUpdate>();
     let names = types.declarations.keys().cloned().collect();
     let declarations: Vec<_> = types.declarations.into_values().collect();
     (generated(&declarations.join("\n")), names)
@@ -154,6 +156,16 @@ fn samples_file() -> (String, Vec<String>) {
             Signal::DateChanged { date: date(4) },
         ]),
         samples(&[View::Day, View::Week, View::Month]),
+        samples(&[Appearance::System, Appearance::Light, Appearance::Dark]),
+        samples(&[Settings {
+            appearance: Appearance::Dark,
+        }]),
+        samples(&[
+            SettingsUpdate::default(),
+            SettingsUpdate {
+                appearance: Some(Appearance::Light),
+            },
+        ]),
     ];
     let mut names = Vec::new();
     let (mut values, mut types) = (String::new(), String::new());

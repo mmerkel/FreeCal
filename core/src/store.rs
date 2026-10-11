@@ -6,7 +6,8 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
-    Account, AccountId, Calendar, CalendarId, Colour, CoreError, EventId, Provider, Result, View,
+    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
+    Result, Settings, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -52,6 +53,9 @@ const MIGRATIONS: &[&str] = &[
         view TEXT NOT NULL DEFAULT 'month'
     );
     INSERT INTO app_state (id) VALUES (1);
+    ",
+    "
+    ALTER TABLE app_state ADD COLUMN appearance TEXT NOT NULL DEFAULT 'system';
     ",
 ];
 
@@ -337,6 +341,23 @@ impl Store {
     pub fn set_last_used_view(&self, view: View) -> Result<()> {
         self.conn
             .execute("UPDATE app_state SET view = ?1", [view.as_str()])?;
+        Ok(())
+    }
+
+    pub fn settings(&self) -> Result<Settings> {
+        let appearance: String =
+            self.conn
+                .query_row("SELECT appearance FROM app_state", [], |row| row.get(0))?;
+        Ok(Settings {
+            appearance: Appearance::parse(&appearance),
+        })
+    }
+
+    pub fn set_appearance(&self, appearance: Appearance) -> Result<()> {
+        self.conn.execute(
+            "UPDATE app_state SET appearance = ?1",
+            [appearance.as_str()],
+        )?;
         Ok(())
     }
 

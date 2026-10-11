@@ -8,6 +8,11 @@ export type Account = { id: AccountId, provider: Provider, };
  */
 export type AccountId = number & { readonly __brand: "AccountId" };
 
+/**
+ * Whether the window is light or dark.
+ */
+export type Appearance = "system" | "light" | "dark";
+
 export type Calendar = { id: CalendarId, accountId: AccountId, name: string, colour: Colour,
 /**
  * Whether the user shows this Calendar's Events or has hidden them.
@@ -80,6 +85,17 @@ export type Piece = { "kind": "text", text: string, } | { "kind": "link", text: 
  * A kind of calendar service FreeCal can talk to.
  */
 export type Provider = "local";
+
+/**
+ * The settings of the Settings dialog, as the Local Store keeps them.
+ */
+export type Settings = { appearance: Appearance, };
+
+/**
+ * A change to the settings: only the settings it gives change, so that
+ * each change in the Settings dialog writes just that one setting.
+ */
+export type SettingsUpdate = { appearance?: Appearance, };
 
 /**
  * A message from the core saying that something changed.

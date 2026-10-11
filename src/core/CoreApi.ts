@@ -7,6 +7,8 @@ import type {
   EventDraft,
   EventId,
   Occurrence,
+  Settings,
+  SettingsUpdate,
   Signal,
   View,
 } from './types';
@@ -20,6 +22,10 @@ export interface CoreApi {
   /** The view FreeCal opens in: month on first launch, then the last-used one. */
   lastUsedView(): Promise<View>;
   setLastUsedView(view: View): Promise<void>;
+  /** The settings of the Settings dialog. */
+  settings(): Promise<Settings>;
+  /** Changes the settings `update` gives and keeps the others; returns them all as they are now. */
+  updateSettings(update: SettingsUpdate): Promise<Settings>;
   listAccounts(): Promise<Account[]>;
   /** Every Calendar of every Account, in the order they were added. */
   listCalendars(): Promise<Calendar[]>;
@@ -46,4 +52,13 @@ export interface CoreApi {
   deleteEvent(id: EventId): Promise<void>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
+  /** FreeCal's version, such as `0.1.0`. */
+  version(): Promise<string>;
+  /**
+   * Shows the window, which starts hidden so that it never flashes the wrong
+   * theme. Called once the appearance is known, or that it can't be.
+   */
+  showWindow(): Promise<void>;
+  /** Ends FreeCal, also when it would otherwise keep running in the background. */
+  quit(): Promise<void>;
 }

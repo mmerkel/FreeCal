@@ -13,6 +13,8 @@ export const tauriCore: CoreApi = {
   today: async () => Temporal.PlainDate.from(await invoke<string>('today')),
   lastUsedView: () => invoke('last_used_view'),
   setLastUsedView: (view) => invoke('set_last_used_view', { view }),
+  settings: () => invoke('settings'),
+  updateSettings: (update) => invoke('update_settings', { update }),
   listAccounts: () => invoke('list_accounts'),
   listCalendars: () => invoke('list_calendars'),
   createCalendar: (accountId, name, colour) =>
@@ -29,4 +31,7 @@ export const tauriCore: CoreApi = {
   editEvent: (id, draft) => invoke('edit_event', { id, draft }),
   deleteEvent: (id) => invoke('delete_event', { id }),
   openLink: (url) => invoke('open_link', { url }),
+  version: () => invoke('version'),
+  showWindow: () => invoke('show_window'),
+  quit: () => invoke('quit'),
 };

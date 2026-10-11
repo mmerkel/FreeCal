@@ -1,5 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import 'temporal-polyfill/global';
+import { afterEach } from 'vitest';
+import { systemDarkQuery } from './darkQuery';
 
 // jsdom has no modal dialogs. This is just enough of them for component
 // tests: opening and closing, and Escape sending "cancel" to the topmost
@@ -22,3 +24,8 @@ if (!HTMLDialogElement.prototype.showModal) {
     this.dispatchEvent(new Event('close'));
   };
 }
+
+// jsdom has no media queries. The only one FreeCal asks is whether the system
+// is dark, which tests answer through `systemDarkQuery`.
+window.matchMedia = () => systemDarkQuery as unknown as MediaQueryList;
+afterEach(() => systemDarkQuery.flip(false));

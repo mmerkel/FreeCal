@@ -1,15 +1,21 @@
 <!--
-  The toolbar over the grid: Today, previous and next, the shown period and
-  the view switch. The Today button is a toggle whose pressed state is
-  tracking today. In day and week view the month names in the shown period
-  open their month.
+  The toolbar over the grid: Today, previous and next, the shown period, the
+  view switch and the main menu. The Today button is a toggle whose pressed
+  state is tracking today. In day and week view the month names in the shown
+  period open their month.
 -->
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+  import Info from '@lucide/svelte/icons/info';
+  import Power from '@lucide/svelte/icons/power';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import type { View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
+  import Menu from './Menu.svelte';
   import { monthTitle, type TitlePart } from './navigation';
+  import { shortcutHint, shortcutKeys } from './shortcuts';
 
   interface Props {
     view: View;
@@ -21,14 +27,30 @@
     onview: (view: View) => void;
     /** A month name in the title was clicked. */
     onmonth: (month: Temporal.PlainYearMonth) => void;
+    onsettings: () => void;
+    onabout: () => void;
+    onquit: () => void;
   }
 
-  let { view, tracking, title, ontoday, onstep, onview, onmonth }: Props = $props();
+  let {
+    view,
+    tracking,
+    title,
+    ontoday,
+    onstep,
+    onview,
+    onmonth,
+    onsettings,
+    onabout,
+    onquit,
+  }: Props = $props();
 
-  const views: { view: View; label: MessageKey; keys: string }[] = [
-    { view: 'day', label: 'view.day', keys: 'D' },
-    { view: 'week', label: 'view.week', keys: 'W' },
-    { view: 'month', label: 'view.month', keys: 'M' },
+  let menuOpen = $state(false);
+
+  const views: { view: View; label: MessageKey }[] = [
+    { view: 'day', label: 'view.day' },
+    { view: 'week', label: 'view.week' },
+    { view: 'month', label: 'view.month' },
   ];
 
   /** The names of the previous and next buttons in each view. */
@@ -41,8 +63,10 @@
   const previous = $derived(t(steps[view].previous));
   const next = $derived(t(steps[view].next));
 
-  function hint(action: string, keys: string) {
-    return t('shortcut.hint', { action, keys });
+  /** Runs a menu item's action: the menu closes first, so focus returns to its button. */
+  function choose(action: () => void) {
+    menuOpen = false;
+    action();
   }
 </script>
 
@@ -51,7 +75,7 @@
     type="button"
     class="button outline today"
     aria-pressed={tracking}
-    title={hint(t('nav.today'), 'T')}
+    title={shortcutHint(t('nav.today'), 'today')}
     onclick={ontoday}
   >
     {t('nav.today')}
@@ -60,7 +84,7 @@
     type="button"
     class="icon-button"
     aria-label={previous}
-    title={hint(previous, 'K')}
+    title={shortcutHint(previous, 'previous')}
     onclick={() => onstep(-1)}
   >
     <ChevronLeft size={18} />
@@ -69,7 +93,7 @@
     type="button"
     class="icon-button"
     aria-label={next}
-    title={hint(next, 'J')}
+    title={shortcutHint(next, 'next')}
     onclick={() => onstep(1)}
   >
     <ChevronRight size={18} />
@@ -96,12 +120,50 @@
       <button
         type="button"
         aria-pressed={option.view === view}
-        title={hint(t(option.label), option.keys)}
+        title={shortcutHint(t(option.label), option.view)}
         onclick={() => onview(option.view)}
       >
         {t(option.label)}
       </button>
     {/each}
+  </div>
+  <div class="main-menu">
+    <button
+      type="button"
+      class="icon-button"
+      aria-label={t('menu.main')}
+      title={t('menu.main')}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      onclick={() => (menuOpen = !menuOpen)}
+    >
+      <EllipsisVertical size={18} aria-hidden="true" />
+    </button>
+    {#if menuOpen}
+      <div class="menu-anchor">
+        <Menu label={t('menu.main')} onclose={() => (menuOpen = false)}>
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={() => choose(onsettings)}
+          >
+            <SettingsIcon size={14} aria-hidden="true" />
+            {t('menu.settings')}
+            <kbd aria-hidden="true">{shortcutKeys('settings')}</kbd>
+          </button>
+          <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onabout)}>
+            <Info size={14} aria-hidden="true" />
+            {t('menu.about')}
+          </button>
+          <hr class="menu-separator" />
+          <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onquit)}>
+            <Power size={14} aria-hidden="true" />
+            {t('menu.quit')}
+          </button>
+        </Menu>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -152,6 +214,26 @@
 
   .month:hover {
     text-decoration: underline;
+  }
+
+  .main-menu {
+    position: relative;
+    margin-left: var(--space-2);
+  }
+
+  .menu-anchor {
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    right: 0;
+    z-index: 10;
+  }
+
+  kbd {
+    margin-left: auto;
+    padding-left: var(--space-6);
+    color: var(--foreground-muted);
+    font: inherit;
+    font-size: var(--text-xs);
   }
 
   .views {
