@@ -18,3 +18,7 @@
 - [ ] Checked by hand in the real app with `run-freecal`
 
 Out of scope: a popover anchored to the Event chip; an "Event deleted · Undo" toast instead of the confirmation, which needs undo for deletes (ticket 19 or later).
+
+## Comments
+
+- 2026-10-11: Ticket 33 added the Settings and About dialogs (`src/lib/SettingsDialog.svelte`, `src/lib/AboutDialog.svelte`), each with a single text Close button. Once `Dialog` shows the ✕, remove those Close buttons so both dialogs show only the ✕. That means `Dialog`'s `actions` snippet becomes optional, and a dialog without actions has no empty actions row. About's initial focus moves from Close to the ✕, like the details. Settings keeps its focus on the checked Appearance choice. Update the tests in `src/App.settings.test.ts` that click Close.
