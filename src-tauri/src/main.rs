@@ -7,7 +7,8 @@ use std::time::Duration;
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
-    Occurrence, Settings, SettingsUpdate, Signal, SignalSink, SystemClock, View, link_allowed,
+    Occurrence, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View,
+    link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -56,6 +57,16 @@ fn last_used_view(core: State<Core>) -> CommandResult<View> {
 #[tauri::command]
 fn set_last_used_view(core: State<Core>, view: View) -> CommandResult<()> {
     core.set_last_used_view(view).map_err(to_message)
+}
+
+#[tauri::command]
+fn sidebar(core: State<Core>) -> CommandResult<SidebarState> {
+    core.sidebar().map_err(to_message)
+}
+
+#[tauri::command]
+fn set_sidebar(core: State<Core>, sidebar: SidebarState) -> CommandResult<()> {
+    core.set_sidebar(sidebar).map_err(to_message)
 }
 
 #[tauri::command]
@@ -218,6 +229,8 @@ fn main() {
             today,
             last_used_view,
             set_last_used_view,
+            sidebar,
+            set_sidebar,
             settings,
             update_settings,
             list_accounts,

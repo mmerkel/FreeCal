@@ -10,6 +10,7 @@
     Occurrence,
     Settings,
     SettingsUpdate,
+    SidebarState,
     Signal,
     View,
     When,
@@ -37,6 +38,7 @@
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
+  import SidebarPane from './lib/SidebarPane.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import { whenForShortcut, type VisibleRange } from './lib/when';
 
@@ -70,6 +72,8 @@
   let today = $state<Temporal.PlainDate>();
   let navigation = $state<Navigation>();
   let viewSaveFailure = $state<string>();
+  let sidebar = $state<SidebarState>();
+  let sidebarSaveFailure = $state<string>();
   let quitFailure = $state<string>();
   let directory = $state<Directory>();
   let startFailure = $state<string>();
@@ -180,13 +184,15 @@
       settings = await core.settings();
       await tick();
       showWindow();
-      const [currentDate, view] = await Promise.all([
+      const [currentDate, view, sidebarState] = await Promise.all([
         core.today(),
         core.lastUsedView(),
+        core.sidebar(),
         readDirectory(),
       ]);
       // A "Date changed" that came in meanwhile is newer.
       today ??= currentDate;
+      sidebar = sidebarState;
       navigation = opening(view, today);
     }
 
@@ -210,6 +216,19 @@
       );
     }
     navigation = next;
+  }
+
+  /** Shows the sidebar as `next` says and remembers it straight away. */
+  function changeSidebar(next: SidebarState) {
+    sidebar = next;
+    core.setSidebar(next).then(
+      () => (sidebarSaveFailure = undefined),
+      (error) => (sidebarSaveFailure = t('app.sidebarSaveFailed', { error: String(error) })),
+    );
+  }
+
+  function toggleSidebar() {
+    changeSidebar({ ...sidebar!, shown: !sidebar!.shown });
   }
 
   function onrangechange(visible: VisibleRange) {
@@ -334,6 +353,7 @@
     // Unlike the Today button, `t` doesn't toggle: it always goes to today.
     today: () => navigate(goToToday(navigation!, today!)),
     settings: openSettings,
+    sidebar: toggleSidebar,
   };
 
   function showView(view: View) {
@@ -365,12 +385,23 @@
 
 {#if startFailure}
   <p role="alert">{t('app.loadFailed', { error: startFailure })}</p>
-{:else if today && navigation && directory}
+{:else if today && navigation && directory && sidebar}
   {@const shown = navigation}
+  {@const sidebarState = sidebar}
   <div class="app">
-    <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
+    {#if sidebarState.shown}
+      <SidebarPane
+        width={sidebarState.width}
+        onresize={(width) => changeSidebar({ shown: true, width })}
+        onhide={() => changeSidebar({ ...sidebarState, shown: false })}
+      >
+        <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
+      </SidebarPane>
+    {/if}
     <main class="grid">
       <Toolbar
+        sidebarShown={sidebarState.shown}
+        ontogglesidebar={toggleSidebar}
         view={shown.view}
         tracking={shown.tracking}
         title={periodTitle(shown)}
@@ -387,6 +418,9 @@
       {/if}
       {#if viewSaveFailure}
         <p role="alert">{viewSaveFailure}</p>
+      {/if}
+      {#if sidebarSaveFailure}
+        <p role="alert">{sidebarSaveFailure}</p>
       {/if}
       {#if quitFailure}
         <p role="alert">{quitFailure}</p>

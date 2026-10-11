@@ -9,6 +9,7 @@ mod clock;
 mod description;
 mod event;
 mod settings;
+mod sidebar;
 mod signal;
 mod store;
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub use clock::{Clock, SystemClock};
 pub use description::{Description, Piece, link_allowed};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use settings::{Appearance, Settings, SettingsUpdate};
+pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
 pub use view::View;
 
@@ -122,6 +124,15 @@ impl Core {
 
     pub fn set_last_used_view(&self, view: View) -> Result<()> {
         self.store().set_last_used_view(view)
+    }
+
+    /// The sidebar as it was left: on first launch shown at the default width.
+    pub fn sidebar(&self) -> Result<SidebarState> {
+        self.store().sidebar()
+    }
+
+    pub fn set_sidebar(&self, sidebar: SidebarState) -> Result<()> {
+        self.store().set_sidebar(sidebar)
     }
 
     pub fn settings(&self) -> Result<Settings> {

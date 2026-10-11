@@ -5,7 +5,7 @@
 import { t } from '../i18n';
 
 export type ShortcutAction =
-  'create' | 'day' | 'week' | 'month' | 'next' | 'previous' | 'today' | 'settings';
+  'create' | 'day' | 'week' | 'month' | 'next' | 'previous' | 'today' | 'settings' | 'sidebar';
 
 interface Shortcut {
   /** `KeyboardEvent.key`. */
@@ -24,6 +24,7 @@ const SHORTCUTS: Record<ShortcutAction, readonly Shortcut[]> = {
   previous: [{ key: 'k' }, { key: 'p' }],
   today: [{ key: 't' }],
   settings: [{ key: ',', ctrl: true }],
+  sidebar: [{ key: 'F9' }],
 };
 
 /** The shortcut `key` presses, if any. Alt, Meta and held-down keys never count. */

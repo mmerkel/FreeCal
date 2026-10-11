@@ -9,6 +9,7 @@ import type {
   Occurrence,
   Settings,
   SettingsUpdate,
+  SidebarState,
   Signal,
   View,
 } from './types';
@@ -22,6 +23,9 @@ export interface CoreApi {
   /** The view FreeCal opens in: month on first launch, then the last-used one. */
   lastUsedView(): Promise<View>;
   setLastUsedView(view: View): Promise<void>;
+  /** The sidebar as it was left: on first launch shown at the default width. */
+  sidebar(): Promise<SidebarState>;
+  setSidebar(sidebar: SidebarState): Promise<void>;
   /** The settings of the Settings dialog. */
   settings(): Promise<Settings>;
   /** Changes the settings `update` gives and keeps the others; returns them all as they are now. */

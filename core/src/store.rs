@@ -2,12 +2,13 @@
 
 use std::path::Path;
 
+use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
-    Result, Settings, View,
+    Result, Settings, SidebarState, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -68,6 +69,12 @@ const MIGRATIONS: &[Migration] = &[
     ",
     ),
     Migration::Code(event_times_as_wall_time),
+    Migration::Sql(
+        "
+    ALTER TABLE app_state ADD COLUMN sidebar_shown INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN sidebar_width REAL;
+    ",
+    ),
 ];
 
 enum Migration {
@@ -488,6 +495,23 @@ impl Store {
         Ok(())
     }
 
+    pub fn sidebar(&self) -> Result<SidebarState> {
+        let (shown, width) = self.conn.query_row(
+            "SELECT sidebar_shown, sidebar_width FROM app_state",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(sidebar_state(shown, width))
+    }
+
+    pub fn set_sidebar(&self, sidebar: SidebarState) -> Result<()> {
+        self.conn.execute(
+            "UPDATE app_state SET sidebar_shown = ?1, sidebar_width = ?2",
+            params![sidebar.shown, sidebar.width],
+        )?;
+        Ok(())
+    }
+
     pub fn settings(&self) -> Result<Settings> {
         let appearance: String =
             self.conn
@@ -515,6 +539,21 @@ impl Store {
             0 => Err(CoreError::CalendarNotFound(id)),
             _ => Ok(()),
         }
+    }
+}
+
+/// Reads the sidebar's stored columns, which are untrusted like every stored
+/// field: anything but 0 shows the sidebar, and anything but a positive number
+/// is the default width.
+fn sidebar_state(shown: Value, width: Value) -> SidebarState {
+    let width = match width {
+        Value::Real(width) if width.is_finite() && width > 0.0 => Some(width),
+        Value::Integer(width) if width > 0 => Some(width as f64),
+        _ => None,
+    };
+    SidebarState {
+        shown: !matches!(shown, Value::Integer(0)),
+        width,
     }
 }
 

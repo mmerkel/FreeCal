@@ -285,10 +285,11 @@
 {/if}
 
 <style>
+  /* Its width is SidebarPane's. */
   .sidebar {
     box-sizing: border-box;
-    flex: none;
-    width: 14rem;
+    flex: 1;
+    min-width: 0;
     padding: var(--space-6) var(--space-4);
     overflow-y: auto;
     border-right: 1px solid var(--border);

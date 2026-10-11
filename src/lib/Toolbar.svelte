@@ -1,7 +1,7 @@
 <!--
-  The toolbar over the grid: Today, previous and next, the shown period, the
-  view switch and the main menu. The Today button is a toggle whose pressed
-  state is tracking today. In day and week view the month names in the shown
+  The toolbar over the grid: the sidebar toggle, Today, previous and next,
+  the shown period, the view switch and the main menu. The Today button is a
+  toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
 -->
 <script lang="ts">
@@ -9,6 +9,7 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import Info from '@lucide/svelte/icons/info';
+  import MenuIcon from '@lucide/svelte/icons/menu';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
   import type { View } from '../core/types';
@@ -18,6 +19,8 @@
   import { shortcutHint, shortcutKeys } from './shortcuts';
 
   interface Props {
+    sidebarShown: boolean;
+    ontogglesidebar: () => void;
     view: View;
     tracking: boolean;
     /** The shown period in words. */
@@ -33,6 +36,8 @@
   }
 
   let {
+    sidebarShown,
+    ontogglesidebar,
     view,
     tracking,
     title,
@@ -60,6 +65,7 @@
     month: { previous: 'nav.previousMonth', next: 'nav.nextMonth' },
   };
 
+  const sidebarLabel = $derived(t(sidebarShown ? 'sidebar.hide' : 'sidebar.show'));
   const previous = $derived(t(steps[view].previous));
   const next = $derived(t(steps[view].next));
 
@@ -71,6 +77,16 @@
 </script>
 
 <div class="toolbar" role="toolbar" aria-label={t('nav.toolbar')}>
+  <button
+    type="button"
+    class="icon-button sidebar-toggle"
+    aria-label={sidebarLabel}
+    aria-expanded={sidebarShown}
+    title={shortcutHint(sidebarLabel, 'sidebar')}
+    onclick={ontogglesidebar}
+  >
+    <MenuIcon size={18} aria-hidden="true" />
+  </button>
   <button
     type="button"
     class="button outline today"
@@ -173,6 +189,10 @@
     align-items: center;
     gap: var(--space-2);
     margin-bottom: var(--space-6);
+  }
+
+  .sidebar-toggle {
+    margin-right: var(--space-2);
   }
 
   .today {

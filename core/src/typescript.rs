@@ -15,7 +15,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, Description, Event, EventDraft,
-    EventId, Occurrence, Piece, Provider, Settings, SettingsUpdate, Signal, View, When,
+    EventId, Occurrence, Piece, Provider, Settings, SettingsUpdate, SidebarState, Signal, View,
+    When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -64,6 +65,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<EventDraft>();
     types.visit::<Signal>();
     types.visit::<View>();
+    types.visit::<SidebarState>();
     types.visit::<Settings>();
     types.visit::<SettingsUpdate>();
     let names = types.declarations.keys().cloned().collect();
@@ -156,6 +158,13 @@ fn samples_file() -> (String, Vec<String>) {
             Signal::DateChanged { date: date(4) },
         ]),
         samples(&[View::Day, View::Week, View::Month]),
+        samples(&[
+            SidebarState::default(),
+            SidebarState {
+                shown: false,
+                width: Some(18.5),
+            },
+        ]),
         samples(&[Appearance::System, Appearance::Light, Appearance::Dark]),
         samples(&[Settings {
             appearance: Appearance::Dark,

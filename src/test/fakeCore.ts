@@ -10,6 +10,7 @@ import type {
   EventId,
   Settings,
   SettingsUpdate,
+  SidebarState,
   Signal,
   View,
   When,
@@ -29,6 +30,10 @@ export class FakeCore implements CoreApi {
   events: Event[] = [];
   currentDate = Temporal.PlainDate.from('2026-10-03');
   lastView: View = 'month';
+  /** The sidebar as the Local Store keeps it. */
+  storedSidebar: SidebarState = { shown: true, width: null };
+  /** The sidebar states written with `setSidebar`, in order. */
+  sidebarSaves: SidebarState[] = [];
   /** The settings as the Local Store keeps them. */
   storedSettings: Settings = { ...DEFAULT_SETTINGS };
   /** The updates written with `updateSettings`, in order. */
@@ -117,6 +122,18 @@ export class FakeCore implements CoreApi {
   async setLastUsedView(view: View) {
     this.calls.push('setLastUsedView');
     this.lastView = view;
+  }
+
+  async sidebar() {
+    this.calls.push('sidebar');
+    this.started();
+    return { ...this.storedSidebar };
+  }
+
+  async setSidebar(sidebar: SidebarState) {
+    this.calls.push('setSidebar');
+    this.sidebarSaves.push({ ...sidebar });
+    this.storedSidebar = { ...sidebar };
   }
 
   async settings() {

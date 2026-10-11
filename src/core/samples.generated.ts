@@ -152,6 +152,16 @@ export const samples = {
     "week",
     "month"
   ],
+  SidebarState: [
+    {
+      "shown": true,
+      "width": null
+    },
+    {
+      "shown": false,
+      "width": 18.5
+    }
+  ],
   Appearance: [
     "system",
     "light",
@@ -186,6 +196,7 @@ type Samples = {
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
   View: Unbranded<T.View>[];
+  SidebarState: Unbranded<T.SidebarState>[];
   Appearance: Unbranded<T.Appearance>[];
   Settings: Unbranded<T.Settings>[];
   SettingsUpdate: Unbranded<T.SettingsUpdate>[];

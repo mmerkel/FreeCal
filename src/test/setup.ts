@@ -25,6 +25,10 @@ if (!HTMLDialogElement.prototype.showModal) {
   };
 }
 
+// jsdom has no pointer capture. Tests send a drag's moves to the window,
+// where they would bubble to from the capturing element.
+Element.prototype.setPointerCapture ??= () => {};
+
 // jsdom has no media queries. The only one FreeCal asks is whether the system
 // is dark, which tests answer through `systemDarkQuery`.
 window.matchMedia = () => systemDarkQuery as unknown as MediaQueryList;

@@ -115,3 +115,19 @@ test('the app commands pass their arguments under the names the shell expects', 
     ['quit', {}],
   ]);
 });
+
+test('the sidebar commands pass their arguments under the names the shell expects', async () => {
+  const invoked: [string, unknown][] = [];
+  mockIPC((command, args) => {
+    invoked.push([command, args]);
+    return command === 'sidebar' ? { shown: true, width: null } : undefined;
+  });
+
+  await tauriCore.sidebar();
+  await tauriCore.setSidebar({ shown: false, width: 18.5 });
+
+  expect(invoked).toEqual([
+    ['sidebar', {}],
+    ['set_sidebar', { sidebar: { shown: false, width: 18.5 } }],
+  ]);
+});
