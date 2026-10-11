@@ -14,3 +14,4 @@
 - [ ] It stays on across view switches, scrolling, selecting, creating or editing Events and opening dialogs
 - [ ] The core sends "Date changed" at midnight and on waking up on a new day (tested with the controllable clock)
 - [ ] On "Date changed" the today highlight moves; the view jumps to the new today only while tracking
+- [ ] The `classic` theme's day and week views (ticket 40) checked by hand with `run-freecal` in light and dark mode; anything that clashes with the visual style is fixed or noted
