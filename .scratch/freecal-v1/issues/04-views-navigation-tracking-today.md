@@ -15,3 +15,7 @@
 - [ ] The core sends "Date changed" at midnight and on waking up on a new day (tested with the controllable clock)
 - [ ] On "Date changed" the today highlight moves; the view jumps to the new today only while tracking
 - [ ] The `classic` theme's day and week views (ticket 40) checked by hand with `run-freecal` in light and dark mode; anything that clashes with the visual style is fixed or noted
+
+## Comments
+
+- 2026-10-11: The week view starts on ticket 46's first-day-of-week value (Monday by default).

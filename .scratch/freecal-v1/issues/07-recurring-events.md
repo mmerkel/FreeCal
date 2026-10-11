@@ -13,3 +13,4 @@
 ## Comments
 
 - 2026-10-11: Expand repeat rules in wall time in the Event Time Zone (ticket 35, ADR 0007), so a weekly 9:00 meeting stays at 9:00 across DST changes. The range query needs derived UTC bounds for the whole Recurring Event (first start, and the end of the last Occurrence or open-ended).
+- 2026-10-11: The first-day-of-week setting (ticket 46) only affects display and never goes into a repeat rule. Rules keep their own `WKST`; new rules get the RFC 5545 default (`MO`), so "every 2 weeks on Sunday and Tuesday" never moves when the setting changes.
