@@ -1,7 +1,7 @@
 Only for human use, don't touch.
 
 - [x] check the mechanism of creating the typescript types. Is this the right one?
-- [ ] time zone format in which events are stored - let's discuss!
+- [x] time zone format in which events are stored - let's discuss!
 - [ ] default time format to 24h format
 - UI:
   - [ ] events should indicate event color when not all day:  i.e. by the font color
