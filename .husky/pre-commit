@@ -1,8 +1,20 @@
 npx lint-staged
 # The checks below need code; a commit of only docs or tickets skips them.
 git diff --cached --name-only | grep -qE '\.(rs|ts|js|svelte|css|json|html|toml|lock)$' || exit 0
-npm run --silent lint
-npm run --silent check
-npm test -- --reporter=dot
-cargo clippy --quiet --all-targets -- -D warnings
-cargo test --quiet
+
+# Runs a check silently; prints its whole output only if it fails.
+quiet() {
+  if output=$("$@" 2>&1); then
+    echo "✔ $*"
+  else
+    echo "$output"
+    echo "✘ $*"
+    exit 1
+  fi
+}
+
+quiet npm run --silent lint
+quiet npm run --silent check
+quiet npm test
+quiet cargo clippy --all-targets -- -D warnings
+quiet cargo test
