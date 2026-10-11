@@ -42,8 +42,12 @@ A Rust core holds all domain logic and the Local Store (one SQLite database). A 
 - [`docs/adr/`](docs/adr/): architecture decisions
 - [`GLOSSARY.md`](GLOSSARY.md): the project's terms (Account, Calendar, Event, Occurrence, ...)
 
+Most of the code is written with [Claude Code](https://claude.com/claude-code), an AI coding assistant, working from the spec and tickets above. A human writes the spec, makes the design decisions and reviews every change. The agent's workflow (specs and tickets, code review, TDD, domain modelling) comes from Matt Pocock's [skills](https://github.com/mattpocock/skills). Commits it helped with carry a `Co-Authored-By: Claude` trailer.
+
 ## Licence
 
 Copyright © 2026 Matthias Merkel
 
 FreeCal is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [`LICENSE`](LICENSE).
+
+The agent skills in [`.claude/skills/`](.claude/skills/) are Matt Pocock's, except `run-freecal`, and are under the MIT License; see [`.claude/skills/LICENSE-mattpocock-skills`](.claude/skills/LICENSE-mattpocock-skills).
