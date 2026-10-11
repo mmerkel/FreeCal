@@ -38,3 +38,4 @@
   - No confirmation before deleting an Event, as in Google Calendar; a Local Event can't be brought back until Snapshots (ticket 11).
   - Checked by hand in the real window (debug build on Xvfb): the no-Calendar hint, drag across three days, saving, the hostile Event in the grid, its details and the editor, the link confirmation and Escape, an untouched save keeping the HTML description's bytes, `c`, delete, and dark mode. The run-freecal driver gained `drag` and now types every printable ASCII character.
 
+- 2026-10-11: The storage described above (UTC instants as the truth) is replaced by ticket 35: wall time plus Event Time Zone is the truth, UTC is derived (ADR 0007).

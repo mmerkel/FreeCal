@@ -21,3 +21,7 @@
 - [ ] Tests run against a real Radicale server started per test run, with a recording fake keyring
 - [ ] CalDAV XML requests are built with an XML writer, never from strings; Calendar names, Event fields and server error text from the server are treated as untrusted and shown only as text
 - [ ] Radicale serving the hostile test Event: it is pulled, stored and shown without running or rendering anything
+
+## Comments
+
+- 2026-10-11: Floating times are pinned by the rule in ADR 0007: to the Calendar's `calendar-timezone` (RFC 4791) if it has one, otherwise to the Display Time Zone when the Event arrives, and the pinned zone is kept on later syncs. Store a mark that the zone was pinned (ticket 06 shows a note for it; add the note here if 06 isn't done yet). Map time zone names that aren't IANA names as decided in ticket 10, or decide here if 14 comes first.

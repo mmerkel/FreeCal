@@ -48,6 +48,10 @@ _Avoid_: Override, modified instance, detached occurrence
 The time zone in which FreeCal currently shows Events; the system time zone unless the user overrides it. New Events get it by default.
 _Avoid_: Local time, current time zone, home time zone
 
+**Event Time Zone**:
+The time zone an Event's times are given in, such as 9:00 in Europe/Berlin. Every Event with a time of day has one; all-day Events have none.
+_Avoid_: Original time zone, floating time (FreeCal has none)
+
 ## Storage
 
 **Local Store**:

@@ -2,7 +2,7 @@
 
 **What to build:** Events are shown in the Display Time Zone (the system time zone), which is shown in the UI. New Events get it by default, and the editor lets the user pick a different time zone for an Event. First day of week, 12/24-hour clock and date format follow the system locale. The Date & time section of the Settings dialog (ticket 33) lets the user override the Display Time Zone, the format region, first day of week and the clock. Spec: user stories 50–55, 127 and 128.
 
-**Blocked by:** 03, 33
+**Blocked by:** 03, 33, 35
 
 **Status:** ready-for-agent
 
@@ -17,3 +17,7 @@
 - [ ] First day of week (System, or a day) and clock (System, 12-hour, 24-hour) overrides, each defaulting to System, applied to the grid and the editor at once
 - [ ] The overrides are settings in the Local Store, written as partial updates through ticket 33's operations
 - [ ] Component tests against the fake core for the pickers and that the grid follows each override
+
+## Comments
+
+- 2026-10-11: Ticket 35 stores wall time plus a start and an end Event Time Zone (ADR 0007). This ticket adds the Event Time Zone to `When` so the editor can show and change it. If ticket 10 or 14 is done first and has added the mark for pinned zones, the details and editor show "The original has no time zone. FreeCal shows it in <zone>." for such Events (ADR 0007, rule 5); otherwise whichever of them comes first adds the note.
