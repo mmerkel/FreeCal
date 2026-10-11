@@ -21,3 +21,10 @@ export function setFirstDayOfWeek(firstDay: FirstDayOfWeek): void {
 export function firstWeekdayNumber(): 0 | 1 | 6 {
   return { sunday: 0, monday: 1, saturday: 6 }[week.firstDay] as 0 | 1 | 6;
 }
+
+/** The first day of the week that `date` is in. */
+export function startOfWeek(date: Temporal.PlainDate): Temporal.PlainDate {
+  // Temporal numbers the days from Monday (1) to Sunday (7).
+  const first = { monday: 1, saturday: 6, sunday: 7 }[week.firstDay];
+  return date.subtract({ days: (date.dayOfWeek - first + 7) % 7 });
+}

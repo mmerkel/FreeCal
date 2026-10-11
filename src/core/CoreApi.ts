@@ -8,6 +8,7 @@ import type {
   EventId,
   Occurrence,
   Signal,
+  View,
 } from './types';
 
 /** The core application interface. The frontend talks only to this. */
@@ -16,6 +17,9 @@ export interface CoreApi {
   subscribe(onSignal: (signal: Signal) => void): Promise<() => void>;
   /** The current local date. */
   today(): Promise<Temporal.PlainDate>;
+  /** The view FreeCal opens in: month on first launch, then the last-used one. */
+  lastUsedView(): Promise<View>;
+  setLastUsedView(view: View): Promise<void>;
   listAccounts(): Promise<Account[]>;
   /** Every Calendar of every Account, in the order they were added. */
   listCalendars(): Promise<Calendar[]>;

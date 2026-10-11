@@ -11,6 +11,8 @@ export const tauriCore: CoreApi = {
   subscribe: (onSignal) => listen<Signal>(SIGNAL_EVENT, (message) => onSignal(message.payload)),
   // The shell sends dates as ISO strings (YYYY-MM-DD).
   today: async () => Temporal.PlainDate.from(await invoke<string>('today')),
+  lastUsedView: () => invoke('last_used_view'),
+  setLastUsedView: (view) => invoke('set_last_used_view', { view }),
   listAccounts: () => invoke('list_accounts'),
   listCalendars: () => invoke('list_calendars'),
   createCalendar: (accountId, name, colour) =>

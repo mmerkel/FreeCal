@@ -7,6 +7,7 @@
   import { Calendar as FullCalendar, type EventInput } from 'fullcalendar';
   import dayGridPlugin from 'fullcalendar/daygrid';
   import interactionPlugin from 'fullcalendar/interaction';
+  import timeGridPlugin from 'fullcalendar/timegrid';
   import classicThemePlugin from 'fullcalendar/themes/classic';
   import 'fullcalendar/skeleton.css';
   // `app.css` points the palette's variables at FreeCal's tokens, so the grid
@@ -14,7 +15,7 @@
   import 'fullcalendar/themes/classic/theme.css';
   import 'fullcalendar/themes/classic/palette.css';
   import { untrack } from 'svelte';
-  import type { Calendar, EventId, Occurrence, When } from '../core/types';
+  import type { Calendar, EventId, Occurrence, View, When } from '../core/types';
   import { t } from '../i18n';
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
@@ -22,7 +23,10 @@
   import { plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
   interface Props {
-    /** The local date that the view opens on and highlights. */
+    view: View;
+    /** The date whose day, week or month is shown. */
+    date: Temporal.PlainDate;
+    /** The local date that the grid highlights. */
     today: Temporal.PlainDate;
     occurrences: Occurrence[];
     /** For the colours of the Occurrences. */
@@ -35,9 +39,16 @@
     onselectslot?: (when: When) => void;
     /** The user clicked an Occurrence. */
     onopenevent?: (id: EventId) => void;
+    /** The user clicked a day number or a day's heading. */
+    onopenday?: (date: Temporal.PlainDate) => void;
   }
 
+  /** FullCalendar's names for FreeCal's views. */
+  const viewNames = { day: 'timeGridDay', week: 'timeGridWeek', month: 'dayGridMonth' } as const;
+
   let {
+    view,
+    date,
     today,
     occurrences,
     calendars,
@@ -45,24 +56,38 @@
     onrangechange,
     onselectslot,
     onopenevent,
+    onopenday,
   }: Props = $props();
 
   let element: HTMLDivElement;
   let grid = $state<FullCalendar>();
 
+  // FullCalendar reads `now` only when it is created, so a new today, once a
+  // day, builds a new grid.
   $effect(() => {
-    const date = today.toString();
+    const now = today.toString();
+    // The effects below follow changes of these; reading them here only
+    // saves the first render a wrong range.
+    const initial = untrack(() => ({
+      view: viewNames[view],
+      date: date.toString(),
+      firstDay: firstWeekdayNumber(),
+    }));
     const calendar = new FullCalendar(element, {
-      plugins: [dayGridPlugin, interactionPlugin, classicThemePlugin],
+      plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, classicThemePlugin],
       // In addition to the theme's classes, which cut titles off without "…".
       eventTitleClass: 'event-title',
-      initialView: 'dayGridMonth',
-      initialDate: date,
-      // The effect below follows changes; reading it here only saves the
-      // first render a wrong range.
-      firstDay: untrack(firstWeekdayNumber),
-      now: date,
+      initialView: initial.view,
+      initialDate: initial.date,
+      firstDay: initial.firstDay,
+      // A function, because a fixed `now` would run on with the system
+      // clock; the core says when the date changes.
+      now: () => now,
       headerToolbar: false,
+      // Day numbers and day headings open their day; FreeCal decides what
+      // that does to the view (spec: "Tracking today").
+      navLinks: true,
+      navLinkDayClick: (day) => onopenday?.(plainDateOf(day)),
       height: '100%',
       selectable: true,
       editable: false,
@@ -86,6 +111,13 @@
       grid = undefined;
       calendar.destroy();
     };
+  });
+
+  $effect(() => {
+    const name = viewNames[view];
+    const shown = date.toString();
+    const calendar = grid;
+    untrack(() => calendar?.changeView(name, shown));
   });
 
   $effect(() => {
@@ -128,7 +160,8 @@
 
 <style>
   .calendar-grid {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
   }
 
   .calendar-grid :global(.selected-event) {

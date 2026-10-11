@@ -15,7 +15,7 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Account, AccountId, Calendar, CalendarId, Colour, Description, Event, EventDraft, EventId,
-    Occurrence, Piece, Provider, Signal, When,
+    Occurrence, Piece, Provider, Signal, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -63,6 +63,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<Event>();
     types.visit::<EventDraft>();
     types.visit::<Signal>();
+    types.visit::<View>();
     let names = types.declarations.keys().cloned().collect();
     let declarations: Vec<_> = types.declarations.into_values().collect();
     (generated(&declarations.join("\n")), names)
@@ -150,7 +151,9 @@ fn samples_file() -> (String, Vec<String>) {
             Signal::OccurrencesChanged {
                 calendar_ids: vec![CalendarId(2)],
             },
+            Signal::DateChanged { date: date(4) },
         ]),
+        samples(&[View::Day, View::Week, View::Month]),
     ];
     let mut names = Vec::new();
     let (mut values, mut types) = (String::new(), String::new());

@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use serde::Serialize;
 
 use crate::CalendarId;
@@ -19,6 +20,10 @@ pub enum Signal {
     /// reason. The frontend reads the visible range again.
     #[serde(rename_all = "camelCase")]
     OccurrencesChanged { calendar_ids: Vec<CalendarId> },
+    /// A status Signal: the local date changed, at midnight or on waking up
+    /// on a new day. The frontend moves the today highlight, and jumps to
+    /// the new today while it is tracking today.
+    DateChanged { date: NaiveDate },
 }
 
 /// Receives the core's Signals, for example the Tauri shell forwarding them to

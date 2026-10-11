@@ -1,8 +1,9 @@
 <!--
   Stands in for CalendarGrid in tests of the App's flows, which jsdom can't
   drive through FullCalendar's drag and select. It lists the Occurrences as
-  buttons that open them, reports a month around today as the visible range,
-  and leaves its props in `stubGrid` for a test to report a selection.
+  buttons that open them, reports a month around the shown date as the
+  visible range, and leaves its props in `stubGrid` for a test to read what
+  it is told to show or to report what the user did, such as a selection.
 -->
 <script lang="ts">
   import type { ComponentProps } from 'svelte';
@@ -20,10 +21,8 @@
   });
 
   $effect(() => {
-    untrack(() => {
-      const from = props.today.with({ day: 1 }).subtract({ days: 7 });
-      props.onrangechange?.({ from, to: from.add({ days: 42 }) });
-    });
+    const from = props.date.with({ day: 1 }).subtract({ days: 7 });
+    untrack(() => props.onrangechange?.({ from, to: from.add({ days: 42 }) }));
   });
 </script>
 

@@ -141,7 +141,16 @@ export const samples = {
       "calendarIds": [
         2
       ]
+    },
+    {
+      "kind": "dateChanged",
+      "date": "2026-10-04"
     }
+  ],
+  View: [
+    "day",
+    "week",
+    "month"
   ],
 } satisfies Samples;
 
@@ -160,4 +169,5 @@ type Samples = {
   Description: Unbranded<T.Description>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
+  View: Unbranded<T.View>[];
 };

@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
-    Account, AccountId, Calendar, CalendarId, Colour, CoreError, EventId, Provider, Result,
+    Account, AccountId, Calendar, CalendarId, Colour, CoreError, EventId, Provider, Result, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -45,6 +45,13 @@ const MIGRATIONS: &[&str] = &[
         description_html INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX event_calendar_start ON event (calendar_id, start_at);
+    ",
+    "
+    CREATE TABLE app_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        view TEXT NOT NULL DEFAULT 'month'
+    );
+    INSERT INTO app_state (id) VALUES (1);
     ",
 ];
 
@@ -317,6 +324,19 @@ impl Store {
             )?
             .collect::<rusqlite::Result<_>>()?;
         Ok(events)
+    }
+
+    pub fn last_used_view(&self) -> Result<View> {
+        let stored: String = self
+            .conn
+            .query_row("SELECT view FROM app_state", [], |row| row.get(0))?;
+        Ok(View::parse(&stored))
+    }
+
+    pub fn set_last_used_view(&self, view: View) -> Result<()> {
+        self.conn
+            .execute("UPDATE app_state SET view = ?1", [view.as_str()])?;
+        Ok(())
     }
 
     fn update_calendar(

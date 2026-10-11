@@ -9,6 +9,7 @@ import type {
   EventDraft,
   EventId,
   Signal,
+  View,
   When,
 } from '../core/types';
 import { accountId, calendarId, eventId } from './ids';
@@ -24,6 +25,7 @@ export class FakeCore implements CoreApi {
   calendars: Calendar[] = [];
   events: Event[] = [];
   currentDate = Temporal.PlainDate.from('2026-10-03');
+  lastView: View = 'month';
   /** The names of the interface methods called, in order. */
   calls: string[] = [];
   /** The links opened in the browser. */
@@ -82,6 +84,22 @@ export class FakeCore implements CoreApi {
   async today() {
     this.calls.push('today');
     return this.currentDate;
+  }
+
+  /** Moves the local date on, as at midnight, and sends "Date changed" like the core. */
+  changeDate(date: string) {
+    this.currentDate = Temporal.PlainDate.from(date);
+    this.emit({ kind: 'dateChanged', date });
+  }
+
+  async lastUsedView() {
+    this.calls.push('lastUsedView');
+    return this.lastView;
+  }
+
+  async setLastUsedView(view: View) {
+    this.calls.push('setLastUsedView');
+    this.lastView = view;
   }
 
   async listAccounts() {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
@@ -9,6 +9,8 @@ import { setClockHours } from './clock.svelte';
 import { setFirstDayOfWeek } from './week.svelte';
 
 const today = Temporal.PlainDate.from('2026-10-03');
+/** The month view of today, as FreeCal opens. */
+const thisMonth = { view: 'month', date: today, today } as const;
 
 afterEach(() => {
   setClockHours(24);
@@ -41,7 +43,7 @@ function chip(title: string): HTMLElement {
 }
 
 test('shows the month view of today with today highlighted', async () => {
-  render(CalendarGrid, { today, occurrences: [], calendars: [] });
+  render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [] });
 
   expect(screen.getByRole('grid', { name: 'October 2026' })).toBeInTheDocument();
   expect(screen.getByRole('gridcell', { name: 'October 3, 2026' })).toHaveAttribute(
@@ -53,12 +55,79 @@ test('shows the month view of today with today highlighted', async () => {
 test('reports the dates it shows', async () => {
   const onrangechange = vi.fn();
 
-  render(CalendarGrid, { today, occurrences: [], calendars: [], onrangechange });
+  render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [], onrangechange });
 
   await waitFor(() => expect(onrangechange).toHaveBeenCalled());
   const range = onrangechange.mock.lastCall![0];
   expect(range.from.toString()).toBe('2026-09-28');
   expect(range.to.toString()).toBe('2026-11-09');
+});
+
+test('shows the week or the day of the given date', async () => {
+  const onrangechange = vi.fn();
+  const date = Temporal.PlainDate.from('2026-10-14');
+
+  const { rerender } = render(CalendarGrid, {
+    view: 'week',
+    date,
+    today,
+    occurrences: [],
+    calendars: [],
+    onrangechange,
+  });
+
+  await waitFor(() => expect(onrangechange).toHaveBeenCalled());
+  expect(onrangechange.mock.lastCall![0].from.toString()).toBe('2026-10-12');
+  expect(onrangechange.mock.lastCall![0].to.toString()).toBe('2026-10-19');
+
+  await rerender({ view: 'day' });
+
+  await waitFor(() => expect(onrangechange.mock.lastCall![0].from.toString()).toBe('2026-10-14'));
+  expect(onrangechange.mock.lastCall![0].to.toString()).toBe('2026-10-15');
+});
+
+test('follows a new date', async () => {
+  const onrangechange = vi.fn();
+  const { rerender } = render(CalendarGrid, {
+    ...thisMonth,
+    occurrences: [],
+    calendars: [],
+    onrangechange,
+  });
+
+  await rerender({ date: Temporal.PlainDate.from('2026-12-24') });
+
+  expect(await screen.findByRole('grid', { name: 'December 2026' })).toBeInTheDocument();
+  expect(onrangechange.mock.lastCall![0].from.toString()).toBe('2026-11-30');
+});
+
+test('moves the today highlight to a new today without moving the view', async () => {
+  const { rerender } = render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [] });
+
+  await rerender({ today: Temporal.PlainDate.from('2026-10-04') });
+
+  await waitFor(() =>
+    expect(screen.getByRole('gridcell', { name: 'October 4, 2026' })).toHaveAttribute(
+      'aria-current',
+      'date',
+    ),
+  );
+  expect(screen.getByRole('gridcell', { name: 'October 3, 2026' })).not.toHaveAttribute(
+    'aria-current',
+  );
+  expect(screen.getByRole('grid', { name: 'October 2026' })).toBeInTheDocument();
+});
+
+test('reports a click on a day number', async () => {
+  const user = userEvent.setup();
+  const onopenday = vi.fn();
+  render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [], onopenday });
+
+  const cell = screen.getByRole('gridcell', { name: 'October 14, 2026' });
+  await user.click(within(cell).getByRole('link'));
+
+  expect(onopenday).toHaveBeenCalledOnce();
+  expect(onopenday.mock.lastCall![0].toString()).toBe('2026-10-14');
 });
 
 /** The weekday names over the month view's columns, in order. */
@@ -69,7 +138,7 @@ function weekdays(): string[] {
 // The tests run in `en-US`, whose own weeks start on Sunday.
 test('starts weeks on Monday, and on Sunday or Saturday when set', async () => {
   const onrangechange = vi.fn();
-  render(CalendarGrid, { today, occurrences: [], calendars: [], onrangechange });
+  render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [], onrangechange });
 
   expect(weekdays()[0]).toMatch(/^Mon/);
 
@@ -86,7 +155,7 @@ test('starts weeks on Monday, and on Sunday or Saturday when set', async () => {
 
 test('shows the Occurrences it is given in their Calendar’s colour', async () => {
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Dentist' }),
       occurrence({
@@ -113,7 +182,7 @@ function dot(found: HTMLElement): Element | undefined {
 
 test('marks timed Events with a dot in their Calendar’s colour and fills all-day ones', async () => {
   const shown = render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Dentist' }),
       occurrence({
@@ -143,7 +212,7 @@ test('writes on a filled Event in whichever of dark or white is easier to read',
   const work: Calendar = { ...home, id: calendarId(2), name: 'Work', colour: '#f6bf26' };
   const allDay = { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' } as const;
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Yellow', calendarId: work.id, when: allDay }),
       occurrence({ eventId: eventId(2), title: 'Blue', when: allDay }),
@@ -158,7 +227,7 @@ test('writes on a filled Event in whichever of dark or white is easier to read',
 
 test('shows an Event’s time on a 24-hour clock, and on a 12-hour one when set', async () => {
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [
       occurrence({
         title: 'Lunch',
@@ -177,7 +246,7 @@ test('shows an Event’s time on a 24-hour clock, and on a 12-hour one when set'
 });
 
 test('shows new Occurrences when it is given them', async () => {
-  const shown = render(CalendarGrid, { today, occurrences: [], calendars: [home] });
+  const shown = render(CalendarGrid, { ...thisMonth, occurrences: [], calendars: [home] });
 
   await shown.rerender({ occurrences: [occurrence({ title: 'Later' })] });
 
@@ -188,7 +257,7 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
   const user = userEvent.setup();
   const onopenevent = vi.fn();
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [occurrence({ eventId: eventId(7), title: 'Dentist' })],
     calendars: [home],
     onopenevent,
@@ -204,7 +273,7 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
 
 test('marks the selected Event', async () => {
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Chosen' }),
       occurrence({ eventId: eventId(2), title: 'Other' }),
@@ -219,7 +288,7 @@ test('marks the selected Event', async () => {
 
 test('draws the hostile title as text, never as markup', async () => {
   render(CalendarGrid, {
-    today,
+    ...thisMonth,
     occurrences: [occurrence({ title: hostile.title })],
     calendars: [home],
   });

@@ -12,6 +12,7 @@ mod signal;
 mod store;
 #[cfg(test)]
 mod typescript;
+mod view;
 
 use std::path::Path;
 
@@ -24,6 +25,7 @@ pub use clock::{Clock, SystemClock};
 pub use description::{Description, Piece, link_allowed};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use signal::{Signal, SignalSink};
+pub use view::View;
 
 use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
@@ -69,6 +71,8 @@ pub struct Core {
     store: Mutex<Store>,
     clock: Arc<dyn Clock>,
     signals: Arc<dyn SignalSink>,
+    /// The local date as [`Core::check_date`] last saw it.
+    date: Mutex<NaiveDate>,
 }
 
 impl Core {
@@ -80,16 +84,42 @@ impl Core {
     ) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
+        let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
             store: Mutex::new(store),
             clock,
             signals,
+            date,
         })
     }
 
     /// The current local date, on which the views open.
     pub fn today(&self) -> NaiveDate {
         self.clock.now().date_naive()
+    }
+
+    /// Sends "Date changed" when the local date differs from the one last
+    /// seen. The shell calls this every few seconds, which notices midnight
+    /// and also waking up on a new day, when timers set for midnight would
+    /// have slept through it.
+    pub fn check_date(&self) {
+        let today = self.today();
+        let changed = {
+            let mut seen = self.date.lock().unwrap();
+            std::mem::replace(&mut *seen, today) != today
+        };
+        if changed {
+            self.signals.send(Signal::DateChanged { date: today });
+        }
+    }
+
+    /// The view FreeCal opens in: month on first launch, then the last-used one.
+    pub fn last_used_view(&self) -> Result<View> {
+        self.store().last_used_view()
+    }
+
+    pub fn set_last_used_view(&self, view: View) -> Result<()> {
+        self.store().set_last_used_view(view)
     }
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {

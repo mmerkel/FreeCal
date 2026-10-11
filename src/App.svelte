@@ -8,6 +8,7 @@
     EventId,
     Occurrence,
     Signal,
+    View,
     When,
   } from './core/types';
   import { t } from './i18n';
@@ -15,7 +16,19 @@
   import Dialog from './lib/Dialog.svelte';
   import EventDetails from './lib/EventDetails.svelte';
   import EventEditor from './lib/EventEditor.svelte';
+  import {
+    dateChanged,
+    goToToday,
+    openDay,
+    opening,
+    periodTitle,
+    step,
+    switchView,
+    toggleToday,
+    type Navigation,
+  } from './lib/navigation';
   import Sidebar from './lib/Sidebar.svelte';
+  import Toolbar from './lib/Toolbar.svelte';
   import { whenForShortcut, type VisibleRange } from './lib/when';
 
   interface Props {
@@ -40,6 +53,8 @@
     | { kind: 'noCalendar' };
 
   let today = $state<Temporal.PlainDate>();
+  let navigation = $state<Navigation>();
+  let viewSaveFailure = $state<string>();
   let directory = $state<Directory>();
   let startFailure = $state<string>();
   let readFailure = $state<string>();
@@ -115,6 +130,10 @@
         readOccurrences().catch(reportRead);
         readOpenedEvent();
         break;
+      case 'dateChanged':
+        today = Temporal.PlainDate.from(signal.date);
+        if (navigation) navigation = dateChanged(navigation, today);
+        break;
     }
   }
 
@@ -129,8 +148,14 @@
       });
       if (stopped) return stop();
       unsubscribe = stop;
-      const [currentDate] = await Promise.all([core.today(), readDirectory()]);
-      today = currentDate;
+      const [currentDate, view] = await Promise.all([
+        core.today(),
+        core.lastUsedView(),
+        readDirectory(),
+      ]);
+      // A "Date changed" that came in meanwhile is newer.
+      today ??= currentDate;
+      navigation = opening(view, today);
     }
 
     start().catch((error) => (startFailure = String(error)));
@@ -139,6 +164,17 @@
       unsubscribe?.();
     };
   });
+
+  /** Shows what `next` says, remembering a changed view as the last-used one. */
+  function navigate(next: Navigation) {
+    if (next.view !== navigation?.view) {
+      core.setLastUsedView(next.view).then(
+        () => (viewSaveFailure = undefined),
+        (error) => (viewSaveFailure = t('app.viewSaveFailed', { error: String(error) })),
+      );
+    }
+    navigation = next;
+  }
 
   function onrangechange(visible: VisibleRange) {
     range = visible;
@@ -215,10 +251,32 @@
     }
   }
 
-  /** Google's shortcut: `c` creates an Event, unless the user is typing or a dialog is open. */
+  /** Google Calendar's shortcuts, which act on the grid. */
+  const shortcuts: Record<string, () => void> = {
+    c: () => startCreating(whenForShortcut(Temporal.Now.plainDateTimeISO())),
+    d: () => showView('day'),
+    '1': () => showView('day'),
+    w: () => showView('week'),
+    '2': () => showView('week'),
+    m: () => showView('month'),
+    '3': () => showView('month'),
+    j: () => navigate(step(navigation!, 1)),
+    n: () => navigate(step(navigation!, 1)),
+    k: () => navigate(step(navigation!, -1)),
+    p: () => navigate(step(navigation!, -1)),
+    // Unlike the Today button, `t` doesn't toggle: it always goes to today.
+    t: () => navigate(goToToday(navigation!, today!)),
+  };
+
+  function showView(view: View) {
+    navigate(switchView(navigation!, view));
+  }
+
+  /** Shortcuts act unless the user is typing or a dialog or menu is open. */
   function onkeydown(key: KeyboardEvent) {
-    if (key.key !== 'c' || key.ctrlKey || key.altKey || key.metaKey || key.repeat) return;
-    if (!today || open || document.querySelector('dialog[open]')) return;
+    const shortcut = Object.hasOwn(shortcuts, key.key) ? shortcuts[key.key] : undefined;
+    if (!shortcut || key.ctrlKey || key.altKey || key.metaKey || key.repeat) return;
+    if (!navigation || open || document.querySelector('dialog[open]')) return;
     const target = key.target;
     if (
       target instanceof Element &&
@@ -227,7 +285,7 @@
       return;
     }
     key.preventDefault();
-    startCreating(whenForShortcut(Temporal.Now.plainDateTimeISO()));
+    shortcut();
   }
 </script>
 
@@ -235,14 +293,28 @@
 
 {#if startFailure}
   <p role="alert">{t('app.loadFailed', { error: startFailure })}</p>
-{:else if today && directory}
+{:else if today && navigation && directory}
+  {@const shown = navigation}
   <div class="app">
     <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
     <main class="grid">
+      <Toolbar
+        view={shown.view}
+        tracking={shown.tracking}
+        title={periodTitle(shown)}
+        ontoday={() => navigate(toggleToday(shown, today!))}
+        onstep={(by) => navigate(step(shown, by))}
+        onview={(view) => navigate(switchView(shown, view))}
+      />
       {#if readFailure}
         <p role="alert">{t('app.readFailed', { error: readFailure })}</p>
       {/if}
+      {#if viewSaveFailure}
+        <p role="alert">{viewSaveFailure}</p>
+      {/if}
       <CalendarGrid
+        view={shown.view}
+        date={shown.date}
         {today}
         {occurrences}
         calendars={directory.calendars}
@@ -250,6 +322,7 @@
         {onrangechange}
         onselectslot={startCreating}
         onopenevent={openDetails}
+        onopenday={(date) => navigate(openDay(date))}
       />
     </main>
   </div>
@@ -303,7 +376,9 @@
   }
 
   .grid {
+    display: flex;
     flex: 1;
+    flex-direction: column;
     min-width: 0;
     padding: var(--space-6);
   }

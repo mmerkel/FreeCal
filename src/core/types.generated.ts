@@ -88,7 +88,13 @@ export type Provider = "local";
  * (desktop notifications). Signals are fire-and-forget. The v1 Signals are
  * added by the tickets that first send them.
  */
-export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, };
+export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, };
+
+/**
+ * The views the grid offers. FreeCal opens in month view on first launch,
+ * then in the last-used one.
+ */
+export type View = "day" | "week" | "month";
 
 /**
  * When an Event takes place. Times are wall-clock times in the Display Time

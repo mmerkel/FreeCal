@@ -2,17 +2,23 @@
 //! commands and forwards the core's Signals as Tauri events.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
-    Occurrence, Signal, SignalSink, SystemClock, link_allowed,
+    Occurrence, Signal, SignalSink, SystemClock, View, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 /// The Tauri event on which Signals reach the frontend.
 const SIGNAL_EVENT: &str = "freecal://signal";
+
+/// How often the core checks whether the local date changed. A sleep of the
+/// thread doesn't count the time the computer was suspended, so a short
+/// period also catches waking up on a new day soon.
+const DATE_CHECK_PERIOD: Duration = Duration::from_secs(10);
 
 struct ForwardToFrontend(AppHandle);
 
@@ -32,6 +38,16 @@ fn to_message(error: CoreError) -> String {
 #[tauri::command]
 fn today(core: State<Core>) -> String {
     core.today().to_string()
+}
+
+#[tauri::command]
+fn last_used_view(core: State<Core>) -> CommandResult<View> {
+    core.last_used_view().map_err(to_message)
+}
+
+#[tauri::command]
+fn set_last_used_view(core: State<Core>, view: View) -> CommandResult<()> {
+    core.set_last_used_view(view).map_err(to_message)
 }
 
 #[tauri::command]
@@ -136,10 +152,19 @@ fn main() {
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
             let core = Core::open(&data_dir, Arc::new(SystemClock), signals)?;
             app.manage(core);
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(DATE_CHECK_PERIOD);
+                    handle.state::<Core>().check_date();
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             today,
+            last_used_view,
+            set_last_used_view,
             list_accounts,
             list_calendars,
             create_calendar,
