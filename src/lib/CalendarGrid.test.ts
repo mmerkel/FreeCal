@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar, Occurrence } from '../core/types';
+import { accountId, calendarId, eventId } from '../test/ids';
 import CalendarGrid from './CalendarGrid.svelte';
 
 const today = Temporal.PlainDate.from('2026-10-03');
 
 const home: Calendar = {
-  id: 1,
-  accountId: 1,
+  id: calendarId(1),
+  accountId: accountId(1),
   name: 'Home',
   colour: '#3366cc',
   shown: true,
@@ -18,7 +19,7 @@ const home: Calendar = {
 
 function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Occurrence {
   return {
-    eventId: 1,
+    eventId: eventId(1),
     calendarId: home.id,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     ...fields,
@@ -57,13 +58,13 @@ test('shows the Occurrences it is given in their Calendar’s colour', async () 
   render(CalendarGrid, {
     today,
     occurrences: [
-      occurrence({ eventId: 1, title: 'Dentist' }),
+      occurrence({ eventId: eventId(1), title: 'Dentist' }),
       occurrence({
-        eventId: 2,
+        eventId: eventId(2),
         title: 'Holiday',
         when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' },
       }),
-      occurrence({ eventId: 3, title: '' }),
+      occurrence({ eventId: eventId(3), title: '' }),
     ],
     calendars: [home],
   });
@@ -87,7 +88,7 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
   const onopenevent = vi.fn();
   render(CalendarGrid, {
     today,
-    occurrences: [occurrence({ eventId: 7, title: 'Dentist' })],
+    occurrences: [occurrence({ eventId: eventId(7), title: 'Dentist' })],
     calendars: [home],
     onopenevent,
   });
@@ -104,11 +105,11 @@ test('marks the selected Event', async () => {
   render(CalendarGrid, {
     today,
     occurrences: [
-      occurrence({ eventId: 1, title: 'Chosen' }),
-      occurrence({ eventId: 2, title: 'Other' }),
+      occurrence({ eventId: eventId(1), title: 'Chosen' }),
+      occurrence({ eventId: eventId(2), title: 'Other' }),
     ],
     calendars: [home],
-    selectedEventId: 1,
+    selectedEventId: eventId(1),
   });
 
   await waitFor(() => expect(chip('Chosen')).toHaveClass('selected-event'));

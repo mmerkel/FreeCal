@@ -3,15 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar, EventDraft } from '../core/types';
+import { accountId, calendarId } from '../test/ids';
 import EventEditor from './EventEditor.svelte';
 
 const calendars: Calendar[] = [
-  { id: 1, accountId: 1, name: 'Home', colour: '#3366cc', shown: true, readOnly: false },
-  { id: 2, accountId: 1, name: 'Work', colour: '#dc3912', shown: false, readOnly: false },
+  { id: calendarId(1), accountId: accountId(1), name: 'Home', colour: '#3366cc', shown: true, readOnly: false },
+  { id: calendarId(2), accountId: accountId(1), name: 'Work', colour: '#dc3912', shown: false, readOnly: false },
 ];
 
 const initial: EventDraft = {
-  calendarId: 1,
+  calendarId: calendarId(1),
   title: '',
   when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:30:00' },
   location: '',

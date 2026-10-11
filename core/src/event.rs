@@ -4,8 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CalendarId, CoreError, Description, Result};
 
+/// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(type = "number"))]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(type = "number & { readonly __brand: \"EventId\" }")
+)]
 #[serde(transparent)]
 pub struct EventId(pub i64);
 
@@ -16,15 +21,11 @@ pub struct EventId(pub i64);
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum When {
     AllDay {
-        #[cfg_attr(test, ts(type = "string"))]
         start: NaiveDate,
-        #[cfg_attr(test, ts(type = "string"))]
         end: NaiveDate,
     },
     Timed {
-        #[cfg_attr(test, ts(type = "string"))]
         start: NaiveDateTime,
-        #[cfg_attr(test, ts(type = "string"))]
         end: NaiveDateTime,
     },
 }

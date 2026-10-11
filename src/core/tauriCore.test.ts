@@ -1,6 +1,7 @@
 import { emit } from '@tauri-apps/api/event';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, expect, test } from 'vitest';
+import { accountId, calendarId, eventId } from '../test/ids';
 import { tauriCore } from './tauriCore';
 
 afterEach(() => clearMocks());
@@ -41,12 +42,12 @@ test('the Calendar commands pass their arguments under the names the shell expec
   });
 
   await tauriCore.listCalendars();
-  await tauriCore.createCalendar(1, 'Home', '#3366cc');
-  await tauriCore.renameCalendar(2, 'Family');
-  await tauriCore.recolourCalendar(2, '#ff8800');
-  await tauriCore.setCalendarShown(2, false);
-  await tauriCore.showOnlyCalendar(2);
-  await tauriCore.deleteCalendar(2);
+  await tauriCore.createCalendar(accountId(1), 'Home', '#3366cc');
+  await tauriCore.renameCalendar(calendarId(2), 'Family');
+  await tauriCore.recolourCalendar(calendarId(2), '#ff8800');
+  await tauriCore.setCalendarShown(calendarId(2), false);
+  await tauriCore.showOnlyCalendar(calendarId(2));
+  await tauriCore.deleteCalendar(calendarId(2));
 
   expect(invoked).toEqual([
     ['list_calendars', {}],
@@ -66,7 +67,7 @@ test('the Event commands pass their arguments under the names the shell expects'
     return command === 'list_occurrences' ? [] : undefined;
   });
   const draft = {
-    calendarId: 2,
+    calendarId: calendarId(2),
     title: 'Dentist',
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     location: '',
@@ -77,10 +78,10 @@ test('the Event commands pass their arguments under the names the shell expects'
     Temporal.PlainDate.from('2026-09-28'),
     Temporal.PlainDate.from('2026-11-09'),
   );
-  await tauriCore.event(7);
+  await tauriCore.event(eventId(7));
   await tauriCore.createEvent(draft);
-  await tauriCore.editEvent(7, draft);
-  await tauriCore.deleteEvent(7);
+  await tauriCore.editEvent(eventId(7), draft);
+  await tauriCore.deleteEvent(eventId(7));
   await tauriCore.openLink('https://example.com');
 
   expect(invoked).toEqual([

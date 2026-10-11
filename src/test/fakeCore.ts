@@ -11,6 +11,7 @@ import type {
   Signal,
   When,
 } from '../core/types';
+import { accountId, calendarId, eventId } from './ids';
 
 /**
  * A fake core interface for component tests. Like the real core, it sends
@@ -19,7 +20,7 @@ import type {
  * themselves.
  */
 export class FakeCore implements CoreApi {
-  accounts: Account[] = [{ id: 1, provider: 'local' }];
+  accounts: Account[] = [{ id: accountId(1), provider: 'local' }];
   calendars: Calendar[] = [];
   events: Event[] = [];
   currentDate = Temporal.PlainDate.from('2026-10-03');
@@ -34,8 +35,8 @@ export class FakeCore implements CoreApi {
   /** Adds a Calendar directly, as if it had been created earlier, without a Signal. */
   addCalendar(calendar: Partial<Calendar> & Pick<Calendar, 'name'>): Calendar {
     const added: Calendar = {
-      id: this.nextCalendarId++,
-      accountId: 1,
+      id: calendarId(this.nextCalendarId++),
+      accountId: accountId(1),
       colour: '#3366cc',
       shown: true,
       readOnly: false,
@@ -56,7 +57,7 @@ export class FakeCore implements CoreApi {
   ): Event {
     const { description = '', ...fields } = event;
     const added: Event = {
-      id: this.nextEventId++,
+      id: eventId(this.nextEventId++),
       title: '',
       location: '',
       ...fields,

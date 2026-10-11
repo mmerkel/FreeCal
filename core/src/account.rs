@@ -1,7 +1,12 @@
 use serde::Serialize;
 
+/// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(type = "number"))]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(type = "number & { readonly __brand: \"AccountId\" }")
+)]
 #[serde(transparent)]
 pub struct AccountId(pub i64);
 

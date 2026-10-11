@@ -2,8 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, CoreError, Result};
 
+/// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(type = "number"))]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(type = "number & { readonly __brand: \"CalendarId\" }")
+)]
 #[serde(transparent)]
 pub struct CalendarId(pub i64);
 

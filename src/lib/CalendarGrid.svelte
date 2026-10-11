@@ -66,7 +66,8 @@
       },
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
-        onopenevent?.(Number(clicked.event.id));
+        // FullCalendar keeps the ID as a string; it came from an Occurrence.
+        onopenevent?.(Number(clicked.event.id) as EventId);
       },
     });
     // FullCalendar reports the visible range while it renders. The owner's
