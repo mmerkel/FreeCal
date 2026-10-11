@@ -28,6 +28,7 @@ Checks:
 cargo test --workspace
 cargo clippy --workspace --all-targets
 cargo fmt --all --check
+npm run lint
 npm run check
 npm test
 ```
@@ -42,5 +43,7 @@ A Rust core holds all domain logic and the Local Store (one SQLite database). A 
 - [`GLOSSARY.md`](GLOSSARY.md): the project's terms (Account, Calendar, Event, Occurrence, ...)
 
 ## Licence
+
+Copyright © 2026 Matthias Merkel
 
 FreeCal is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [`LICENSE`](LICENSE).

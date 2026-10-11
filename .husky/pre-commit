@@ -1,5 +1,8 @@
 npx lint-staged
-npm run check
-npm test
-cargo clippy --all-targets -- -D warnings
-cargo test
+# The checks below need code; a commit of only docs or tickets skips them.
+git diff --cached --name-only | grep -qE '\.(rs|ts|js|svelte|css|json|html|toml|lock)$' || exit 0
+npm run --silent lint
+npm run --silent check
+npm test -- --reporter=dot
+cargo clippy --quiet --all-targets -- -D warnings
+cargo test --quiet

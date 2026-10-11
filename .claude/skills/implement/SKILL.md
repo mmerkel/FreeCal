@@ -12,4 +12,6 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Once done, use /code-review to review the work.
 
+Close the ticket: tick each box only after checking it is done. A box that is partly done, or waits on another ticket, stays open, with a comment naming what is left and which ticket finishes it.
+
 Commit your work to the current branch.
