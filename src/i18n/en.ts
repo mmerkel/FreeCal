@@ -13,6 +13,7 @@ export const en = {
   'nav.nextWeek': 'Next week',
   'nav.nextMonth': 'Next month',
   'nav.views': 'View',
+  'nav.showMonth': 'Show {month}',
   'view.day': 'Day',
   'view.week': 'Week',
   'view.month': 'Month',

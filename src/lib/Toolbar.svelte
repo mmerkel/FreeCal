@@ -1,25 +1,29 @@
 <!--
   The toolbar over the grid: Today, previous and next, the shown period and
   the view switch. The Today button is a toggle whose pressed state is
-  tracking today.
+  tracking today. In day and week view the month names in the shown period
+  open their month.
 -->
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import type { View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
+  import { monthTitle, type TitlePart } from './navigation';
 
   interface Props {
     view: View;
     tracking: boolean;
     /** The shown period in words. */
-    title: string;
+    title: TitlePart[];
     ontoday: () => void;
     onstep: (by: -1 | 1) => void;
     onview: (view: View) => void;
+    /** A month name in the title was clicked. */
+    onmonth: (month: Temporal.PlainYearMonth) => void;
   }
 
-  let { view, tracking, title, ontoday, onstep, onview }: Props = $props();
+  let { view, tracking, title, ontoday, onstep, onview, onmonth }: Props = $props();
 
   const views: { view: View; label: MessageKey; keys: string }[] = [
     { view: 'day', label: 'view.day', keys: 'D' },
@@ -70,7 +74,23 @@
   >
     <ChevronRight size={18} />
   </button>
-  <h1 class="period" aria-live="polite">{title}</h1>
+  <h1 class="period" aria-live="polite">
+    {#each title as part, index (index)}
+      {#if part.month}
+        {@const month = part.month}
+        {@const label = t('nav.showMonth', { month: monthTitle(month) })}
+        <button
+          type="button"
+          class="month"
+          aria-label={label}
+          title={label}
+          onclick={() => onmonth(month)}>{part.text}</button
+        >
+      {:else}
+        {part.text}
+      {/if}
+    {/each}
+  </h1>
   <div class="views" role="group" aria-label={t('nav.views')}>
     {#each views as option (option.view)}
       <button
@@ -118,6 +138,20 @@
     font-weight: 600;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  .month {
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .month:hover {
+    text-decoration: underline;
   }
 
   .views {

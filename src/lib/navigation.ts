@@ -34,6 +34,16 @@ export function openDay(date: Temporal.PlainDate): Navigation {
   return { view: 'day', date, tracking: false };
 }
 
+/**
+ * A month name clicked in the title, in month view. Its own month is only a
+ * view switch; another month changes the date, which ends tracking.
+ */
+export function openMonth(navigation: Navigation, month: Temporal.PlainYearMonth): Navigation {
+  return month.equals(navigation.date.toPlainYearMonth())
+    ? switchView(navigation, 'month')
+    : { view: 'month', date: month.toPlainDate({ day: 1 }), tracking: false };
+}
+
 /** Jumps to today and tracks it. */
 export function goToToday(navigation: Navigation, today: Temporal.PlainDate): Navigation {
   return { ...navigation, date: today, tracking: true };
@@ -49,23 +59,62 @@ export function dateChanged(navigation: Navigation, today: Temporal.PlainDate): 
   return navigation.tracking ? { ...navigation, date: today } : navigation;
 }
 
-/** The shown period in words, in the system locale: a day, a week's range or a month. */
-export function periodTitle({ view, date }: Navigation): string {
-  const asDate = (day: Temporal.PlainDate) => new Date(day.year, day.month - 1, day.day);
+/** A piece of the period title: text, and for a month's name, the month it opens. */
+export interface TitlePart {
+  text: string;
+  month?: Temporal.PlainYearMonth;
+}
+
+/**
+ * The shown period in words, in the system locale: a day, a week's range or
+ * a month. In day and week view the month names open their month.
+ */
+export function periodTitle({ view, date }: Navigation): TitlePart[] {
   switch (view) {
     case 'day':
-      return new Intl.DateTimeFormat(undefined, { dateStyle: 'full' }).format(asDate(date));
+      return titleParts(
+        new Intl.DateTimeFormat(undefined, { dateStyle: 'full' }).formatToParts(asDate(date)),
+        () => date.toPlainYearMonth(),
+      );
     case 'week': {
       const start = startOfWeek(date);
-      return new Intl.DateTimeFormat(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      }).formatRange(asDate(start), asDate(start.add({ days: 6 })));
+      const end = start.add({ days: 6 });
+      return titleParts(
+        new Intl.DateTimeFormat(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        }).formatRangeToParts(asDate(start), asDate(end)),
+        (source) => (source === 'endRange' ? end : start).toPlainYearMonth(),
+      );
     }
     case 'month':
-      return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long' }).format(
-        asDate(date),
-      );
+      return [{ text: monthTitle(date.toPlainYearMonth()) }];
   }
+}
+
+/** A month and its year in words, such as the month view's title. */
+export function monthTitle(month: Temporal.PlainYearMonth): string {
+  return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long' }).format(
+    asDate(month.toPlainDate({ day: 1 })),
+  );
+}
+
+/** Joins the formatted parts into text and month names, asking each month name which month it is. */
+function titleParts(
+  parts: { type: string; value: string; source?: string }[],
+  monthOf: (source: string | undefined) => Temporal.PlainYearMonth,
+): TitlePart[] {
+  const joined: TitlePart[] = [];
+  for (const part of parts) {
+    const last = joined.at(-1);
+    if (part.type === 'month') joined.push({ text: part.value, month: monthOf(part.source) });
+    else if (last && !last.month) last.text += part.value;
+    else joined.push({ text: part.value });
+  }
+  return joined;
+}
+
+function asDate(day: Temporal.PlainDate): Date {
+  return new Date(day.year, day.month - 1, day.day);
 }

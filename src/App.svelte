@@ -21,6 +21,7 @@
     goToToday,
     openDay,
     opening,
+    openMonth,
     periodTitle,
     step,
     switchView,
@@ -304,6 +305,7 @@
         ontoday={() => navigate(toggleToday(shown, today!))}
         onstep={(by) => navigate(step(shown, by))}
         onview={(view) => navigate(switchView(shown, view))}
+        onmonth={(month) => navigate(openMonth(shown, month))}
       />
       {#if readFailure}
         <p role="alert">{t('app.readFailed', { error: readFailure })}</p>

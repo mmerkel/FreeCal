@@ -123,6 +123,50 @@ test('clicking a day number opens that day and ends tracking today', async () =>
   expect(core.lastView).toBe('day');
 });
 
+test('in day view, the month name in the title opens its month and keeps tracking today', async () => {
+  const { core, user } = await showApp();
+  await user.click(viewButton('Day'));
+
+  await user.click(screen.getByRole('button', { name: 'Show October 2026' }));
+
+  expect(shown()).toMatchObject({ view: 'month', date: '2026-10-03' });
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
+  expect(core.lastView).toBe('month');
+});
+
+test('in a week across two months, each month name opens its own month', async () => {
+  const { user } = await showApp();
+  await user.click(viewButton('Week'));
+  expect(title()).toMatch(/^Sep 28\s–\sOct 4, 2026$/);
+
+  await user.click(screen.getByRole('button', { name: 'Show September 2026' }));
+  expect(shown()).toMatchObject({ view: 'month', date: '2026-09-01' });
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'false');
+
+  await user.click(todayButton());
+  await user.click(viewButton('Week'));
+  await user.click(screen.getByRole('button', { name: 'Show October 2026' }));
+  expect(shown()).toMatchObject({ view: 'month', date: '2026-10-03' });
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('in a week within one month, its one month name opens it', async () => {
+  const { user } = await showApp();
+  await user.click(viewButton('Week'));
+  await user.click(screen.getByRole('button', { name: 'Next week' }));
+  expect(title()).toMatch(/^Oct 5\s–\s11, 2026$/);
+
+  await user.click(screen.getByRole('button', { name: 'Show October 2026' }));
+  expect(shown()).toMatchObject({ view: 'month', date: '2026-10-10' });
+});
+
+test('in month view, the title has no month button', async () => {
+  await showApp();
+
+  expect(title()).toBe('October 2026');
+  expect(screen.queryByRole('button', { name: /^Show / })).toBeNull();
+});
+
 test('on “Date changed” the view follows the new today while tracking', async () => {
   const { core } = await showApp();
 
