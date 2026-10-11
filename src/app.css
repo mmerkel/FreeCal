@@ -131,7 +131,10 @@ body {
   line-height: 1.4;
 }
 
-:focus-visible {
+/* A focused element whose visible part is a child, such as a splitter and
+   its grip, draws the ring on the child marked `data-focus-ring`. */
+:focus-visible,
+:focus-visible > [data-focus-ring] {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }

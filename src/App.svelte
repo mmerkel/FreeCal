@@ -389,19 +389,11 @@
   {@const shown = navigation}
   {@const sidebarState = sidebar}
   <div class="app">
-    {#if sidebarState.shown}
-      <SidebarPane
-        width={sidebarState.width}
-        onresize={(width) => changeSidebar({ shown: true, width })}
-        onhide={() => changeSidebar({ ...sidebarState, shown: false })}
-      >
-        <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
-      </SidebarPane>
-    {/if}
+    <SidebarPane sidebar={sidebarState} onchange={changeSidebar}>
+      <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
+    </SidebarPane>
     <main class="grid">
       <Toolbar
-        sidebarShown={sidebarState.shown}
-        ontogglesidebar={toggleSidebar}
         view={shown.view}
         tracking={shown.tracking}
         title={periodTitle(shown)}

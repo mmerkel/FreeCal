@@ -1,7 +1,7 @@
 """Sends mouse and keyboard input to an X display through XTEST.
 
 Usage (DISPLAY must be set):
-    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | move X Y | type TEXT | key NAME
+    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | type TEXT | key NAME
 
 NAME is an X keysym (Return, Escape, Tab, BackSpace, ...), optionally with
 modifiers: ctrl+a, shift+Tab.
@@ -82,6 +82,13 @@ def drag(x1, y1, x2, y2, steps=10):
     flush()
 
 
+def button(x, y, event):
+    """Moves to a point and presses or releases the left button there."""
+    move(x, y)
+    xtest.fake_input(d, event, 1)
+    flush()
+
+
 command, *args = sys.argv[1:] or ["help"]
 if command == "click":
     click(int(args[0]), int(args[1]))
@@ -91,6 +98,10 @@ elif command == "rightclick":
     click(int(args[0]), int(args[1]), button=3)
 elif command == "drag":
     drag(*map(int, args[:4]))
+elif command == "down":
+    button(int(args[0]), int(args[1]), X.ButtonPress)
+elif command == "up":
+    button(int(args[0]), int(args[1]), X.ButtonRelease)
 elif command == "move":
     move(int(args[0]), int(args[1]))
 elif command == "type":
