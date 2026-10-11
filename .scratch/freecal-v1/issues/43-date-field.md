@@ -14,6 +14,7 @@
 - [ ] End-date popover: the start date is marked, the days between start and end are highlighted, days before the start are disabled
 - [ ] Start-date popover: the end date and the range are shown dimmed; every day is selectable, since the end follows the start (ticket 38)
 - [ ] Shares the popover and list code with ticket 38's time field where they overlap
+- [ ] The toolbar gets a date picker built on the same popover (moved from ticket 04): picking a date shows its period in the current view and ends tracking today
 - [ ] Every string goes through `t`
 - [ ] Component tests for typing, the popover's keys and range marks; checked by hand in the real app with `run-freecal`, including that no grey band appears
 

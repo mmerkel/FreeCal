@@ -1,6 +1,6 @@
 // The App's views, navigation and tracking today, run against the fake core
 // with a stand-in grid (see StubGrid.svelte).
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { expect, test, vi } from 'vitest';
@@ -153,6 +153,33 @@ test('opening and closing dialogs keeps tracking today', async () => {
   await user.click(await screen.findByRole('button', { name: 'Cancel' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('selecting, creating and editing Events keeps tracking today', async () => {
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  const { user } = await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
+
+  stubGrid.props!.onselectslot!({
+    kind: 'timed',
+    start: '2026-10-05T09:00:00',
+    end: '2026-10-05T10:00:00',
+  });
+  await tick();
+  await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Dentist{Enter}');
+  await user.click(await within(grid).findByRole('button', { name: 'Dentist' }));
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Dentist' })).getByRole('button', {
+      name: 'Edit',
+    }),
+  );
+  await user.type(screen.getByRole('textbox', { name: 'Title' }), ' at 9');
+  await user.click(screen.getByRole('button', { name: 'Save' }));
+  await within(grid).findByRole('button', { name: 'Dentist at 9' });
+
+  expect(shown()).toMatchObject({ view: 'month', date: '2026-10-03' });
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
 });
 

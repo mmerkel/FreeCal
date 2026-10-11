@@ -24,7 +24,6 @@ export function firstWeekdayNumber(): 0 | 1 | 6 {
 
 /** The first day of the week that `date` is in. */
 export function startOfWeek(date: Temporal.PlainDate): Temporal.PlainDate {
-  // Temporal numbers the days from Monday (1) to Sunday (7).
-  const first = { monday: 1, saturday: 6, sunday: 7 }[week.firstDay];
-  return date.subtract({ days: (date.dayOfWeek - first + 7) % 7 });
+  // Temporal numbers Sunday 7, so `% 7` brings it to JavaScript's 0.
+  return date.subtract({ days: ((date.dayOfWeek % 7) - firstWeekdayNumber() + 7) % 7 });
 }
