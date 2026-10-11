@@ -130,9 +130,9 @@
   >
     <span class="tab" data-focus-ring>
       {#if shown}
-        <ChevronLeft size={12} aria-hidden="true" />
+        <ChevronLeft size={10} aria-hidden="true" />
       {:else}
-        <ChevronRight size={12} aria-hidden="true" />
+        <ChevronRight size={10} aria-hidden="true" />
       {/if}
     </span>
   </div>
@@ -208,7 +208,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 14px;
+    width: 10px;
     height: 40px;
     box-sizing: border-box;
     border: 1px solid var(--border);
