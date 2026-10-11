@@ -7,15 +7,16 @@
   import { Calendar as FullCalendar, type EventInput } from 'fullcalendar';
   import dayGridPlugin from 'fullcalendar/daygrid';
   import interactionPlugin from 'fullcalendar/interaction';
-  import breezyThemePlugin from 'fullcalendar/themes/breezy';
+  import classicThemePlugin from 'fullcalendar/themes/classic';
   import 'fullcalendar/skeleton.css';
-  // The palette has light and dark values and switches on `data-color-scheme`
-  // like the rest of the window (spec: "Visual style").
-  import 'fullcalendar/themes/breezy/theme.css';
-  import 'fullcalendar/themes/breezy/palettes/indigo.css';
+  // `app.css` points the palette's variables at FreeCal's tokens, so the grid
+  // has the window's light and dark colours (spec: "Visual style").
+  import 'fullcalendar/themes/classic/theme.css';
+  import 'fullcalendar/themes/classic/palette.css';
   import { untrack } from 'svelte';
   import type { Calendar, EventId, Occurrence, When } from '../core/types';
   import { t } from '../i18n';
+  import { textColourOn } from './palette';
   import { plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
   interface Props {
@@ -50,7 +51,9 @@
   $effect(() => {
     const date = today.toString();
     const calendar = new FullCalendar(element, {
-      plugins: [dayGridPlugin, interactionPlugin, breezyThemePlugin],
+      plugins: [dayGridPlugin, interactionPlugin, classicThemePlugin],
+      // In addition to the theme's classes, which cut titles off without "…".
+      eventTitleClass: 'event-title',
       initialView: 'dayGridMonth',
       initialDate: date,
       now: date,
@@ -82,16 +85,20 @@
 
   $effect(() => {
     const colours = new Map(calendars.map((calendar) => [calendar.id, calendar.colour]));
-    const events: EventInput[] = occurrences.map((occurrence) => ({
-      id: String(occurrence.eventId),
-      // Titles are untrusted; FullCalendar draws them as text, never as HTML.
-      title: occurrence.title || t('event.untitled'),
-      start: occurrence.when.start,
-      end: occurrence.when.end,
-      allDay: occurrence.when.kind === 'allDay',
-      color: colours.get(occurrence.calendarId),
-      className: occurrence.eventId === selectedEventId ? 'selected-event' : undefined,
-    }));
+    const events: EventInput[] = occurrences.map((occurrence) => {
+      const colour = colours.get(occurrence.calendarId);
+      return {
+        id: String(occurrence.eventId),
+        // Titles are untrusted; FullCalendar draws them as text, never as HTML.
+        title: occurrence.title || t('event.untitled'),
+        start: occurrence.when.start,
+        end: occurrence.when.end,
+        allDay: occurrence.when.kind === 'allDay',
+        color: colour,
+        contrastColor: colour && textColourOn(colour),
+        className: occurrence.eventId === selectedEventId ? 'selected-event' : undefined,
+      };
+    });
     const shown = grid;
     untrack(() => shown?.setOption('events', events));
   });
@@ -107,5 +114,11 @@
   .calendar-grid :global(.selected-event) {
     outline: 2px solid var(--foreground);
     outline-offset: 1px;
+  }
+
+  .calendar-grid :global(.event-title) {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 </style>

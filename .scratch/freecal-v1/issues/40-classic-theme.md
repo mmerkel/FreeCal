@@ -4,18 +4,18 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The grid uses `classic` (theme and `palette.css`); `breezy` and its `indigo` palette are no longer imported in `CalendarGrid.svelte`
-- [ ] Timed Events in the month view show the dot in the Calendar colour, then the time, then the title; all-day Events stay filled bars in the Calendar colour
-- [ ] Text on a filled Event is near-black or white, whichever contrasts more with the Calendar's colour (WCAG contrast ratio), worked out from the colour itself, so that colours from CalDAV or Google also work. Yellow, mustard and lime get dark text, for example
-- [ ] Dot and fill follow a Calendar's colour change without a reload
-- [ ] `classic`'s palette variables are pointed at FreeCal's tokens in `app.css`, for light and dark: background, borders and foregrounds match the rest of the window (no blue-tinted black next to the sidebar in dark mode)
-- [ ] `classic`'s own accent colours are replaced by neutral ones from the tokens: the primary blue (`#3788d8`) and the cyan tint when selecting a range of days. Calendar colours stay the only strong colours
-- [ ] Titles that don't fit end in "…" instead of being cut off mid-letter, for timed and all-day Events
-- [ ] The dot is decorative: the chip's accessible name is unchanged
-- [ ] Component test: a timed Event's chip has a dot in its Calendar's colour and an all-day Event's has none; a yellow Calendar's all-day Event gets dark text, a blue one's white
-- [ ] Checked by hand with `run-freecal` in light and dark mode, with a light (yellow) and a dark Calendar colour and a long title
+- [x] The grid uses `classic` (theme and `palette.css`); `breezy` and its `indigo` palette are no longer imported in `CalendarGrid.svelte`
+- [x] Timed Events in the month view show the dot in the Calendar colour, then the time, then the title; all-day Events stay filled bars in the Calendar colour
+- [x] Text on a filled Event is near-black or white, whichever contrasts more with the Calendar's colour (WCAG contrast ratio), worked out from the colour itself, so that colours from CalDAV or Google also work. Yellow, mustard and lime get dark text, for example
+- [x] Dot and fill follow a Calendar's colour change without a reload
+- [x] `classic`'s palette variables are pointed at FreeCal's tokens in `app.css`, for light and dark: background, borders and foregrounds match the rest of the window (no blue-tinted black next to the sidebar in dark mode)
+- [x] `classic`'s own accent colours are replaced by neutral ones from the tokens: the primary blue (`#3788d8`) and the cyan tint when selecting a range of days. Calendar colours stay the only strong colours
+- [x] Titles that don't fit end in "…" instead of being cut off mid-letter, for timed and all-day Events
+- [x] The dot is decorative: the chip's accessible name is unchanged
+- [x] Component test: a timed Event's chip has a dot in its Calendar's colour and an all-day Event's has none; a yellow Calendar's all-day Event gets dark text, a blue one's white
+- [x] Checked by hand with `run-freecal` in light and dark mode, with a light (yellow) and a dark Calendar colour and a long title
 
 Out of scope:
 

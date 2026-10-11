@@ -59,7 +59,7 @@
 
 /* Dark values. `data-color-scheme` on the root element is the one switch:
    it follows the system now, and a setting can override it later. FullCalendar's
-   palettes switch on the same attribute. */
+   palette switches on the same attribute. */
 :root[data-color-scheme='dark'] {
   color-scheme: dark;
 
@@ -87,6 +87,31 @@
   --backdrop: #000000a6;
   --shadow-menu: 0 0.25rem 0.75rem #00000066;
   --shadow-dialog: 0 0.625rem 1.875rem #00000099;
+}
+
+/* FullCalendar's classic palette, pointed at the tokens above (spec: "Visual
+   style"). The tokens switch between light and dark, so one block covers both;
+   the attribute selector outranks the palette's own light and dark rules. The
+   theme's accents become neutral: Calendar colours stay the only strong ones.
+   Its translucent shades (faint, muted, strong) and today's tint are kept. */
+:root[data-color-scheme] {
+  --fc-classic-background: var(--background);
+  --fc-classic-foreground: var(--foreground);
+  --fc-classic-muted-foreground: var(--foreground-muted);
+  --fc-classic-faint-foreground: var(--foreground-faint);
+  --fc-classic-border: var(--border);
+  --fc-classic-strong-border: var(--border-strong);
+
+  --fc-classic-primary: var(--focus-ring);
+  --fc-classic-primary-foreground: var(--background);
+  --fc-classic-highlight: var(--fc-classic-muted);
+
+  --fc-classic-button: var(--solid);
+  --fc-classic-button-border: var(--solid);
+  --fc-classic-button-strong: var(--solid-hover);
+  --fc-classic-button-strong-border: var(--solid-hover);
+  --fc-classic-button-outline: var(--focus-ring);
+  --fc-classic-button-foreground: var(--solid-foreground);
 }
 
 /* Page-wide rules. The window shows exactly one screen: the page never

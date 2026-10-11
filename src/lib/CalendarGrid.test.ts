@@ -75,6 +75,57 @@ test('shows the Occurrences it is given in their Calendar’s colour', async () 
   expect(chip('Dentist').getAttribute('style')).toContain('#3366cc');
 });
 
+/** The colour dot at the front of a chip: an empty element before its text. */
+function dot(found: HTMLElement): Element | undefined {
+  const first = found.firstElementChild;
+  return first && first.childElementCount === 0 && first.textContent === '' ? first : undefined;
+}
+
+test('marks timed Events with a dot in their Calendar’s colour and fills all-day ones', async () => {
+  const shown = render(CalendarGrid, {
+    today,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'Dentist' }),
+      occurrence({
+        eventId: eventId(2),
+        title: 'Holiday',
+        when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' },
+      }),
+    ],
+    calendars: [home],
+  });
+
+  await waitFor(() => expect(screen.getByText('Dentist')).toBeInTheDocument());
+  expect(dot(chip('Dentist'))).toBeDefined();
+  expect(chip('Dentist').style.getPropertyValue('--fc-event-color')).toBe('#3366cc');
+  expect(dot(chip('Holiday'))).toBeUndefined();
+  expect(chip('Holiday').style.getPropertyValue('--fc-event-color')).toBe('#3366cc');
+
+  await shown.rerender({ calendars: [{ ...home, colour: '#0b8043' }] });
+
+  await waitFor(() =>
+    expect(chip('Dentist').style.getPropertyValue('--fc-event-color')).toBe('#0b8043'),
+  );
+  expect(chip('Holiday').style.getPropertyValue('--fc-event-color')).toBe('#0b8043');
+});
+
+test('writes on a filled Event in whichever of dark or white is easier to read', async () => {
+  const work: Calendar = { ...home, id: calendarId(2), name: 'Work', colour: '#f6bf26' };
+  const allDay = { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' } as const;
+  render(CalendarGrid, {
+    today,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'Yellow', calendarId: work.id, when: allDay }),
+      occurrence({ eventId: eventId(2), title: 'Blue', when: allDay }),
+    ],
+    calendars: [home, work],
+  });
+
+  await waitFor(() => expect(screen.getByText('Yellow')).toBeInTheDocument());
+  expect(chip('Yellow').style.getPropertyValue('--fc-event-contrast-color')).toBe('#171717');
+  expect(chip('Blue').style.getPropertyValue('--fc-event-contrast-color')).toBe('#ffffff');
+});
+
 test('shows new Occurrences when it is given them', async () => {
   const shown = render(CalendarGrid, { today, occurrences: [], calendars: [home] });
 
