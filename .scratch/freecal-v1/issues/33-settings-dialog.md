@@ -21,3 +21,7 @@
 - [ ] Checked by hand in the real app with `run-freecal`: no flash at startup with Dark chosen on a light system
 
 Out of scope: settings for sync timings, retention values and the default view; a keyboard shortcuts overview.
+
+## Comments
+
+- 2026-10-11: From the ticket 04 review: the shortcut keys are listed twice, in the `shortcuts` map in `src/App.svelte` and as the hint letters in `src/lib/Toolbar.svelte`, kept in step by hand. Before adding Ctrl+, here, merge them into one table that both read, so a later keyboard shortcuts overview can read it too.
