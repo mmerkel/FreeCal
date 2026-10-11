@@ -7,12 +7,9 @@
   import { Calendar as FullCalendar, type EventInput } from 'fullcalendar';
   import dayGridPlugin from 'fullcalendar/daygrid';
   import interactionPlugin from 'fullcalendar/interaction';
-  import breezyThemePlugin from 'fullcalendar/themes/breezy';
   import 'fullcalendar/skeleton.css';
-  // The palette has light and dark values and switches on `data-color-scheme`
-  // like the rest of the window (spec: "Visual style").
-  import 'fullcalendar/themes/breezy/theme.css';
-  import 'fullcalendar/themes/breezy/palettes/indigo.css';
+  import { currentVariant } from './prototypeThemes';
+  import PrototypeSwitcher from './PrototypeSwitcher.svelte';
   import { untrack } from 'svelte';
   import type { Calendar, EventId, Occurrence, When } from '../core/types';
   import { t } from '../i18n';
@@ -46,11 +43,15 @@
 
   let element: HTMLDivElement;
   let grid = $state<FullCalendar>();
+  // PROTOTYPE (ticket 40): the theme under comparison.
+  let variant = $state.raw(currentVariant());
 
   $effect(() => {
     const date = today.toString();
+    const shownVariant = variant;
     const calendar = new FullCalendar(element, {
-      plugins: [dayGridPlugin, interactionPlugin, breezyThemePlugin],
+      ...shownVariant.options,
+      plugins: [dayGridPlugin, interactionPlugin, shownVariant.plugin],
       initialView: 'dayGridMonth',
       initialDate: date,
       now: date,
@@ -98,6 +99,7 @@
 </script>
 
 <div class="calendar-grid" bind:this={element}></div>
+<PrototypeSwitcher current={variant} onchange={(chosen) => (variant = chosen)} />
 
 <style>
   .calendar-grid {
@@ -107,5 +109,25 @@
   .calendar-grid :global(.selected-event) {
     outline: 2px solid var(--foreground);
     outline-offset: 1px;
+  }
+
+  /* PROTOTYPE (ticket 40): the dot and the time moved to the front, for breezy. */
+  .calendar-grid :global(.prototype-dot) {
+    flex-shrink: 0;
+    align-self: center;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-inline-start: 4px;
+    border-radius: 50%;
+    background: var(--fc-event-color);
+  }
+
+  .calendar-grid :global(.prototype-start) {
+    justify-content: flex-start;
+    gap: 2px;
+  }
+
+  .calendar-grid :global(.prototype-time-first) {
+    order: 0;
   }
 </style>
