@@ -1,12 +1,15 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { expect, test, vi } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar, Occurrence } from '../core/types';
 import { accountId, calendarId, eventId } from '../test/ids';
 import CalendarGrid from './CalendarGrid.svelte';
+import { setClockHours } from './clock.svelte';
 
 const today = Temporal.PlainDate.from('2026-10-03');
+
+afterEach(() => setClockHours(24));
 
 const home: Calendar = {
   id: calendarId(1),
@@ -124,6 +127,26 @@ test('writes on a filled Event in whichever of dark or white is easier to read',
   await waitFor(() => expect(screen.getByText('Yellow')).toBeInTheDocument());
   expect(chip('Yellow').style.getPropertyValue('--fc-event-contrast-color')).toBe('#171717');
   expect(chip('Blue').style.getPropertyValue('--fc-event-contrast-color')).toBe('#ffffff');
+});
+
+test('shows an Event’s time on a 24-hour clock, and on a 12-hour one when set', async () => {
+  render(CalendarGrid, {
+    today,
+    occurrences: [
+      occurrence({
+        title: 'Lunch',
+        when: { kind: 'timed', start: '2026-10-05T13:30:00', end: '2026-10-05T14:30:00' },
+      }),
+    ],
+    calendars: [home],
+  });
+
+  await waitFor(() => expect(chip('Lunch')).toHaveTextContent('13:30'));
+
+  setClockHours(12);
+
+  await waitFor(() => expect(chip('Lunch')).toHaveTextContent('1:30p'));
+  expect(chip('Lunch')).not.toHaveTextContent('13:30');
 });
 
 test('shows new Occurrences when it is given them', async () => {

@@ -16,6 +16,7 @@
   import { untrack } from 'svelte';
   import type { Calendar, EventId, Occurrence, When } from '../core/types';
   import { t } from '../i18n';
+  import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
   import { plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
@@ -81,6 +82,15 @@
       grid = undefined;
       calendar.destroy();
     };
+  });
+
+  $effect(() => {
+    const format = gridTimeFormat();
+    const shown = grid;
+    untrack(() => {
+      shown?.setOption('eventTimeFormat', format);
+      shown?.setOption('slotHeaderFormat', format);
+    });
   });
 
   $effect(() => {

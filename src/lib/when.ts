@@ -1,4 +1,5 @@
 import type { When } from '../core/types';
+import { hourCycle } from './clock.svelte';
 
 /** The dates the grid shows, `to` exclusive. */
 export interface VisibleRange {
@@ -105,7 +106,10 @@ export function endsBeforeStart(when: When): boolean {
     : Temporal.PlainDateTime.compare(when.end, when.start) < 0;
 }
 
-/** How an Event's details say when it takes place, in the system locale. */
+/**
+ * How an Event's details say when it takes place: dates in the system
+ * locale, times on FreeCal's clock.
+ */
 export function describeWhen(when: When): string {
   if (when.kind === 'allDay') {
     const start = Temporal.PlainDate.from(when.start);
@@ -115,7 +119,11 @@ export function describeWhen(when: When): string {
       ? format.format(asDate(start.toPlainDateTime()))
       : format.formatRange(asDate(start.toPlainDateTime()), asDate(last.toPlainDateTime()));
   }
-  const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'full', timeStyle: 'short' });
+  const format = new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'full',
+    timeStyle: 'short',
+    hourCycle: hourCycle(),
+  });
   return format.formatRange(
     asDate(Temporal.PlainDateTime.from(when.start)),
     asDate(Temporal.PlainDateTime.from(when.end)),

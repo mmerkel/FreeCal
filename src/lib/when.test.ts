@@ -1,5 +1,15 @@
-import { expect, test } from 'vitest';
-import { endsBeforeStart, fieldsOf, whenForShortcut, whenOf, whenOfSelection } from './when';
+import { afterEach, expect, test } from 'vitest';
+import { setClockHours } from './clock.svelte';
+import {
+  describeWhen,
+  endsBeforeStart,
+  fieldsOf,
+  whenForShortcut,
+  whenOf,
+  whenOfSelection,
+} from './when';
+
+afterEach(() => setClockHours(24));
 
 test('a selection of whole days is an all-day When with an exclusive end', () => {
   expect(whenOfSelection(new Date(2026, 9, 5), new Date(2026, 9, 8), true)).toEqual({
@@ -85,4 +95,25 @@ test('an Event may not end before it starts; a timed one may take no time', () =
   ).toBe(false);
   expect(endsBeforeStart({ kind: 'allDay', start: '2026-10-05', end: '2026-10-05' })).toBe(true);
   expect(endsBeforeStart({ kind: 'allDay', start: '2026-10-05', end: '2026-10-06' })).toBe(false);
+});
+
+const afternoon = {
+  kind: 'timed',
+  start: '2026-10-05T14:30:00',
+  end: '2026-10-05T16:00:00',
+} as const;
+
+// The tests run in `en-US`, whose own default is a 12-hour clock.
+test('the details show times on a 24-hour clock and dates in the system locale', () => {
+  const said = describeWhen(afternoon);
+
+  expect(said).toContain('Monday, October 5, 2026');
+  expect(said).toMatch(/14:30\s*–\s*16:00/);
+  expect(said).not.toMatch(/PM/);
+});
+
+test('on a 12-hour clock the details show AM and PM', () => {
+  setClockHours(12);
+
+  expect(describeWhen(afternoon)).toMatch(/2:30\s*–\s*4:00\s*PM/);
 });
