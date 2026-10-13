@@ -448,7 +448,7 @@ fn an_edited_description_is_written_back_as_plain_text() {
 }
 
 #[test]
-fn links_in_the_place_become_link_pieces() {
+fn links_in_the_location_become_link_pieces() {
     let harness = Harness::new();
     let core = harness.open();
     let home = calendar(&core, "Home");
@@ -553,12 +553,10 @@ mod hostile {
         let event = core.event(id).unwrap();
         assert_eq!(event.title, field("title"));
         assert_eq!(
-            event.location.paragraphs,
-            vec![vec![Piece::Text {
-                text: field("location")
-            }]]
+            serde_json::to_value(&event.location).unwrap(),
+            fixture()["expected"]["location"]
         );
-        assert_eq!(event.location.text, field("location"));
+        assert_only_allowed_links(&event.location.paragraphs);
         assert_eq!(
             core.occurrences(date("2026-10-05"), date("2026-10-06"))
                 .unwrap()[0]

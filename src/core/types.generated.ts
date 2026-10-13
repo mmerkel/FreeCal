@@ -99,7 +99,7 @@ export type SidebarState = { shown: boolean, width: number | null, };
 export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, };
 
 /**
- * An Event's description or place, ready to show and to edit.
+ * An Event's description or location, ready to show and to edit.
  */
 export type StructuredText = {
 /**

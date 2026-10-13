@@ -1,8 +1,8 @@
-//! Descriptions and places as structured content (spec: "Untrusted
+//! Descriptions and locations as structured content (spec: "Untrusted
 //! content").
 //!
-//! An Event's description and place reach the frontend as paragraphs of text
-//! pieces and link pieces, never as markup. HTML (only ever a description) is
+//! An Event's description and location reach the frontend as paragraphs of
+//! text pieces and link pieces, never as markup. HTML (only ever a description) is
 //! converted here: `<br>` and `<p>` become line breaks, `<a href=u>x</a>`
 //! becomes a link piece, and every other tag is dropped with its text kept.
 //! Only `http(s)://` and `mailto:` URLs become links.
@@ -25,7 +25,7 @@ pub enum Piece {
     },
 }
 
-/// An Event's description or place, ready to show and to edit.
+/// An Event's description or location, ready to show and to edit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

@@ -159,7 +159,7 @@ fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
     core.delete_event(id).map_err(to_message)
 }
 
-/// Opens a link from a description or place in the system browser. The scheme
+/// Opens a link from a description or location in the system browser. The scheme
 /// is checked again here, so that the window can't open anything else even if
 /// it asks to.
 #[tauri::command]

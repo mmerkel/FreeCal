@@ -36,6 +36,10 @@ _Avoid_: Appointment, entry, item
 An Event with a repeat rule, taken as a whole.
 _Avoid_: Series, repeating event, recurrence
 
+**Location**:
+Where an Event happens, as free text: an address, a room or a video-call link.
+_Avoid_: Place, venue
+
 **Occurrence**:
 One dated appearance of a Recurring Event.
 _Avoid_: Instance, repetition

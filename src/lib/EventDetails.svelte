@@ -1,5 +1,5 @@
 <!--
-  An Event's details: its title, time, place, description and Calendar, with
+  An Event's details: its title, time, location, description and Calendar, with
   Edit and Delete for Events of writable Calendars.
 -->
 <script lang="ts">

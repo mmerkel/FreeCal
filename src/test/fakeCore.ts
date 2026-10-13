@@ -70,7 +70,7 @@ export class FakeCore implements CoreApi {
 
   /**
    * Adds an Event directly, as if it had been created earlier, without a
-   * Signal. Its place and description are plain text unless the test gives
+   * Signal. Its location and description are plain text unless the test gives
    * the structured content the core would build.
    */
   addEvent(

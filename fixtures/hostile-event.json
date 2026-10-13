@@ -1,7 +1,7 @@
 {
-  "purpose": "The hostile test Event (spec: Testing Decisions). Every path that shows, writes or sends Event text runs it through. `expected` is the structured description the core builds from `description`, read as plain text and as HTML; both seams use it.",
+  "purpose": "The hostile test Event (spec: Testing Decisions). Every path that shows, writes or sends Event text runs it through. `expected` holds the structured content the core builds: from `description`, read as plain text and as HTML, and from `location`; both seams use it.",
   "title": "<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com",
-  "location": "../../.bashrc & <i>Room</i> %s ${HOME}",
+  "location": "../../.bashrc & <i>Room</i> %s ${HOME} javascript:alert(6) https://meet.example.com/abc",
   "description": "<p>Agenda <img src=x onerror=alert(3)></p><script>alert(4)</script>\r\nATTENDEE:mailto:evil@example.com<br><a href=\"javascript:alert(5)\">click me</a> <a href=\"https://example.com/agenda\">the agenda</a> <a href=\"file:///etc/passwd\">passwords</a> data:text/html,<b>x</b> https://example.org/plain mailto:someone@example.com",
   "expected": {
     "plainText": {
@@ -103,6 +103,22 @@
         ]
       ],
       "text": "Agenda\nalert(4) ATTENDEE:mailto:evil@example.com\nclick me the agenda (https://example.com/agenda) passwords data:text/html,x https://example.org/plain mailto:someone@example.com"
+    },
+    "location": {
+      "paragraphs": [
+        [
+          {
+            "kind": "text",
+            "text": "../../.bashrc & <i>Room</i> %s ${HOME} javascript:alert(6) "
+          },
+          {
+            "kind": "link",
+            "text": "https://meet.example.com/abc",
+            "url": "https://meet.example.com/abc"
+          }
+        ]
+      ],
+      "text": "../../.bashrc & <i>Room</i> %s ${HOME} javascript:alert(6) https://meet.example.com/abc"
     }
   }
 }

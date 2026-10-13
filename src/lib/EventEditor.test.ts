@@ -59,7 +59,7 @@ test('saves every field the user filled in', async () => {
   await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Dentist');
   await fireEvent.input(screen.getByLabelText('End time'), { target: { value: '11:00' } });
   await user.selectOptions(screen.getByRole('combobox', { name: 'Calendar' }), 'Work');
-  await user.type(screen.getByRole('textbox', { name: 'Place' }), 'Main Street 1');
+  await user.type(screen.getByRole('textbox', { name: 'Location' }), 'Main Street 1');
   await user.type(screen.getByRole('textbox', { name: 'Description' }), 'Bring{Enter}the card');
   await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -160,7 +160,7 @@ test('edits the hostile Event’s fields as plain text', async () => {
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue(
     hostile.title.replace(/[\r\n]/g, ''),
   );
-  expect(screen.getByRole('textbox', { name: 'Place' })).toHaveValue(hostile.location);
+  expect(screen.getByRole('textbox', { name: 'Location' })).toHaveValue(hostile.location);
   expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue(
     hostile.expected.html.text,
   );

@@ -88,7 +88,7 @@ export const en = {
   'event.endDate': 'End date',
   'event.endTime': 'End time',
   'event.calendar': 'Calendar',
-  'event.location': 'Place',
+  'event.location': 'Location',
   'event.description': 'Description',
   'event.save': 'Save',
   'event.edit': 'Edit',

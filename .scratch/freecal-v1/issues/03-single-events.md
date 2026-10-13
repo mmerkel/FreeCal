@@ -1,6 +1,6 @@
 # 03: Create, view, edit and delete single Events
 
-**What to build:** In a Local Calendar, the user can click an empty slot or drag across a time range to create an Event, choose which writable Calendar it goes into, open it to see its details, edit its title, time, all-day flag, place, description and Calendar, and delete it. A keyboard shortcut creates an Event.
+**What to build:** In a Local Calendar, the user can click an empty slot or drag across a time range to create an Event, choose which writable Calendar it goes into, open it to see its details, edit its title, time, all-day flag, location, description and Calendar, and delete it. A keyboard shortcut creates an Event.
 
 **Blocked by:** 02
 
@@ -10,7 +10,7 @@
 - [x] Clicking an empty slot or dragging across a range opens the editor prefilled with that time
 - [x] The editor offers only writable Calendars
 - [x] With no writable Calendar, clicking a slot, dragging or the shortcut doesn't open the editor but points to "+" next to the Local Account (a Local Store starts with Home and Work, ticket 34, but the user can delete them)
-- [x] Event details show title, time, place, description and Calendar
+- [x] Event details show title, time, location, description and Calendar
 - [x] Edit and delete work and are persisted in the Local Store
 - [x] Every change sends "Occurrences changed" with the affected Calendar IDs; the frontend re-fetches the visible range and keeps the current selection
 - [x] An open editor's draft survives a re-fetch

@@ -139,7 +139,7 @@ test('c does nothing while typing or with a modifier', async () => {
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
-test('an Event’s details show its title, time, place, description and Calendar', async () => {
+test('an Event’s details show its title, time, location, description and Calendar', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
   const home = core.addCalendar({ name: 'Home' });
@@ -323,7 +323,7 @@ test('a link whose text is its URL opens straight away', async () => {
   expect(core.openedLinks).toEqual([url]);
 });
 
-test('a link in the place opens like one in the description', async () => {
+test('a link in the location opens like one in the description', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
   const home = core.addCalendar({ name: 'Home' });
@@ -385,7 +385,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     calendarId: home.id,
     title: 'Hostile',
     when: monday,
-    location: hostile.location,
+    location: hostile.expected.location as StructuredText,
     description: hostile.expected.html as StructuredText,
   });
   core.addEvent({
@@ -401,9 +401,12 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   expect(details).toHaveTextContent(hostile.location);
   expect(details).toHaveTextContent('click me');
   // Disallowed links are plain text; only the core's link pieces are links.
-  for (const text of ['click me', 'passwords', 'data:text/html']) {
+  for (const text of ['click me', 'passwords', 'data:text/html', 'javascript:']) {
     expect(within(details).queryByRole('button', { name: new RegExp(text) })).toBeNull();
   }
+  expect(
+    within(details).getByRole('button', { name: 'https://meet.example.com/abc' }),
+  ).toBeInTheDocument();
   expect(within(details).getByRole('button', { name: 'the agenda' })).toHaveAttribute(
     'title',
     'https://example.com/agenda',
@@ -414,7 +417,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue(
     hostile.expected.html.text,
   );
-  expect(screen.getByRole('textbox', { name: 'Place' })).toHaveValue(hostile.location);
+  expect(screen.getByRole('textbox', { name: 'Location' })).toHaveValue(hostile.location);
   await user.click(screen.getByRole('button', { name: 'Save' }));
   // Untouched, the description keeps the core's original.
   await screen.findByRole('dialog', { name: 'Hostile' });

@@ -1,7 +1,8 @@
 <!--
-  Draws an Event's description or place from the pieces the core built: text
-  and links, never markup. A link opens in the system browser; when its text
-  differs from its URL, the user is first asked whether to open the full URL.
+  Draws an Event's description or location from the pieces the core built:
+  text and links, never markup. A link opens in the system browser; when its
+  text differs from its URL, the user is first asked whether to open the full
+  URL.
 -->
 <script lang="ts">
   import type { StructuredText } from '../core/types';
