@@ -1,7 +1,7 @@
 """Sends mouse and keyboard input to an X display through XTEST.
 
 Usage (DISPLAY must be set):
-    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | type TEXT | key NAME
+    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | type TEXT | key NAME | cursor X Y
 
 NAME is an X keysym (Return, Escape, Tab, BackSpace, ...), optionally with
 modifiers: ctrl+a, shift+Tab.
@@ -12,6 +12,7 @@ import time
 
 from Xlib import X, XK, display
 from Xlib.ext import xtest
+from Xlib.protocol import rq
 
 MODIFIERS = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
 
@@ -89,6 +90,40 @@ def button(x, y, event):
     flush()
 
 
+class GetCursorImageAndName(rq.ReplyRequest):
+    """XFixes 2.0's GetCursorImageAndName, which python-xlib lacks. Only the
+    header is read: the name is also there, as an atom."""
+
+    _request = rq.Struct(rq.Card8("opcode"), rq.Opcode(25), rq.RequestLength())
+    _reply = rq.Struct(
+        rq.ReplyCode(),
+        rq.Pad(1),
+        rq.Card16("sequence_number"),
+        rq.ReplyLength(),
+        rq.Int16("x"),
+        rq.Int16("y"),
+        rq.Card16("width"),
+        rq.Card16("height"),
+        rq.Card16("xhot"),
+        rq.Card16("yhot"),
+        rq.Card32("cursor_serial"),
+        rq.Card32("cursor_atom"),
+        rq.Card16("nbytes"),
+        rq.Pad(2),
+    )
+
+
+def cursor(x, y):
+    """Moves to a point and prints the name of the cursor shown there, such as
+    pointer, default or text (CSS names, as WebKitGTK sets them)."""
+    move(x, y)
+    time.sleep(0.3)
+    # The extension must be told the client's version before other requests.
+    d.xfixes_query_version()
+    reply = GetCursorImageAndName(display=d.display, opcode=d.display.get_extension_major("XFIXES"))
+    print(d.get_atom_name(reply.cursor_atom) if reply.cursor_atom else "(unnamed)")
+
+
 command, *args = sys.argv[1:] or ["help"]
 if command == "click":
     click(int(args[0]), int(args[1]))
@@ -108,6 +143,8 @@ elif command == "type":
     type_text(args[0])
 elif command == "key":
     key(args[0])
+elif command == "cursor":
+    cursor(int(args[0]), int(args[1]))
 else:
     sys.exit(__doc__)
 # Give the webview time to react before the next command or screenshot.

@@ -29,6 +29,7 @@ $R click 200 27                  # "+" (New calendar) next to the account headin
 $R type "Home" && $R key Return
 $R move 600 700                  # park the mouse so no row shows its hover actions
 $R shot sidebar 260x200+0+0      # crop to the sidebar
+$R cursor 236 30                 # → pointer: the cursor's name over Today
 $R sql 'select id, name, colour, shown from calendar'
 $R restart                       # relaunch on the same Local Store (persistence checks)
 $R log                           # app output, minus the harmless libEGL warnings
@@ -45,6 +46,7 @@ $R stop                          # stops FreeCal and Xvfb
 | `click X Y`, `dblclick X Y`, `rightclick X Y`, `move X Y` | mouse, in screen pixels |
 | `drag X1 Y1 X2 Y2` | press, move in steps, release: drag-to-create across days |
 | `down X Y`, `up X Y` | press or release the left button there; with `move` and `shot` in between, a screenshot can be taken mid-drag |
+| `cursor X Y` | move there and print the name of the cursor shown, as WebKitGTK names it after CSS: `pointer`, `default`, `text`, `col-resize`, …; after `down` it shows the cursor mid-drag |
 | `type TEXT` | types printable ASCII, with Shift wherever the keyboard map needs it |
 | `key NAME` | one key by X keysym: `Return`, `Escape`, `Tab`, `ctrl+a`, `shift+Tab` |
 | `sql QUERY` | `sqlite3` on the Local Store |
@@ -63,6 +65,8 @@ In the month view of October 2026 (weeks start on Monday): each day column is 14
 As of ticket 47 the sidebar's right edge (x≈192 at the default 12rem) is a splitter with a tab on it at about 197,400. A click on the tab (or `key F9`) hides and shows the sidebar; a press that moves 4 px or more is a drag. A drag puts the edge where the pointer goes, keeping where it was grabbed: between 8rem and 20rem (128 and 320 px), and left of x≈64 (4rem) the sidebar hides, live. `drag 192 300 320 300` widens it to 20rem, `drag 192 300 40 300` hides it. Hidden, the tab is at about 5,400 and the grid and toolbar start at x≈12 (Today at about 44,30); `drag 5 400 245 400` pulls it out to 15rem, and a pull that stays left of x≈69 shows nothing. Its state is in `app_state` (`sql 'select sidebar_shown, sidebar_width from app_state'`, width in rem, NULL for the default). The other coordinates here assume the sidebar shown.
 
 A ticket that moves the layout updates the coordinates here.
+
+**Checking cursors:** screenshots don't show the pointer and jsdom has no cursors, so use `cursor`. It reads the name through XFixes. An open dialog's backdrop covers the whole window, so everywhere outside the dialog says `default`.
 
 ## Run (human path)
 
