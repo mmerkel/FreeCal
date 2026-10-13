@@ -19,4 +19,4 @@
 - [ ] Every string goes through `t`
 - [ ] Component tests for typing, `a`/`p`, the list and its keys, invalid input, and the end following the start; checked by hand in the real app with `run-freecal`
 
-Out of scope: the Event Time Zone choice in the editor (ticket 06).
+Out of scope: the Event Time Zone choice in the editor (ticket 50).

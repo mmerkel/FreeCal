@@ -2,7 +2,7 @@
 
 **What to build:** If one sync would delete or change more than 10 Events or more than 5% of a Calendar, in either direction, FreeCal pauses that Calendar and asks first. The paused Calendar shows a Sync Error such as "Paused: 120 Events would be deleted. Review?", and the user approves or rejects the paused changes. Imports skip the guard because the preview is the approval.
 
-**Blocked by:** 10, 17
+**Blocked by:** 17, 58
 
 **Status:** ready-for-agent
 

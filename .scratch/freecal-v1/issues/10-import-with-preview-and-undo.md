@@ -4,7 +4,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** wontfix
+
+**Split into:** 57, 58, 59
 
 - [ ] Import accepts `.ics` and `.zip` of `.ics`; CSV is not supported
 - [ ] The preview shows counts of new and existing Events
@@ -17,4 +19,5 @@
 
 ## Comments
 
-- 2026-10-11: Floating times (a time of day with no zone) are pinned by the rule in ADR 0007: a Local Calendar has no zone of its own, so they get the Display Time Zone at import. The preview says how many Events were pinned to which zone. Store a mark that the zone was pinned (ticket 06 shows a note for it; add the note here if 06 isn't done yet). Time zone names that aren't IANA names (Outlook's `W. Europe Standard Time`, custom `VTIMEZONE`s) must be mapped to IANA names; decide here how, and what happens when no mapping exists.
+- 2026-10-11: Floating times (a time of day with no zone) are pinned by the rule in ADR 0007: a Local Calendar has no zone of its own, so they get the Display Time Zone at import. The preview says how many Events were pinned to which zone. Store a mark that the zone was pinned (ticket 50 shows a note for it; add the note here if 50 isn't done yet). Time zone names that aren't IANA names (Outlook's `W. Europe Standard Time`, custom `VTIMEZONE`s) must be mapped to IANA names; decide here how (or follow ticket 54 if it comes first), and what happens when no mapping exists.
+- 2026-10-13: Split into 57 (read .ics and .zip files into an import preview), 58 (run an import as one undoable unit) and 59 (import flow in the window). Work from those; this file stays for its history.

@@ -4,7 +4,9 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** wontfix
+
+**Split into:** 53, 54, 55, 56
 
 - [ ] Credentials are stored in the system keyring (Secret Service); without a working keyring, adding a server Account fails with a clear error
 - [ ] Discovery lists all Calendars of the Account as Available Calendars; the user chooses which to add
@@ -25,3 +27,4 @@
 ## Comments
 
 - 2026-10-11: Floating times are pinned by the rule in ADR 0007: to the Calendar's `calendar-timezone` (RFC 4791) if it has one, otherwise to the Display Time Zone when the Event arrives, and the pinned zone is kept on later syncs. Store a mark that the zone was pinned (ticket 06 shows a note for it; add the note here if 06 isn't done yet). Map time zone names that aren't IANA names as decided in ticket 10, or decide here if 14 comes first.
+- 2026-10-13: Split into 53 (CalDAV Accounts and Available Calendars in the core), 54 (pull CalDAV Calendars), 55 (add a CalDAV Account and manage its Calendars in the window) and 56 (read-only CalDAV Calendars). Work from those; this file stays for its history.

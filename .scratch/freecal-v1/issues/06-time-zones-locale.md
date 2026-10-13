@@ -4,7 +4,9 @@
 
 **Blocked by:** 03, 33, 35, 36, 46
 
-**Status:** ready-for-agent
+**Status:** wontfix
+
+**Split into:** 49, 50, 51, 52
 
 - [ ] The core returns Occurrences already converted to the Display Time Zone
 - [ ] The Display Time Zone is shown in the UI
@@ -23,3 +25,4 @@
 - 2026-10-11: Ticket 35 stores wall time plus a start and an end Event Time Zone (ADR 0007). This ticket adds the Event Time Zone to `When` so the editor can show and change it. If ticket 10 or 14 is done first and has added the mark for pinned zones, the details and editor show "The original has no time zone. FreeCal shows it in <zone>." for such Events (ADR 0007, rule 5); otherwise whichever of them comes first adds the note.
 - 2026-10-11: The clock is now 24-hour by default, whatever the locale (story 55 changed). Ticket 36 builds the shared clock value; this ticket only adds the 24-hour / 12-hour option, with no "System" choice.
 - 2026-10-11: Weeks now start on Monday by default, whatever the locale (story 55 changed). Ticket 46 builds the shared first-day value; this ticket only adds the Monday / Saturday / Sunday option, with no "System" choice. Neither it nor the clock has a `system` value in the Local Store.
+- 2026-10-13: Split into 49 (Display Time Zone shown and followed), 50 (Event Time Zone in the editor), 51 (override the Display Time Zone in Settings) and 52 (date format from the locale, with formats, first day and clock in Settings). Work from those; this file stays for its history.

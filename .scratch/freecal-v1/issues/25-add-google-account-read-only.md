@@ -2,7 +2,7 @@
 
 **What to build:** The user adds a Google Account by logging in through the browser with FreeCal's shared (unverified) client, chooses which of its Available Calendars to add, and sees them in FreeCal. "Manage Calendars…" on the Account line works as for CalDAV. Several Google Accounts can be connected.
 
-**Blocked by:** 14, 15
+**Blocked by:** 15, 55, 56
 
 **Status:** ready-for-agent
 

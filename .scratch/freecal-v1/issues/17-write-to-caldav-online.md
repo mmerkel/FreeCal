@@ -2,7 +2,7 @@
 
 **What to build:** The user can switch a CalDAV Calendar from read-only to writable, and mark any Calendar read-only. In a writable CalDAV Calendar, creating, editing, moving and deleting Events (including recurrence scopes) is sent to the server. Every change sent is recorded in the Change Journal. Details FreeCal doesn't show are never lost, and Events with other attendees can't be edited.
 
-**Blocked by:** 08, 14, 15
+**Blocked by:** 08, 15, 56
 
 **Status:** ready-for-agent
 

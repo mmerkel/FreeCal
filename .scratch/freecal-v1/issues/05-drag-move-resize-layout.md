@@ -15,3 +15,4 @@
 ## Comments
 
 - 2026-10-11: Since ticket 04, a new today rebuilds the FullCalendar instance (`CalendarGrid.svelte`), because FullCalendar reads `now` only when it is created. A rebuild in the middle of an interaction drops it without a word, and a `revert()` held from the old instance may do nothing. This matters most after waking from sleep: the shell checks the date every 10 seconds, so "Date changed" can arrive while the user has already started to drag. Today a drag-to-create is lost the same way (no data at risk).
+- 2026-10-13: If ticket 56 (read-only CalDAV Calendars) is done first, dragging or resizing a read-only Event shows a short message explaining why; otherwise 56 adds it.
