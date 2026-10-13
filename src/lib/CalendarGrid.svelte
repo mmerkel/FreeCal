@@ -150,6 +150,7 @@
       selectable: true,
       // Read-only Occurrences say otherwise (spec: "Event chips stay sparse").
       editable: true,
+      eventResizableFromStart: true,
       forceEventDuration: true,
       // Overlapping Occurrences side by side, none hidden behind another.
       slotEventOverlap: false,

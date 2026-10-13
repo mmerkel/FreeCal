@@ -43,6 +43,34 @@ test('a resize moves each edge by its own shift', () => {
   });
 });
 
+test('a resize from the start keeps the end', () => {
+  const oldEvent = gridEvent(monday, false, new Date(2026, 9, 5, 9), new Date(2026, 9, 5, 10));
+  const event = gridEvent(monday, false, new Date(2026, 9, 5, 8, 30), new Date(2026, 9, 5, 10));
+
+  expect(
+    rescheduleOfResize({
+      event,
+      oldEvent,
+      startDelta: { ...still, milliseconds: -1_800_000 },
+      endDelta: still,
+    }),
+  ).toEqual({
+    id: 7,
+    when: { kind: 'timed', start: '2026-10-05T08:30:00', end: '2026-10-05T10:00:00' },
+  });
+});
+
+test('a bar resized from the start keeps its last day', () => {
+  const holiday: When = { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' };
+  const oldEvent = gridEvent(holiday, true, new Date(2026, 9, 6), new Date(2026, 9, 9));
+  const event = gridEvent(holiday, true, new Date(2026, 9, 4), new Date(2026, 9, 9));
+
+  expect(
+    rescheduleOfResize({ event, oldEvent, startDelta: { ...still, days: -2 }, endDelta: still })
+      .when,
+  ).toEqual({ kind: 'allDay', start: '2026-10-04', end: '2026-10-09' });
+});
+
 test('a drop into the all-day area takes the day it was dropped on', () => {
   const oldEvent = gridEvent(monday, false, new Date(2026, 9, 5, 9), new Date(2026, 9, 5, 10));
   const event = gridEvent(monday, true, new Date(2026, 9, 6), new Date(2026, 9, 7));

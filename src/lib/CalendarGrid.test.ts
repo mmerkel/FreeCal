@@ -358,27 +358,42 @@ test('shows all-day Events and timed Events of a day or more in the all-day area
   expect(inAllDayArea(chip('Meeting'))).toBe(false);
 });
 
-/** The handle on a chip's end edge that resizes it: an empty last child. */
-function resizer(found: HTMLElement): Element | undefined {
-  const last = found.lastElementChild;
-  return last && last.childElementCount === 0 && last.textContent === '' ? last : undefined;
+/** The handle on a chip's edge that resizes it: an empty first or last child. */
+function resizer(found: HTMLElement, edge: 'start' | 'end'): Element | undefined {
+  const handle = edge === 'start' ? found.firstElementChild : found.lastElementChild;
+  return handle && handle.childElementCount === 0 && handle.textContent === '' ? handle : undefined;
 }
 
-test('offers a resize for Events of writable Calendars only', async () => {
+test('offers a resize on both edges for Events of writable Calendars only', async () => {
   const shared: Calendar = { ...home, id: calendarId(2), name: 'Shared', readOnly: true };
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Mine' }),
       occurrence({ eventId: eventId(2), title: 'Theirs', calendarId: shared.id }),
+      occurrence({
+        eventId: eventId(3),
+        title: 'Holiday',
+        when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
+      }),
+      occurrence({
+        eventId: eventId(4),
+        title: 'Their holiday',
+        calendarId: shared.id,
+        when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
+      }),
     ],
     calendars: [home, shared],
     onreschedule: vi.fn(async () => {}),
   });
   await waitFor(() => expect(screen.getByText('Theirs')).toBeInTheDocument());
 
-  expect(resizer(chip('Mine'))).toBeDefined();
-  expect(resizer(chip('Theirs'))).toBeUndefined();
+  for (const edge of ['start', 'end'] as const) {
+    expect(resizer(chip('Mine'), edge)).toBeDefined();
+    expect(resizer(chip('Holiday'), edge)).toBeDefined();
+    expect(resizer(chip('Theirs'), edge)).toBeUndefined();
+    expect(resizer(chip('Their holiday'), edge)).toBeUndefined();
+  }
 });
 
 /** The day the grid highlights as today. */
@@ -420,7 +435,7 @@ test('holds back a new today during a drag', async () => {
 });
 
 test('holds back a new today during a resize', async () => {
-  await holdsBackTodayWhilePressing(() => resizer(chip('Dentist'))!);
+  await holdsBackTodayWhilePressing(() => resizer(chip('Dentist'), 'end')!);
 });
 
 test('holds back a new today during a drag-to-create', async () => {
