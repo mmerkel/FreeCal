@@ -77,6 +77,7 @@
       plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, classicThemePlugin],
       // In addition to the theme's classes, which cut titles off without "…".
       eventTitleClass: 'event-title',
+      eventClass: 'event-chip',
       initialView: initial.view,
       initialDate: initial.date,
       firstDay: initial.firstDay,
@@ -162,6 +163,13 @@
   .calendar-grid {
     flex: 1;
     min-height: 0;
+  }
+
+  /* Every Event opens its details, so the pointer is a hand over the whole
+     chip and its text can't be selected (spec: "Event chips stay sparse"). */
+  .calendar-grid :global(.event-chip) {
+    cursor: pointer;
+    user-select: none;
   }
 
   .calendar-grid :global(.selected-event) {
