@@ -135,6 +135,9 @@
       // In addition to the theme's classes, which cut titles off without "…".
       eventTitleClass: 'event-title',
       eventClass: 'event-chip',
+      // Bars and time-grid chips, filled with their Calendar colour; not the
+      // month view's dots.
+      blockEventClass: 'event-block',
       initialView: initial.view,
       initialDate: initial.date,
       firstDay: initial.firstDay,
@@ -258,6 +261,16 @@
   .calendar-grid :global(.event-chip) {
     cursor: pointer;
     user-select: none;
+  }
+
+  /* Filled chips darken on hover, as the theme greys the dots. An overlay on
+     the background, not the grey `--hover`, works on any Calendar colour and
+     leaves the text and the outlines alone (spec: "Event chips stay
+     sparse"). */
+  @media (hover: hover) {
+    .calendar-grid :global(.event-block:hover) {
+      background-image: linear-gradient(rgb(0 0 0 / 15%), rgb(0 0 0 / 15%));
+    }
   }
 
   .calendar-grid :global(.selected-event) {

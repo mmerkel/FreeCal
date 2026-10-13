@@ -286,6 +286,34 @@ test('marks the selected Event', async () => {
   expect(chip('Other')).not.toHaveClass('selected-event');
 });
 
+test('marks the chips filled with their Calendar colour, for their hover effect', async () => {
+  const occurrences = [
+    occurrence({ eventId: eventId(1), title: 'Meeting' }),
+    occurrence({
+      eventId: eventId(2),
+      title: 'Holiday',
+      when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-07' },
+    }),
+    occurrence({
+      eventId: eventId(3),
+      title: 'Trip',
+      when: { kind: 'timed', start: '2026-10-07T09:00:00', end: '2026-10-09T18:00:00' },
+    }),
+  ];
+  const { rerender } = render(CalendarGrid, { ...thisMonth, occurrences, calendars: [home] });
+
+  await waitFor(() => expect(chip('Holiday')).toHaveClass('event-block'));
+  expect(chip('Trip')).toHaveClass('event-block');
+  // A timed Event in the month view is a dot and text, not filled.
+  expect(chip('Meeting')).not.toHaveClass('event-block');
+
+  await rerender({ view: 'week', date: Temporal.PlainDate.from('2026-10-05') });
+
+  await waitFor(() => expect(chip('Meeting')).toHaveClass('event-block'));
+  expect(chip('Holiday')).toHaveClass('event-block');
+  expect(chip('Trip')).toHaveClass('event-block');
+});
+
 test('draws the hostile title as text, never as markup', async () => {
   render(CalendarGrid, {
     ...thisMonth,
