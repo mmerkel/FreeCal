@@ -72,7 +72,17 @@ export const samples = {
         "start": "2026-10-05T09:30:00",
         "end": "2026-10-05T10:00:00"
       },
-      "location": "Main Street 1",
+      "location": {
+        "paragraphs": [
+          [
+            {
+              "kind": "text",
+              "text": "Main Street 1"
+            }
+          ]
+        ],
+        "text": "Main Street 1"
+      },
       "description": {
         "paragraphs": [
           [
@@ -103,7 +113,7 @@ export const samples = {
       }
     }
   ],
-  Description: [
+  StructuredText: [
     {
       "paragraphs": [
         [
@@ -192,7 +202,7 @@ type Samples = {
   EventDraft: Unbranded<T.EventDraft>[];
   Event: Unbranded<T.Event>[];
   Occurrence: Unbranded<T.Occurrence>[];
-  Description: Unbranded<T.Description>[];
+  StructuredText: Unbranded<T.StructuredText>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
   View: Unbranded<T.View>[];

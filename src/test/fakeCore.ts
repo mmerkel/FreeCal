@@ -4,7 +4,6 @@ import type {
   AccountId,
   Calendar,
   CalendarId,
-  Description,
   Event,
   EventDraft,
   EventId,
@@ -12,6 +11,7 @@ import type {
   SettingsUpdate,
   SidebarState,
   Signal,
+  StructuredText,
   View,
   When,
 } from '../core/types';
@@ -70,20 +70,25 @@ export class FakeCore implements CoreApi {
 
   /**
    * Adds an Event directly, as if it had been created earlier, without a
-   * Signal. Its description is plain text unless the test gives the
-   * structured content the core would build.
+   * Signal. Its place and description are plain text unless the test gives
+   * the structured content the core would build.
    */
   addEvent(
-    event: Partial<Omit<Event, 'description'>> &
-      Pick<Event, 'calendarId' | 'when'> & { description?: Description | string },
+    event: Partial<Omit<Event, 'location' | 'description'>> &
+      Pick<Event, 'calendarId' | 'when'> & {
+        location?: StructuredText | string;
+        description?: StructuredText | string;
+      },
   ): Event {
-    const { description = '', ...fields } = event;
+    const { location = '', description = '', ...fields } = event;
+    const structured = (text: StructuredText | string) =>
+      typeof text === 'string' ? plainText(text) : text;
     const added: Event = {
       id: eventId(this.nextEventId++),
       title: '',
-      location: '',
       ...fields,
-      description: typeof description === 'string' ? plainDescription(description) : description,
+      location: structured(location),
+      description: structured(description),
     };
     this.events.push(added);
     return added;
@@ -232,10 +237,11 @@ export class FakeCore implements CoreApi {
     this.writable(draft.calendarId);
     Object.assign(event, {
       ...draft,
+      location: plainText(draft.location),
       description:
         draft.description === event.description.text
           ? event.description
-          : plainDescription(draft.description),
+          : plainText(draft.description),
     });
     this.emit({
       kind: 'occurrencesChanged',
@@ -298,8 +304,8 @@ export class FakeCore implements CoreApi {
   }
 }
 
-/** A plain-text description as the core would structure it, without links. */
-function plainDescription(text: string): Description {
+/** Plain text as the core would structure it, without links. */
+function plainText(text: string): StructuredText {
   return {
     paragraphs:
       text === ''

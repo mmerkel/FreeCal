@@ -96,7 +96,7 @@ fn a_local_store_from_ticket_03_opens_with_the_same_occurrences() {
         .event_id;
     let late = core.event(late).unwrap();
     assert_eq!(
-        (late.location.as_str(), late.description.text.as_str()),
+        (late.location.text.as_str(), late.description.text.as_str()),
         ("Room 1", "Notes")
     );
 }

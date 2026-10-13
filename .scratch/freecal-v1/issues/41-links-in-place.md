@@ -4,12 +4,12 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The core sends the place as structured text (text and link pieces) next to its plain form, which the editor keeps editing; the same code turns description and place into pieces
-- [ ] Only `http(s)://` and `mailto:` become links (core tests, including a `javascript:` URL staying text)
-- [ ] The details draw the place's pieces with the description's link display; a click opens the system browser through the shell
-- [ ] The TypeScript types and samples are regenerated (`FREECAL_WRITE_TYPES=1 cargo test -p freecal-core`)
-- [ ] Component test: a place with a Zoom URL shows a link that goes through `onopenlink`
+- [x] The core sends the place as structured text (text and link pieces) next to its plain form, which the editor keeps editing; the same code turns description and place into pieces
+- [x] Only `http(s)://` and `mailto:` become links (core tests, including a `javascript:` URL staying text)
+- [x] The details draw the place's pieces with the description's link display; a click opens the system browser through the shell
+- [x] The TypeScript types and samples are regenerated (`FREECAL_WRITE_TYPES=1 cargo test -p freecal-core`)
+- [x] Component test: a place with a Zoom URL shows a link that goes through `onopenlink`
 
 Out of scope: a map link for addresses.

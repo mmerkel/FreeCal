@@ -14,9 +14,9 @@ use serde::Serialize;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Colour, Description, Event, EventDraft,
-    EventId, Occurrence, Piece, Provider, Settings, SettingsUpdate, SidebarState, Signal, View,
-    When,
+    Account, AccountId, Appearance, Calendar, CalendarId, Colour, Event, EventDraft, EventId,
+    Occurrence, Piece, Provider, Settings, SettingsUpdate, SidebarState, Signal, StructuredText,
+    View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -103,7 +103,7 @@ fn samples_file() -> (String, Vec<String>) {
         text: "notes".to_owned(),
         url: "https://example.org/notes".to_owned(),
     };
-    let description = Description {
+    let description = StructuredText {
         paragraphs: vec![vec![text.clone(), link.clone()]],
         text: "Agenda: notes (https://example.org/notes)".to_owned(),
     };
@@ -139,7 +139,7 @@ fn samples_file() -> (String, Vec<String>) {
             calendar_id: CalendarId(2),
             title: "Dentist".to_owned(),
             when: timed,
-            location: "Main Street 1".to_owned(),
+            location: StructuredText::from_plain_text("Main Street 1"),
             description: description.clone(),
         }]),
         samples(&[Occurrence {

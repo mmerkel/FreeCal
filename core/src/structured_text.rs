@@ -1,10 +1,11 @@
-//! Descriptions as structured content (spec: "Untrusted content").
+//! Descriptions and places as structured content (spec: "Untrusted
+//! content").
 //!
-//! A description reaches the frontend as paragraphs of text pieces and link
-//! pieces, never as markup. HTML is converted here: `<br>` and `<p>` become
-//! line breaks, `<a href=u>x</a>` becomes a link piece, and every other tag is
-//! dropped with its text kept. Only `http(s)://` and `mailto:` URLs become
-//! links.
+//! An Event's description and place reach the frontend as paragraphs of text
+//! pieces and link pieces, never as markup. HTML (only ever a description) is
+//! converted here: `<br>` and `<p>` become line breaks, `<a href=u>x</a>`
+//! becomes a link piece, and every other tag is dropped with its text kept.
+//! Only `http(s)://` and `mailto:` URLs become links.
 
 use serde::Serialize;
 
@@ -24,12 +25,12 @@ pub enum Piece {
     },
 }
 
-/// An Event's description, ready to show and to edit.
+/// An Event's description or place, ready to show and to edit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-pub struct Description {
-    /// One paragraph per line, for showing the description.
+pub struct StructuredText {
+    /// One paragraph per line, for showing the text.
     pub paragraphs: Vec<Vec<Piece>>,
     /// The plain-text form, which the editor edits. A link whose text differs
     /// from its URL is written as `text (url)`, so that the URL survives an
@@ -37,7 +38,7 @@ pub struct Description {
     pub text: String,
 }
 
-impl Description {
+impl StructuredText {
     pub(crate) fn from_plain_text(stored: &str) -> Self {
         let text = stored.replace("\r\n", "\n").replace('\r', "\n");
         Self::from_raw(vec![Raw::Text(text)])
@@ -273,7 +274,7 @@ fn collapse_whitespace(text: &str) -> String {
 }
 
 /// Trims spaces at the start and end of every line, and drops empty lines at
-/// the start and end of the description.
+/// the start and end of the text.
 fn tidy_lines(raw: Vec<Raw>) -> Vec<Raw> {
     let mut lines: Vec<Vec<Raw>> = vec![Vec::new()];
     for piece in raw {
@@ -469,7 +470,7 @@ mod tests {
 
     #[test]
     fn plain_text_becomes_one_paragraph_per_line() {
-        let description = Description::from_plain_text("First line\r\nSecond\n\nFourth");
+        let description = StructuredText::from_plain_text("First line\r\nSecond\n\nFourth");
 
         assert_eq!(
             description.paragraphs,
@@ -485,13 +486,17 @@ mod tests {
 
     #[test]
     fn an_empty_description_has_no_paragraphs() {
-        assert!(Description::from_plain_text("").paragraphs.is_empty());
-        assert!(Description::from_html("<p></p><br>").paragraphs.is_empty());
+        assert!(StructuredText::from_plain_text("").paragraphs.is_empty());
+        assert!(
+            StructuredText::from_html("<p></p><br>")
+                .paragraphs
+                .is_empty()
+        );
     }
 
     #[test]
     fn markup_in_plain_text_stays_text() {
-        let description = Description::from_plain_text("Use <b>bold</b> & <Tab>");
+        let description = StructuredText::from_plain_text("Use <b>bold</b> & <Tab>");
 
         assert_eq!(
             description.paragraphs,
@@ -501,7 +506,7 @@ mod tests {
 
     #[test]
     fn urls_in_text_become_links_without_trailing_punctuation() {
-        let description = Description::from_plain_text(
+        let description = StructuredText::from_plain_text(
             "See https://example.com/a?b=1. Or (http://example.org/x_(y)), mail mailto:me@example.com!",
         );
 
@@ -529,7 +534,7 @@ mod tests {
             "https://",
         ] {
             assert_eq!(
-                Description::from_plain_text(plain).paragraphs,
+                StructuredText::from_plain_text(plain).paragraphs,
                 vec![vec![text(plain)]],
                 "{plain:?}"
             );
@@ -539,15 +544,16 @@ mod tests {
     #[test]
     fn upper_case_schemes_are_links_too() {
         assert_eq!(
-            Description::from_plain_text("HTTPS://EXAMPLE.COM").paragraphs,
+            StructuredText::from_plain_text("HTTPS://EXAMPLE.COM").paragraphs,
             vec![vec![link("HTTPS://EXAMPLE.COM", "HTTPS://EXAMPLE.COM")]]
         );
     }
 
     #[test]
     fn html_line_breaks_and_paragraphs_become_lines() {
-        let description =
-            Description::from_html("<p>First   <b>bold</b>\n line</p><p>Second<br>Third<BR/></p>");
+        let description = StructuredText::from_html(
+            "<p>First   <b>bold</b>\n line</p><p>Second<br>Third<BR/></p>",
+        );
 
         assert_eq!(
             description.paragraphs,
@@ -562,7 +568,7 @@ mod tests {
 
     #[test]
     fn html_tags_are_dropped_and_their_text_kept() {
-        let description = Description::from_html(
+        let description = StructuredText::from_html(
             "<img src=x onerror=alert(1)><script>alert(2)</script><!-- note --><i>kept</i>",
         );
 
@@ -572,7 +578,7 @@ mod tests {
     #[test]
     fn html_entities_are_decoded_once() {
         let description =
-            Description::from_html("a &amp; b &lt;b&gt; &amp;lt; &#x41;&#66; &bogus;");
+            StructuredText::from_html("a &amp; b &lt;b&gt; &amp;lt; &#x41;&#66; &bogus;");
 
         assert_eq!(
             description.paragraphs,
@@ -582,7 +588,7 @@ mod tests {
 
     #[test]
     fn html_links_keep_their_text_and_only_allowed_urls() {
-        let description = Description::from_html(
+        let description = StructuredText::from_html(
             "<a href=\"https://example.com/a?x=1&amp;y=2\">the agenda</a> \
              <a href='javascript:alert(1)'>click me</a> \
              <a href=mailto:me@example.com></a> \
@@ -603,7 +609,7 @@ mod tests {
 
     #[test]
     fn the_plain_text_form_keeps_link_urls() {
-        let description = Description::from_html(
+        let description = StructuredText::from_html(
             "Agenda: <a href=\"https://example.com/doc\">the doc</a><br>Bye",
         );
 
@@ -616,7 +622,7 @@ mod tests {
     #[test]
     fn unfinished_markup_is_text() {
         assert_eq!(
-            Description::from_html("a < b and <a href=\"x").paragraphs,
+            StructuredText::from_html("a < b and <a href=\"x").paragraphs,
             vec![vec![text("a < b and <a href=\"x")]]
         );
     }

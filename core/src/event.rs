@@ -4,7 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{CalendarId, CoreError, Description, Result};
+use crate::{CalendarId, CoreError, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -80,8 +80,8 @@ pub struct Event {
     pub calendar_id: CalendarId,
     pub title: String,
     pub when: When,
-    pub location: String,
-    pub description: Description,
+    pub location: StructuredText,
+    pub description: StructuredText,
 }
 
 /// One dated appearance of an Event in the grid. A single Event has exactly

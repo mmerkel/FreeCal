@@ -6,12 +6,12 @@
 mod account;
 mod calendar;
 mod clock;
-mod description;
 mod event;
 mod settings;
 mod sidebar;
 mod signal;
 mod store;
+mod structured_text;
 #[cfg(test)]
 mod typescript;
 mod view;
@@ -24,11 +24,11 @@ use std::sync::{Arc, Mutex};
 pub use account::{Account, AccountId, Provider};
 pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
-pub use description::{Description, Piece, link_allowed};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
+pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
@@ -342,7 +342,7 @@ impl Core {
             calendar_id: stored.calendar_id,
             title: fields.title,
             when: fields.when.to_when(self.clock.time_zone())?,
-            location: fields.location,
+            location: StructuredText::from_plain_text(&fields.location),
             description,
         })
     }
@@ -363,10 +363,10 @@ fn writable(store: &Store, id: CalendarId) -> Result<()> {
     }
 }
 
-fn description_of(fields: &EventFields) -> Description {
+fn description_of(fields: &EventFields) -> StructuredText {
     if fields.description_html {
-        Description::from_html(&fields.description)
+        StructuredText::from_html(&fields.description)
     } else {
-        Description::from_plain_text(&fields.description)
+        StructuredText::from_plain_text(&fields.description)
     }
 }

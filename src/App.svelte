@@ -266,7 +266,7 @@
         calendarId: event.calendarId,
         title: event.title,
         when: event.when,
-        location: event.location,
+        location: event.location.text,
         description: event.description.text,
       },
     };

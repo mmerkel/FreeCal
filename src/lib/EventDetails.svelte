@@ -9,8 +9,8 @@
   import Text from '@lucide/svelte/icons/text';
   import type { Calendar as CalendarType, Event } from '../core/types';
   import { t } from '../i18n';
-  import DescriptionView from './DescriptionView.svelte';
   import Dialog from './Dialog.svelte';
+  import StructuredTextView from './StructuredTextView.svelte';
   import { describeWhen } from './when';
 
   interface Props {
@@ -36,16 +36,16 @@
       <dt><Clock size={14} aria-label={t('event.starts')} /></dt>
       <dd>{describeWhen(event.when)}</dd>
     </div>
-    {#if event.location}
+    {#if event.location.paragraphs.length > 0}
       <div class="row">
         <dt><MapPin size={14} aria-label={t('event.location')} /></dt>
-        <dd class="text">{event.location}</dd>
+        <dd><StructuredTextView content={event.location} {onopenlink} /></dd>
       </div>
     {/if}
     {#if event.description.paragraphs.length > 0}
       <div class="row">
         <dt><Text size={14} aria-label={t('event.description')} /></dt>
-        <dd><DescriptionView description={event.description} {onopenlink} /></dd>
+        <dd><StructuredTextView content={event.description} {onopenlink} /></dd>
       </div>
     {/if}
     {#if calendar}

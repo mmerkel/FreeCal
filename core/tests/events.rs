@@ -50,7 +50,7 @@ fn a_created_event_can_be_read_back_and_is_signalled() {
         created.when,
         timed("2026-10-05T09:00:00", "2026-10-05T10:30:00")
     );
-    assert_eq!(created.location, "Main Street 1");
+    assert_eq!(created.location.text, "Main Street 1");
     assert_eq!(created.description.text, "Bring the card");
     assert_eq!(
         harness.signals.received()[signals_before..],
@@ -202,7 +202,7 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
     assert_eq!(relaunch.event(created.id).unwrap(), edited);
     assert_eq!(edited.title, "Long lunch");
     assert_eq!(edited.when, all_day("2026-10-06", "2026-10-08"));
-    assert_eq!(edited.location, "Café");
+    assert_eq!(edited.location.text, "Café");
     assert_eq!(edited.description.text, "With Sam");
     assert_eq!(
         harness.signals.received()[signals_before..],
@@ -448,6 +448,34 @@ fn an_edited_description_is_written_back_as_plain_text() {
 }
 
 #[test]
+fn links_in_the_place_become_link_pieces() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let mut zoom = draft(home.id, "Call", all_day("2026-10-05", "2026-10-06"));
+    zoom.location = "Zoom: https://zoom.us/j/123?pwd=x, or javascript:alert(1)".to_owned();
+
+    let created = core.create_event(zoom.clone()).unwrap();
+
+    assert_eq!(
+        created.location.paragraphs,
+        vec![vec![
+            Piece::Text {
+                text: "Zoom: ".to_owned()
+            },
+            Piece::Link {
+                text: "https://zoom.us/j/123?pwd=x".to_owned(),
+                url: "https://zoom.us/j/123?pwd=x".to_owned()
+            },
+            Piece::Text {
+                text: ", or javascript:alert(1)".to_owned()
+            },
+        ]]
+    );
+    assert_eq!(created.location.text, zoom.location);
+}
+
+#[test]
 fn an_unreadable_stored_time_is_an_error_not_a_crash() {
     let harness = Harness::new();
     let core = harness.open();
@@ -524,7 +552,13 @@ mod hostile {
 
         let event = core.event(id).unwrap();
         assert_eq!(event.title, field("title"));
-        assert_eq!(event.location, field("location"));
+        assert_eq!(
+            event.location.paragraphs,
+            vec![vec![Piece::Text {
+                text: field("location")
+            }]]
+        );
+        assert_eq!(event.location.text, field("location"));
         assert_eq!(
             core.occurrences(date("2026-10-05"), date("2026-10-06"))
                 .unwrap()[0]

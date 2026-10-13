@@ -6,7 +6,7 @@ import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
 import App from './App.svelte';
-import type { Description, When } from './core/types';
+import type { StructuredText, When } from './core/types';
 import { FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
 
@@ -323,6 +323,34 @@ test('a link whose text is its URL opens straight away', async () => {
   expect(core.openedLinks).toEqual([url]);
 });
 
+test('a link in the place opens like one in the description', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const url = 'https://zoom.us/j/123';
+  core.addEvent({
+    calendarId: home.id,
+    title: 'Call',
+    when: monday,
+    location: {
+      paragraphs: [
+        [
+          { kind: 'text', text: 'Zoom: ' },
+          { kind: 'link', text: url, url },
+        ],
+      ],
+      text: `Zoom: ${url}`,
+    },
+  });
+  await showApp(core);
+  const details = await openOccurrence(user, 'Call');
+
+  expect(details).toHaveTextContent(`Zoom: ${url}`);
+  await user.click(within(details).getByRole('button', { name: url }));
+
+  expect(core.openedLinks).toEqual([url]);
+});
+
 test('a link whose text differs from its URL asks first', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
@@ -358,13 +386,13 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     title: 'Hostile',
     when: monday,
     location: hostile.location,
-    description: hostile.expected.html as Description,
+    description: hostile.expected.html as StructuredText,
   });
   core.addEvent({
     calendarId: home.id,
     title: hostile.title,
     when: monday,
-    description: hostile.expected.plainText as Description,
+    description: hostile.expected.plainText as StructuredText,
   });
   const grid = await showApp(core);
   await within(grid).findByRole('button', { name: /onerror/ });

@@ -36,24 +36,9 @@ export type CalendarId = number & { readonly __brand: "CalendarId" };
 export type Colour = string;
 
 /**
- * An Event's description, ready to show and to edit.
- */
-export type Description = {
-/**
- * One paragraph per line, for showing the description.
- */
-paragraphs: Array<Array<Piece>>,
-/**
- * The plain-text form, which the editor edits. A link whose text differs
- * from its URL is written as `text (url)`, so that the URL survives an
- * edit.
- */
-text: string, };
-
-/**
  * An Event with everything its details and editor show.
  */
-export type Event = { id: EventId, calendarId: CalendarId, title: string, when: When, location: string, description: Description, };
+export type Event = { id: EventId, calendarId: CalendarId, title: string, when: When, location: StructuredText, description: StructuredText, };
 
 /**
  * What the user gives an Event when creating or editing it.
@@ -112,6 +97,21 @@ export type SidebarState = { shown: boolean, width: number | null, };
  * added by the tickets that first send them.
  */
 export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, };
+
+/**
+ * An Event's description or place, ready to show and to edit.
+ */
+export type StructuredText = {
+/**
+ * One paragraph per line, for showing the text.
+ */
+paragraphs: Array<Array<Piece>>,
+/**
+ * The plain-text form, which the editor edits. A link whose text differs
+ * from its URL is written as `text (url)`, so that the URL survives an
+ * edit.
+ */
+text: string, };
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

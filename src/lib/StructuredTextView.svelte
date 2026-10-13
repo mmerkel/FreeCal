@@ -1,19 +1,19 @@
 <!--
-  Draws a description from the pieces the core built: text and links, never
-  markup. A link opens in the system browser; when its text differs from its
-  URL, the user is first asked whether to open the full URL.
+  Draws an Event's description or place from the pieces the core built: text
+  and links, never markup. A link opens in the system browser; when its text
+  differs from its URL, the user is first asked whether to open the full URL.
 -->
 <script lang="ts">
-  import type { Description } from '../core/types';
+  import type { StructuredText } from '../core/types';
   import { t } from '../i18n';
   import Dialog from './Dialog.svelte';
 
   interface Props {
-    description: Description;
+    content: StructuredText;
     onopenlink: (url: string) => void;
   }
 
-  let { description, onopenlink }: Props = $props();
+  let { content, onopenlink }: Props = $props();
 
   /** The URL waiting for the user's yes. */
   let confirming = $state<string>();
@@ -24,8 +24,8 @@
   }
 </script>
 
-<div class="description">
-  {#each description.paragraphs as paragraph, index (index)}
+<div class="structured-text">
+  {#each content.paragraphs as paragraph, index (index)}
     <!-- One line, so that no whitespace gets between the pieces. -->
     <!-- prettier-ignore -->
     <p>{#each paragraph as piece, at (at)}{#if piece.kind === 'link'}<button type="button" class="link" title={piece.url} onclick={() => open(piece.text, piece.url)}>{piece.text}</button>{:else}{piece.text}{/if}{/each}</p>
@@ -61,7 +61,7 @@
 {/if}
 
 <style>
-  .description p {
+  .structured-text p {
     min-height: 1lh;
     margin: 0;
     white-space: pre-wrap;
