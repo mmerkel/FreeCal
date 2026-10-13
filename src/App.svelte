@@ -75,6 +75,14 @@
   let sidebar = $state<SidebarState>();
   let sidebarSaveFailure = $state<string>();
   let quitFailure = $state<string>();
+  let rescheduleFailure = $state<string>();
+  /**
+   * Whether the user is pressing on the grid, as for a drag. A "Date
+   * changed" meanwhile moves the view only once the press ends, so that the
+   * grid doesn't move under the pointer.
+   */
+  let interacting = false;
+  let dateChangeHeld = false;
   let directory = $state<Directory>();
   let startFailure = $state<string>();
   let readFailure = $state<string>();
@@ -153,8 +161,25 @@
         break;
       case 'dateChanged':
         today = Temporal.PlainDate.from(signal.date);
-        if (navigation) navigation = dateChanged(navigation, today);
+        followToday();
         break;
+    }
+  }
+
+  /** Moves the view to a new today if it tracks it and nothing holds it back. */
+  function followToday() {
+    if (interacting) {
+      dateChangeHeld = true;
+    } else if (navigation && today) {
+      navigation = dateChanged(navigation, today);
+    }
+  }
+
+  function oninteract(active: boolean) {
+    interacting = active;
+    if (!active && dateChangeHeld) {
+      dateChangeHeld = false;
+      followToday();
     }
   }
 
@@ -288,6 +313,17 @@
     openDetails(id);
   }
 
+  /** A drag or resize in the grid; the grid puts the Event back if this rejects. */
+  async function reschedule(id: EventId, when: When) {
+    try {
+      await core.rescheduleEvent(id, when);
+      rescheduleFailure = undefined;
+    } catch (error) {
+      rescheduleFailure = t('event.rescheduleFailed', { error: String(error) });
+      throw error;
+    }
+  }
+
   async function remove(id: EventId) {
     try {
       await core.deleteEvent(id);
@@ -417,6 +453,9 @@
       {#if quitFailure}
         <p role="alert">{quitFailure}</p>
       {/if}
+      {#if rescheduleFailure}
+        <p role="alert">{rescheduleFailure}</p>
+      {/if}
       <CalendarGrid
         view={shown.view}
         date={shown.date}
@@ -428,6 +467,8 @@
         onselectslot={startCreating}
         onopenevent={openDetails}
         onopenday={(date) => navigate(openDay(date))}
+        onreschedule={reschedule}
+        {oninteract}
       />
     </main>
   </div>

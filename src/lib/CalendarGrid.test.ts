@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
@@ -297,4 +297,143 @@ test('draws the hostile title as text, never as markup', async () => {
     expect(screen.getByText(hostile.title.replace(/\s+/g, ' ').trim())).toBeInTheDocument(),
   );
   expect(document.querySelector('img, script:not([src]), b')).toBeNull();
+});
+
+/** The week of 2026-10-05, a Monday, with today on its Saturday. */
+const thatWeek = {
+  view: 'week',
+  date: Temporal.PlainDate.from('2026-10-05'),
+  today: Temporal.PlainDate.from('2026-10-10'),
+} as const;
+
+/** Whether a chip is in the all-day area of the day or week view. */
+function inAllDayArea(found: HTMLElement): boolean {
+  const row = found.closest('[role="row"]');
+  return within(row as HTMLElement).queryByRole('rowheader', { name: 'All-day' }) !== null;
+}
+
+test('lays out overlapping Events side by side in the week view', async () => {
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'First' }),
+      occurrence({
+        eventId: eventId(2),
+        title: 'Second',
+        when: { kind: 'timed', start: '2026-10-05T09:30:00', end: '2026-10-05T10:30:00' },
+      }),
+    ],
+    calendars: [home],
+  });
+  await waitFor(() => expect(screen.getByText('Second')).toBeInTheDocument());
+
+  // Each takes half the day's width, rather than one covering the other.
+  const placement = (title: string) => chip(title).parentElement!.style;
+  expect(placement('First').insetInlineEnd).toBe('50%');
+  expect(placement('Second').insetInlineStart).toBe('50%');
+});
+
+test('shows all-day Events and timed Events of a day or more in the all-day area', async () => {
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'Meeting' }),
+      occurrence({
+        eventId: eventId(2),
+        title: 'Holiday',
+        when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
+      }),
+      occurrence({
+        eventId: eventId(3),
+        title: 'Conference',
+        when: { kind: 'timed', start: '2026-10-07T18:00:00', end: '2026-10-09T12:00:00' },
+      }),
+    ],
+    calendars: [home],
+  });
+  await waitFor(() => expect(screen.getByText('Conference')).toBeInTheDocument());
+
+  expect(inAllDayArea(chip('Holiday'))).toBe(true);
+  expect(inAllDayArea(chip('Conference'))).toBe(true);
+  expect(inAllDayArea(chip('Meeting'))).toBe(false);
+});
+
+/** The handle on a chip's end edge that resizes it: an empty last child. */
+function resizer(found: HTMLElement): Element | undefined {
+  const last = found.lastElementChild;
+  return last && last.childElementCount === 0 && last.textContent === '' ? last : undefined;
+}
+
+test('offers a resize for Events of writable Calendars only', async () => {
+  const shared: Calendar = { ...home, id: calendarId(2), name: 'Shared', readOnly: true };
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'Mine' }),
+      occurrence({ eventId: eventId(2), title: 'Theirs', calendarId: shared.id }),
+    ],
+    calendars: [home, shared],
+    onreschedule: vi.fn(async () => {}),
+  });
+  await waitFor(() => expect(screen.getByText('Theirs')).toBeInTheDocument());
+
+  expect(resizer(chip('Mine'))).toBeDefined();
+  expect(resizer(chip('Theirs'))).toBeUndefined();
+});
+
+/** The day the grid highlights as today. */
+function highlighted(): string | null | undefined {
+  return document
+    .querySelector('[role="columnheader"][aria-current="date"]')
+    ?.getAttribute('data-date');
+}
+
+const newToday = Temporal.PlainDate.from('2026-10-11');
+
+/** Presses on `target` the way each interaction starts, and checks that a new today waits for the release. */
+async function holdsBackTodayWhilePressing(target: () => Element) {
+  const oninteract = vi.fn();
+  const shown = render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [occurrence({ title: 'Dentist' })],
+    calendars: [home],
+    onreschedule: vi.fn(async () => {}),
+    oninteract,
+  });
+  await waitFor(() => expect(screen.getByText('Dentist')).toBeInTheDocument());
+  expect(highlighted()).toBe('2026-10-10');
+
+  fireEvent.mouseDown(target());
+  await shown.rerender({ today: newToday });
+
+  expect(oninteract.mock.calls).toEqual([[true]]);
+  expect(highlighted()).toBe('2026-10-10');
+
+  fireEvent.mouseUp(window);
+
+  await waitFor(() => expect(highlighted()).toBe('2026-10-11'));
+  expect(oninteract.mock.calls).toEqual([[true], [false]]);
+}
+
+test('holds back a new today during a drag', async () => {
+  await holdsBackTodayWhilePressing(() => chip('Dentist'));
+});
+
+test('holds back a new today during a resize', async () => {
+  await holdsBackTodayWhilePressing(() => resizer(chip('Dentist'))!);
+});
+
+test('holds back a new today during a drag-to-create', async () => {
+  await holdsBackTodayWhilePressing(() =>
+    document.querySelector('[role="gridcell"][data-date="2026-10-08"]')!,
+  );
+});
+
+test('shows a new today straight away when nothing is pressed', async () => {
+  const shown = render(CalendarGrid, { ...thatWeek, occurrences: [], calendars: [] });
+  await waitFor(() => expect(highlighted()).toBe('2026-10-10'));
+
+  await shown.rerender({ today: newToday });
+
+  await waitFor(() => expect(highlighted()).toBe('2026-10-11'));
 });

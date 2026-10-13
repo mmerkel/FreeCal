@@ -427,3 +427,37 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   await openOccurrence(user, hostile.title.replace(/\r\n/g, ' '));
   expect(document.querySelector('img, script, b, i')).toBeNull();
 });
+
+test('dragging an Event to another time reschedules it through the core', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const dentist = core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  await showApp(core);
+  const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
+
+  await stubGrid.props!.onreschedule!(dentist.id, later);
+
+  expect(core.calls.filter((call) => call === 'rescheduleEvent')).toHaveLength(1);
+  expect(core.events[0]).toMatchObject({ title: 'Dentist', when: later });
+  await waitFor(() => expect(stubGrid.props!.occurrences[0]?.when).toEqual(later));
+});
+
+test('a refused drag says why and tells the grid to put the Event back', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const dentist = core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  await showApp(core);
+  vi.spyOn(core, 'rescheduleEvent').mockRejectedValueOnce(new Error('disk full'));
+  const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
+
+  await expect(stubGrid.props!.onreschedule!(dentist.id, later)).rejects.toThrow('disk full');
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'The event couldn’t be moved: Error: disk full',
+  );
+  expect(core.events[0]?.when).toEqual(monday);
+
+  await stubGrid.props!.onreschedule!(dentist.id, later);
+
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});

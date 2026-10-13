@@ -31,6 +31,7 @@ export const tauriCore: CoreApi = {
   event: (id) => invoke('event', { id }),
   createEvent: (draft) => invoke('create_event', { draft }),
   editEvent: (id, draft) => invoke('edit_event', { id, draft }),
+  rescheduleEvent: (id, when) => invoke('reschedule_event', { id, when }),
   deleteEvent: (id) => invoke('delete_event', { id }),
   openLink: (url) => invoke('open_link', { url }),
   version: () => invoke('version'),

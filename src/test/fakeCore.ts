@@ -250,6 +250,15 @@ export class FakeCore implements CoreApi {
     return structuredClone(event);
   }
 
+  async rescheduleEvent(id: EventId, when: When) {
+    this.calls.push('rescheduleEvent');
+    const event = this.findEvent(id);
+    this.writable(event.calendarId);
+    event.when = { ...when };
+    this.emit({ kind: 'occurrencesChanged', calendarIds: [event.calendarId] });
+    return structuredClone(event);
+  }
+
   async deleteEvent(id: EventId) {
     this.calls.push('deleteEvent');
     const { calendarId } = this.findEvent(id);

@@ -188,6 +188,37 @@ test('on “Date changed” only the today highlight moves while not tracking', 
   expect(todayButton()).toHaveAttribute('aria-pressed', 'false');
 });
 
+test('a “Date changed” during a press on the grid waits for its end to move the view', async () => {
+  const { core } = await showApp();
+
+  stubGrid.props!.oninteract!(true);
+  core.changeDate('2026-10-04');
+  await tick();
+
+  // The grid holds back its own today highlight meanwhile.
+  expect(shown()).toMatchObject({ date: '2026-10-03', today: '2026-10-04' });
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
+
+  stubGrid.props!.oninteract!(false);
+  await tick();
+
+  expect(shown()).toMatchObject({ date: '2026-10-04', today: '2026-10-04' });
+  expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a press on the grid without a “Date changed” leaves the view where it is', async () => {
+  const { core, user } = await showApp();
+  await user.click(screen.getByRole('button', { name: 'Next month' }));
+  const before = shown();
+
+  stubGrid.props!.oninteract!(true);
+  stubGrid.props!.oninteract!(false);
+  core.changeDate('2026-10-04');
+  await tick();
+
+  expect(shown()).toEqual({ ...before, today: '2026-10-04' });
+});
+
 test('opening and closing dialogs keeps tracking today', async () => {
   const core = new FakeCore();
   core.addCalendar({ name: 'Home' });

@@ -12,6 +12,7 @@ import type {
   SidebarState,
   Signal,
   View,
+  When,
 } from './types';
 
 /** The core application interface. The frontend talks only to this. */
@@ -53,6 +54,11 @@ export interface CoreApi {
   createEvent(draft: EventDraft): Promise<Event>;
   /** Changes an Event, possibly moving it to another writable Calendar. */
   editEvent(id: EventId, draft: EventDraft): Promise<Event>;
+  /**
+   * Moves an Event to another time, as a drag or a resize in the grid does,
+   * and leaves everything else as it is.
+   */
+  rescheduleEvent(id: EventId, when: When): Promise<Event>;
   deleteEvent(id: EventId): Promise<void>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;

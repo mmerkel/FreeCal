@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
     Occurrence, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View,
-    link_allowed,
+    When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -155,6 +155,11 @@ fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResul
 }
 
 #[tauri::command]
+fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult<Event> {
+    core.reschedule_event(id, when).map_err(to_message)
+}
+
+#[tauri::command]
 fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
     core.delete_event(id).map_err(to_message)
 }
@@ -245,6 +250,7 @@ fn main() {
             event,
             create_event,
             edit_event,
+            reschedule_event,
             delete_event,
             open_link,
             version,

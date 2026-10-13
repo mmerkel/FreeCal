@@ -8,5 +8,6 @@
 
 - [ ] Editing an Occurrence asks for the scope: this / this and following / all
 - [ ] Dropping a dragged or resized Occurrence asks for the scope; cancel reverts the drag (component test)
+- [ ] While the scope prompt for a drop is open, a "Date changed" waits as it does during a drag (ticket 05): the grid holds back the new today and the App the jump while tracking today (component test)
 - [ ] "This event" creates an Exception; "this and following" splits the Recurring Event; "all" changes the whole
 - [ ] Exceptions are preserved when unrelated parts of the Recurring Event change, where possible

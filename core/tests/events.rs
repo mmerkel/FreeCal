@@ -232,6 +232,119 @@ fn moving_an_event_to_another_calendar_signals_both() {
 }
 
 #[test]
+fn rescheduling_changes_only_the_time_and_is_signalled() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let created = core
+        .create_event(EventDraft {
+            calendar_id: home.id,
+            title: "Dentist".to_owned(),
+            when: timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
+            location: "Main Street 1".to_owned(),
+            description: "Bring the card".to_owned(),
+        })
+        .unwrap();
+    let signals_before = harness.signals.received().len();
+
+    let moved = core
+        .reschedule_event(
+            created.id,
+            timed("2026-10-06T14:00:00", "2026-10-06T15:30:00"),
+        )
+        .unwrap();
+    drop(core);
+    let relaunch = harness.open();
+
+    assert_eq!(relaunch.event(created.id).unwrap(), moved);
+    assert_eq!(
+        moved.when,
+        timed("2026-10-06T14:00:00", "2026-10-06T15:30:00")
+    );
+    assert_eq!(
+        (
+            moved.calendar_id,
+            moved.title,
+            moved.location,
+            moved.description
+        ),
+        (
+            created.calendar_id,
+            created.title,
+            created.location,
+            created.description
+        )
+    );
+    assert_eq!(
+        harness.signals.received()[signals_before..],
+        [occurrences_changed(&[home.id])]
+    );
+}
+
+#[test]
+fn rescheduling_can_make_a_timed_event_all_day_and_back() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let created = core
+        .create_event(draft(
+            home.id,
+            "Lunch",
+            timed("2026-10-05T12:00:00", "2026-10-05T13:00:00"),
+        ))
+        .unwrap();
+
+    let all_day_now = core
+        .reschedule_event(created.id, all_day("2026-10-07", "2026-10-08"))
+        .unwrap();
+    let timed_again = core
+        .reschedule_event(
+            created.id,
+            timed("2026-10-08T08:00:00", "2026-10-08T09:00:00"),
+        )
+        .unwrap();
+
+    assert_eq!(all_day_now.when, all_day("2026-10-07", "2026-10-08"));
+    assert_eq!(
+        timed_again.when,
+        timed("2026-10-08T08:00:00", "2026-10-08T09:00:00")
+    );
+}
+
+#[test]
+fn rescheduling_is_refused_for_read_only_events_and_backwards_times() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let work = calendar(&core, "Work");
+    let day = all_day("2026-10-05", "2026-10-06");
+    let in_home = core.create_event(draft(home.id, "Mine", day)).unwrap();
+    let in_work = core.create_event(draft(work.id, "Theirs", day)).unwrap();
+    harness.arrange_local_store(&format!(
+        "UPDATE calendar SET read_only = 1 WHERE id = {}",
+        work.id.0
+    ));
+    let signals_before = harness.signals.received().len();
+
+    let read_only = core.reschedule_event(in_work.id, all_day("2026-10-07", "2026-10-08"));
+    let backwards = core.reschedule_event(
+        in_home.id,
+        timed("2026-10-05T10:00:00", "2026-10-05T09:00:00"),
+    );
+    let missing = core.reschedule_event(EventId(999), day);
+
+    assert!(matches!(read_only, Err(CoreError::CalendarReadOnly(id)) if id == work.id));
+    assert!(matches!(backwards, Err(CoreError::EndBeforeStart)));
+    assert!(matches!(
+        missing,
+        Err(CoreError::EventNotFound(EventId(999)))
+    ));
+    assert_eq!(core.event(in_work.id).unwrap().when, day);
+    assert_eq!(core.event(in_home.id).unwrap().when, day);
+    assert_eq!(harness.signals.received().len(), signals_before);
+}
+
+#[test]
 fn deleting_an_event_removes_it_and_is_signalled() {
     let harness = Harness::new();
     let core = harness.open();
@@ -586,4 +699,36 @@ mod hostile {
         assert_only_allowed_links(&description.paragraphs);
         assert!(links(&description.paragraphs).contains(&"https://example.com/agenda".to_owned()));
     }
+}
+
+#[test]
+fn rescheduling_keeps_the_event_time_zone_and_an_html_description() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let created = core
+        .create_event(draft(
+            home.id,
+            "Call",
+            timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
+        ))
+        .unwrap();
+    arrange_html_description(&harness, created.id, "<b>Agenda</b>");
+    let before = core.event(created.id).unwrap().description;
+    harness.clock.set_time_zone("America/New_York");
+
+    // A day later, as dragged in New York: 03:00 to 04:00 there.
+    core.reschedule_event(
+        created.id,
+        timed("2026-10-06T03:00:00", "2026-10-06T04:00:00"),
+    )
+    .unwrap();
+    harness.clock.set_time_zone("Europe/Berlin");
+
+    let after = core.event(created.id).unwrap();
+    assert_eq!(
+        after.when,
+        timed("2026-10-06T09:00:00", "2026-10-06T10:00:00")
+    );
+    assert_eq!(after.description, before);
 }

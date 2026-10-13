@@ -98,6 +98,7 @@ export const en = {
   'event.endBeforeStart': 'The event can’t end before it starts.',
   'event.saveFailed': 'The event couldn’t be saved: {error}',
   'event.deleteFailed': 'The event couldn’t be deleted: {error}',
+  'event.rescheduleFailed': 'The event couldn’t be moved: {error}',
   'event.readFailed': 'The event couldn’t be read: {error}',
   'event.noCalendarTitle': 'No calendar for new events',
   'event.noCalendarBody': 'Create a calendar first with the + next to “{account}” in the sidebar.',

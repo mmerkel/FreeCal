@@ -81,6 +81,7 @@ test('the Event commands pass their arguments under the names the shell expects'
   await tauriCore.event(eventId(7));
   await tauriCore.createEvent(draft);
   await tauriCore.editEvent(eventId(7), draft);
+  await tauriCore.rescheduleEvent(eventId(7), draft.when);
   await tauriCore.deleteEvent(eventId(7));
   await tauriCore.openLink('https://example.com');
 
@@ -89,6 +90,7 @@ test('the Event commands pass their arguments under the names the shell expects'
     ['event', { id: 7 }],
     ['create_event', { draft }],
     ['edit_event', { id: 7, draft }],
+    ['reschedule_event', { id: 7, when: draft.when }],
     ['delete_event', { id: 7 }],
     ['open_link', { url: 'https://example.com' }],
   ]);

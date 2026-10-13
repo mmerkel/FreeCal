@@ -14,13 +14,14 @@
   // has the window's light and dark colours (spec: "Visual style").
   import 'fullcalendar/themes/classic/theme.css';
   import 'fullcalendar/themes/classic/palette.css';
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import type { Calendar, EventId, Occurrence, View, When } from '../core/types';
   import { t } from '../i18n';
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
   import { firstWeekdayNumber } from './week.svelte';
-  import { plainDateOf, whenOfSelection, type VisibleRange } from './when';
+  import { idOf, rescheduleOfDrop, rescheduleOfResize, type Reschedule } from './gridDrag';
+  import { allDaySpan, plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
   interface Props {
     view: View;
@@ -41,6 +42,17 @@
     onopenevent?: (id: EventId) => void;
     /** The user clicked a day number or a day's heading. */
     onopenday?: (date: Temporal.PlainDate) => void;
+    /**
+     * The user dragged an Occurrence to another time or dragged its edge. If
+     * the promise rejects, the Occurrence goes back to where it was.
+     */
+    onreschedule?: (id: EventId, when: When) => Promise<void>;
+    /**
+     * The user started (`true`) or ended (`false`) pressing on the grid, as
+     * for a drag, a resize or a drag-to-create. Meanwhile the grid holds back
+     * a new today, and its owner should hold back moving the view.
+     */
+    oninteract?: (interacting: boolean) => void;
   }
 
   /** FullCalendar's names for FreeCal's views. */
@@ -57,15 +69,60 @@
     onselectslot,
     onopenevent,
     onopenday,
+    onreschedule,
+    oninteract,
   }: Props = $props();
 
   let element: HTMLDivElement;
   let grid = $state<FullCalendar>();
 
+  /**
+   * Whether the user is pressing on the grid. A new grid would drop a drag,
+   * a resize or a drag-to-create without a word, so a new today waits.
+   */
+  let interacting = $state(false);
+  let shownToday = $state(untrack(() => today));
+  let interactionEnd: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    const next = today;
+    if (!interacting) shownToday = next;
+  });
+
+  function startInteracting() {
+    clearTimeout(interactionEnd);
+    interactionEnd = undefined;
+    if (interacting) return;
+    interacting = true;
+    oninteract?.(true);
+  }
+
+  function endInteracting() {
+    if (!interacting || interactionEnd !== undefined) return;
+    // After FullCalendar has handled the same release, so that the drop or
+    // selection lands on the grid it started on.
+    interactionEnd = setTimeout(() => {
+      interactionEnd = undefined;
+      interacting = false;
+      oninteract?.(false);
+    });
+  }
+
+  onDestroy(() => clearTimeout(interactionEnd));
+
+  /** Counts drags the owner refused, so that the Occurrences are drawn again. */
+  let redraws = $state(0);
+
+  function reschedule({ id, when }: Reschedule) {
+    // The grid may be a new one by the time the core answers, so the
+    // Occurrences are drawn again rather than the drag reverted.
+    onreschedule?.(id, when).catch(() => redraws++);
+  }
+
   // FullCalendar reads `now` only when it is created, so a new today, once a
   // day, builds a new grid.
   $effect(() => {
-    const now = today.toString();
+    const now = shownToday.toString();
     // The effects below follow changes of these; reading them here only
     // saves the first render a wrong range.
     const initial = untrack(() => ({
@@ -91,7 +148,11 @@
       navLinkDayClick: (day) => onopenday?.(plainDateOf(day)),
       height: '100%',
       selectable: true,
-      editable: false,
+      // Read-only Occurrences say otherwise (spec: "Event chips stay sparse").
+      editable: true,
+      forceEventDuration: true,
+      // Overlapping Occurrences side by side, none hidden behind another.
+      slotEventOverlap: false,
       datesSet: (range) =>
         onrangechange?.({ from: plainDateOf(range.start), to: plainDateOf(range.end) }),
       select: (selection) => {
@@ -100,9 +161,10 @@
       },
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
-        // FullCalendar keeps the ID as a string; it came from an Occurrence.
-        onopenevent?.(Number(clicked.event.id) as EventId);
+        onopenevent?.(idOf(clicked.event));
       },
+      eventDrop: (dropped) => reschedule(rescheduleOfDrop(dropped)),
+      eventResize: (resized) => reschedule(rescheduleOfResize(resized)),
     });
     // FullCalendar reports the visible range while it renders. The owner's
     // handler must not become a dependency of this effect.
@@ -137,16 +199,27 @@
   });
 
   $effect(() => {
-    const colours = new Map(calendars.map((calendar) => [calendar.id, calendar.colour]));
+    // Draws the Occurrences again after a refused drag.
+    redraws;
+    // Without a handler there is nothing to tell about a drag.
+    const movable = onreschedule !== undefined;
+    const calendarsById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+    const timeGrid = view !== 'month';
     const events: EventInput[] = occurrences.map((occurrence) => {
-      const colour = colours.get(occurrence.calendarId);
+      const calendar = calendarsById.get(occurrence.calendarId);
+      const colour = calendar?.colour;
+      // A timed Occurrence of a day or more goes to the all-day area, so that
+      // it doesn't cover the time grid.
+      const span = timeGrid ? allDaySpan(occurrence.when) : undefined;
       return {
         id: String(occurrence.eventId),
         // Titles are untrusted; FullCalendar draws them as text, never as HTML.
         title: occurrence.title || t('event.untitled'),
-        start: occurrence.when.start,
-        end: occurrence.when.end,
-        allDay: occurrence.when.kind === 'allDay',
+        start: span?.start ?? occurrence.when.start,
+        end: span?.end ?? occurrence.when.end,
+        allDay: span !== undefined || occurrence.when.kind === 'allDay',
+        editable: movable && calendar !== undefined && !calendar.readOnly,
+        extendedProps: { when: occurrence.when },
         color: colour,
         contrastColor: colour && textColourOn(colour),
         className: occurrence.eventId === selectedEventId ? 'selected-event' : undefined,
@@ -157,7 +230,21 @@
   });
 </script>
 
-<div class="calendar-grid" bind:this={element}></div>
+<svelte:window
+  onmouseup={endInteracting}
+  ontouchend={endInteracting}
+  ontouchcancel={endInteracting}
+/>
+
+<!-- The same mouse and touch events FullCalendar starts and ends its drags
+     with. While a button is held the window keeps the pointer, so the release
+     arrives even outside it. -->
+<div
+  class="calendar-grid"
+  bind:this={element}
+  onmousedowncapture={startInteracting}
+  ontouchstartcapture={startInteracting}
+></div>
 
 <style>
   .calendar-grid {

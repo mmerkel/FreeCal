@@ -319,6 +319,25 @@ impl Core {
         self.to_event(id, after)
     }
 
+    /// Moves an Event to another time, as a drag or a resize in the grid
+    /// does, and leaves everything else as stored. `when` is in the Display
+    /// Time Zone; a timed Event keeps its Event Time Zones.
+    pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Event> {
+        let zone = self.clock.time_zone();
+        let after = {
+            let store = self.store();
+            let mut event = store.find_event(id)?;
+            writable(&store, event.calendar_id)?;
+            event.fields.when = event.fields.when.edit(when, zone)?;
+            store.update_event(id, &event)?;
+            event
+        };
+        self.signals.send(Signal::OccurrencesChanged {
+            calendar_ids: vec![after.calendar_id],
+        });
+        self.to_event(id, after)
+    }
+
     /// Deletes an Event from a writable Calendar.
     pub fn delete_event(&self, id: EventId) -> Result<()> {
         let calendar_id = {
