@@ -8,7 +8,7 @@ Implement the work described by the user in the spec or tickets.
 
 Use /tdd where possible, at pre-agreed seams.
 
-Run typechecking regularly, single test files regularly, and the full test suite once at the end.
+Run typechecking regularly and single test files regularly. The commit's pre-commit hook runs the full suite; a failing hook means the work isn't done.
 
 Once done, use /code-review to review the work.
 
