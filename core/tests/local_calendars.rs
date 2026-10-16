@@ -12,17 +12,54 @@ fn colour(hex: &str) -> Colour {
 }
 
 #[test]
-fn a_new_local_store_has_no_calendars() {
+fn a_new_local_store_has_home_shown_and_work_hidden() {
     let harness = Harness::new();
     let core = harness.open();
+    let local = local_account(&core);
 
-    assert!(core.list_calendars().unwrap().is_empty());
+    let calendars: Vec<_> = core
+        .list_calendars()
+        .unwrap()
+        .into_iter()
+        .map(|calendar| {
+            (
+                calendar.account_id,
+                calendar.name,
+                calendar.colour,
+                calendar.shown,
+                calendar.read_only,
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        calendars,
+        vec![
+            (local, "Home".to_owned(), colour("#3f51b5"), true, false),
+            (local, "Work".to_owned(), colour("#ad1457"), false, false),
+        ]
+    );
+    assert!(harness.signals.received().is_empty());
+}
+
+#[test]
+fn deleted_starting_calendars_never_come_back() {
+    let harness = Harness::new();
+    let first_launch = harness.open();
+    for calendar in first_launch.list_calendars().unwrap() {
+        first_launch.delete_calendar(calendar.id).unwrap();
+    }
+    drop(first_launch);
+
+    let relaunch = harness.open();
+
+    assert!(relaunch.list_calendars().unwrap().is_empty());
 }
 
 #[test]
 fn a_created_calendar_is_listed_under_its_account_and_shown() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
 
     let created = core
@@ -40,7 +77,7 @@ fn a_created_calendar_is_listed_under_its_account_and_shown() {
 #[test]
 fn calendars_are_listed_in_the_order_they_were_created() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
 
     core.create_calendar(local, "Work", colour("#aa0000"))
@@ -60,7 +97,7 @@ fn calendars_are_listed_in_the_order_they_were_created() {
 #[test]
 fn calendars_survive_a_relaunch() {
     let harness = Harness::new();
-    let first_launch = harness.open();
+    let first_launch = harness.open_without_starting_calendars();
     let local = local_account(&first_launch);
     let created = first_launch
         .create_calendar(local, "Home", colour("#3366cc"))
@@ -79,7 +116,7 @@ fn calendars_survive_a_relaunch() {
 #[test]
 fn a_calendar_name_is_trimmed_and_must_not_be_empty() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
 
     let created = core
@@ -103,7 +140,7 @@ fn a_calendar_name_is_trimmed_and_must_not_be_empty() {
 #[test]
 fn creating_a_calendar_in_an_unknown_account_is_refused() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
 
     let result = core.create_calendar(AccountId(999), "Home", colour("#3366cc"));
 
@@ -117,7 +154,7 @@ fn creating_a_calendar_in_an_unknown_account_is_refused() {
 #[test]
 fn renaming_a_calendar_changes_only_its_name() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let created = core
         .create_calendar(local, "Home", colour("#3366cc"))
@@ -137,7 +174,7 @@ fn renaming_a_calendar_changes_only_its_name() {
 #[test]
 fn recolouring_a_calendar_changes_only_its_colour() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let created = core
         .create_calendar(local, "Home", colour("#3366cc"))
@@ -155,7 +192,7 @@ fn recolouring_a_calendar_changes_only_its_colour() {
 #[test]
 fn deleting_a_calendar_removes_it() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let doomed = core
         .create_calendar(local, "Old", colour("#3366cc"))
@@ -173,7 +210,7 @@ fn deleting_a_calendar_removes_it() {
 #[test]
 fn hiding_and_showing_a_calendar_is_recorded_and_signalled() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let created = core
         .create_calendar(local, "Home", colour("#3366cc"))
@@ -191,7 +228,7 @@ fn hiding_and_showing_a_calendar_is_recorded_and_signalled() {
 #[test]
 fn showing_only_one_calendar_hides_all_others_with_one_signal() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let home = core
         .create_calendar(local, "Home", colour("#3366cc"))
@@ -226,7 +263,7 @@ fn showing_only_one_calendar_hides_all_others_with_one_signal() {
 #[test]
 fn changing_an_unknown_calendar_is_refused_without_a_signal() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let missing = CalendarId(999);
 
     let results = [
@@ -267,7 +304,7 @@ fn a_colour_is_six_digit_hex_and_kept_in_lower_case() {
 #[test]
 fn a_hostile_calendar_name_is_stored_and_returned_as_plain_text() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let hostile = "<img src=x onerror=alert(1)>'); DROP TABLE calendar; --";
 
@@ -280,7 +317,7 @@ fn a_hostile_calendar_name_is_stored_and_returned_as_plain_text() {
 #[test]
 fn an_invalid_stored_colour_is_read_as_the_default_colour() {
     let harness = Harness::new();
-    let core = harness.open();
+    let core = harness.open_without_starting_calendars();
     let local = local_account(&core);
     let created = core
         .create_calendar(local, "Home", colour("#3366cc"))

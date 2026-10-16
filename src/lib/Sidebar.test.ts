@@ -43,6 +43,47 @@ test('an Account’s full name is in its heading’s tooltip', async () => {
   expect(screen.getByRole('heading', { name: 'Local' })).toHaveAttribute('title', 'Local');
 });
 
+test('with no Calendars, the Local Account shows a hint until one is created', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  await showApp(core);
+  const hint = 'No calendars yet. Use + to create one.';
+
+  expect(screen.getByText(hint)).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'New calendar' }));
+  await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Home{Enter}');
+
+  await screen.findByRole('switch', { name: 'Home' });
+  expect(screen.queryByText(hint)).not.toBeInTheDocument();
+});
+
+test('a Calendar’s tooltip says whether it is shown and what a click does', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  core.addCalendar({ name: 'Work', shown: false });
+  await showApp(core);
+
+  expect(screen.getByRole('switch', { name: 'Home' })).toHaveAttribute(
+    'title',
+    'Home: shown, click to hide',
+  );
+  expect(screen.getByRole('switch', { name: 'Work' })).toHaveAttribute(
+    'title',
+    'Work: hidden, click to show',
+  );
+
+  await user.click(screen.getByRole('switch', { name: 'Home' }));
+
+  await waitFor(() =>
+    expect(screen.getByRole('switch', { name: 'Home' })).toHaveAttribute(
+      'title',
+      'Home: hidden, click to show',
+    ),
+  );
+});
+
 test('clicking a Calendar’s row hides and shows it', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();

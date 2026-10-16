@@ -174,11 +174,14 @@
                 class="row toggle"
                 role="switch"
                 aria-checked={calendar.shown}
+                title={t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
+                  name: calendar.name,
+                })}
                 {...menuOpeners(calendar)}
                 onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
               >
                 <span class="dot" style:--colour={calendar.colour} aria-hidden="true"></span>
-                <span class="name" title={calendar.name}>{calendar.name}</span>
+                <span class="name">{calendar.name}</span>
               </button>
               <button
                 type="button"
@@ -259,6 +262,8 @@
           <li>
             {@render nameForm('', newCalendarColour(calendars), (name) => create(account.id, name))}
           </li>
+        {:else if account.provider === 'local' && calendarsOf(account).length === 0}
+          <li class="hint">{t('sidebar.noCalendars')}</li>
         {/if}
       </ul>
     </section>
@@ -332,7 +337,7 @@
     border-radius: var(--radius);
   }
 
-  li:hover,
+  li:not(.hint):hover,
   li.open {
     background: var(--hover);
   }
@@ -438,6 +443,10 @@
     box-shadow:
       0 0 0 2px var(--surface-raised),
       0 0 0 3px var(--foreground);
+  }
+
+  .hint {
+    color: var(--foreground-muted);
   }
 
   .failure {

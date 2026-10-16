@@ -30,3 +30,15 @@ fn an_account_with_an_unknown_provider_is_an_error_not_a_crash() {
         ));
     }
 }
+
+#[test]
+fn a_local_store_holds_only_one_local_account() {
+    let harness = Harness::new();
+    drop(harness.open());
+
+    let result =
+        harness.try_arrange_local_store("INSERT INTO account (provider) VALUES ('local');");
+
+    assert!(result.is_err());
+    assert_eq!(harness.open().list_accounts().unwrap().len(), 1);
+}

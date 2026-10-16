@@ -23,10 +23,10 @@ Rebuild after every frontend or Rust change; the binary embeds the compiled fron
 
 ```bash
 R=.claude/skills/run-freecal/freecal.sh
-$R start --fresh                 # Xvfb on :97, FreeCal with an empty Local Store
+$R start --fresh                 # Xvfb on :97, FreeCal with a new Local Store
 $R shot start                    # → /tmp/freecal-run/shots/start.png — Read it and look
 $R click 200 27                  # "+" (New calendar) next to the account heading
-$R type "Home" && $R key Return
+$R type "Birthdays" && $R key Return
 $R move 600 700                  # park the mouse so no row shows its hover actions
 $R shot sidebar 260x200+0+0      # crop to the sidebar
 $R cursor 236 30                 # → pointer: the cursor's name over Today
@@ -39,7 +39,7 @@ $R stop                          # stops FreeCal and Xvfb
 | command | what it does |
 |---|---|
 | `build` | debug build without bundles |
-| `start [--fresh]` | start Xvfb (if needed) and FreeCal, wait for the window; `--fresh` deletes the Local Store first |
+| `start [--fresh]` | start Xvfb (if needed) and FreeCal, wait for the window; `--fresh` deletes the Local Store first, so FreeCal starts on a new one with Home (shown) and Work (hidden) |
 | `restart` | relaunch FreeCal, keeping the Local Store |
 | `stop` | stop FreeCal and Xvfb |
 | `shot NAME [GEOM]` | screenshot to `/tmp/freecal-run/shots/NAME.png`; `GEOM` crops (`WxH+X+Y`) |
@@ -54,7 +54,7 @@ $R stop                          # stops FreeCal and Xvfb
 
 `FREECAL_RUN_DIR` (default `/tmp/freecal-run`) and `FREECAL_DISPLAY` (default `:97`) override the locations.
 
-**Finding coordinates:** there is no DOM access, so take a full screenshot, read it, and click by pixel. The window sits at 0,0 and is 1200×800 on the 1280×800 screen. Layout as of ticket 47, with the sidebar at its default 12rem: the sidebar's account heading is at y≈27, with its "+" (New calendar) at x≈168. Calendar rows start at y≈56 and are 28 px apart; clicking a row shows or hides it. Each row's ⋮ button is at x≈170. Its menu opens below the row: from the Home row (y≈56), the 24 swatches are in three rows at y≈108, 127 and 145 (x≈23 to 161, 20 px apart), Rename at y≈182, Show only this at y≈212 and Delete at y≈251. While a menu is open, a click or right-click anywhere outside it only closes it. Shift+F10 on a focused row opens the same menu. The delete dialog's Cancel and Delete are at about 660,447 and 740,447. As of ticket 47 the sidebar is 192 px wide (12rem) and the grid starts at x≈204.
+**Finding coordinates:** there is no DOM access, so take a full screenshot, read it, and click by pixel. The window sits at 0,0 and is 1200×800 on the 1280×800 screen. Layout as of ticket 47, with the sidebar at its default 12rem: the sidebar's account heading is at y≈27, with its "+" (New calendar) at x≈168. Calendar rows start at y≈56 and are 28 px apart; as of ticket 34 a new Local Store has Home at y≈56 and Work at y≈84, and with no Calendars the account shows a hint instead of rows; clicking a row shows or hides it. Each row's ⋮ button is at x≈170. Its menu opens below the row: from the Home row (y≈56), the 24 swatches are in three rows at y≈108, 127 and 145 (x≈23 to 161, 20 px apart), Rename at y≈182, Show only this at y≈212 and Delete at y≈251. While a menu is open, a click or right-click anywhere outside it only closes it. Shift+F10 on a focused row opens the same menu. The delete dialog's Cancel and Delete are at about 660,447 and 740,447. As of ticket 47 the sidebar is 192 px wide (12rem) and the grid starts at x≈204.
 
 As of ticket 04, a toolbar sits over the grid at y≈30. As of ticket 47 it starts with Today at x≈236 (pressed while tracking today), then previous and next at 297 and 335, the period title from x≈364, and Day, Week and Month at 992, 1048 and 1112. The shortcuts `d`, `w`, `m`, `j`, `k` and `t` are often easier than clicks. The view is stored in `app_state` (`sql 'select view from app_state'`), so `start --fresh` opens in month view and `restart` reopens the last one.
 

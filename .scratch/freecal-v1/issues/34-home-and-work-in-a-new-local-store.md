@@ -4,18 +4,22 @@
 
 **Blocked by:** 02, 32
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A new Local Store is created with the Local Account and two Calendars in it: "Home" (`#3f51b5`, shown) and "Work" (`#ad1457`, hidden), the first two colours of `NEW_CALENDAR_ORDER` in `src/lib/palette.ts`. They are created in the same step as the Local Account, so no Signal is sent
-- [ ] Only a new Local Store gets them: opening an existing Local Store never creates Calendars, so deleted ones never come back (core test: delete both, reopen, still none)
-- [ ] `a_new_local_store_has_no_calendars` becomes a test that a new Local Store has Home (shown) and Work (hidden)
-- [ ] A new migration adds a partial unique index so that the Local Store can't hold a second Local Account (core test: inserting one is refused)
-- [ ] When the Local Account has no Calendars, its section shows "No calendars yet. Use + to create one."
-- [ ] Each Calendar row's tooltip is "<name>: shown, click to hide" or "<name>: hidden, click to show". It replaces the name-only tooltip on the name, so long names can still be read in full
-- [ ] Every string goes through `t()`
-- [ ] Component tests against the fake core: the hint appears with no Calendars and goes when one is created; the tooltip follows the shown state
-- [ ] Checked by hand with `run-freecal start --fresh`: Home and Work appear, and the driver's notes in `.claude/skills/run-freecal/SKILL.md` say that a fresh Local Store now has them
+- [x] A new Local Store is created with the Local Account and two Calendars in it: "Home" (`#3f51b5`, shown) and "Work" (`#ad1457`, hidden), the first two colours of `NEW_CALENDAR_ORDER` in `src/lib/palette.ts`. They are created in the same step as the Local Account, so no Signal is sent
+- [x] Only a new Local Store gets them: opening an existing Local Store never creates Calendars, so deleted ones never come back (core test: delete both, reopen, still none)
+- [x] `a_new_local_store_has_no_calendars` becomes a test that a new Local Store has Home (shown) and Work (hidden)
+- [x] A new migration adds a partial unique index so that the Local Store can't hold a second Local Account (core test: inserting one is refused)
+- [x] When the Local Account has no Calendars, its section shows "No calendars yet. Use + to create one."
+- [x] Each Calendar row's tooltip is "<name>: shown, click to hide" or "<name>: hidden, click to show". It replaces the name-only tooltip on the name, so long names can still be read in full
+- [x] Every string goes through `t()`
+- [x] Component tests against the fake core: the hint appears with no Calendars and goes when one is created; the tooltip follows the shown state
+- [x] Checked by hand with `run-freecal start --fresh`: Home and Work appear, and the driver's notes in `.claude/skills/run-freecal/SKILL.md` say that a fresh Local Store now has them
 
 The names are stored in English, because v1 ships English only and the core creates them before the frontend runs. When FreeCal is translated, the core should pick the two names from the system locale when it creates the Local Store; they stay as they are afterwards, like any name the user typed.
 
 Out of scope: what creating an Event does when there is no writable Calendar (ticket 03).
+
+## Comments
+
+- 2026-10-16: Done. The core adds Home and Work in the same transaction that creates the schema, only when the Local Store had no migrations applied yet. The core tests use `Harness::open_without_starting_calendars` to start with no Calendars. The tooltip now sits on the whole row (the switch), not only the name. The hint is hidden while the new-calendar name field is open, since the user is already using "+". `FakeCore` still starts with no Calendars; frontend tests add the ones they need.

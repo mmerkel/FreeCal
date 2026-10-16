@@ -419,7 +419,12 @@ fn events_of_read_only_calendars_cannot_be_changed() {
     ));
     let signals_before = harness.signals.received().len();
 
-    assert!(core.list_calendars().unwrap()[1].read_only);
+    assert!(
+        core.list_calendars()
+            .unwrap()
+            .iter()
+            .any(|c| c.id == work.id && c.read_only)
+    );
     let refused = [
         core.create_event(draft(work.id, "New", day)).map(|_| ()),
         core.edit_event(in_work.id, draft(work.id, "Changed", day))

@@ -75,7 +75,32 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE app_state ADD COLUMN sidebar_width REAL;
     ",
     ),
+    Migration::Sql(
+        "
+    CREATE UNIQUE INDEX one_local_account ON account (provider) WHERE provider = 'local';
+    ",
+    ),
 ];
+
+/// The Local Calendars a new Local Store starts with: name, colour and whether
+/// it is shown. The colours are the first two of the frontend's
+/// `NEW_CALENDAR_ORDER`. The names are English because v1 ships English only.
+const STARTING_CALENDARS: &[(&str, &str, bool)] =
+    &[("Home", "#3f51b5", true), ("Work", "#ad1457", false)];
+
+/// Puts the starting Calendars into the Local Account of a Local Store that
+/// was just created. An existing Local Store never gets them, so deleted
+/// ones never come back.
+fn add_starting_calendars(tx: &Transaction) -> Result<()> {
+    for (name, colour, shown) in STARTING_CALENDARS {
+        tx.execute(
+            "INSERT INTO calendar (account_id, name, colour, shown) \
+             SELECT id, ?1, ?2, ?3 FROM account WHERE provider = 'local'",
+            params![name, colour, shown],
+        )?;
+    }
+    Ok(())
+}
 
 enum Migration {
     Sql(&'static str),
@@ -576,6 +601,9 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             Migration::Code(migrate) => migrate(&tx)?,
         }
         tx.pragma_update(None, "user_version", index as i64 + 1)?;
+    }
+    if applied == 0 {
+        add_starting_calendars(&tx)?;
     }
     recompute_instants(&tx)?;
     tx.commit()?;

@@ -41,14 +41,30 @@ impl Harness {
         )
     }
 
+    /// Like [`Harness::open`], on a Local Store without the Calendars a new
+    /// one starts with, and with no Signals recorded yet.
+    pub fn open_without_starting_calendars(&self) -> Core {
+        let core = self.open();
+        for calendar in core.list_calendars().expect("list calendars") {
+            core.delete_calendar(calendar.id).expect("delete calendar");
+        }
+        self.signals.clear();
+        core
+    }
+
     /// Arranges the Local Store's state before a launch by running `sql`
     /// directly on its file. Only for putting the file into a state the
     /// interface can't produce; tests verify through the interface, never here.
     pub fn arrange_local_store(&self, sql: &str) {
-        let path = self.data_dir.path().join("freecal.sqlite3");
-        rusqlite::Connection::open(path)
-            .and_then(|conn| conn.execute_batch(sql))
+        self.try_arrange_local_store(sql)
             .expect("arrange the Local Store");
+    }
+
+    /// Like [`Harness::arrange_local_store`], for SQL the Local Store is
+    /// expected to refuse.
+    pub fn try_arrange_local_store(&self, sql: &str) -> rusqlite::Result<()> {
+        let path = self.data_dir.path().join("freecal.sqlite3");
+        rusqlite::Connection::open(path).and_then(|conn| conn.execute_batch(sql))
     }
 }
 
@@ -100,6 +116,10 @@ pub struct RecordingSignals {
 impl RecordingSignals {
     pub fn received(&self) -> Vec<Signal> {
         self.received.lock().unwrap().clone()
+    }
+
+    pub fn clear(&self) {
+        self.received.lock().unwrap().clear();
     }
 }
 
