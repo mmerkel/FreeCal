@@ -86,7 +86,7 @@ const MIGRATIONS: &[Migration] = &[
 /// it is shown. The colours are the first two of the frontend's
 /// `NEW_CALENDAR_ORDER`. The names are English because v1 ships English only.
 const STARTING_CALENDARS: &[(&str, &str, bool)] =
-    &[("Home", "#3f51b5", true), ("Work", "#ad1457", false)];
+    &[("Work", "#3f51b5", true), ("Home", "#ad1457", false)];
 
 /// Puts the starting Calendars into the Local Account of a Local Store that
 /// was just created. An existing Local Store never gets them, so deleted

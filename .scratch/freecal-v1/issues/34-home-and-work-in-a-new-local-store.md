@@ -23,3 +23,4 @@ Out of scope: what creating an Event does when there is no writable Calendar (ti
 ## Comments
 
 - 2026-10-16: Done. The core adds Home and Work in the same transaction that creates the schema, only when the Local Store had no migrations applied yet. The core tests use `Harness::open_without_starting_calendars` to start with no Calendars. The tooltip now sits on the whole row (the switch), not only the name. The hint is hidden while the new-calendar name field is open, since the user is already using "+". `FakeCore` still starts with no Calendars; frontend tests add the ones they need.
+- 2026-10-16: Swapped at the user's request: a new Local Store now starts with "Work" (`#3f51b5`, shown, first) and "Home" (`#ad1457`, hidden). The spec and the run-freecal notes follow; the boxes above keep the original wording.

@@ -12,7 +12,7 @@ fn colour(hex: &str) -> Colour {
 }
 
 #[test]
-fn a_new_local_store_has_home_shown_and_work_hidden() {
+fn a_new_local_store_has_work_shown_and_home_hidden() {
     let harness = Harness::new();
     let core = harness.open();
     let local = local_account(&core);
@@ -35,8 +35,8 @@ fn a_new_local_store_has_home_shown_and_work_hidden() {
     assert_eq!(
         calendars,
         vec![
-            (local, "Home".to_owned(), colour("#3f51b5"), true, false),
-            (local, "Work".to_owned(), colour("#ad1457"), false, false),
+            (local, "Work".to_owned(), colour("#3f51b5"), true, false),
+            (local, "Home".to_owned(), colour("#ad1457"), false, false),
         ]
     );
     assert!(harness.signals.received().is_empty());
