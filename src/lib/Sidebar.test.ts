@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { expect, test } from 'vitest';
+import { expect, onTestFinished, test, vi } from 'vitest';
 import App from '../App.svelte';
+import { expectAnchoredTo } from '../test/anchored';
 import { FakeCore } from '../test/fakeCore';
 
 async function showApp(core: FakeCore) {
@@ -239,6 +240,7 @@ test.each(['{Shift>}{F10}{/Shift}', '{ContextMenu}'])(
 
     const menu = screen.getByRole('menu', { name: 'Options for Home' });
     expect(menu).toContainElement(document.activeElement as HTMLElement);
+    expectAnchoredTo(menu, screen.getByRole('button', { name: 'Options for Home' }));
   },
 );
 
@@ -329,6 +331,78 @@ test('a click on its own row only closes a menu opened by right-click', async ()
 
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   expect(core.calls).not.toContain('setCalendarShown');
+});
+
+test('a Calendar’s menu is shown as a popover anchored to its ⋮ button', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  await showApp(core);
+  const shown = vi.spyOn(HTMLElement.prototype, 'showPopover');
+  onTestFinished(() => shown.mockRestore());
+
+  const menu = await openMenu(user, 'Home');
+
+  expect(menu).toHaveAttribute('popover', 'manual');
+  expect(shown.mock.contexts).toEqual([menu]);
+  expectAnchoredTo(menu, screen.getByRole('button', { name: 'Options for Home' }));
+});
+
+test('a menu opened by right-click on a row is anchored to its ⋮ button', async () => {
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  await showApp(core);
+
+  await fireEvent.contextMenu(screen.getByRole('switch', { name: 'Home' }));
+
+  expectAnchoredTo(
+    screen.getByRole('menu'),
+    screen.getByRole('button', { name: 'Options for Home' }),
+  );
+});
+
+test('an open menu keeps its focus when the Calendars change', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  await showApp(core);
+  const shown = vi.spyOn(HTMLElement.prototype, 'showPopover');
+  onTestFinished(() => shown.mockRestore());
+
+  const menu = await openMenu(user, 'Home');
+  await user.keyboard('{End}');
+  core.addCalendar({ name: 'Work' });
+  core.emit({ kind: 'calendarsChanged' });
+  await screen.findByRole('switch', { name: 'Work' });
+
+  expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toHaveFocus();
+  expect(shown).toHaveBeenCalledTimes(1);
+});
+
+test('a wheel or touch outside the open menu doesn’t scroll, but one over it does', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  const local = await showApp(core);
+
+  const menu = await openMenu(user, 'Home');
+
+  expect(await fireEvent.wheel(local)).toBe(false);
+  expect(await fireEvent.touchMove(local)).toBe(false);
+  expect(await fireEvent.wheel(menu)).toBe(true);
+  expect(await fireEvent.touchMove(menu)).toBe(true);
+});
+
+test('the sidebar scrolls again once the menu closes', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  const local = await showApp(core);
+
+  await openMenu(user, 'Home');
+  await user.keyboard('{Escape}');
+
+  expect(await fireEvent.wheel(local)).toBe(true);
 });
 
 test('“Show only this” shows one Calendar and hides all others', async () => {

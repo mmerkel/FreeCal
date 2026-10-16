@@ -46,6 +46,7 @@
   }: Props = $props();
 
   let menuOpen = $state(false);
+  let menuButton = $state<HTMLButtonElement>();
 
   const views: { view: View; label: MessageKey }[] = [
     { view: 'day', label: 'view.day' },
@@ -135,34 +136,28 @@
       title={t('menu.main')}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
+      bind:this={menuButton}
       onclick={() => (menuOpen = !menuOpen)}
     >
       <EllipsisVertical size={18} aria-hidden="true" />
     </button>
-    {#if menuOpen}
-      <div class="menu-anchor">
-        <Menu label={t('menu.main')} onclose={() => (menuOpen = false)}>
-          <button
-            type="button"
-            class="menu-item"
-            role="menuitem"
-            onclick={() => choose(onsettings)}
-          >
-            <SettingsIcon size={14} aria-hidden="true" />
-            {t('menu.settings')}
-            <kbd aria-hidden="true">{shortcutKeys('settings')}</kbd>
-          </button>
-          <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onabout)}>
-            <Info size={14} aria-hidden="true" />
-            {t('menu.about')}
-          </button>
-          <hr class="menu-separator" />
-          <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onquit)}>
-            <Power size={14} aria-hidden="true" />
-            {t('menu.quit')}
-          </button>
-        </Menu>
-      </div>
+    {#if menuOpen && menuButton}
+      <Menu label={t('menu.main')} anchor={menuButton} onclose={() => (menuOpen = false)}>
+        <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onsettings)}>
+          <SettingsIcon size={14} aria-hidden="true" />
+          {t('menu.settings')}
+          <kbd aria-hidden="true">{shortcutKeys('settings')}</kbd>
+        </button>
+        <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onabout)}>
+          <Info size={14} aria-hidden="true" />
+          {t('menu.about')}
+        </button>
+        <hr class="menu-separator" />
+        <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onquit)}>
+          <Power size={14} aria-hidden="true" />
+          {t('menu.quit')}
+        </button>
+      </Menu>
     {/if}
   </div>
 </div>
@@ -217,15 +212,7 @@
   }
 
   .main-menu {
-    position: relative;
     margin-left: var(--space-2);
-  }
-
-  .menu-anchor {
-    position: absolute;
-    top: calc(100% + var(--space-2));
-    right: 0;
-    z-index: 10;
   }
 
   kbd {

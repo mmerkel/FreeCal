@@ -219,8 +219,16 @@ input[type='checkbox'] {
   accent-color: var(--solid);
 }
 
-/* Menus: a raised card of items, labels and separators (see Menu.svelte). */
+/* Menus: a raised card of items, labels and separators (see Menu.svelte).
+   A menu is a popover placed by its `position-anchor`: centred under the
+   anchor, flipped above it when there is no room below. Where centring
+   would cross the window's edge, the area's default alignment shifts it
+   inside. The insets and margins replace the popover's own centring. */
 .menu {
+  position-area: bottom;
+  position-try-fallbacks: flip-block;
+  inset: auto;
+  margin: var(--space-1) 0;
   box-sizing: border-box;
   min-width: 11.25rem;
   padding: var(--space-2);

@@ -25,6 +25,17 @@ if (!HTMLDialogElement.prototype.showModal) {
   };
 }
 
+// jsdom has no popovers, and as it never matches `:popover-open`, its own
+// stylesheet hides every element with a `popover` attribute. This shows and
+// hides them through their inline style; the top layer and anchoring are
+// checked in the real app.
+HTMLElement.prototype.showPopover ??= function (this: HTMLElement) {
+  this.style.display = 'block';
+};
+HTMLElement.prototype.hidePopover ??= function (this: HTMLElement) {
+  this.style.removeProperty('display');
+};
+
 // jsdom has no pointer capture. Tests send a drag's moves to the window,
 // where they would bubble to from the capturing element.
 Element.prototype.setPointerCapture ??= () => {};

@@ -28,6 +28,8 @@
   let editing = $state<Editing>();
   /** The Calendar whose menu is open. */
   let menuFor = $state<CalendarId>();
+  /** Each Calendar's ⋮ button, which its menu opens against however it is opened. */
+  const moreButtons: Record<CalendarId, HTMLButtonElement> = {};
   let failure = $state<string>();
 
   function accountName(account: Account): string {
@@ -190,6 +192,7 @@
                 title={optionsLabel}
                 aria-haspopup="menu"
                 aria-expanded={menuFor === calendar.id}
+                bind:this={moreButtons[calendar.id]}
                 {...menuOpeners(calendar)}
                 onclick={() =>
                   menuFor === calendar.id ? closeMenu(calendar.id) : openMenu(calendar)}
@@ -200,60 +203,62 @@
 
             {#if menuFor === calendar.id}
               {@const colourLabelId = `sidebar-colour-${calendar.id}`}
-              <div class="menu-anchor">
-                <Menu label={optionsLabel} onclose={() => closeMenu(calendar.id)}>
-                  <div class="menu-label" id={colourLabelId}>{t('calendar.colour')}</div>
-                  <div class="swatches" role="group" aria-labelledby={colourLabelId}>
-                    {#each SWATCHES as swatch (swatch.colour)}
-                      <button
-                        type="button"
-                        class="swatch"
-                        role="menuitemradio"
-                        aria-checked={swatch.colour === calendar.colour}
-                        aria-label={t(swatch.name)}
-                        title={t(swatch.name)}
-                        style:--colour={swatch.colour}
-                        onclick={() =>
-                          choose(calendar.id, () =>
-                            change(() => core.recolourCalendar(calendar.id, swatch.colour)),
-                          )}
-                      ></button>
-                    {/each}
-                  </div>
-                  <hr class="menu-separator" />
-                  <button
-                    type="button"
-                    class="menu-item"
-                    role="menuitem"
-                    onclick={() =>
-                      choose(calendar.id, () => (editing = { kind: 'renaming', id: calendar.id }))}
-                  >
-                    <Pencil size={14} aria-hidden="true" />
-                    {t('calendar.rename')}
-                  </button>
-                  <button
-                    type="button"
-                    class="menu-item"
-                    role="menuitem"
-                    onclick={() =>
-                      choose(calendar.id, () => change(() => core.showOnlyCalendar(calendar.id)))}
-                  >
-                    <Eye size={14} aria-hidden="true" />
-                    {t('calendar.showOnly')}
-                  </button>
-                  <hr class="menu-separator" />
-                  <button
-                    type="button"
-                    class="menu-item danger"
-                    role="menuitem"
-                    onclick={() =>
-                      choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    {t('calendar.delete')}
-                  </button>
-                </Menu>
-              </div>
+              <Menu
+                label={optionsLabel}
+                anchor={moreButtons[calendar.id]}
+                onclose={() => closeMenu(calendar.id)}
+              >
+                <div class="menu-label" id={colourLabelId}>{t('calendar.colour')}</div>
+                <div class="swatches" role="group" aria-labelledby={colourLabelId}>
+                  {#each SWATCHES as swatch (swatch.colour)}
+                    <button
+                      type="button"
+                      class="swatch"
+                      role="menuitemradio"
+                      aria-checked={swatch.colour === calendar.colour}
+                      aria-label={t(swatch.name)}
+                      title={t(swatch.name)}
+                      style:--colour={swatch.colour}
+                      onclick={() =>
+                        choose(calendar.id, () =>
+                          change(() => core.recolourCalendar(calendar.id, swatch.colour)),
+                        )}
+                    ></button>
+                  {/each}
+                </div>
+                <hr class="menu-separator" />
+                <button
+                  type="button"
+                  class="menu-item"
+                  role="menuitem"
+                  onclick={() =>
+                    choose(calendar.id, () => (editing = { kind: 'renaming', id: calendar.id }))}
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                  {t('calendar.rename')}
+                </button>
+                <button
+                  type="button"
+                  class="menu-item"
+                  role="menuitem"
+                  onclick={() =>
+                    choose(calendar.id, () => change(() => core.showOnlyCalendar(calendar.id)))}
+                >
+                  <Eye size={14} aria-hidden="true" />
+                  {t('calendar.showOnly')}
+                </button>
+                <hr class="menu-separator" />
+                <button
+                  type="button"
+                  class="menu-item danger"
+                  role="menuitem"
+                  onclick={() =>
+                    choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  {t('calendar.delete')}
+                </button>
+              </Menu>
             {/if}
           </li>
         {/each}
@@ -328,7 +333,6 @@
   }
 
   li {
-    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-4);
@@ -409,14 +413,6 @@
   .name-form .input {
     flex: 1;
     margin: var(--space-1) 0;
-  }
-
-  /* The menu opens below its row, inside the sidebar, so it isn't clipped. */
-  .menu-anchor {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    z-index: 10;
   }
 
   .swatches {

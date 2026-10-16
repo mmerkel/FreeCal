@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
+import { expectAnchoredTo } from './test/anchored';
 import { systemDarkQuery } from './test/darkQuery';
 import { FakeCore } from './test/fakeCore';
 
@@ -38,6 +39,15 @@ test('the main menu offers Settings, About FreeCal and Quit', async () => {
   await user.click(within(menu).getByRole('menuitem', { name: 'Settings…' }));
   expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+});
+
+test('the main menu is a popover anchored to its button', async () => {
+  const { user } = await showApp();
+
+  const menu = await openMainMenu(user);
+
+  expect(menu).toHaveAttribute('popover', 'manual');
+  expectAnchoredTo(menu, screen.getByRole('button', { name: 'Main menu' }));
 });
 
 test('Ctrl+, opens Settings, also while typing, but not over another dialog', async () => {
