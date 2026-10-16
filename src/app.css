@@ -129,6 +129,10 @@ body {
   font-family: var(--font-family);
   font-size: var(--text-sm);
   line-height: 1.4;
+  /* Grey smoothing everywhere. With subpixel smoothing and GPU rendering,
+     WebKit draws the sidebar's text heavier once the sidebar scrolls and
+     gets its own layer; grey smoothing looks the same in every layer. */
+  -webkit-font-smoothing: antialiased;
 }
 
 /* A focused element whose visible part is a child, such as a splitter and

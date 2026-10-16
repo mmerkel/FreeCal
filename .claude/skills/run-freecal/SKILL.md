@@ -39,8 +39,8 @@ $R stop                          # stops FreeCal and Xvfb
 | command | what it does |
 |---|---|
 | `build` | debug build without bundles |
-| `start [--fresh]` | start Xvfb (if needed) and FreeCal, wait for the window; `--fresh` deletes the Local Store first, so FreeCal starts on a new one with Work (shown) and Home (hidden) |
-| `restart` | relaunch FreeCal, keeping the Local Store |
+| `start [--fresh] [--subpixel]` | start Xvfb (if needed) and FreeCal, wait for the window; `--fresh` deletes the Local Store first, so FreeCal starts on a new one with Work (shown) and Home (hidden); `--subpixel`: see "Text rendering" |
+| `restart [--subpixel]` | relaunch FreeCal, keeping the Local Store; `--subpixel`: see "Text rendering" |
 | `stop` | stop FreeCal and Xvfb |
 | `shot NAME [GEOM]` | screenshot to `/tmp/freecal-run/shots/NAME.png`; `GEOM` crops (`WxH+X+Y`) |
 | `click X Y`, `dblclick X Y`, `rightclick X Y`, `move X Y` | mouse, in screen pixels |
@@ -65,6 +65,13 @@ In the month view of October 2026 (weeks start on Monday): each day column is 14
 As of ticket 47 the sidebar's right edge (x≈192 at the default 12rem) is a splitter with a tab on it at about 197,400. A click on the tab (or `key F9`) hides and shows the sidebar; a press that moves 4 px or more is a drag. A drag puts the edge where the pointer goes, keeping where it was grabbed: between 8rem and 20rem (128 and 320 px), and left of x≈64 (4rem) the sidebar hides, live. `drag 192 300 320 300` widens it to 20rem, `drag 192 300 40 300` hides it. Hidden, the tab is at about 5,400 and the grid and toolbar start at x≈12 (Today at about 44,30); `drag 5 400 245 400` pulls it out to 15rem, and a pull that stays left of x≈69 shows nothing. Its state is in `app_state` (`sql 'select sidebar_shown, sidebar_width from app_state'`, width in rem, NULL for the default). The other coordinates here assume the sidebar shown.
 
 A ticket that moves the layout updates the coordinates here.
+
+**Text rendering:** by default FreeCal renders on the CPU with grey font smoothing, which hides some differences the user sees.
+
+- `start --subpixel` or `restart --subpixel` renders as on the user's machine: subpixel RGB smoothing with slight hinting and GPU rendering (details in `freecal.sh`). It isn't remembered: pass it on every `start` and `restart`, or screenshots get compared across renderers.
+- Use it when text looks heavier, thinner or colour-fringed, or changes when part of the window starts to scroll or animate (WebKit gives such parts their own layer).
+- Compare zoomed crops with `compare -metric AE a.png b.png null:` (ImageMagick; 0 means pixel-identical).
+- All text uses grey smoothing, so colour fringes under `--subpixel` mean something overrides it.
 
 **Checking cursors:** screenshots don't show the pointer and jsdom has no cursors, so use `cursor`. It reads the name through XFixes. An open dialog's backdrop covers the whole window, so everywhere outside the dialog says `default`.
 

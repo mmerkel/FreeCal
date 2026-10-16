@@ -17,8 +17,11 @@ usage() {
   cat <<EOF
 usage: $0 COMMAND
   build              debug build of the frontend and the shell (no bundles)
-  start [--fresh]    start Xvfb and FreeCal; --fresh empties the Local Store first
-  restart            relaunch FreeCal on the same Local Store
+  start [--fresh] [--subpixel]
+                     start Xvfb and FreeCal; --fresh empties the Local Store first;
+                     --subpixel renders text as on the user's machine (SKILL.md)
+  restart [--subpixel]
+                     relaunch FreeCal on the same Local Store
   stop               stop FreeCal and Xvfb
   shot NAME [GEOM]   screenshot to $RUN_DIR/shots/NAME.png; GEOM crops, e.g. 260x200+0+0
   click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | type TEXT | key NAME
@@ -46,7 +49,17 @@ start_xvfb() {
 
 launch() {
   [ -x "$APP" ] || { echo "no $APP: run '$0 build' first" >&2; exit 1; }
-  XDG_DATA_HOME="$RUN_DIR/data" WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+  # --subpixel replaces the CPU renderer rather than adding to it: the bug it
+  # exists for only shows with GPU rendering (llvmpipe here).
+  local rendering=(WEBKIT_DISABLE_DMABUF_RENDERER=1)
+  if [ "$subpixel" = 1 ]; then
+    local config="$RUN_DIR/subpixel-config"
+    mkdir -p "$config/gtk-3.0"
+    printf '%s\n' '[Settings]' gtk-xft-antialias=1 gtk-xft-hinting=1 \
+      gtk-xft-hintstyle=hintslight gtk-xft-rgba=rgb >"$config/gtk-3.0/settings.ini"
+    rendering=("XDG_CONFIG_HOME=$config" LIBGL_ALWAYS_SOFTWARE=1)
+  fi
+  env XDG_DATA_HOME="$RUN_DIR/data" "${rendering[@]}" \
     nohup "$APP" >"$RUN_DIR/app.log" 2>&1 &
   # The window exists before the page has rendered; wait for both.
   timeout 30 bash -c 'until xwininfo -root -tree | grep -q "\"FreeCal\""; do sleep 0.2; done'
@@ -63,11 +76,22 @@ stop_app() {
 
 command="${1:-}"
 shift || true
+fresh=0
+subpixel=0
+if [ "$command" = start ] || [ "$command" = restart ]; then
+  for option in "$@"; do
+    case "$option" in
+      --fresh) [ "$command" = start ] || usage; fresh=1 ;;
+      --subpixel) subpixel=1 ;;
+      *) usage ;;
+    esac
+  done
+fi
 case "$command" in
   build) npx tauri build --debug --no-bundle ;;
   start)
     stop_app
-    if [ "${1:-}" = "--fresh" ]; then rm -rf "$RUN_DIR/data"; mkdir -p "$RUN_DIR/data"; fi
+    if [ "$fresh" = 1 ]; then rm -rf "$RUN_DIR/data"; mkdir -p "$RUN_DIR/data"; fi
     start_xvfb
     launch
     ;;
