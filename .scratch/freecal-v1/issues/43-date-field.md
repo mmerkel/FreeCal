@@ -19,3 +19,7 @@
 - [ ] Component tests for typing, the popover's keys and range marks; checked by hand in the real app with `run-freecal`, including that no grey band appears
 
 Out of scope: words such as "tomorrow".
+
+## Comments
+
+- 2026-10-16: Ticket 48 moves `Menu` into the top layer as a `popover="manual"` placed with CSS anchor positioning (`position-area: bottom`, `position-try-fallbacks: flip-block`), which the real webview supports, including shifting to stay inside the window. The month popover and the toolbar date picker can use the same approach.

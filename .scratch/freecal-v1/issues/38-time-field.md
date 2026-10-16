@@ -20,3 +20,7 @@
 - [ ] Component tests for typing, `a`/`p`, the list and its keys, invalid input, and the end following the start; checked by hand in the real app with `run-freecal`
 
 Out of scope: the Event Time Zone choice in the editor (ticket 50).
+
+## Comments
+
+- 2026-10-16: Ticket 48 moves `Menu` into the top layer as a `popover="manual"` placed with CSS anchor positioning (`position-area: bottom`, `position-try-fallbacks: flip-block`), which the real webview supports, including shifting to stay inside the window. The time list can use the same approach, which also keeps it from being clipped by the editor dialog.
