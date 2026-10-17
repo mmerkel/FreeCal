@@ -36,14 +36,6 @@ HTMLElement.prototype.hidePopover ??= function (this: HTMLElement) {
   this.style.removeProperty('display');
 };
 
-// jsdom has no layout, so nothing ever resizes; the sidebar's overflow is
-// checked in the real app.
-globalThis.ResizeObserver ??= class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};
-
 // jsdom has no pointer capture. Tests send a drag's moves to the window,
 // where they would bubble to from the capturing element.
 Element.prototype.setPointerCapture ??= () => {};

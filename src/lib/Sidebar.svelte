@@ -109,19 +109,6 @@
     };
   }
 
-  /** Whether the sidebar overflows, and so shows its scrollbar strip. */
-  let scrolls = $state(false);
-
-  // The strip appearing or going narrows or widens the sidebar's content
-  // box, which the observer sees. CSS can't tell overflow in WebKitGTK.
-  function watchOverflow(sidebar: HTMLElement) {
-    const observer = new ResizeObserver(() => {
-      scrolls = sidebar.scrollHeight > sidebar.clientHeight;
-    });
-    observer.observe(sidebar);
-    return () => observer.disconnect();
-  }
-
   function focus(element: HTMLElement) {
     element.focus();
     if (element instanceof HTMLInputElement) element.select();
@@ -152,7 +139,7 @@
   </form>
 {/snippet}
 
-<nav class="sidebar" class:scrolls aria-label={t('sidebar.label')} {@attach watchOverflow}>
+<nav class="sidebar" aria-label={t('sidebar.label')}>
   {#if failure}
     <p class="failure" role="alert">{failure}</p>
   {/if}
@@ -313,15 +300,11 @@
     box-sizing: border-box;
     flex: 1;
     min-width: 0;
-    padding: var(--space-6) var(--space-4);
+    /* Little on the right, next to the scrollbar strip or the splitter. */
+    padding: var(--space-6) var(--space-1) var(--space-6) var(--space-4);
     overflow-y: auto;
     border-right: 1px solid var(--border);
     background: var(--surface);
-  }
-
-  /* The strip takes the place of most of the right padding. */
-  .sidebar.scrolls {
-    padding-right: var(--space-2);
   }
 
   /* A styled scrollbar takes its own strip, shown only while the sidebar
