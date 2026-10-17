@@ -306,6 +306,25 @@
     background: var(--surface);
   }
 
+  /* A styled scrollbar takes its own strip, shown only while the sidebar
+     overflows, instead of GTK's overlay bar, which lies over the rows' ⋮
+     buttons and takes their clicks. WebKitGTK ignores `scrollbar-width` and
+     `scrollbar-gutter` for this. */
+  .sidebar::-webkit-scrollbar {
+    width: 0.5rem;
+    background: transparent;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    background: var(--border-strong) padding-box;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb:hover {
+    background-color: var(--foreground-faint);
+  }
+
   .account {
     display: flex;
     align-items: center;

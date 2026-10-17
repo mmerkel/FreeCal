@@ -379,30 +379,29 @@ test('an open menu keeps its focus when the Calendars change', async () => {
   expect(shown).toHaveBeenCalledTimes(1);
 });
 
-test('a wheel or touch outside the open menu doesn’t scroll, but one over it does', async () => {
-  const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  const local = await showApp(core);
-
-  const menu = await openMenu(user, 'Home');
-
-  expect(await fireEvent.wheel(local)).toBe(false);
-  expect(await fireEvent.touchMove(local)).toBe(false);
-  expect(await fireEvent.wheel(menu)).toBe(true);
-  expect(await fireEvent.touchMove(menu)).toBe(true);
-});
-
-test('the sidebar scrolls again once the menu closes', async () => {
+test('a scroll outside the open menu closes it, and focus returns to its ⋮', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
   core.addCalendar({ name: 'Home' });
   const local = await showApp(core);
 
   await openMenu(user, 'Home');
-  await user.keyboard('{Escape}');
+  await fireEvent.scroll(local);
 
-  expect(await fireEvent.wheel(local)).toBe(true);
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Options for Home' })).toHaveFocus();
+});
+
+test('a scroll inside the open menu leaves it open', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  await showApp(core);
+
+  const menu = await openMenu(user, 'Home');
+  await fireEvent.scroll(menu);
+
+  expect(menu).toBeInTheDocument();
 });
 
 test('“Show only this” shows one Calendar and hides all others', async () => {

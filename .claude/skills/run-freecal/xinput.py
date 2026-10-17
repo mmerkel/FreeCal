@@ -1,7 +1,7 @@
 """Sends mouse and keyboard input to an X display through XTEST.
 
 Usage (DISPLAY must be set):
-    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | type TEXT | key NAME | cursor X Y
+    xinput.py click X Y | dblclick X Y | rightclick X Y | drag X1 Y1 X2 Y2 | down X Y | up X Y | move X Y | wheel X Y up|down [N] | type TEXT | key NAME | cursor X Y
 
 NAME is an X keysym (Return, Escape, Tab, BackSpace, ...), optionally with
 modifiers: ctrl+a, shift+Tab.
@@ -83,6 +83,13 @@ def drag(x1, y1, x2, y2, steps=10):
     flush()
 
 
+def wheel(x, y, direction, notches=1):
+    """Moves to a point and turns the wheel there: X buttons 4 (up) and 5 (down)."""
+    move(x, y)
+    for _ in range(notches):
+        click(x, y, button={"up": 4, "down": 5}[direction])
+
+
 def button(x, y, event):
     """Moves to a point and presses or releases the left button there."""
     move(x, y)
@@ -139,6 +146,8 @@ elif command == "up":
     button(int(args[0]), int(args[1]), X.ButtonRelease)
 elif command == "move":
     move(int(args[0]), int(args[1]))
+elif command == "wheel":
+    wheel(int(args[0]), int(args[1]), args[2], int(args[3]) if len(args) > 3 else 1)
 elif command == "type":
     type_text(args[0])
 elif command == "key":

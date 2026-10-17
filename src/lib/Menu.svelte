@@ -7,10 +7,12 @@
   Escape, Tab and a click or right-click outside it ask the owner to close it
   through `onclose`. That click does nothing else: while the menu is open,
   every mouse press, release and click outside it is stopped before it
-  reaches anything, as if a sheet lay over the rest of the window, and a wheel
-  or touch outside it doesn't scroll, as in native menus. When it closes with
-  focus inside it, focus returns to where it was when it opened, normally the
-  button that opened it.
+  reaches anything, as if a sheet lay over the rest of the window. Anything
+  outside it scrolling, by wheel, touch, scrollbar or the app itself, closes
+  it too, and the scroll goes ahead: a scrollbar drag can't be stopped in
+  WebKitGTK, and would otherwise flip the menu or scroll its anchor away. When
+  it closes with focus inside it, focus returns to where it was when it
+  opened, normally the button that opened it.
 -->
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte';
@@ -40,9 +42,6 @@
     'contextmenu',
   ];
 
-  /** The events that scroll what is under them. */
-  const SCROLLS = ['wheel', 'touchmove'];
-
   function items(menu: HTMLElement): HTMLElement[] {
     return [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
   }
@@ -54,7 +53,9 @@
     const anchoredTo = untrack(() => anchor);
     anchoredTo.style.setProperty('anchor-name', anchorName);
     element.showPopover();
-    items(element)[0]?.focus();
+    // Without `preventScroll`, WebKit scrolls the sidebar to show the item
+    // before the menu is placed, and that scroll would close it again.
+    items(element)[0]?.focus({ preventScroll: true });
 
     // On `window` in the capture phase, so nothing outside the menu sees the
     // press. The click or right-click that opened the menu has already
@@ -67,17 +68,16 @@
     }
     for (const type of SWALLOWED) window.addEventListener(type, outside, true);
 
-    // Not passive, or the scroll couldn't be cancelled.
+    // `scroll` doesn't bubble, but the capture phase on `window` sees it on
+    // every scroller. A scroll the app makes itself closes the menu too.
     function scroll(scrolled: Event) {
-      if (!element.contains(scrolled.target as Node)) scrolled.preventDefault();
+      if (!element.contains(scrolled.target as Node)) onclose();
     }
-    for (const type of SCROLLS) {
-      window.addEventListener(type, scroll, { capture: true, passive: false });
-    }
+    window.addEventListener('scroll', scroll, true);
 
     return () => {
       for (const type of SWALLOWED) window.removeEventListener(type, outside, true);
-      for (const type of SCROLLS) window.removeEventListener(type, scroll, true);
+      window.removeEventListener('scroll', scroll, true);
       anchoredTo.style.removeProperty('anchor-name');
       const focus = document.activeElement;
       if (!focus || focus === document.body || element.contains(focus)) {
