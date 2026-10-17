@@ -8,6 +8,10 @@ import type {
   ErrorCode,
   EventDraft,
   EventId,
+  ExistingEvents,
+  ImportId,
+  ImportOutcome,
+  PinnedZone,
   Settings,
   SettingsUpdate,
   SidebarState,
@@ -17,7 +21,23 @@ import type {
   When,
 } from '../core/types';
 import { DEFAULT_SETTINGS } from '../lib/settings';
-import { accountId, calendarId, eventId } from './ids';
+import { accountId, calendarId, eventId, importId } from './ids';
+
+/** A file a test lets the user pick to import. */
+export interface FakeImportFile {
+  name: string;
+  /** Its Events, each with its UID. */
+  events: (Pick<Event, 'title' | 'when'> & { uid: string })[];
+  /** The zones its floating times were pinned to. */
+  pinned?: PinnedZone[];
+}
+
+/** What undoes an import: the Events it added, and the previous versions of those it updated. */
+interface ImportUnit {
+  calendarId: CalendarId;
+  added: EventId[];
+  previous: { event: Event; uid: string }[];
+}
 
 /**
  * A fake core interface for component tests. Like the real core, it sends
@@ -51,6 +71,19 @@ export class FakeCore implements CoreApi {
   calls: string[] = [];
   /** The links opened in the browser. */
   openedLinks: string[] = [];
+  /**
+   * What the next file dialog gives: a file, `null` as when the user
+   * cancels, or the failure reading the file.
+   */
+  importFile: FakeImportFile | ErrorCode | null = null;
+  /** The file the user picked and the shell holds, if any. */
+  pickedImport?: FakeImportFile;
+  /** The title and filter name the file dialogs were opened with. */
+  fileDialogs: { title: string; filter: string }[] = [];
+  /** Each Event's UID. */
+  uids = new Map<EventId, string>();
+  private imports = new Map<ImportId, ImportUnit>();
+  private nextImportId = 1;
   private subscribers = new Set<(signal: Signal) => void>();
   private nextCalendarId = 1;
   private nextEventId = 1;
@@ -79,9 +112,10 @@ export class FakeCore implements CoreApi {
       Pick<Event, 'calendarId' | 'when'> & {
         location?: StructuredText | string;
         description?: StructuredText | string;
+        uid?: string;
       },
   ): Event {
-    const { location = '', description = '', ...fields } = event;
+    const { location = '', description = '', uid, ...fields } = event;
     const structured = (text: StructuredText | string) =>
       typeof text === 'string' ? plainText(text) : text;
     const added: Event = {
@@ -93,6 +127,7 @@ export class FakeCore implements CoreApi {
       description: structured(description),
     };
     this.events.push(added);
+    this.uids.set(added.id, uid ?? `event-${added.id}`);
     return added;
   }
 
@@ -276,6 +311,84 @@ export class FakeCore implements CoreApi {
     this.emit({ kind: 'occurrencesChanged', calendarIds: [calendarId] });
   }
 
+  async pickImportFile(title: string, filter: string) {
+    this.calls.push('pickImportFile');
+    this.fileDialogs.push({ title, filter });
+    const file = this.importFile;
+    if (file && 'code' in file) throw file;
+    if (file) this.pickedImport = structuredClone(file);
+    return file?.name ?? null;
+  }
+
+  async previewImport(calendarId: CalendarId) {
+    this.calls.push('previewImport');
+    const file = this.picked();
+    this.calendar(calendarId);
+    const existingEvents = file.events.filter((event) =>
+      this.eventWithUid(calendarId, event.uid),
+    ).length;
+    return {
+      calendarId,
+      newEvents: file.events.length - existingEvents,
+      existingEvents,
+      pinned: structuredClone(file.pinned ?? []),
+    };
+  }
+
+  async runImport(calendarId: CalendarId, existing: ExistingEvents) {
+    this.calls.push('runImport');
+    const file = this.picked();
+    this.writable(calendarId);
+    const unit: ImportUnit = { calendarId, added: [], previous: [] };
+    const outcome: ImportOutcome = {
+      id: importId(this.nextImportId++),
+      imported: 0,
+      updated: 0,
+      skipped: 0,
+    };
+    for (const imported of file.events) {
+      const found = this.eventWithUid(calendarId, imported.uid);
+      if (found && existing === 'skip') {
+        outcome.skipped++;
+      } else if (found && existing === 'update') {
+        unit.previous.push({ event: structuredClone(found), uid: imported.uid });
+        Object.assign(found, { title: imported.title, when: { ...imported.when } });
+        outcome.updated++;
+      } else {
+        const uid = found ? `${imported.uid}-copy` : imported.uid;
+        const { title, when } = imported;
+        unit.added.push(this.addEvent({ calendarId, title, when: { ...when }, uid }).id);
+        outcome.imported++;
+      }
+    }
+    this.imports.set(outcome.id, unit);
+    this.pickedImport = undefined;
+    if (outcome.imported + outcome.updated > 0) {
+      this.emit({ kind: 'occurrencesChanged', calendarIds: [calendarId] });
+    }
+    return outcome;
+  }
+
+  async discardImport() {
+    this.calls.push('discardImport');
+    this.pickedImport = undefined;
+  }
+
+  async undoImport(id: ImportId) {
+    this.calls.push('undoImport');
+    const unit = this.imports.get(id);
+    if (!unit) throw failure('importNotFound');
+    this.writable(unit.calendarId);
+    this.events = this.events.filter((event) => !unit.added.includes(event.id));
+    for (const { event, uid } of unit.previous) {
+      this.events = this.events.filter((kept) => kept.id !== event.id);
+      this.events.push(event);
+      this.uids.set(event.id, uid);
+    }
+    this.imports.delete(id);
+    this.emit({ kind: 'occurrencesChanged', calendarIds: [unit.calendarId] });
+  }
+
   async openLink(url: string) {
     this.calls.push('openLink');
     this.openedLinks.push(url);
@@ -298,6 +411,17 @@ export class FakeCore implements CoreApi {
 
   private started() {
     if (this.startupError) throw this.startupError;
+  }
+
+  private picked(): FakeImportFile {
+    if (!this.pickedImport) throw failure('noFileToImport');
+    return this.pickedImport;
+  }
+
+  private eventWithUid(calendarId: CalendarId, uid: string): Event | undefined {
+    return this.events.find(
+      (event) => event.calendarId === calendarId && this.uids.get(event.id) === uid,
+    );
   }
 
   private findEvent(id: EventId): Event {

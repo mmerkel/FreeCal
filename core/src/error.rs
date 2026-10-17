@@ -126,6 +126,9 @@ pub enum ErrorCode {
     },
     /// An import to undo was undone already, or its Calendar deleted.
     ImportNotFound,
+    /// The window asked to preview or run an import before a file was
+    /// picked, or after it was run or discarded.
+    NoFileToImport,
     /// The window asked to open a link that isn't `http(s)://` or `mailto:`.
     LinkNotAllowed,
     /// The system couldn't open a link in the browser.
@@ -159,6 +162,7 @@ impl ErrorCode {
             ErrorCode::ImportZipWithoutCalendars { file: file() },
             ErrorCode::ImportTooLarge { file: file() },
             ErrorCode::ImportNotFound,
+            ErrorCode::NoFileToImport,
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,
             ErrorCode::WindowNotShown,

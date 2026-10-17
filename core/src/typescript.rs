@@ -15,8 +15,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, ErrorCode, Event, EventDraft,
-    EventId, Occurrence, Piece, Provider, Settings, SettingsUpdate, SidebarState, Signal,
-    StructuredText, View, When,
+    EventId, ExistingEvents, ImportId, ImportOutcome, ImportSummary, Occurrence, Piece, PinnedZone,
+    Provider, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -68,6 +68,9 @@ fn types() -> (String, Vec<String>) {
     types.visit::<SidebarState>();
     types.visit::<Settings>();
     types.visit::<SettingsUpdate>();
+    types.visit::<ImportSummary>();
+    types.visit::<ExistingEvents>();
+    types.visit::<ImportOutcome>();
     types.visit::<ErrorCode>();
     let names = types.declarations.keys().cloned().collect();
     let declarations: Vec<_> = types.declarations.into_values().collect();
@@ -177,6 +180,31 @@ fn samples_file() -> (String, Vec<String>) {
                 appearance: Some(Appearance::Light),
             },
         ]),
+        samples(&[ImportSummary {
+            calendar_id: CalendarId(2),
+            new_events: 40,
+            existing_events: 2,
+            pinned: vec![PinnedZone {
+                zone: "Europe/Berlin".to_owned(),
+                events: 3,
+            }],
+        }]),
+        samples(&[PinnedZone {
+            zone: "Europe/Berlin".to_owned(),
+            events: 3,
+        }]),
+        samples(&[
+            ExistingEvents::Update,
+            ExistingEvents::Skip,
+            ExistingEvents::Copy,
+        ]),
+        samples(&[ImportId(4)]),
+        samples(&[ImportOutcome {
+            id: ImportId(4),
+            imported: 40,
+            updated: 2,
+            skipped: 0,
+        }]),
         samples(&ErrorCode::all()),
     ];
     let mut names = Vec::new();

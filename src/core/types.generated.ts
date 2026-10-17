@@ -41,7 +41,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "importNotFound" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "importNotFound" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -69,6 +69,35 @@ description: string, };
 export type EventId = number & { readonly __brand: "EventId" };
 
 /**
+ * What an import does with the Events its Calendar already has (same UID),
+ * chosen once per import.
+ */
+export type ExistingEvents = "update" | "skip" | "copy";
+
+/**
+ * An import that was run, as the Change Journal records it.
+ */
+export type ImportId = number & { readonly __brand: "ImportId" };
+
+/**
+ * What running an import did.
+ */
+export type ImportOutcome = {
+/**
+ * What undoes it.
+ */
+id: ImportId,
+/**
+ * How many Events it added, copies included.
+ */
+imported: number, updated: number, skipped: number, };
+
+/**
+ * An import preview as the window shows it: the counts, not the Events.
+ */
+export type ImportSummary = { calendarId: CalendarId, newEvents: number, existingEvents: number, pinned: Array<PinnedZone>, };
+
+/**
  * One dated appearance of an Event in the grid. A single Event has exactly
  * one; Recurring Events get one per date (ticket 07).
  */
@@ -78,6 +107,11 @@ export type Occurrence = { eventId: EventId, calendarId: CalendarId, title: stri
  * One piece of a paragraph.
  */
 export type Piece = { "kind": "text", text: string, } | { "kind": "link", text: string, url: string, };
+
+/**
+ * How many Events of an import had floating times pinned to `zone`.
+ */
+export type PinnedZone = { zone: string, events: number, };
 
 /**
  * A kind of calendar service FreeCal can talk to.

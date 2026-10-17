@@ -81,7 +81,7 @@
     </label>
 
     <div class="times">
-      <span class="label">{t('event.starts')}</span>
+      <span class="field-label">{t('event.starts')}</span>
       <input
         class="input"
         type="date"
@@ -96,7 +96,7 @@
           bind:value={times.startTime}
         />
       {/if}
-      <span class="label">{t('event.ends')}</span>
+      <span class="field-label">{t('event.ends')}</span>
       <input class="input" type="date" aria-label={t('event.endDate')} bind:value={times.endDate} />
       {#if !times.allDay}
         <input
@@ -109,7 +109,7 @@
     </div>
 
     <label class="field">
-      <span class="label">{t('event.calendar')}</span>
+      <span class="field-label">{t('event.calendar')}</span>
       <select class="input" bind:value={calendarId}>
         {#each calendars as calendar (calendar.id)}
           <option value={calendar.id}>{calendar.name}</option>
@@ -118,12 +118,12 @@
     </label>
 
     <label class="field">
-      <span class="label">{t('event.location')}</span>
+      <span class="field-label">{t('event.location')}</span>
       <input class="input" bind:value={location} />
     </label>
 
     <label class="field">
-      <span class="label">{t('event.description')}</span>
+      <span class="field-label">{t('event.description')}</span>
       <textarea class="input" rows="4" bind:value={description}></textarea>
     </label>
 
@@ -149,17 +149,6 @@
 </Dialog>
 
 <style>
-  .form {
-    display: grid;
-    gap: var(--space-6);
-    color: var(--foreground);
-  }
-
-  .form .input {
-    min-height: var(--control-height);
-    padding: 0 var(--space-4);
-  }
-
   .title {
     font-size: var(--text-lg);
   }
@@ -179,31 +168,5 @@
   /* An all-day Event has no time inputs; its dates take the whole row. */
   .times:not(:has(input[type='time'])) {
     grid-template-columns: auto 1fr;
-  }
-
-  .field {
-    display: grid;
-    gap: var(--space-2);
-  }
-
-  .label {
-    color: var(--foreground-muted);
-    font-size: var(--text-xs);
-    font-weight: 600;
-  }
-
-  .check {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-
-  .problem {
-    color: var(--danger);
-  }
-
-  .button:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 </style>

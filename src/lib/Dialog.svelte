@@ -16,7 +16,7 @@
     role?: 'dialog' | 'alertdialog';
     children: Snippet;
     /** The buttons, shown in a row on the right. */
-    actions: Snippet;
+    actions?: Snippet;
   }
 
   let { title, onclose, role = 'dialog', children, actions }: Props = $props();
@@ -50,9 +50,11 @@
   <div id="{id}-body" class="body">
     {@render children()}
   </div>
-  <div class="actions">
-    {@render actions()}
-  </div>
+  {#if actions}
+    <div class="actions">
+      {@render actions()}
+    </div>
+  {/if}
 </dialog>
 
 <style>
@@ -81,8 +83,11 @@
   }
 
   .body {
-    margin-bottom: var(--space-10);
     color: var(--foreground-muted);
+  }
+
+  .body:has(+ .actions) {
+    margin-bottom: var(--space-10);
   }
 
   .body :global(p) {

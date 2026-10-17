@@ -30,8 +30,8 @@ pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use import::{
-    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportedEvent,
-    ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
+    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportSummary,
+    ImportedEvent, ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;

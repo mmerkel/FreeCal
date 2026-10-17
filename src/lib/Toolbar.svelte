@@ -1,6 +1,7 @@
 <!--
   The toolbar over the grid: Today, previous and next,
-  the shown period, the view switch and the main menu. The Today button is a
+  the shown period, the view switch and the main menu (Import…, Settings…,
+  About FreeCal and Quit). The Today button is a
   toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
 -->
@@ -8,6 +9,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+  import ImportIcon from '@lucide/svelte/icons/import';
   import Info from '@lucide/svelte/icons/info';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -27,6 +29,7 @@
     onview: (view: View) => void;
     /** A month name in the title was clicked. */
     onmonth: (month: Temporal.PlainYearMonth) => void;
+    onimport: () => void;
     onsettings: () => void;
     onabout: () => void;
     onquit: () => void;
@@ -40,6 +43,7 @@
     onstep,
     onview,
     onmonth,
+    onimport,
     onsettings,
     onabout,
     onquit,
@@ -143,6 +147,10 @@
     </button>
     {#if menuOpen && menuButton}
       <Menu label={t('menu.main')} anchor={menuButton} onclose={() => (menuOpen = false)}>
+        <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onimport)}>
+          <ImportIcon size={14} aria-hidden="true" />
+          {t('menu.import')}
+        </button>
         <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onsettings)}>
           <SettingsIcon size={14} aria-hidden="true" />
           {t('menu.settings')}

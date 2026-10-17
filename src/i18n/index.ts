@@ -8,6 +8,19 @@ export function t(key: MessageKey, params: Record<string, string> = {}): string 
   return en[key].replace(/\{(\w+)\}/g, (placeholder, name: string) => params[name] ?? placeholder);
 }
 
+/** The keys of messages about a count, without their `.one` and `.other`. */
+export type CountKey = WithoutOne<MessageKey>;
+type WithoutOne<Key> = Key extends `${infer Base}.one` ? Base : never;
+
+/**
+ * A message about `count` things, in its form for one or for any other
+ * number, with `{count}` and its other placeholders filled in.
+ */
+export function tCount(key: CountKey, count: number, params: Record<string, string> = {}): string {
+  const form = new Intl.PluralRules('en').select(count) === 'one' ? 'one' : 'other';
+  return t(`${key}.${form}`, { ...params, count: String(count) });
+}
+
 /** The words for each code a failure crosses the core interface as. */
 const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   localStoreFailed: 'error.localStoreFailed',
@@ -29,6 +42,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   importZipWithoutCalendars: 'error.importZipWithoutCalendars',
   importTooLarge: 'error.importTooLarge',
   importNotFound: 'error.importNotFound',
+  noFileToImport: 'error.noFileToImport',
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
   windowNotShown: 'error.windowNotShown',

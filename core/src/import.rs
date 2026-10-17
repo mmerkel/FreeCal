@@ -19,6 +19,7 @@ use std::path::Path;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Utc};
 use chrono_tz::Tz;
 use icalendar::{CalendarComponent, CalendarDateTime, Component, DatePerhapsTime, EventLike};
+use serde::{Deserialize, Serialize};
 
 use crate::event::{StoredWhen, instant};
 use crate::store::{EventFields, JournalEntry, Store, StoredEvent};
@@ -86,8 +87,32 @@ pub struct ImportPreview {
     pub events: Vec<ImportedEvent>,
 }
 
+impl ImportPreview {
+    /// What the window shows of the preview, without the Events.
+    pub fn summary(&self) -> ImportSummary {
+        ImportSummary {
+            calendar_id: self.calendar_id,
+            new_events: self.new_events,
+            existing_events: self.existing_events,
+            pinned: self.pinned.clone(),
+        }
+    }
+}
+
+/// An import preview as the window shows it: the counts, not the Events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    pub calendar_id: CalendarId,
+    pub new_events: usize,
+    pub existing_events: usize,
+    pub pinned: Vec<PinnedZone>,
+}
+
 /// How many Events of an import had floating times pinned to `zone`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PinnedZone {
     pub zone: String,
     pub events: usize,
@@ -142,7 +167,9 @@ pub enum ImportedWhen {
 
 /// What an import does with the Events its Calendar already has (same UID),
 /// chosen once per import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
 pub enum ExistingEvents {
     /// The Event takes the imported version.
     Update,
@@ -153,11 +180,19 @@ pub enum ExistingEvents {
 }
 
 /// An import that was run, as the Change Journal records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(type = "number & { readonly __brand: \"ImportId\" }")
+)]
+#[serde(transparent)]
 pub struct ImportId(pub i64);
 
 /// What running an import did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct ImportOutcome {
     /// What undoes it.
     pub id: ImportId,

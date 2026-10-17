@@ -7,6 +7,10 @@ import type {
   ErrorCode,
   EventDraft,
   EventId,
+  ExistingEvents,
+  ImportId,
+  ImportOutcome,
+  ImportSummary,
   Occurrence,
   Settings,
   SettingsUpdate,
@@ -70,6 +74,25 @@ export interface CoreApi {
    */
   rescheduleEvent(id: EventId, when: When): Promise<Event>;
   deleteEvent(id: EventId): Promise<void>;
+  /**
+   * Asks the user for an `.ics` or `.zip` file to import through the system's
+   * file dialog, with the dialog's `title` and the name of its file `filter`,
+   * and reads it. Resolves to the file's name, or `null` when the user
+   * cancels. The shell holds the file; the window never sees its path.
+   */
+  pickImportFile(title: string, filter: string): Promise<string | null>;
+  /** Previews importing the picked file into a Calendar. Changes no Events. */
+  previewImport(calendarId: CalendarId): Promise<ImportSummary>;
+  /**
+   * Imports the picked file into a writable Calendar, doing with the Events
+   * it already has (same UID) what `existing` says, as one undoable unit.
+   * Afterwards no file is picked.
+   */
+  runImport(calendarId: CalendarId, existing: ExistingEvents): Promise<ImportOutcome>;
+  /** Lets go of the picked file without importing it. */
+  discardImport(): Promise<void>;
+  /** Undoes a whole import in one step; an import is undone once. */
+  undoImport(id: ImportId): Promise<void>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
   /** FreeCal's version, such as `0.1.0`. */

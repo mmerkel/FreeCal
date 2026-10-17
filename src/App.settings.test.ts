@@ -25,16 +25,17 @@ async function openMainMenu(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('menu', { name: 'Main menu' });
 }
 
-test('the main menu offers Settings, About FreeCal and Quit', async () => {
+test('the main menu offers Import, Settings, About FreeCal and Quit', async () => {
   const { user } = await showApp();
 
   const menu = await openMainMenu(user);
 
   const items = within(menu).getAllByRole('menuitem');
-  expect(items).toHaveLength(3);
-  expect(items[0]).toHaveAccessibleName('Settings…');
-  expect(items[1]).toHaveAccessibleName('About FreeCal');
-  expect(items[2]).toHaveAccessibleName('Quit');
+  expect(items).toHaveLength(4);
+  expect(items[0]).toHaveAccessibleName('Import…');
+  expect(items[1]).toHaveAccessibleName('Settings…');
+  expect(items[2]).toHaveAccessibleName('About FreeCal');
+  expect(items[3]).toHaveAccessibleName('Quit');
 
   await user.click(within(menu).getByRole('menuitem', { name: 'Settings…' }));
   expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();

@@ -4,9 +4,12 @@
   import type {
     Account,
     Calendar,
+    CalendarId,
     Event,
     EventDraft,
     EventId,
+    ExistingEvents,
+    ImportId,
     Occurrence,
     Settings,
     SettingsUpdate,
@@ -22,6 +25,7 @@
   import Dialog from './lib/Dialog.svelte';
   import EventDetails from './lib/EventDetails.svelte';
   import EventEditor from './lib/EventEditor.svelte';
+  import ImportDialog from './lib/ImportDialog.svelte';
   import {
     dateChanged,
     goToToday,
@@ -40,8 +44,10 @@
   import Sidebar from './lib/Sidebar.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
+  import Toast from './lib/Toast.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import { whenForShortcut, type VisibleRange } from './lib/when';
+  import WorkingDialog from './lib/WorkingDialog.svelte';
 
   interface Props {
     core: CoreApi;
@@ -62,7 +68,8 @@
     | { kind: 'details'; id: EventId }
     | { kind: 'editing'; id: EventId; draft: EventDraft }
     | { kind: 'creating'; draft: EventDraft }
-    | { kind: 'noCalendar' }
+    | { kind: 'importing'; file: string; calendarId: CalendarId }
+    | { kind: 'notice'; title: string; body: string }
     | { kind: 'settings' }
     | { kind: 'about' };
 
@@ -97,6 +104,12 @@
   let dialogFailure = $state<string>();
   /** Counts editor sessions, so that each one starts from its own draft. */
   let session = $state(0);
+  /** Why the last import from the open import dialog failed. */
+  let importFailure = $state<string>();
+  /** What the modal "Working…" dialog says while a long command runs. */
+  let working = $state<string>();
+  /** The message at the bottom of the window, with its Undo if it has one. */
+  let toast = $state<{ message: string; undo?: () => void }>();
 
   const writableCalendars = $derived(
     directory?.calendars.filter((calendar) => !calendar.readOnly) ?? [],
@@ -271,9 +284,13 @@
 
   /** Opens the editor for a new Event, or says where to create a Calendar first. */
   function startCreating(when: When) {
-    const target = writableCalendars.find((calendar) => calendar.shown) ?? writableCalendars[0];
+    const target = defaultCalendar();
     if (!target) {
-      open = { kind: 'noCalendar' };
+      open = {
+        kind: 'notice',
+        title: t('event.noCalendarTitle'),
+        body: t('event.noCalendarBody', { account: t('account.local') }),
+      };
       return;
     }
     session++;
@@ -346,6 +363,91 @@
       await core.openLink(url);
     } catch (error) {
       dialogFailure = t('link.openFailed', { error: errorText(error) });
+    }
+  }
+
+  /** The Calendar new things go into: the first shown writable one. */
+  function defaultCalendar(): Calendar | undefined {
+    return writableCalendars.find((calendar) => calendar.shown) ?? writableCalendars[0];
+  }
+
+  /** Asks for a file to import, then opens the import dialog for it. */
+  async function startImport() {
+    if (!defaultCalendar()) {
+      open = {
+        kind: 'notice',
+        title: t('import.noCalendarTitle'),
+        body: t('event.noCalendarBody', { account: t('account.local') }),
+      };
+      return;
+    }
+    let file: string | null;
+    try {
+      file = await core.pickImportFile(t('import.fileDialogTitle'), t('import.fileFilter'));
+    } catch (error) {
+      open = {
+        kind: 'notice',
+        title: t('import.pickFailedTitle'),
+        body: t('import.pickFailed', { error: errorText(error) }),
+      };
+      return;
+    }
+    if (file === null) return;
+    const target = defaultCalendar();
+    // The user may have opened something else while the file dialog was showing.
+    if (open || !target) {
+      cancelImport();
+      return;
+    }
+    importFailure = undefined;
+    open = { kind: 'importing', file, calendarId: target.id };
+  }
+
+  function cancelImport() {
+    // Nothing closes the dialog while its import runs, not even an Escape
+    // that reaches it under "Working…".
+    if (working) return;
+    core.discardImport().catch(() => {});
+    if (open?.kind === 'importing') close();
+  }
+
+  async function runImport(file: string, calendarId: CalendarId, existing: ExistingEvents) {
+    working = t('working.importing', { file });
+    try {
+      const outcome = await core.runImport(calendarId, existing);
+      close();
+      toast = {
+        message: t('import.done', {
+          file,
+          imported: String(outcome.imported),
+          updated: String(outcome.updated),
+          skipped: String(outcome.skipped),
+        }),
+        // An import that changed nothing has nothing to undo.
+        undo:
+          outcome.imported + outcome.updated > 0 ? () => undoImport(file, outcome.id) : undefined,
+      };
+    } catch (error) {
+      importFailure = t('import.failed', { error: errorText(error) });
+    } finally {
+      working = undefined;
+    }
+  }
+
+  async function undoImport(file: string, id: ImportId) {
+    toast = undefined;
+    working = t('working.undoingImport', { file });
+    try {
+      await core.undoImport(id);
+      toast = { message: t('import.undone', { file }) };
+    } catch (error) {
+      // Undo can succeed later, such as once the Calendar is writable again.
+      toast = {
+        message: t('import.undoFailed', { file, error: errorText(error) }),
+        undo: () => undoImport(file, id),
+      };
+    } finally {
+      working = undefined;
     }
   }
 
@@ -445,6 +547,7 @@
         onstep={(by) => navigate(step(shown, by))}
         onview={(view) => navigate(switchView(shown, view))}
         onmonth={(month) => navigate(openMonth(shown, month))}
+        onimport={startImport}
         onsettings={openSettings}
         onabout={openAbout}
         onquit={quit}
@@ -513,15 +616,38 @@
     />
   {:else if open?.kind === 'about'}
     <AboutDialog {version} failure={dialogFailure} onopenlink={openLink} onclose={close} />
-  {:else if open?.kind === 'noCalendar'}
-    <Dialog title={t('event.noCalendarTitle')} onclose={close}>
-      <p>{t('event.noCalendarBody', { account: t('account.local') })}</p>
+  {:else if open?.kind === 'importing'}
+    {@const importing = open}
+    <ImportDialog
+      {core}
+      file={importing.file}
+      calendars={writableCalendars}
+      initialCalendarId={importing.calendarId}
+      failure={importFailure}
+      onimport={(calendarId, existing) => runImport(importing.file, calendarId, existing)}
+      oncancel={cancelImport}
+    />
+  {:else if open?.kind === 'notice'}
+    <Dialog title={open.title} onclose={close}>
+      <p>{open.body}</p>
       {#snippet actions()}
         <button type="button" class="button solid" data-initial-focus onclick={close}>
           {t('common.ok')}
         </button>
       {/snippet}
     </Dialog>
+  {/if}
+
+  {#if toast}
+    {@const shown = toast}
+    <Toast
+      message={shown.message}
+      action={shown.undo && { label: t('import.undo'), run: shown.undo }}
+      ondismiss={() => (toast = undefined)}
+    />
+  {/if}
+  {#if working}
+    <WorkingDialog message={working} />
   {/if}
 {:else}
   <p>{t('app.loading')}</p>

@@ -4,16 +4,19 @@
 #[cfg(target_os = "linux")]
 mod handoff;
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Colour, Core, ErrorCode, Event, EventDraft, EventId,
-    Occurrence, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View,
-    When, link_allowed,
+    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportSummary, Occurrence,
+    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View, When,
+    link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 /// The Tauri event on which Signals reach the frontend.
@@ -44,6 +47,17 @@ impl SignalSink for ForwardToFrontend {
 /// Why the core couldn't open its Local Store. Managed only then, in place
 /// of the [`Core`], and the window shows it on the startup error screen.
 struct StartupFailure(ErrorCode);
+
+/// The file the user picked to import, with its latest preview. It is held
+/// here, so that the window never handles paths or the parsed Events: it
+/// can't make the shell read any other file.
+#[derive(Default)]
+struct PickedImport(Mutex<Option<PickedFile>>);
+
+struct PickedFile {
+    file: ImportFile,
+    preview: Option<ImportPreview>,
+}
 
 /// Failures reach the frontend as codes it translates, never as English text.
 type CommandResult<T> = Result<T, ErrorCode>;
@@ -168,6 +182,103 @@ fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult
 #[tauri::command]
 fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
     core.delete_event(id).map_err(ErrorCode::from)
+}
+
+/// Asks the user for an `.ics` or `.zip` file to import through the system's
+/// file dialog (the portal's, where there is one) and reads it. Returns its
+/// name, or `None` when the user cancels. `title` and `filter` are the
+/// dialog's translated words.
+#[tauri::command]
+async fn pick_import_file(
+    app: AppHandle,
+    picked: State<'_, PickedImport>,
+    title: String,
+    filter: String,
+) -> CommandResult<Option<String>> {
+    let Some(path) = import_path(&app, title, filter) else {
+        return Ok(None);
+    };
+    let file = ImportFile::read(&path).map_err(ErrorCode::from)?;
+    let name = file.name.clone();
+    *picked.0.lock().unwrap() = Some(PickedFile {
+        file,
+        preview: None,
+    });
+    Ok(Some(name))
+}
+
+fn import_path(app: &AppHandle, title: String, filter: String) -> Option<PathBuf> {
+    // The agent's Xvfb session has no portal; a debug build takes the file
+    // from the environment instead (see the run-freecal skill).
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("FREECAL_IMPORT_FILE") {
+        return Some(path.into());
+    }
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .add_filter(filter, &["ics", "zip"]);
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.blocking_pick_file()?.into_path().ok()
+}
+
+/// Previews importing the picked file into a Calendar, and keeps the preview
+/// for [`run_import`].
+#[tauri::command]
+async fn preview_import(
+    core: State<'_, Core>,
+    picked: State<'_, PickedImport>,
+    calendar_id: i64,
+) -> CommandResult<ImportSummary> {
+    let mut held = picked.0.lock().unwrap();
+    let current = held.as_mut().ok_or(ErrorCode::NoFileToImport)?;
+    let preview = core
+        .preview_import(&current.file, CalendarId(calendar_id))
+        .map_err(ErrorCode::from)?;
+    let summary = preview.summary();
+    current.preview = Some(preview);
+    Ok(summary)
+}
+
+/// Imports the picked file into a Calendar, doing with the Events it already
+/// has what `existing` says, and lets go of the file. The kept preview is
+/// used when it is of that Calendar.
+#[tauri::command]
+async fn run_import(
+    core: State<'_, Core>,
+    picked: State<'_, PickedImport>,
+    calendar_id: i64,
+    existing: ExistingEvents,
+) -> CommandResult<ImportOutcome> {
+    let mut held = picked.0.lock().unwrap();
+    let current = held.as_mut().ok_or(ErrorCode::NoFileToImport)?;
+    let calendar_id = CalendarId(calendar_id);
+    let preview = match current.preview.take() {
+        Some(preview) if preview.calendar_id == calendar_id => preview,
+        _ => core
+            .preview_import(&current.file, calendar_id)
+            .map_err(ErrorCode::from)?,
+    };
+    let outcome = core.run_import(&preview, existing);
+    match outcome {
+        Ok(_) => *held = None,
+        Err(_) => current.preview = Some(preview),
+    }
+    outcome.map_err(ErrorCode::from)
+}
+
+/// Lets go of the picked file without importing it.
+#[tauri::command]
+fn discard_import(picked: State<PickedImport>) {
+    *picked.0.lock().unwrap() = None;
+}
+
+#[tauri::command]
+async fn undo_import(core: State<'_, Core>, id: ImportId) -> CommandResult<()> {
+    core.undo_import(id).map_err(ErrorCode::from)
 }
 
 /// Opens a link from a description or location in the system browser. The scheme
@@ -297,6 +408,8 @@ fn hand_off_or_serve(app: &tauri::App, data_dir: &std::path::Path) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(PickedImport::default())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
@@ -359,6 +472,11 @@ fn main() {
             edit_event,
             reschedule_event,
             delete_event,
+            pick_import_file,
+            preview_import,
+            run_import,
+            discard_import,
+            undo_import,
             open_link,
             version,
             show_window,

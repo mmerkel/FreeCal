@@ -189,6 +189,41 @@ export const samples = {
       "appearance": "light"
     }
   ],
+  ImportSummary: [
+    {
+      "calendarId": 2,
+      "newEvents": 40,
+      "existingEvents": 2,
+      "pinned": [
+        {
+          "zone": "Europe/Berlin",
+          "events": 3
+        }
+      ]
+    }
+  ],
+  PinnedZone: [
+    {
+      "zone": "Europe/Berlin",
+      "events": 3
+    }
+  ],
+  ExistingEvents: [
+    "update",
+    "skip",
+    "copy"
+  ],
+  ImportId: [
+    4
+  ],
+  ImportOutcome: [
+    {
+      "id": 4,
+      "imported": 40,
+      "updated": 2,
+      "skipped": 0
+    }
+  ],
   ErrorCode: [
     {
       "code": "localStoreFailed"
@@ -252,6 +287,9 @@ export const samples = {
       "code": "importNotFound"
     },
     {
+      "code": "noFileToImport"
+    },
+    {
       "code": "linkNotAllowed"
     },
     {
@@ -283,5 +321,10 @@ type Samples = {
   Appearance: Unbranded<T.Appearance>[];
   Settings: Unbranded<T.Settings>[];
   SettingsUpdate: Unbranded<T.SettingsUpdate>[];
+  ImportSummary: Unbranded<T.ImportSummary>[];
+  PinnedZone: Unbranded<T.PinnedZone>[];
+  ExistingEvents: Unbranded<T.ExistingEvents>[];
+  ImportId: Unbranded<T.ImportId>[];
+  ImportOutcome: Unbranded<T.ImportOutcome>[];
   ErrorCode: Unbranded<T.ErrorCode>[];
 };

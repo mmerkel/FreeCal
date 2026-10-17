@@ -218,9 +218,50 @@ body {
   font: inherit;
 }
 
-/* Checkboxes take the neutral solid colour, not the system's accent. */
-input[type='checkbox'] {
+/* Checkboxes and radios take the neutral solid colour, not the system's accent. */
+input[type='checkbox'],
+input[type='radio'] {
   accent-color: var(--solid);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Forms in dialogs: a column of fields, each a small label over its input,
+   and the text that says what is wrong. */
+.form {
+  display: grid;
+  gap: var(--space-6);
+  color: var(--foreground);
+}
+
+.form .input {
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field-label {
+  color: var(--foreground-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.problem {
+  color: var(--danger);
+}
+
+/* A checkbox or radio with its words. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* Menus: a raised card of items, labels and separators (see Menu.svelte).
@@ -239,6 +280,11 @@ input[type='checkbox'] {
   box-sizing: border-box;
   min-width: 11.25rem;
   padding: var(--space-2);
+}
+
+/* The raised card that menus and toasts (see Toast.svelte) float on. */
+.menu,
+.toast {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
