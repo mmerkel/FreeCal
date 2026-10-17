@@ -142,6 +142,7 @@ fn samples_file() -> (String, Vec<String>) {
             when: timed,
             location: StructuredText::from_plain_text("Main Street 1"),
             description: description.clone(),
+            pinned_zone: Some("Europe/Berlin".to_owned()),
         }]),
         samples(&[Occurrence {
             event_id: EventId(3),

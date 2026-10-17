@@ -1,11 +1,13 @@
 {
-  "purpose": "The hostile test Event (spec: Testing Decisions). Every path that shows, writes or sends Event text runs it through. `expected` holds the structured content the core builds: from `description`, read as plain text and as HTML, and from `location`, and as `importNotCalendar` the words the frontend gives for an import error naming `fileName`; both seams use it.",
+  "purpose": "The hostile test Event (spec: Testing Decisions). Every path that shows, writes or sends Event text runs it through. `expected` holds the structured content the core builds: from `description`, read as plain text and as HTML, and from `location`, as `importNotCalendar` the words the frontend gives for an import error naming `fileName`, and as `pinnedZoneNote` its note on an Event pinned to `pinnedZone`; both seams use it.",
   "title": "<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com",
   "fileName": "../../.bashrc <img src=x onerror=alert(7)> {error} %s‮.ics",
+  "pinnedZone": "Europe/<img src=x onerror=alert(8)> {zone} %s",
   "location": "../../.bashrc & <i>Room</i> %s ${HOME} javascript:alert(6) https://meet.example.com/abc",
   "description": "<p>Agenda <img src=x onerror=alert(3)></p><script>alert(4)</script>\r\nATTENDEE:mailto:evil@example.com<br><a href=\"javascript:alert(5)\">click me</a> <a href=\"https://example.com/agenda\">the agenda</a> <a href=\"file:///etc/passwd\">passwords</a> data:text/html,<b>x</b> https://example.org/plain mailto:someone@example.com",
   "expected": {
     "importNotCalendar": "“../../.bashrc <img src=x onerror=alert(7)> {error} %s‮.ics” isn’t a calendar file FreeCal can read",
+    "pinnedZoneNote": "The original has no time zone, so FreeCal uses Europe/<img src=x onerror=alert(8)> {zone} %s.",
     "plainText": {
       "paragraphs": [
         [

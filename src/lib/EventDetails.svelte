@@ -34,7 +34,12 @@
   <dl class="details">
     <div class="row">
       <dt><Clock size={14} aria-label={t('event.starts')} /></dt>
-      <dd>{describeWhen(event.when)}</dd>
+      <dd>
+        {describeWhen(event.when)}
+        {#if event.pinnedZone !== null}
+          <p class="note">{t('event.pinnedZone', { zone: event.pinnedZone })}</p>
+        {/if}
+      </dd>
     </div>
     {#if event.location.paragraphs.length > 0}
       <div class="row">
@@ -99,6 +104,12 @@
   dd {
     min-width: 0;
     margin: 0;
+  }
+
+  .note {
+    margin: var(--space-2) 0 0;
+    color: var(--foreground-muted);
+    overflow-wrap: anywhere;
   }
 
   .text {

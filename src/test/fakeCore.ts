@@ -87,6 +87,7 @@ export class FakeCore implements CoreApi {
     const added: Event = {
       id: eventId(this.nextEventId++),
       title: '',
+      pinnedZone: null,
       ...fields,
       location: structured(location),
       description: structured(description),
@@ -248,6 +249,7 @@ export class FakeCore implements CoreApi {
         draft.description === event.description.text
           ? event.description
           : plainText(draft.description),
+      pinnedZone: keptPinnedZone(event, draft.when),
     });
     this.emit({
       kind: 'occurrencesChanged',
@@ -260,6 +262,7 @@ export class FakeCore implements CoreApi {
     this.calls.push('rescheduleEvent');
     const event = this.findEvent(id);
     this.writable(event.calendarId);
+    event.pinnedZone = keptPinnedZone(event, when);
     event.when = { ...when };
     this.emit({ kind: 'occurrencesChanged', calendarIds: [event.calendarId] });
     return structuredClone(event);
@@ -348,4 +351,9 @@ function overlaps(when: When, from: Temporal.PlainDate, to: Temporal.PlainDate):
     Temporal.PlainDateTime.compare(start, to.toPlainDateTime()) < 0 &&
     Temporal.PlainDateTime.compare(end, from.toPlainDateTime()) > 0
   );
+}
+
+/** Like the core, a time the user changes is no longer a pinned one. */
+function keptPinnedZone(event: Event, when: When): string | null {
+  return JSON.stringify(event.when) === JSON.stringify(when) ? event.pinnedZone : null;
 }

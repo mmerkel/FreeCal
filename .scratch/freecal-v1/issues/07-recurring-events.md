@@ -11,6 +11,7 @@
 - [ ] The editor sets a repeat rule: daily, weekly, monthly or yearly, with an interval and an end
 - [ ] The core expands Recurring Events into Occurrences for the requested range; the frontend never interprets repeat rules
 - [ ] Deleting a single Occurrence creates a cancelled Exception and leaves the rest of the Recurring Event in place
+- [ ] Import carries `RRULE`, `EXDATE` and `RECURRENCE-ID` overrides (ticket 57 skips overrides; until now an imported Recurring Event is stored as its first Occurrence)
 
 ## Comments
 

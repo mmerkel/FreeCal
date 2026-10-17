@@ -4,7 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{CalendarId, CoreError, Result, StructuredText};
+use crate::{CalendarId, CoreError, ImportedWhen, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -82,6 +82,9 @@ pub struct Event {
     pub when: When,
     pub location: StructuredText,
     pub description: StructuredText,
+    /// The zone FreeCal gave the Event when it arrived with a time of day but
+    /// no time zone (ADR 0007), which its details mention.
+    pub pinned_zone: Option<String>,
 }
 
 /// One dated appearance of an Event in the grid. A single Event has exactly
@@ -148,6 +151,46 @@ impl StoredWhen {
                 end_zone: Some(display.name().to_owned()),
             },
         })
+    }
+
+    /// An imported Event's time, as the file gives it.
+    pub fn imported(when: &ImportedWhen) -> Self {
+        match *when {
+            ImportedWhen::AllDay { start, end } => Self {
+                all_day: true,
+                start: start.to_string(),
+                end: end.to_string(),
+                start_zone: None,
+                end_zone: None,
+            },
+            ImportedWhen::Timed {
+                start,
+                start_zone,
+                end,
+                end_zone,
+            } => Self {
+                all_day: false,
+                start: wall_text(start),
+                end: wall_text(end),
+                start_zone: Some(start_zone.name().to_owned()),
+                end_zone: Some(end_zone.name().to_owned()),
+            },
+        }
+    }
+
+    /// This time's wall times in the Event Time Zones of `pinned`, the time
+    /// of an Event whose floating time was pinned before: a new version that
+    /// is still floating keeps the zone it was pinned to (ADR 0007, rule 2).
+    /// Stays as it is when either is all-day or `pinned`'s zones can't be read.
+    pub fn in_zones_of(self, pinned: &StoredWhen) -> Self {
+        if self.all_day || pinned.all_day || pinned.zones().is_err() {
+            return self;
+        }
+        Self {
+            start_zone: pinned.start_zone.clone(),
+            end_zone: pinned.end_zone.clone(),
+            ..self
+        }
     }
 
     /// This time edited to `when`, given in the Display Time Zone. A timed

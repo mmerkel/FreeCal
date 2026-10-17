@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
-use freecal_core::{CalendarId, Clock, Core, CoreError, EventDraft, Signal, SignalSink, When};
+use freecal_core::{
+    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, Signal, SignalSink, When,
+};
 use tempfile::TempDir;
 
 pub struct Harness {
@@ -129,6 +131,13 @@ impl SignalSink for RecordingSignals {
     }
 }
 
+/// A new Local Calendar.
+pub fn calendar(core: &Core, name: &str) -> Calendar {
+    let local = core.list_accounts().unwrap()[0].id;
+    core.create_calendar(local, name, Colour::parse("#3366cc").unwrap())
+        .unwrap()
+}
+
 // Events and their times, written as text.
 
 pub fn date(text: &str) -> NaiveDate {
@@ -161,4 +170,20 @@ pub fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
         location: String::new(),
         description: String::new(),
     }
+}
+
+// Files to import, written as text.
+
+/// An `.ics` file with `body` between `BEGIN:VCALENDAR` and `END:VCALENDAR`,
+/// one property per line.
+pub fn ics(body: &str) -> Vec<u8> {
+    format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{body}END:VCALENDAR\r\n")
+        .replace("\r\n", "\n")
+        .replace('\n', "\r\n")
+        .into_bytes()
+}
+
+/// A `VEVENT` whose title is its UID, with `start` and `end` as whole lines.
+pub fn event(uid: &str, start: &str, end: &str) -> String {
+    format!("BEGIN:VEVENT\nUID:{uid}\nSUMMARY:{uid}\n{start}\n{end}\nEND:VEVENT\n")
 }

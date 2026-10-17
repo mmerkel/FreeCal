@@ -263,6 +263,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - **Import/export**:
   - Import accepts `.ics` and `.zip` of `.ics` files; CSV is not supported.
   - Time zone names in imported and synced data that aren't IANA names are mapped to IANA names: a path ending in one (`/mozilla.org/20050126_1/Europe/Berlin`), a Windows name as Outlook writes it (`W. Europe Standard Time`, through CLDR's `windowsZones` table), or a custom `VTIMEZONE`'s `X-LIC-LOCATION`. A time whose zone can't be mapped is treated like a floating time: pinned by ADR 0007 and counted in the import preview. UTC times keep their instant and get the file's `X-WR-TIMEZONE` when it names one, as Google's exports do, otherwise UTC.
+  - Running an import looks up again which Events the Calendar has, by UID: "update" gives them the imported version (a version that still has no time zone at either end keeps the zone pinned before, ADR 0007 rule 2), "skip" leaves them, "copy" adds the imported version with a new UID. Undoing the import deletes the Events it added, wherever they are now, and writes back the previous version of the ones it updated, also if they were deleted since; it is refused while any Calendar it touches is Read-only. An Event the user changes the time of loses its pinned mark.
   - Export produces a single `.ics`, or for everything a `.zip` with one `.ics` per Calendar organised by Account.
   - Google-only fields are written as `X-` properties and read back on import.
   - Existing UIDs trigger one update / skip / copy choice per import.

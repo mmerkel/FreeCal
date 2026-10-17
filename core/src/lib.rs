@@ -30,8 +30,8 @@ pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use import::{
-    ImportFile, ImportPreview, ImportedEvent, ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE,
-    PinnedZone,
+    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportedEvent,
+    ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
@@ -245,6 +245,7 @@ impl Core {
                 location: draft.location,
                 description: draft.description,
                 description_html: false,
+                zone_pinned: false,
             };
             let id = store.insert_event(calendar_id, &fields)?;
             (
@@ -284,6 +285,7 @@ impl Core {
                 calendar_id: draft.calendar_id,
                 fields: EventFields {
                     title: draft.title,
+                    zone_pinned: old.zone_pinned && when == old.when,
                     when,
                     location: draft.location,
                     description,
@@ -311,7 +313,10 @@ impl Core {
             let store = self.store();
             let mut event = store.find_event(id)?;
             writable(&store, event.calendar_id)?;
-            event.fields.when = event.fields.when.edit(when, zone)?;
+            let edited = event.fields.when.edit(when, zone)?;
+            // A time the user changed is theirs, no longer a pinned one.
+            event.fields.zone_pinned &= edited == event.fields.when;
+            event.fields.when = edited;
             store.update_event(id, &event)?;
             event
         };
@@ -352,6 +357,37 @@ impl Core {
         import::preview(file, calendar_id, &existing, self.clock.time_zone())
     }
 
+    /// Runs a previewed import into a writable Calendar, doing with the
+    /// Events it already has what `existing` says. The import is one Change
+    /// Journal unit, which [`Core::undo_import`] undoes in one step.
+    pub fn run_import(
+        &self,
+        preview: &ImportPreview,
+        existing: ExistingEvents,
+    ) -> Result<ImportOutcome> {
+        let outcome = {
+            let store = self.store();
+            writable(&store, preview.calendar_id)?;
+            import::run(&store, preview, existing, self.clock.now().timestamp())?
+        };
+        if outcome.imported + outcome.updated > 0 {
+            self.signals.send(Signal::OccurrencesChanged {
+                calendar_ids: vec![preview.calendar_id],
+            });
+        }
+        Ok(outcome)
+    }
+
+    /// Undoes an import exactly: the Events it added are deleted and the
+    /// ones it updated get their previous version back. An import is undone
+    /// once, and only while every Calendar it changes Events in is writable.
+    pub fn undo_import(&self, id: ImportId) -> Result<()> {
+        let calendar_ids = import::undo(&self.store(), id)?;
+        self.signals
+            .send(Signal::OccurrencesChanged { calendar_ids });
+        Ok(())
+    }
+
     fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
         let description = description_of(&stored.fields);
         let fields = stored.fields;
@@ -362,6 +398,10 @@ impl Core {
             when: fields.when.to_when(self.clock.time_zone())?,
             location: StructuredText::from_plain_text(&fields.location),
             description,
+            pinned_zone: fields
+                .zone_pinned
+                .then_some(fields.when.start_zone)
+                .flatten(),
         })
     }
 
@@ -388,7 +428,7 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
 }
 
 /// Refuses changes to the Events of a missing or Read-only Calendar.
-fn writable(store: &Store, id: CalendarId) -> Result<()> {
+pub(crate) fn writable(store: &Store, id: CalendarId) -> Result<()> {
     if store.find_calendar(id)?.read_only {
         Err(CoreError::CalendarReadOnly(id))
     } else {

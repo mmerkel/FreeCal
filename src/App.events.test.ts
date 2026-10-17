@@ -165,6 +165,29 @@ test('an Event’s details show its title, time, location, description and Calen
   ).toHaveAttribute('aria-current', 'true');
 });
 
+test('the details of an Event that had no time zone say which zone FreeCal gave it', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({
+    calendarId: home.id,
+    title: 'Floating',
+    when: monday,
+    pinnedZone: 'Europe/Berlin',
+  });
+  core.addEvent({ calendarId: home.id, title: 'Zoned', when: monday });
+  await showApp(core);
+
+  const floating = await openOccurrence(user, 'Floating');
+  expect(floating).toHaveTextContent(
+    'The original has no time zone, so FreeCal uses Europe/Berlin.',
+  );
+  await user.click(within(floating).getByRole('button', { name: 'Close' }));
+
+  const zoned = await openOccurrence(user, 'Zoned');
+  expect(zoned).not.toHaveTextContent('no time zone');
+});
+
 test('an Event of a Read-only Calendar can’t be edited or deleted', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();
@@ -387,6 +410,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     when: monday,
     location: hostile.expected.location as StructuredText,
     description: hostile.expected.html as StructuredText,
+    pinnedZone: hostile.pinnedZone,
   });
   core.addEvent({
     calendarId: home.id,
@@ -399,6 +423,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   const details = await openOccurrence(user, 'Hostile');
 
   expect(details).toHaveTextContent(hostile.location);
+  expect(details).toHaveTextContent(hostile.expected.pinnedZoneNote);
   expect(details).toHaveTextContent('click me');
   // Disallowed links are plain text; only the core's link pieces are links.
   for (const text of ['click me', 'passwords', 'data:text/html', 'javascript:']) {

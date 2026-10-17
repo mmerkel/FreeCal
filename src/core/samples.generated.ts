@@ -98,7 +98,8 @@ export const samples = {
           ]
         ],
         "text": "Agenda: notes (https://example.org/notes)"
-      }
+      },
+      "pinnedZone": "Europe/Berlin"
     }
   ],
   Occurrence: [
@@ -246,6 +247,9 @@ export const samples = {
     {
       "code": "importTooLarge",
       "file": "takeout.zip/Calendar/Work.ics"
+    },
+    {
+      "code": "importNotFound"
     },
     {
       "code": "linkNotAllowed"

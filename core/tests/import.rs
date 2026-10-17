@@ -4,30 +4,11 @@ use std::io::Write;
 
 use chrono_tz::Tz;
 use freecal_core::{
-    Calendar, Colour, Core, CoreError, ErrorCode, ImportFile, ImportPreview, ImportedWhen,
-    MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone, link_allowed,
+    Core, CoreError, ErrorCode, ImportFile, ImportPreview, ImportedWhen, MAX_IMPORT_ENTRIES,
+    MAX_IMPORT_SIZE, PinnedZone, link_allowed,
 };
 use icalendar::{Component, EventLike};
-use support::{Harness, date, time};
-
-fn calendar(core: &Core, name: &str) -> Calendar {
-    let local = core.list_accounts().unwrap()[0].id;
-    core.create_calendar(local, name, Colour::parse("#3366cc").unwrap())
-        .unwrap()
-}
-
-/// An `.ics` file with `body` between `BEGIN:VCALENDAR` and `END:VCALENDAR`,
-/// one property per line.
-fn ics(body: &str) -> Vec<u8> {
-    format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{body}END:VCALENDAR\r\n")
-        .replace("\r\n", "\n")
-        .replace('\n', "\r\n")
-        .into_bytes()
-}
-
-fn event(uid: &str, start: &str, end: &str) -> String {
-    format!("BEGIN:VEVENT\nUID:{uid}\nSUMMARY:{uid}\n{start}\n{end}\nEND:VEVENT\n")
-}
+use support::{Harness, calendar, date, event, ics, time};
 
 fn zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

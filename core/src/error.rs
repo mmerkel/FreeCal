@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{AccountId, CalendarId, EventId};
+use crate::{AccountId, CalendarId, EventId, ImportId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -43,6 +43,8 @@ pub enum CoreError {
     ImportZipWithoutCalendars { file: String },
     #[error("{file:?} is larger than an import may be")]
     ImportTooLarge { file: String },
+    #[error("there is no import {0:?} to undo")]
+    ImportNotFound(ImportId),
 }
 
 impl CoreError {
@@ -74,6 +76,7 @@ impl CoreError {
                 ErrorCode::ImportZipWithoutCalendars { file: file.clone() }
             }
             CoreError::ImportTooLarge { file } => ErrorCode::ImportTooLarge { file: file.clone() },
+            CoreError::ImportNotFound(_) => ErrorCode::ImportNotFound,
         }
     }
 }
@@ -121,6 +124,8 @@ pub enum ErrorCode {
     ImportTooLarge {
         file: String,
     },
+    /// An import to undo was undone already, or its Calendar deleted.
+    ImportNotFound,
     /// The window asked to open a link that isn't `http(s)://` or `mailto:`.
     LinkNotAllowed,
     /// The system couldn't open a link in the browser.
@@ -153,6 +158,7 @@ impl ErrorCode {
             ErrorCode::ImportNotCalendar { file: file() },
             ErrorCode::ImportZipWithoutCalendars { file: file() },
             ErrorCode::ImportTooLarge { file: file() },
+            ErrorCode::ImportNotFound,
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,
             ErrorCode::WindowNotShown,

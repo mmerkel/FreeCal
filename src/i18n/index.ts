@@ -28,6 +28,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   importNotCalendar: 'error.importNotCalendar',
   importZipWithoutCalendars: 'error.importZipWithoutCalendars',
   importTooLarge: 'error.importTooLarge',
+  importNotFound: 'error.importNotFound',
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
   windowNotShown: 'error.windowNotShown',
