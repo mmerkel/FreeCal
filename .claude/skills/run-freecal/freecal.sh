@@ -11,6 +11,10 @@ STORE="$RUN_DIR/data/io.github.mmerkel.FreeCal/freecal.sqlite3"
 VENV="$RUN_DIR/venv"
 
 export DISPLAY="$DISPLAY_NUMBER"
+# GTK prefers Wayland when the session has it, which would put the window on
+# the user's desktop instead of Xvfb.
+unset WAYLAND_DISPLAY
+export GDK_BACKEND=x11
 mkdir -p "$RUN_DIR/shots" "$RUN_DIR/data"
 
 usage() {
