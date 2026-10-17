@@ -8,7 +8,7 @@ Ticket 48 blocks the wheel and touch scrolling outside an open menu, but draggin
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
@@ -20,7 +20,7 @@ Ticket 48 blocks the wheel and touch scrolling outside an open menu, but draggin
 - [x] `Menu`'s header comment says what scrolling outside it does now
 - [x] Tests: ticket 48's wheel and touch tests in `Sidebar.test.ts` are replaced by: a `scroll` outside the open menu closes it; a `scroll` inside it does not
 - [x] `.claude/skills/run-freecal/SKILL.md` is updated: the ⋮ coordinates with the strip, the overlay-bar gotcha removed, the line on scrolling under an open menu rewritten, and a wheel helper documented if one is added to the driver
-- [ ] While the strip shows, the sidebar's right padding shrinks to `--space-2`, so ⋮ sits close to the strip without unused space; checked by hand
+- [x] While the strip shows, the sidebar's right padding shrinks to `--space-2`, so ⋮ sits close to the strip without unused space; checked by hand
 - [x] Checked by hand with `run-freecal` and 30 or more Calendars, results noted below: the strip shows only when the sidebar overflows; ⋮ opens its menu wherever its row is; a wheel over the sidebar or the week grid closes an open menu and scrolls; dragging the sidebar's scrollbar closes it and scrolls; a wheel over the month grid leaves it open
 
 ## Comments
@@ -28,3 +28,4 @@ Ticket 48 blocks the wheel and touch scrolling outside an open menu, but draggin
 - 2026-10-17: From `TODO.md` ("side bar scroll bar on left?" and "side bar can still be scrolled when menu open: by dragging scroll bar, and that can make the menu flip"), settled in a grilling session. Kept on the right in its own strip, since a left-hand bar is unusual on Linux. Considered and rejected for the menu: undoing the scroll by restoring `scrollTop` (works, but the thumb twitches), `overflow: hidden` on scrollers (the bar vanishes) and `pointer-events: none` on scrollers (hover dies). Closing on gestures only (`wheel`, `touchmove`, a press hit-tested onto a scrollbar) was rejected for the WebKit-specific hit-testing; closing on any `scroll` event was chosen, and the wheel closes too, so all scrolling behaves alike. Checked in WebKitGTK 2.52.6: the overlay bar did not paint over the menu in GPU rendering; the run-freecal note that it does came from CPU rendering.
 - 2026-10-17: Done. Checked by hand with `run-freecal --subpixel` and 32 Calendars: with 2 Calendars there is no strip; with 32 the strip is at x≈184–191, and ⋮ (now x≈162) opens its menu on the top row and on a low row (y≈756, flipped above), and the menu lies over the strip. A wheel over the sidebar or the week grid closes an open menu and scrolls; dragging the sidebar's scrollbar closes it and scrolls; a wheel over the month grid leaves it open; arrow keys inside the menu leave it open. The low row first failed: focusing the first item before the menu was placed made WebKit scroll the sidebar, which now closes the menu. The first item is now focused with `preventScroll`; jsdom doesn't scroll on focus, so only the hand check covers this. `run-freecal` gained a `wheel` command. Keyboard scrolling outside an open menu can't happen while the menu holds focus; a scroll the app makes itself closes it, as accepted.
 - 2026-10-17: Reopened. With the strip, ⋮ sits slightly too far left: the sidebar's 8px right padding plus the strip leave unused space.
+- 2026-10-17: Done again. A `ResizeObserver` on the sidebar marks it `.scrolls` while it overflows (the strip appearing shrinks its content box, so the observer fires; CSS can't tell overflow in WebKitGTK), and its right padding is then `--space-2`. Checked by hand with `--subpixel`: with the strip, ⋮ is at x≈166 and "+" at x≈164 (was 162 and 160); deleting Calendars through the menu until the sidebar fits removes the strip and restores the 8px padding ("+" at x≈168) live, and adding Calendars brings both back.
