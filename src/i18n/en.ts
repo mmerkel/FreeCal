@@ -7,7 +7,7 @@ export const en = {
     'FreeCal is already running, but it couldn’t be brought to the front. Close the other FreeCal, then start FreeCal again.',
   'startup.newerLocalStore':
     'Your calendar data was saved by a newer version of FreeCal. Update your FreeCal version to open it.',
-  'startup.localStoreFailed': 'FreeCal couldn’t read its data. It may be damaged.',
+  'startup.localStoreFailed': 'FreeCal couldn’t read its database. It may be damaged.',
   'startup.dataDirectoryFailed': 'FreeCal couldn’t use the folder for its data.',
   'startup.quit': 'Quit FreeCal',
   'app.readFailed': 'FreeCal could not read the Calendars again: {error}',
@@ -117,7 +117,7 @@ export const en = {
   'link.openBody': 'Open {url} in your browser?',
   'link.open': 'Open',
   'link.openFailed': 'The link couldn’t be opened: {error}',
-  'error.localStoreFailed': 'FreeCal’s data couldn’t be read or written',
+  'error.localStoreFailed': 'FreeCal’s database couldn’t be read or written',
   'error.dataDirectoryFailed': 'the folder for FreeCal’s data couldn’t be used',
   'error.localStoreInUse': 'another FreeCal is using the same data',
   'error.accountNotFound': 'the account no longer exists',

@@ -139,7 +139,7 @@ test('a startup failure is drawn with the frontend’s default settings', async 
 test.each([
   ['localStoreInUse', 'FreeCal is already running, but it couldn’t be brought to the front.'],
   ['newerLocalStore', 'Your calendar data was saved by a newer version of FreeCal.'],
-  ['localStoreFailed', 'FreeCal couldn’t read its data. It may be damaged.'],
+  ['localStoreFailed', 'FreeCal couldn’t read its database. It may be damaged.'],
 ] as const)('the startup error screen says why FreeCal couldn’t start: %s', async (code, why) => {
   const core = new FakeCore();
   core.startupError = { code };
@@ -170,7 +170,7 @@ test('a failure the core reports is shown in words, not as its code', async () =
   await user.click(screen.getByRole('radio', { name: 'Dark' }));
 
   expect(await screen.findByRole('alert')).toHaveTextContent(
-    'The setting couldn’t be saved: FreeCal’s data couldn’t be read or written',
+    'The setting couldn’t be saved: FreeCal’s database couldn’t be read or written',
   );
 });
 
