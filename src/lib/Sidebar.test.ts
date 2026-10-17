@@ -16,12 +16,13 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) 
   return screen.getByRole('menu', { name: `Options for ${name}` });
 }
 
-test('subscribes to Signals before reading anything', async () => {
+test('subscribes to Signals before reading anything a Signal could change', async () => {
   const core = new FakeCore();
 
   await showApp(core);
 
-  expect(core.calls[0]).toBe('subscribe');
+  // Whether FreeCal started comes first; no Signal changes that.
+  expect(core.calls.slice(0, 2)).toEqual(['startupFailure', 'subscribe']);
   expect(core.calls).toContain('listCalendars');
 });
 

@@ -15,7 +15,7 @@
     View,
     When,
   } from './core/types';
-  import { t } from './i18n';
+  import { errorText, startupText, t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
   import { followAppearance } from './lib/colourScheme';
@@ -39,6 +39,7 @@
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
+  import StartupError from './lib/StartupError.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import { whenForShortcut, type VisibleRange } from './lib/when';
 
@@ -84,7 +85,8 @@
   let interacting = false;
   let dateChangeHeld = false;
   let directory = $state<Directory>();
-  let startFailure = $state<string>();
+  /** Why FreeCal couldn't start, in words, for the startup error screen. */
+  let startupReason = $state<string>();
   let readFailure = $state<string>();
   let range = $state<VisibleRange>();
   let occurrences = $state<Occurrence[]>([]);
@@ -138,7 +140,7 @@
   }
 
   function reportRead(error: unknown) {
-    readFailure = String(error);
+    readFailure = errorText(error);
   }
 
   /** Everything shown depends on the Calendars; re-reads after any change. */
@@ -198,6 +200,12 @@
     let unsubscribe: (() => void) | undefined;
 
     async function start() {
+      const failure = await core.startupFailure();
+      if (failure) {
+        startupReason = startupText(failure);
+        showWindow();
+        return;
+      }
       // Subscribe first, then read, so that no change falls in the gap.
       const stop = await core.subscribe((signal) => {
         if (!stopped) onSignal(signal);
@@ -223,7 +231,7 @@
 
     start().catch((error) => {
       // Drawn with the default settings.
-      startFailure = String(error);
+      startupReason = t('app.loadFailed', { error: errorText(error) });
       showWindow();
     });
     return () => {
@@ -237,7 +245,7 @@
     if (next.view !== navigation?.view) {
       core.setLastUsedView(next.view).then(
         () => (viewSaveFailure = undefined),
-        (error) => (viewSaveFailure = t('app.viewSaveFailed', { error: String(error) })),
+        (error) => (viewSaveFailure = t('app.viewSaveFailed', { error: errorText(error) })),
       );
     }
     navigation = next;
@@ -248,7 +256,7 @@
     sidebar = next;
     core.setSidebar(next).then(
       () => (sidebarSaveFailure = undefined),
-      (error) => (sidebarSaveFailure = t('app.sidebarSaveFailed', { error: String(error) })),
+      (error) => (sidebarSaveFailure = t('app.sidebarSaveFailed', { error: errorText(error) })),
     );
   }
 
@@ -319,7 +327,7 @@
       await core.rescheduleEvent(id, when);
       rescheduleFailure = undefined;
     } catch (error) {
-      rescheduleFailure = t('event.rescheduleFailed', { error: String(error) });
+      rescheduleFailure = t('event.rescheduleFailed', { error: errorText(error) });
       throw error;
     }
   }
@@ -329,7 +337,7 @@
       await core.deleteEvent(id);
       close();
     } catch (error) {
-      dialogFailure = t('event.deleteFailed', { error: String(error) });
+      dialogFailure = t('event.deleteFailed', { error: errorText(error) });
     }
   }
 
@@ -337,7 +345,7 @@
     try {
       await core.openLink(url);
     } catch (error) {
-      dialogFailure = t('link.openFailed', { error: String(error) });
+      dialogFailure = t('link.openFailed', { error: errorText(error) });
     }
   }
 
@@ -347,7 +355,7 @@
     core.updateSettings(update).then(
       () => (settingsFailure = undefined),
       (error) => {
-        settingsFailure = t('settings.saveFailed', { error: String(error) });
+        settingsFailure = t('settings.saveFailed', { error: errorText(error) });
         // Back to what the Local Store kept, so that the window doesn't show
         // a setting it won't open with next time.
         core.settings().then(
@@ -375,7 +383,7 @@
   }
 
   function quit() {
-    core.quit().catch((error) => (quitFailure = t('app.quitFailed', { error: String(error) })));
+    core.quit().catch((error) => (quitFailure = t('app.quitFailed', { error: errorText(error) })));
   }
 
   /** What each keyboard shortcut does (see `shortcuts.ts` for the keys). */
@@ -419,8 +427,8 @@
 
 <svelte:window {onkeydown} />
 
-{#if startFailure}
-  <p role="alert">{t('app.loadFailed', { error: startFailure })}</p>
+{#if startupReason}
+  <StartupError reason={startupReason} onquit={quit} />
 {:else if today && navigation && directory && sidebar}
   {@const shown = navigation}
   {@const sidebarState = sidebar}

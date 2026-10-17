@@ -16,3 +16,7 @@
 - [ ] Tray detection, tray and autostart are behind fakeable desktop interfaces with tests
 - [ ] The Background section of Settings has "Keep running in the background" and "Start at login" switches. The background switch is always enabled, with the hint "Needs a system tray; without one, closing quits", because a tray is only checked for at window close
 - [ ] Turning on start at login goes through the Background portal at the moment the switch is flipped (the portal may ask the user); if it is refused, the switch goes back off with a translated message
+
+## Comments
+
+- 2026-10-17 (from ticket 29): closing the window on a startup error screen must still quit FreeCal. `on_window_event` in `src-tauri/src/main.rs` quits when `StartupFailure` is managed; a start that fails after the core opened shows the same screen without that state, so the frontend or shell needs to cover it too.

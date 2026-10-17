@@ -6,7 +6,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Calendar, EventDraft } from '../core/types';
-  import { t } from '../i18n';
+  import { errorText, t } from '../i18n';
   import Dialog from './Dialog.svelte';
   import { endsBeforeStart, fieldsOf, whenOf } from './when';
 
@@ -50,7 +50,7 @@
     try {
       await onsave({ calendarId, title, when, location, description });
     } catch (error) {
-      failure = t('event.saveFailed', { error: String(error) });
+      failure = t('event.saveFailed', { error: errorText(error) });
     } finally {
       saving = false;
     }

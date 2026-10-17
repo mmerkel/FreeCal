@@ -6,7 +6,7 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import type { CoreApi } from '../core/CoreApi';
   import type { Account, AccountId, Calendar, CalendarId } from '../core/types';
-  import { t } from '../i18n';
+  import { errorText, t } from '../i18n';
   import Dialog from './Dialog.svelte';
   import Menu from './Menu.svelte';
   import { newCalendarColour, SWATCHES } from './palette';
@@ -53,7 +53,7 @@
       await request();
       return true;
     } catch (error) {
-      failure = t('sidebar.changeFailed', { error: String(error) });
+      failure = t('sidebar.changeFailed', { error: errorText(error) });
       return false;
     }
   }

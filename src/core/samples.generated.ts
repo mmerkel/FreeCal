@@ -188,6 +188,59 @@ export const samples = {
       "appearance": "light"
     }
   ],
+  ErrorCode: [
+    {
+      "code": "localStoreFailed"
+    },
+    {
+      "code": "dataDirectoryFailed"
+    },
+    {
+      "code": "localStoreInUse"
+    },
+    {
+      "code": "accountNotFound"
+    },
+    {
+      "code": "calendarNotFound"
+    },
+    {
+      "code": "calendarReadOnly"
+    },
+    {
+      "code": "eventNotFound"
+    },
+    {
+      "code": "endBeforeStart"
+    },
+    {
+      "code": "unreadableEventTime"
+    },
+    {
+      "code": "emptyCalendarName"
+    },
+    {
+      "code": "invalidColour"
+    },
+    {
+      "code": "localAccountCannotBeRemoved"
+    },
+    {
+      "code": "newerLocalStore"
+    },
+    {
+      "code": "unknownProvider"
+    },
+    {
+      "code": "linkNotAllowed"
+    },
+    {
+      "code": "linkNotOpened"
+    },
+    {
+      "code": "windowNotShown"
+    }
+  ],
 } satisfies Samples;
 
 type Samples = {
@@ -210,4 +263,5 @@ type Samples = {
   Appearance: Unbranded<T.Appearance>[];
   Settings: Unbranded<T.Settings>[];
   SettingsUpdate: Unbranded<T.SettingsUpdate>[];
+  ErrorCode: Unbranded<T.ErrorCode>[];
 };

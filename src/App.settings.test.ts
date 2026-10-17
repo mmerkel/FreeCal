@@ -127,13 +127,51 @@ test('opens with the stored appearance and shows the window once it is known', a
 test('a startup failure is drawn with the frontend’s default settings', async () => {
   const core = new FakeCore();
   core.storedSettings = { appearance: 'dark' };
-  core.startupFailure = 'LocalStoreInUse';
+  core.startupError = { code: 'localStoreInUse' };
 
   render(App, { core });
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('LocalStoreInUse');
+  expect(await screen.findByRole('heading', { name: 'FreeCal couldn’t start' })).toBeVisible();
   expect(colourScheme()).toBe('light');
   expect(core.windowShown).toBe(true);
+});
+
+test.each([
+  ['localStoreInUse', 'FreeCal is already running, but it couldn’t be brought to the front.'],
+  ['newerLocalStore', 'Your calendar data was saved by a newer version of FreeCal.'],
+  ['localStoreFailed', 'FreeCal couldn’t read its data. It may be damaged.'],
+] as const)('the startup error screen says why FreeCal couldn’t start: %s', async (code, why) => {
+  const core = new FakeCore();
+  core.startupError = { code };
+
+  render(App, { core });
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(why);
+  expect(core.calls).not.toContain('settings');
+});
+
+test('the startup error screen quits FreeCal', async () => {
+  const core = new FakeCore();
+  core.startupError = { code: 'newerLocalStore' };
+  render(App, { core });
+  const user = userEvent.setup();
+
+  await user.click(await screen.findByRole('button', { name: 'Quit FreeCal' }));
+
+  expect(core.hasQuit).toBe(true);
+});
+
+test('a failure the core reports is shown in words, not as its code', async () => {
+  const core = new FakeCore();
+  vi.spyOn(core, 'updateSettings').mockRejectedValue({ code: 'localStoreFailed' });
+  const { user } = await showApp(core);
+
+  await user.keyboard('{Control>},{/Control}');
+  await user.click(screen.getByRole('radio', { name: 'Dark' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'The setting couldn’t be saved: FreeCal’s data couldn’t be read or written',
+  );
 });
 
 test('About FreeCal shows the version and the licence, and opens the source through the shell', async () => {

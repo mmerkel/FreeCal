@@ -5,6 +5,7 @@ import type {
   Calendar,
   CalendarId,
   Event,
+  ErrorCode,
   EventDraft,
   EventId,
   Settings,
@@ -40,9 +41,9 @@ export class FakeCore implements CoreApi {
   settingsUpdates: SettingsUpdate[] = [];
   /**
    * Set to make the core fail to start, as when it can't open the Local
-   * Store: every read rejects with it.
+   * Store: `startupFailure` returns it and every read rejects with it.
    */
-  startupFailure?: string;
+  startupError?: ErrorCode;
   /** Whether the window has been shown; it starts hidden. */
   windowShown = false;
   hasQuit = false;
@@ -92,6 +93,11 @@ export class FakeCore implements CoreApi {
     };
     this.events.push(added);
     return added;
+  }
+
+  async startupFailure() {
+    this.calls.push('startupFailure');
+    return this.startupError ?? null;
   }
 
   async subscribe(onSignal: (signal: Signal) => void) {
@@ -288,22 +294,22 @@ export class FakeCore implements CoreApi {
   }
 
   private started() {
-    if (this.startupFailure !== undefined) throw new Error(this.startupFailure);
+    if (this.startupError) throw this.startupError;
   }
 
   private findEvent(id: EventId): Event {
     const found = this.events.find((event) => event.id === id);
-    if (!found) throw new Error(`there is no Event ${id}`);
+    if (!found) throw failure('eventNotFound');
     return found;
   }
 
   private writable(id: CalendarId) {
-    if (this.calendar(id).readOnly) throw new Error(`Calendar ${id} is read-only`);
+    if (this.calendar(id).readOnly) throw failure('calendarReadOnly');
   }
 
   private calendar(id: CalendarId): Calendar {
     const found = this.calendars.find((calendar) => calendar.id === id);
-    if (!found) throw new Error(`there is no Calendar ${id}`);
+    if (!found) throw failure('calendarNotFound');
     return found;
   }
 
@@ -311,6 +317,11 @@ export class FakeCore implements CoreApi {
     Object.assign(this.calendar(id), fields);
     this.emit({ kind: 'calendarsChanged' });
   }
+}
+
+/** A failure as the real core reports it. */
+function failure(code: ErrorCode['code']): ErrorCode {
+  return { code };
 }
 
 /** Plain text as the core would structure it, without links. */

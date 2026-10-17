@@ -6,6 +6,7 @@
 mod account;
 mod calendar;
 mod clock;
+mod error;
 mod event;
 mod settings;
 mod sidebar;
@@ -16,6 +17,7 @@ mod structured_text;
 mod typescript;
 mod view;
 
+use std::fs::{File, TryLockError};
 use std::path::Path;
 
 use chrono::NaiveDate;
@@ -24,6 +26,7 @@ use std::sync::{Arc, Mutex};
 pub use account::{Account, AccountId, Provider};
 pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
+pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
@@ -35,43 +38,14 @@ use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
 use store::{EventFields, Store, StoredEvent};
 
-#[derive(Debug, thiserror::Error)]
-pub enum CoreError {
-    #[error("the Local Store failed: {0}")]
-    Store(#[from] rusqlite::Error),
-    #[error("could not create the data directory: {0}")]
-    DataDirectory(#[from] std::io::Error),
-    #[error("there is no Account {0:?}")]
-    AccountNotFound(AccountId),
-    #[error("there is no Calendar {0:?}")]
-    CalendarNotFound(CalendarId),
-    #[error("Calendar {0:?} is read-only")]
-    CalendarReadOnly(CalendarId),
-    #[error("there is no Event {0:?}")]
-    EventNotFound(EventId),
-    #[error("an Event can't end before it starts")]
-    EndBeforeStart,
-    #[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
-    UnreadableEventTime(String),
-    #[error("a Calendar needs a name")]
-    EmptyCalendarName,
-    #[error("{0:?} is not a colour of the form #rrggbb")]
-    InvalidColour(String),
-    #[error("the Local Account cannot be removed")]
-    LocalAccountCannotBeRemoved,
-    #[error(
-        "the Local Store was written by a newer FreeCal \
-         (schema {found}, this build knows {known})"
-    )]
-    NewerLocalStore { found: i64, known: i64 },
-    #[error("the Local Store has an Account with an unknown Provider {0:?}")]
-    UnknownProvider(String),
-}
-
 pub type Result<T> = std::result::Result<T, CoreError>;
 
 /// The core application interface.
 pub struct Core {
+    /// Held for the lifetime of `Core`, so that only one running FreeCal
+    /// opens the Local Store (ADR 0005). The OS releases it when the process
+    /// ends, even after a crash.
+    _lock: File,
     store: Mutex<Store>,
     clock: Arc<dyn Clock>,
     signals: Arc<dyn SignalSink>,
@@ -81,15 +55,19 @@ pub struct Core {
 
 impl Core {
     /// Opens the Local Store in `data_dir`, creating it on first launch.
+    /// Refuses with [`CoreError::LocalStoreInUse`] while another running
+    /// FreeCal has it open.
     pub fn open(
         data_dir: &Path,
         clock: Arc<dyn Clock>,
         signals: Arc<dyn SignalSink>,
     ) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
+        let lock = lock_local_store(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
         let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
+            _lock: lock,
             store: Mutex::new(store),
             clock,
             signals,
@@ -370,6 +348,21 @@ impl Core {
     /// released, so a subscriber can read straight away.
     fn store(&self) -> std::sync::MutexGuard<'_, Store> {
         self.store.lock().unwrap()
+    }
+}
+
+/// Takes the exclusive lock on the Local Store in `data_dir`, which
+/// `freecal.lock` next to it stands for.
+fn lock_local_store(data_dir: &Path) -> Result<File> {
+    let lock = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(data_dir.join("freecal.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => Ok(lock),
+        Err(TryLockError::WouldBlock) => Err(CoreError::LocalStoreInUse),
+        Err(TryLockError::Error(error)) => Err(error.into()),
     }
 }
 

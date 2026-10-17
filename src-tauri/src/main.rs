@@ -1,16 +1,17 @@
 //! The Tauri shell: exposes the core application interface to the frontend as
 //! commands and forwards the core's Signals as Tauri events.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::NaiveDate;
 use freecal_core::{
-    Account, AccountId, Calendar, CalendarId, Colour, Core, CoreError, Event, EventDraft, EventId,
+    Account, AccountId, Calendar, CalendarId, Colour, Core, ErrorCode, Event, EventDraft, EventId,
     Occurrence, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View,
     When, link_allowed,
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
 /// The Tauri event on which Signals reach the frontend.
@@ -38,11 +39,12 @@ impl SignalSink for ForwardToFrontend {
     }
 }
 
-type CommandResult<T> = Result<T, String>;
+/// Why the core couldn't open its Local Store. Managed only then, in place
+/// of the [`Core`], and the window shows it on the startup error screen.
+struct StartupFailure(ErrorCode);
 
-fn to_message(error: CoreError) -> String {
-    error.to_string()
-}
+/// Failures reach the frontend as codes it translates, never as English text.
+type CommandResult<T> = Result<T, ErrorCode>;
 
 #[tauri::command]
 fn today(core: State<Core>) -> String {
@@ -51,42 +53,42 @@ fn today(core: State<Core>) -> String {
 
 #[tauri::command]
 fn last_used_view(core: State<Core>) -> CommandResult<View> {
-    core.last_used_view().map_err(to_message)
+    core.last_used_view().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn set_last_used_view(core: State<Core>, view: View) -> CommandResult<()> {
-    core.set_last_used_view(view).map_err(to_message)
+    core.set_last_used_view(view).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn sidebar(core: State<Core>) -> CommandResult<SidebarState> {
-    core.sidebar().map_err(to_message)
+    core.sidebar().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn set_sidebar(core: State<Core>, sidebar: SidebarState) -> CommandResult<()> {
-    core.set_sidebar(sidebar).map_err(to_message)
+    core.set_sidebar(sidebar).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn settings(core: State<Core>) -> CommandResult<Settings> {
-    core.settings().map_err(to_message)
+    core.settings().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn update_settings(core: State<Core>, update: SettingsUpdate) -> CommandResult<Settings> {
-    core.update_settings(update).map_err(to_message)
+    core.update_settings(update).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn list_accounts(core: State<Core>) -> CommandResult<Vec<Account>> {
-    core.list_accounts().map_err(to_message)
+    core.list_accounts().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn list_calendars(core: State<Core>) -> CommandResult<Vec<Calendar>> {
-    core.list_calendars().map_err(to_message)
+    core.list_calendars().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
@@ -96,38 +98,40 @@ fn create_calendar(
     name: String,
     colour: String,
 ) -> CommandResult<Calendar> {
-    let colour = Colour::parse(&colour).map_err(to_message)?;
+    let colour = Colour::parse(&colour).map_err(ErrorCode::from)?;
     core.create_calendar(AccountId(account_id), &name, colour)
-        .map_err(to_message)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn rename_calendar(core: State<Core>, id: i64, name: String) -> CommandResult<()> {
     core.rename_calendar(CalendarId(id), &name)
-        .map_err(to_message)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn recolour_calendar(core: State<Core>, id: i64, colour: String) -> CommandResult<()> {
-    let colour = Colour::parse(&colour).map_err(to_message)?;
+    let colour = Colour::parse(&colour).map_err(ErrorCode::from)?;
     core.recolour_calendar(CalendarId(id), colour)
-        .map_err(to_message)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn delete_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
-    core.delete_calendar(CalendarId(id)).map_err(to_message)
+    core.delete_calendar(CalendarId(id))
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn set_calendar_shown(core: State<Core>, id: i64, shown: bool) -> CommandResult<()> {
     core.set_calendar_shown(CalendarId(id), shown)
-        .map_err(to_message)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn show_only_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
-    core.show_only_calendar(CalendarId(id)).map_err(to_message)
+    core.show_only_calendar(CalendarId(id))
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
@@ -136,32 +140,32 @@ fn list_occurrences(
     from: NaiveDate,
     to: NaiveDate,
 ) -> CommandResult<Vec<Occurrence>> {
-    core.occurrences(from, to).map_err(to_message)
+    core.occurrences(from, to).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn event(core: State<Core>, id: EventId) -> CommandResult<Event> {
-    core.event(id).map_err(to_message)
+    core.event(id).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn create_event(core: State<Core>, draft: EventDraft) -> CommandResult<Event> {
-    core.create_event(draft).map_err(to_message)
+    core.create_event(draft).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResult<Event> {
-    core.edit_event(id, draft).map_err(to_message)
+    core.edit_event(id, draft).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult<Event> {
-    core.reschedule_event(id, when).map_err(to_message)
+    core.reschedule_event(id, when).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
-    core.delete_event(id).map_err(to_message)
+    core.delete_event(id).map_err(ErrorCode::from)
 }
 
 /// Opens a link from a description or location in the system browser. The scheme
@@ -170,13 +174,11 @@ fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
 #[tauri::command]
 fn open_link(app: AppHandle, url: String) -> CommandResult<()> {
     if !link_allowed(&url) {
-        return Err(format!(
-            "FreeCal opens only http, https and mailto links: {url:?}"
-        ));
+        return Err(ErrorCode::LinkNotAllowed);
     }
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|error| error.to_string())
+        .map_err(|_| ErrorCode::LinkNotOpened)
 }
 
 /// FreeCal's version, for the About dialog.
@@ -188,7 +190,14 @@ fn version(app: AppHandle) -> String {
 /// Shows the window, which starts hidden.
 #[tauri::command]
 fn show_window(app: AppHandle) -> CommandResult<()> {
-    show_main_window(&app).map_err(|error| error.to_string())
+    show_main_window(&app).map_err(|_| ErrorCode::WindowNotShown)
+}
+
+/// Why FreeCal couldn't start, if it couldn't. The frontend asks before
+/// anything else and then shows the startup error screen instead.
+#[tauri::command]
+fn startup_failure(app: AppHandle) -> Option<ErrorCode> {
+    app.try_state::<StartupFailure>().map(|failure| failure.0)
 }
 
 /// Ends FreeCal, also when it would otherwise keep running in the background.
@@ -207,28 +216,87 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     }
 }
 
+/// Brings the window to the front, as when FreeCal is started again.
+fn bring_to_front(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        window.show()?;
+        window.unminimize()?;
+        window.set_focus()?;
+    }
+    Ok(())
+}
+
+/// The D-Bus name under which the running FreeCal takes the arguments of a
+/// second launch. It stands for the Local Store rather than the app, so that
+/// FreeCals on separate data directories run side by side (ADR 0005). The
+/// hash is FNV-1a, which unlike `std`'s hasher stays the same across builds,
+/// so an updated FreeCal still reaches one started before the update.
+fn local_store_dbus_name(identifier: &str, data_dir: &Path) -> String {
+    let hash = data_dir
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    // A D-Bus name element can't start with a digit.
+    format!("{identifier}.Store{hash:016x}")
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
+            // Before the core opens: a second launch hands its arguments to
+            // the running FreeCal here and exits.
+            // Without the hand-off FreeCal still starts: the core's lock
+            // keeps a second launch from opening the Local Store anyway.
+            let name = local_store_dbus_name(&app.config().identifier, &data_dir);
+            if let Err(error) = app.handle().plugin(
+                tauri_plugin_single_instance::Builder::new()
+                    .dbus_id(name)
+                    .callback(|app, _args, _cwd| {
+                        // Files to open among the arguments are ticket 30's.
+                        let _ = bring_to_front(app);
+                    })
+                    .build(),
+            ) {
+                eprintln!("FreeCal can't take over from a second launch: {error}");
+            }
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
-            let core = Core::open(&data_dir, Arc::new(SystemClock), signals)?;
-            app.manage(core);
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                loop {
-                    std::thread::sleep(DATE_CHECK_PERIOD);
-                    handle.state::<Core>().check_date();
+            match Core::open(&data_dir, Arc::new(SystemClock), signals) {
+                Ok(core) => {
+                    app.manage(core);
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        loop {
+                            std::thread::sleep(DATE_CHECK_PERIOD);
+                            handle.state::<Core>().check_date();
+                        }
+                    });
                 }
-            });
+                Err(error) => {
+                    eprintln!("FreeCal could not open its Local Store: {error}");
+                    app.manage(StartupFailure(error.code()));
+                }
+            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(SHOW_WINDOW_FALLBACK);
                 let _ = show_main_window(&handle);
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing the startup error screen quits FreeCal, which has
+            // nothing to keep running for.
+            if let WindowEvent::CloseRequested { .. } = event
+                && window.try_state::<StartupFailure>().is_some()
+            {
+                window.app_handle().exit(0);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             today,
@@ -255,6 +323,7 @@ fn main() {
             open_link,
             version,
             show_window,
+            startup_failure,
             quit,
         ])
         .run(tauri::generate_context!())

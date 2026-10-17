@@ -42,3 +42,15 @@ fn a_local_store_holds_only_one_local_account() {
     assert!(result.is_err());
     assert_eq!(harness.open().list_accounts().unwrap().len(), 1);
 }
+
+#[test]
+fn a_local_store_open_in_another_running_freecal_is_refused() {
+    let harness = Harness::new();
+    let running = harness.open();
+
+    let result = harness.try_open();
+
+    assert!(matches!(result, Err(CoreError::LocalStoreInUse)));
+    drop(running);
+    assert!(harness.try_open().is_ok());
+}

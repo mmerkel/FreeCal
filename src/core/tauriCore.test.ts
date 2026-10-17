@@ -15,6 +15,15 @@ test('today turns the shell’s ISO date into a PlainDate', async () => {
   expect(today.equals(Temporal.PlainDate.from('2026-10-04'))).toBe(true);
 });
 
+test('startupFailure passes on the shell’s error code, or null when FreeCal started', async () => {
+  let failure: unknown = { code: 'localStoreInUse' };
+  mockIPC((command) => (command === 'startup_failure' ? failure : undefined));
+
+  expect(await tauriCore.startupFailure()).toEqual({ code: 'localStoreInUse' });
+  failure = null;
+  expect(await tauriCore.startupFailure()).toBeNull();
+});
+
 test('listAccounts returns the shell’s Accounts', async () => {
   mockIPC((command) => (command === 'list_accounts' ? [{ id: 1, provider: 'local' }] : undefined));
 

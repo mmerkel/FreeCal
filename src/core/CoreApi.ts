@@ -4,6 +4,7 @@ import type {
   Calendar,
   CalendarId,
   Event,
+  ErrorCode,
   EventDraft,
   EventId,
   Occurrence,
@@ -15,8 +16,17 @@ import type {
   When,
 } from './types';
 
-/** The core application interface. The frontend talks only to this. */
+/**
+ * The core application interface. The frontend talks only to this. A method
+ * that fails rejects with an `ErrorCode`, which `errorText` puts into words.
+ */
 export interface CoreApi {
+  /**
+   * Why FreeCal couldn't start, such as another running FreeCal holding the
+   * Local Store, or `null` when it started. Asked before anything else: after
+   * a startup failure every other read fails.
+   */
+  startupFailure(): Promise<ErrorCode | null>;
   /** Starts receiving Signals. Subscribe before reading state, so that nothing falls in the gap. */
   subscribe(onSignal: (signal: Signal) => void): Promise<() => void>;
   /** The current local date. */
