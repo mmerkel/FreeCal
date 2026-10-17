@@ -209,3 +209,5 @@ subprocess.run([chrome, "--headless", "--disable-gpu", "--no-pdf-header-footer",
                check=True, capture_output=True)
 os.remove(html_path)
 print(f"Wrote {OUT}: {len(active)} tickets, {len(open_)} open, ~{open_days:.0f} days remaining, longest chain {crit_txt}")
+for n in frontier[:3]:
+    print(f"  ready: {n} [{open_[n]['effort']}] {open_[n]['title']} (unblocks {len(downstream(n))})")

@@ -11,6 +11,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Effort is recorded as an `**Effort:** S|M|L|XL` line after the Status line: S ≈ ½ day, M ≈ 1–2 days, L ≈ 3–5 days, XL ≈ 1–2 weeks of agent-driven work. Size it from the ticket's scope when writing the ticket; re-size it when a ticket is split or grows. A split ticket carries no Effort; its parts do
 - A finished ticket gets `**Status:** done`
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- After changing any ticket's Status, Blocked by or Effort, or adding, splitting or removing a ticket, rebuild the overview with the `tickets-pdf` skill (pass the feature's directory if it isn't `.scratch/freecal-v1`). Once per batch of changes, not per edit. A comment or a ticked box alone doesn't need it
 
 ## When a skill says "publish to the issue tracker"
 
