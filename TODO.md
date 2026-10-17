@@ -1,3 +1,4 @@
-Only for human use, don't touch.
+Human adds items here. Remove when finished.
 
-- [ ] add minimum distance between calendar/main menu and any window boundaries
+- [ ] Many items on a day in month view currently increase row wodth. Add options to setting to rather show if as "<n> more events" or so.
+- [ ] 
