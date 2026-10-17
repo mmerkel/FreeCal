@@ -346,9 +346,14 @@
     white-space: nowrap;
   }
 
+  /* Space between Accounts only, so none is left under the last one. */
+  section + section {
+    margin-top: var(--space-6);
+  }
+
   ul {
     list-style: none;
-    margin: 0 0 var(--space-6);
+    margin: 0;
     padding: 0;
   }
 
