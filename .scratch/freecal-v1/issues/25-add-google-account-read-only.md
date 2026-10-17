@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] Browser login with a loopback redirect and PKCE; tokens stored in the keyring
 - [ ] Discovery lists the Account's Calendars as Available Calendars; the user chooses which to add; later-appearing Calendars stay Available Calendars until added through "Manage Calendars…"
 - [ ] Incremental pulls through the Google Calendar REST API (ADR 0002) using sync tokens; a 410 "token expired" triggers a full resync

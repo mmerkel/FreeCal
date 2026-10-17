@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] A Provider interface that can take Microsoft Graph and ICS feeds later without changing the sync engine; CalDAV is its first implementation
 - [ ] Adding a Calendar pulls it; a core operation syncs an Account on demand (timing and triggers come in ticket 16)
 - [ ] Incremental fetching via `sync-collection` / ETags (tested against Radicale: create, change and delete on the server, then sync)

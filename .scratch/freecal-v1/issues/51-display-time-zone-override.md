@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** S
+
 - [ ] Date & time in Settings: a searchable list of IANA time zones (ticket 50's list) with "System (<zone>)" at the top
 - [ ] While an override is set, changes to the system time zone are ignored; changing the override sends "Display Time Zone changed" like a system change (core test)
 - [ ] The override is a setting in the Local Store, written as a partial update through ticket 33's operations

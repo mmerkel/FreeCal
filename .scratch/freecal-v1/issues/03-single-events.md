@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 - [x] The core returns the Occurrences in a date range
 - [x] Clicking an empty slot or dragging across a range opens the editor prefilled with that time
 - [x] The editor offers only writable Calendars

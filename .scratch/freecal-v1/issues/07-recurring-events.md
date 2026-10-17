@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] The editor sets a repeat rule: daily, weekly, monthly or yearly, with an interval and an end
 - [ ] The core expands Recurring Events into Occurrences for the requested range; the frontend never interprets repeat rules
 - [ ] Deleting a single Occurrence creates a cancelled Exception and leaves the rest of the Recurring Event in place

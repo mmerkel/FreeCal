@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 - [x] Dragging an Event moves it; dragging its edge resizes it; both go through the core interface
 - [x] Overlapping Events are laid out side by side in day and week views
 - [x] All-day and multi-day Events are shown in the all-day area

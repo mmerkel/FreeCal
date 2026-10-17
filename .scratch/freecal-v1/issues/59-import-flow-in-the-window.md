@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] "Import…" opens a file dialog through a portal-friendly API, for `.ics` and `.zip`
 - [ ] The user chooses the target Calendar; Read-only Calendars aren't offered
 - [ ] The preview dialog shows the counts of new and existing Events and the zones floating times were pinned to, and asks for the update / skip / copy choice only when some exist

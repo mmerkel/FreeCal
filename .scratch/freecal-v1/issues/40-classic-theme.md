@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] The grid uses `classic` (theme and `palette.css`); `breezy` and its `indigo` palette are no longer imported in `CalendarGrid.svelte`
 - [x] Timed Events in the month view show the dot in the Calendar colour, then the time, then the title; all-day Events stay filled bars in the Calendar colour
 - [x] Text on a filled Event is near-black or white, whichever contrasts more with the Calendar's colour (WCAG contrast ratio), worked out from the colour itself, so that colours from CalDAV or Google also work. Yellow, mustard and lime get dark text, for example

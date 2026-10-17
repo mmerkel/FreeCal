@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] The user can set any Calendar read-only or writable in FreeCal (server-reported read-only still wins)
 - [ ] Changes are applied to the Local Store immediately, queued, and pushed with conditional requests (ETags)
 - [ ] Recurrence scope edits (this / this and following / all) and Exceptions reach the server correctly

@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 The look was chosen from a throwaway prototype: option C on branch `prototype/sidebar-styles` (`src/lib/prototype-sidebar/VariantC.svelte`, commit `2b46cc9`). Build it exactly as prototyped, but never merge that branch. To see it: switch to the branch, `.claude/skills/run-freecal/freecal.sh build`, run `./target/debug/freecal` and press → until C shows.
 
 - [x] A shared base in `src/app.css`: colour, spacing, radius and font-size tokens as CSS custom properties, plus outline, solid, danger and ghost buttons, text inputs, a menu and a focus ring; components use the tokens, not their own colour values

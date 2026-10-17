@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] FullCalendar's `eventResizableFromStart` is on; a resize from the start goes through `rescheduleEvent` like one from the end (`rescheduleOfResize` already reads `startDelta`)
 - [x] Works for timed Events in the time grid, for multi-day bars in the all-day area and the month view, and for all-day Events
 - [x] An Event can't shrink past FullCalendar's minimum (one slot in the time grid, one day for bars) from either edge

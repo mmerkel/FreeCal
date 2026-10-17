@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] A notification is shown when a reminder stored on an Event (or Occurrence) becomes due (tested with the controllable clock and a recording fake notifier)
 - [ ] Snooze re-shows the notification later; dismiss stops it
 - [ ] No Signals are used for reminders

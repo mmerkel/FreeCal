@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The tray icon follows the same overall status as the window indicator, driven by the same Signals inside the shell
 - [ ] The tray menu: Open FreeCal, Sync now, a line per current Conflict and Sync Error, Quit; choosing a problem line opens the window at it
 - [ ] With the window closed, one notification per new Conflict or Sync Error

@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] While a timed Event is dragged in the time grid, its copy has the width and offset (as fractions of the column) the Event had when the drag started, in any column and at any time
 - [ ] An Event that had the whole column keeps the whole column, as now
 - [ ] Dragged into the all-day row, it becomes a bar as now; resizing is unchanged

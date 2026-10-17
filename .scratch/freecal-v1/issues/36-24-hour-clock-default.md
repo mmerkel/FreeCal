@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] One frontend module holds the clock (`24` or `12`, default `24`) and the formatting helpers that use it; `when.ts` and `CalendarGrid` format times only through it
 - [x] The grid's slot labels and Event times and the details' time line show 24-hour times on an `en-US` system (component tests with an `en-US` locale); the editor follows with ticket 38
 - [x] Setting the clock to 12-hour in a test switches every place to AM/PM, so ticket 06 has a tested switch to wire to Settings

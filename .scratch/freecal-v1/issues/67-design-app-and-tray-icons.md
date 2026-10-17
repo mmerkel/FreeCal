@@ -6,6 +6,8 @@
 
 **Status:** ready-for-human
 
+**Effort:** M
+
 - [ ] An app icon drawn as SVG, kept in the repo as the source, that still reads at 16×16 and 32×32
 - [ ] PNGs exported from it in the sizes the Tauri bundles need (at least 32, 128, 256 and 512, plus `icon.ico`/`icon.icns` if Windows or macOS builds are kept possible), and `bundle.icon` in `tauri.conf.json` listing them
 - [ ] A tray icon per overall status: Online and synced is the plain icon; Syncing, Offline, Sync Error and Conflict add a badge or mark. Conflict and Sync Error must be told apart at tray size (about 22px, and 16px on some panels), and not by colour alone

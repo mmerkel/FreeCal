@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** S
+
 - [ ] A guided setup walks the user through creating their own Google client and entering its credentials
 - [ ] Adding a Google Account then uses that client for login and token refresh
 - [ ] The shared client stays available for the developer and testers

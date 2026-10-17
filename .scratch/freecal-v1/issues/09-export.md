@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Export one Calendar to a single `.ics`
 - [ ] Export everything to a `.zip`, one `.ics` per Calendar, organised by Account
 - [ ] The file dialog goes through a portal-friendly API

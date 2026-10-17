@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] Edit/edit: both versions shown, the user chooses one
 - [ ] Local edit vs remote delete: "restore with my changes" or "accept the delete"
 - [ ] Local delete vs remote edit: "delete anyway" or "keep the server version"

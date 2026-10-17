@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** S
+
 - [ ] Before squashing, a test confirms the schema of a new Local Store matches the one migrated through every current step (compare `sqlite_master`), so the baseline is known to equal what's being replaced
 - [ ] `MIGRATIONS` holds one `Migration::Sql` creating the current tables and indexes; a new Local Store ends at `user_version = 1` with the Local Account and starting Calendars as before
 - [ ] `event_times_as_wall_time` is removed with the step-by-step migrations and their tests (`core/tests/event_times.rs` builds a version 5 Local Store); `recompute_instants` stays if time zone rule updates still need it (ADR 0007)

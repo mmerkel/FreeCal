@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The date format comes from the system locale; FullCalendar's locale is wired to it (ticket 01's note: its month title and weekday names come from its default locale today)
 - [ ] A "Formats" region picker: "System" plus a curated list of about 30 regions (major English, European, Latin American and Asian formats), names shown through `Intl.DisplayNames`; each entry shows 31 December of the current year in short and long form (e.g. "31.12.2026 · 31. Dezember 2026"). Dates are formatted with `Intl.DateTimeFormat` for the chosen region
 - [ ] A first day of week option (Monday, Saturday, Sunday), defaulting to Monday and setting ticket 46's shared value (`setFirstDayOfWeek` in `src/lib/week.svelte.ts`)

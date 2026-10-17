@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 - [x] A ghost ⋮ "Main menu" button at the right end of ticket 04's toolbar opens a menu: Settings…, About FreeCal, Quit (no Keyboard shortcuts item until a ticket builds that overview)
 - [x] Ctrl+, opens Settings, handled with ticket 04's shortcuts
 - [x] Settings is a modal dialog built on ticket 32's `Dialog`, with sections in this order: Date & time (filled by ticket 06), Appearance, Background (filled by ticket 13). A section with no settings yet isn't shown

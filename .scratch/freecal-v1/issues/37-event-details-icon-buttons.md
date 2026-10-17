@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] `Dialog` shows a ✕ ghost icon button at the top right for `role="dialog"` that calls `onclose`, like Escape; `alertdialog` shows none
 - [ ] `Dialog` has a maximum height within the window and its body scrolls
 - [ ] The details stay a centred modal `Dialog`. Above the title, a row of icon buttons at the top right: Edit (pencil), Delete (trash), Close (✕), Lucide icons; for Events of Read-only Calendars only ✕. The text button row is gone

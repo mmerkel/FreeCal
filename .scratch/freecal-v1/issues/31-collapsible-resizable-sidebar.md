@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] A hidden sidebar is fully hidden; the grid takes the whole width
 - [x] One ☰ button at the left end of ticket 04's toolbar shows and hides it, in the same place in both states; its label ("Show sidebar" / "Hide sidebar") goes through `t()` and it carries `aria-expanded`
 - [x] F9 shows and hides it, handled with ticket 04's shortcuts

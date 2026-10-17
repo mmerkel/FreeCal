@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] `body` in `src/app.css` sets `-webkit-font-smoothing: antialiased`, with a comment saying why (the scrolling sidebar's own layer changes its smoothing)
 - [x] `.claude/skills/run-freecal/freecal.sh` gets an option (e.g. `start --subpixel`, and the same for `restart`) that runs with subpixel RGB smoothing and slight hinting through a scratch `XDG_CONFIG_HOME` (`gtk-xft-rgba=rgb`) and GPU rendering on llvmpipe (`LIBGL_ALWAYS_SOFTWARE=1`, without `WEBKIT_DISABLE_DMABUF_RENDERER`); `SKILL.md` documents it and when to use it
 - [x] Checked by hand with that option, results noted below: crops of the sidebar's heading and rows with 2 and with 32 Calendars, zoomed, are identical; the toolbar and grid text look as intended

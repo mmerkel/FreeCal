@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] A daily compressed `.ics` Snapshot per changed Calendar in the data directory, including Local Calendars (tested with the controllable clock)
 - [ ] Unchanged Calendars are skipped
 - [ ] Only the last 14 Snapshots per Calendar are kept

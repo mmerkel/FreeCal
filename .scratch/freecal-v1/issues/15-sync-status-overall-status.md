@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The core sends "Sync status changed" separately for Accounts and Calendars, carrying the new state, the time and outcome of the last finished sync, the number of unsent local changes, and a first-sync marker; the Local Account never sends it
 - [ ] A network-level failure (DNS, connection refused, timeout) makes that Account Offline; an error response from the server is a Sync Error with a clear message, on the Account or Calendar where it happened
 - [ ] Account-level states appear once on the Account row, not repeated on every Calendar

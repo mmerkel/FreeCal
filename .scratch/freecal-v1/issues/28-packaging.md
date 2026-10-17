@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The build produces `.deb`, `.rpm` and AppImage
 - [ ] Each package installs or runs and launches FreeCal on a clean system
 - [ ] Autostart, keyring, file dialogs and network status use portal-friendly APIs (checked as features land)

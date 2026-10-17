@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] Bars change on hover in the month view and in the all-day area of day and week views, for writable and read-only Events
 - [x] The effect works on any Calendar colour in light and dark mode (e.g. a slight darkening through `filter` or an overlay, not the grey `--hover`), and the text stays readable
 - [x] The outline of the selected Event and, later, the dashed outline for unsent changes still show over it

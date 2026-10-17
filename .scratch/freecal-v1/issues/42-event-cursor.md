@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] `cursor: pointer` over the whole chip (dot, time, title, padding), for writable and read-only Events, in every view
 - [x] `user-select: none` on chips
 - [x] Empty slots keep the normal arrow

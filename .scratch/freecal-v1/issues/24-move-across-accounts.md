@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Changing an Event's Calendar to one in another Account creates it in the target and then deletes it from the source
 - [ ] Both steps are recorded in the Change Journal where they touch a server
 - [ ] The warning appears only when details would be lost, and the move is skipped if the user cancels

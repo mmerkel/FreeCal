@@ -10,6 +10,8 @@ Ticket 48 blocks the wheel and touch scrolling outside an open menu, but draggin
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] `.sidebar` has a `::-webkit-scrollbar` about 6–8px wide, a rounded thumb in colours from `app.css` tokens (add tokens if none fit), and no visible track; it reserves its own strip, shows only while the sidebar overflows, and the rows narrow to make room
 - [ ] With the strip, a click on a row's ⋮ opens its menu, and the bar no longer covers an open menu
 - [ ] `Menu` no longer cancels `wheel` and `touchmove` outside it; instead any `scroll` event outside the menu, while it is open, calls `onclose` (one capture-phase listener on `window`, next to the events `Menu` already swallows). The scroll is not undone, and focus returns as on any close

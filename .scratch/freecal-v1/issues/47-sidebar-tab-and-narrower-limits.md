@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] Default width 12rem, minimum 8rem, maximum 20rem whatever the window's size; a stored width outside these shows at the nearest limit, without migrating the stored value. A narrow window still never hides the sidebar on its own
 - [x] The ☰ button is gone from the toolbar; the toolbar starts with Today
 - [x] A half-tab with a Lucide chevron sits on the edge, centred vertically, sticking out on the grid's side of the line (about 14×40px, rounded on its outer side, in the shared base's tokens). It is always visible and gets stronger on hover, on focus and during a drag. While the sidebar is hidden it stays at the window's left edge, its chevron pointing right

@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] One frontend module holds the first day of week (`monday`, `saturday` or `sunday`, default `monday`) with a `setFirstDayOfWeek` switch, following the pattern of `src/lib/clock.svelte.ts`; `CalendarGrid` sets FullCalendar's `firstDay` from it
 - [x] The month view starts its rows on Monday on an `en-US` system (component test with an `en-US` locale)
 - [x] Setting the value to Sunday or Saturday in a test moves the grid's first column at once, so ticket 06 has a tested switch to wire to Settings

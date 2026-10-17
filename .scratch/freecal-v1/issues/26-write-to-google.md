@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] Conditional create, update and delete with ETags; unknown fields preserved byte-for-byte
 - [ ] Change Journal, Conflicts, the Mass-Change Guard and offline replay work for Google Calendars (tested against the fake Google server)
 - [ ] An expired login is a Sync Error on the Account that asks the user to log in again; after re-authentication sync resumes

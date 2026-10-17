@@ -45,6 +45,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
+- **Effort**: S, M, L or XL, where the tracker records effort
 - **What it delivers**: the end-to-end behaviour this ticket makes work
 
 Ask the user:
@@ -75,6 +76,8 @@ Do NOT close or modify any parent issue.
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
 
 **Status:** ready-for-agent
+
+**Effort:** S, M, L or XL, sized as the tracker doc defines them.
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2

@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] `minWidth` and `minHeight` in `tauri.conf.json`, about 800×560; the exact values are measured in the real app with `run-freecal` so that the toolbar, the sidebar at 14rem and seven week columns with readable Event chips fit
 - [x] At the minimum size the Event editor fits or scrolls inside its dialog (ticket 37's maximum height), with Save reachable
 - [x] Checked by hand in the real app, including a screenshot at the minimum size

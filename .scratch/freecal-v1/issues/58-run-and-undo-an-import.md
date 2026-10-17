@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] One update / skip / copy choice per import for existing UIDs; copies get new UIDs
 - [ ] The core refuses an import into a Read-only Calendar
 - [ ] The import is recorded as one Change Journal unit holding each Event's previous version (start the Change Journal's storage here if it doesn't exist yet; ticket 17 adds the server entries and ticket 19 the list)

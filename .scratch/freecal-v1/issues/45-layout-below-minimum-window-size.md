@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Brainstorm with the user and write the decisions down as a comment here and in the spec's "Window size". Options to weigh, among others:
   - collapse the sidebar automatically below a width, as an overlay that opens with ticket 47's tab and F9 and closes after a choice, without changing the remembered shown/hidden state (ticket 31 says the sidebar never hides on its own; this ticket changes that only for the too-narrow case)
   - switch to a narrower view: fewer days in the week view (e.g. 3 days or the day view), or hide weekends

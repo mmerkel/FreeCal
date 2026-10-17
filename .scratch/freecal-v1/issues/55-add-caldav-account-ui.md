@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] An "Add account…" flow: server URL, username and password; errors from the core (wrong credentials, no keyring, unreachable server) shown translated, with server text only as text
 - [ ] After adding, the user chooses which Available Calendars to add
 - [ ] Calendars are grouped by Account in the sidebar

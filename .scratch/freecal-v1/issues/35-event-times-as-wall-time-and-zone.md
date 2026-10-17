@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 - [x] A new migration stores, for each Event: start and end as wall time (`YYYY-MM-DDTHH:MM:SS`) or date, a start zone and an end zone (IANA names), and derived `start_utc` / `end_utc` as INTEGER Unix seconds. A `CHECK` makes timed Events have both zones and all-day Events none. The index for range queries uses the derived columns
 - [x] The migration converts existing rows: each UTC instant becomes the wall time in the row's `time_zone`, used for both start and end (core test: a Local Store with ticket 03's schema and rows opens with the same Occurrences)
 - [x] The Local Store records which time zone rules the UTC columns were computed with: the tzdata version `chrono-tz` was built with, or the `chrono-tz` version if it doesn't expose one. On opening, a different version recomputes every derived column in one transaction (core test: set an old version and wrong UTC values, reopen, values recomputed)

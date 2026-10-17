@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The core returns Occurrences already converted to the Display Time Zone (already so since ticket 03; keep it covered by a core test)
 - [ ] The Display Time Zone is shown in the UI
 - [ ] When the system time zone changes, the core sends "Display Time Zone changed"; the frontend redraws the range and the label (core test with `TestClock::set_time_zone`; component test against the fake core)

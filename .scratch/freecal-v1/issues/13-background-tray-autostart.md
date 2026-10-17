@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] At every window close, a D-Bus check for a StatusNotifierWatcher with a registered host decides whether to keep running or quit
 - [ ] Background running is on by default and can be turned off, so closing always quits
 - [ ] Start at login is off by default and uses the Background portal where available

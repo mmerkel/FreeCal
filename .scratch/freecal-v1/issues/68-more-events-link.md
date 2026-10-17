@@ -8,6 +8,8 @@ The popover is FullCalendar's own (the "more" popover of 7.1), restyled. It alre
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Month view: `dayMaxEvents: true`, so rows keep equal heights, fill the window and no longer grow; the month grid never scrolls. A day where not even one Event fits shows only "+n more"
 - [ ] Week and day view: the all-day area shows at most 6 rows, with "+n more" taking the 6th (`dayMaxEventRows: 6` set for the time-grid views only)
 - [ ] The link text comes from `src/i18n` ("+{n} more" in `en.ts`), via FullCalendar's `moreLinkContent`

@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] Day, week and month views; prev / next / today
 - [x] Google-style shortcuts for the views and for prev / next / today, handled by FreeCal and not FullCalendar
 - [x] Month view on first launch; afterwards the last-used view is persisted as app state and restored, always opening on today

@@ -8,6 +8,8 @@ The fix goes in the shared `Menu.svelte`, so the toolbar's main menu gets it too
 
 **Status:** done
 
+**Effort:** M
+
 - [x] `Menu` renders as `popover="manual"` and is shown with `showPopover()`; its open, close, focus-return, outside-click and key handling stay as now (ticket 32's menu)
 - [x] It is anchored to its opening button with `anchor-name` / `position-anchor`, `position-area: bottom` and `position-try-fallbacks: flip-block`; the absolute `.menu-anchor` placement in `Sidebar.svelte` and `Toolbar.svelte` goes, with its "inside the sidebar, so it isn't clipped" comment
 - [x] Both the Calendar ⋮ menu and the main menu use it, with no placement setting per menu; the main menu ends flush with the window's right edge

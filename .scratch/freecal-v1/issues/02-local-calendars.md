@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** M
+
 - [x] Create, rename, recolour and delete a Local Calendar through the core interface and the sidebar
 - [x] Each Calendar has a colour
 - [x] Calendars are grouped by Account in the sidebar and can be shown or hidden individually

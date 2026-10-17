@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] A series edit vs a remote Occurrence edit becomes one Conflict on the whole Recurring Event
 - [ ] Both versions are shown; resolving applies the chosen one to the whole Recurring Event
 - [ ] Written test-first against Radicale

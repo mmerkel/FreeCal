@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] List Change Journal entries
 - [ ] Undo one entry: the previous version is written back under the same identity (original ID, all details)
 - [ ] Undo everything for a Calendar since a given time

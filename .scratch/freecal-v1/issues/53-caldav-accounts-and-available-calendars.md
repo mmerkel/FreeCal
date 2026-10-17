@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** L
+
 - [ ] Tests run against a real Radicale server started per test run, with a recording fake keyring
 - [ ] Credentials are stored in the system keyring (Secret Service) behind a fakeable interface; without a working keyring, adding a server Account fails with a clear error
 - [ ] Adding an Account checks the credentials and discovers the server's Calendars

@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** S
+
 - [ ] Reproduce and measure the delay between a size change and the redrawn content
 - [ ] Try FullCalendar's `windowResizeDelay` (100 ms by default) at 0, and redrawing through a `ResizeObserver` on the grid's container
 - [ ] Compare against a blank WebKitGTK page in the same window, to separate WebKitGTK's own lag from FreeCal's

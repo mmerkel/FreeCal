@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** S
+
 - [ ] `Core::open` takes an exclusive OS file lock (`File::try_lock`) in the data directory for the lifetime of `Core`, and fails with a new `CoreError::LocalStoreInUse` when another process holds it
 - [ ] Tested at the core seam: a second open of the same Local Store is refused; it opens again once the first `Core` is dropped
 - [ ] The shell uses `tauri-plugin-single-instance`: a second launch hands its arguments to the running FreeCal, which shows and focuses its window, then exits. The forwarded arguments are received but not acted on yet (ticket 30). Re-creating a window closed to the tray belongs to ticket 13

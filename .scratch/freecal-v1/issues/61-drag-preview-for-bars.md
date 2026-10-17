@@ -6,6 +6,8 @@
 
 **Status:** needs-triage
 
+**Effort:** M
+
 ## What FullCalendar does now
 
 FullCalendar 7 draws the result of a resize in the day grid, but not of a drag: during a drag it only shades the target cells and moves a small copy of the chip with the pointer (`getMirrorSegs` in the DayGrid code returns only resize segments). The time grid already draws a dragged Event in place. So this needs FreeCal's own code, not an option.

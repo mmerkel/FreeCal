@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] A pure parser (unit tests) accepts `14`, `1430`, `14:30`, `14.30`, `14h30`, `2:30p`, `2.30 pm`, `2p`, `2 pm` and any minute; rejects hours above 23 and minutes above 59. On a 12-hour clock an hour from 13 to 23 means PM, `12a` is midnight and `12p` noon
 - [ ] The field shows the time in the shared clock format (ticket 36) and normalises typed text on Enter, Tab or blur
 - [ ] Invalid text stays in the field, marked red with `aria-invalid`, and blocks Save with the "incomplete" message

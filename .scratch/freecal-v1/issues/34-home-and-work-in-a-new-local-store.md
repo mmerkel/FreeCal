@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] A new Local Store is created with the Local Account and two Calendars in it: "Home" (`#3f51b5`, shown) and "Work" (`#ad1457`, hidden), the first two colours of `NEW_CALENDAR_ORDER` in `src/lib/palette.ts`. They are created in the same step as the Local Account, so no Signal is sent
 - [x] Only a new Local Store gets them: opening an existing Local Store never creates Calendars, so deleted ones never come back (core test: delete both, reopen, still none)
 - [x] `a_new_local_store_has_no_calendars` becomes a test that a new Local Store has Home (shown) and Work (hidden)

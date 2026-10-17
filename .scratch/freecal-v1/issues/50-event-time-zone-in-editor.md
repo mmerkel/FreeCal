@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The core interface's `When` carries the Event Time Zone (start and end zone, ADR 0007); regenerate the TypeScript types
 - [ ] New Events default to the Display Time Zone
 - [ ] The editor shows the Event's time zone and lets the user choose another one from a searchable list of IANA time zones (`Intl.supportedValuesOf('timeZone')`); build the list as a component ticket 51 can reuse

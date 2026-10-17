@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The core reads the server's privileges and makes Calendars the server doesn't allow changing Read-only Calendars (tested against Radicale)
 - [ ] Before 1.0, all newly added CalDAV Calendars default to read-only
 - [ ] A lock shows on the Calendar's row in the sidebar, in ticket 32's grey marker style; the Event details say the Event is read-only and offer only ✕ (ticket 37)

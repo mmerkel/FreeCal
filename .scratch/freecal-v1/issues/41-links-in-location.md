@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** S
+
 - [x] The core sends the location as structured text (text and link pieces) next to its plain form, which the editor keeps editing; the same code turns description and location into pieces
 - [x] Only `http(s)://` and `mailto:` become links (core tests, including a `javascript:` URL staying text)
 - [x] The details draw the location's pieces with the description's link display; a click opens the system browser through the shell

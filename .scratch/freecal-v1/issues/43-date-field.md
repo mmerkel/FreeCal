@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] A pure parser (unit tests) follows the order of the date format, accepts `.`, `/` and `-` as separators and ISO `2026-10-04`; `4` means the 4th of the shown month, `4/10` that day in the shown year; two-digit years mean 20xx; no words
 - [ ] The field shows the date in the date format and normalises typed text on Enter, Tab or blur; invalid text stays, marked red with `aria-invalid`, and blocks Save
 - [ ] A popover (ARIA date-picker dialog) shows a month grid with ‹ › for months, today ringed and the selected day in the accent colour

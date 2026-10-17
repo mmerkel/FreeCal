@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Command-line arguments at first launch, arguments forwarded by a second launch, and macOS open-file events (`RunEvent::Opened`) all feed one core operation that adds waiting imports
 - [ ] The core reads each file's contents on arrival (mail clients may delete their temporary copy) and keeps waiting imports in arrival order until they are imported or dismissed; each change sends "Waiting imports changed"
 - [ ] A missing, unreadable or unparseable file, or a `.zip` without `.ics` files, becomes a waiting import with a translated error naming the file; the other files still import

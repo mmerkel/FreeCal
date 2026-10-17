@@ -6,6 +6,8 @@
 
 **Status:** done
 
+**Effort:** L
+
 - [x] A Rust core library, a Tauri shell exposing the core as commands and forwarding Signals as Tauri events, and a Svelte 5 frontend (runes only, plain Vite, no SvelteKit); the shipped binary embeds the compiled frontend
 - [x] The Local Store is a SQLite database in the XDG data directory (ADR 0004)
 - [x] The Local Account exists from the first launch and cannot be removed (the core refuses)

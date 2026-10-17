@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** XL
+
 - [ ] Edits while the Account is Offline succeed locally and are queued
 - [ ] Queued changes are replayed when the network returns, in order, through the same conditional requests and Change Journal recording
 - [ ] Occurrences returned by the core say whether they have unsent changes and since when

@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Import accepts `.ics` and `.zip` of `.ics`; CSV is not supported; files are parsed with a library, never by hand
 - [ ] `.zip` contents are read in memory and never extracted, within fixed limits on unpacked size and number of entries (choose the numbers here, sized for a Google Takeout export, and write them into the spec's "Untrusted content"); exceeding them makes a translated error entry
 - [ ] The preview counts new and existing Events for the target Calendar, and the floating times pinned per zone

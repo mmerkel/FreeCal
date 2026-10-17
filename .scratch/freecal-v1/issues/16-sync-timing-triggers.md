@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] Polls every 2 minutes with the window open and every 15 minutes in the background (controllable clock)
 - [ ] Syncs on window focus, on wake from sleep and after local edits
 - [ ] Sync now: per Account or for all; a window control, a Google-style shortcut and a tray menu item

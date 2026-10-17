@@ -6,6 +6,8 @@
 
 **Status:** ready-for-agent
 
+**Effort:** M
+
 - [ ] The thresholds (more than 10 Events or more than 5% of a Calendar) are checked before a sync is applied, for pushes and pulls
 - [ ] Exceeding them pauses the Calendar as a Sync Error with an explanatory message
 - [ ] Approve applies the paused changes; reject discards them as chosen, and sync continues
