@@ -1,4 +1,3 @@
-Human adds items here. Remove when finished.
+Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
-- [ ] Many items on a day in month view currently increase row wodth. Add options to setting to rather show if as "<n> more events" or so.
 - [ ] 
