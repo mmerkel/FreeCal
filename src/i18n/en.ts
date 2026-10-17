@@ -6,7 +6,7 @@ export const en = {
   'startup.localStoreInUse':
     'FreeCal is already running, but it couldn’t be brought to the front. Close the other FreeCal, then start FreeCal again.',
   'startup.newerLocalStore':
-    'Your calendar data was saved by a newer version of FreeCal. Install that version or a later one to open it.',
+    'Your calendar data was saved by a newer version of FreeCal. Update your FreeCal version to open it.',
   'startup.localStoreFailed': 'FreeCal couldn’t read its data. It may be damaged.',
   'startup.dataDirectoryFailed': 'FreeCal couldn’t use the folder for its data.',
   'startup.quit': 'Quit FreeCal',
