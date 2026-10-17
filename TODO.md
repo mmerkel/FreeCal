@@ -1,6 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
-- [ ] 
+- [ ] hand test import
+  - [ ] seems some timed events are not imported or don't show up
 
 ## Import behaviour to review (ticket 58)
 
