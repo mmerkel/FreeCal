@@ -2,12 +2,13 @@
 
 Only one FreeCal process may have a given Local Store open at a time. A second launch hands its command-line arguments (files to open) to the running FreeCal, which comes to the front, and then exits. Sync, reminders, the tray and Signals all assume they are alone: Signals reach only one process, two syncs would send the same queued change twice, and every reminder would fire twice. FreeCal runs in the background, so starting it again from the launcher while it sits in the tray is the normal way to reach a second launch, not an edge case.
 
-The rule is enforced twice. The core takes an exclusive OS file lock in the data directory for the lifetime of `Core` and refuses to open an already-locked Local Store, which is the real guarantee and is testable at the core interface. The shell uses `tauri-plugin-single-instance` for the hand-off, which provides the user experience. Separate Local Stores (a development build with its own data directory) may run side by side.
+The rule is enforced twice. The core takes an exclusive OS file lock in the data directory for the lifetime of `Core` and refuses to open an already-locked Local Store, which is the real guarantee and is testable at the core interface. The shell does the hand-off, which provides the user experience: the first launch owns a D-Bus name that stands for its Local Store, and a second launch passes its arguments, working directory and activation token to it in one call. Separate Local Stores (a development build with its own data directory) may run side by side.
 
 ## Considered Options
 
 - **Several processes sharing one Local Store**: every feature would need cross-process coordination (Signals between processes, a sync lease, deduplicated reminders and tray notifications), for no benefit to a single-user desktop app.
 - **One running FreeCal per user session, whatever the data directory**: stricter than needed, and it would block test and development builds next to the real FreeCal.
+- **`tauri-plugin-single-instance` for the hand-off** (used at first): it forwards only the arguments and the working directory. Without the second launch's activation token, Wayland compositors won't raise the running FreeCal's window; KWin only flashes it in the taskbar.
 - **SQLite's exclusive locking mode, or a PID file, instead of an OS file lock**: SQLite's mode only blocks others once the right lock is taken, which is hard to reason about. A PID file can be left behind after a crash. An OS file lock is released by the OS when the process dies, and Rust's `File::try_lock` works on Linux, Windows and macOS.
 
 ## Consequences

@@ -1,7 +1,9 @@
 //! The Tauri shell: exposes the core application interface to the frontend as
 //! commands and forwards the core's Signals as Tauri events.
 
-use std::path::Path;
+#[cfg(target_os = "linux")]
+mod handoff;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -216,31 +218,79 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     }
 }
 
-/// Brings the window to the front, as when FreeCal is started again.
-fn bring_to_front(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        window.show()?;
-        window.unminimize()?;
-        window.set_focus()?;
-    }
-    Ok(())
+/// Brings the window to the front for a second launch. Its activation
+/// token is what lets the compositor raise the window; without it KWin on
+/// Wayland only marks FreeCal in the taskbar.
+#[cfg(target_os = "linux")]
+fn bring_to_front(app: &AppHandle, activation_token: Option<String>) {
+    use gtk::prelude::*;
+
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    // GTK only works on the main thread.
+    let _ = app.run_on_main_thread(move || {
+        let Ok(window) = window.gtk_window() else {
+            return;
+        };
+        if let Some(token) = activation_token {
+            set_activation_token(&window, &token);
+        }
+        window.deiconify();
+        // Shows the window if needed, and on Wayland activates it with the token.
+        window.present_with_time(gtk::gdk::ffi::GDK_CURRENT_TIME as u32);
+    });
 }
 
-/// The D-Bus name under which the running FreeCal takes the arguments of a
-/// second launch. It stands for the Local Store rather than the app, so that
-/// FreeCals on separate data directories run side by side (ADR 0005). The
-/// hash is FNV-1a, which unlike `std`'s hasher stays the same across builds,
-/// so an updated FreeCal still reaches one started before the update.
-fn local_store_dbus_name(identifier: &str, data_dir: &Path) -> String {
-    let hash = data_dir
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    // A D-Bus name element can't start with a digit.
-    format!("{identifier}.Store{hash:016x}")
+/// Makes the window's next activation use `token`: through xdg-activation on
+/// Wayland, as a startup notification ID on X11.
+#[cfg(target_os = "linux")]
+fn set_activation_token(window: &gtk::ApplicationWindow, token: &str) {
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::*;
+
+    let display = WidgetExt::display(window);
+    if display.type_().name() == "GdkWaylandDisplay" {
+        let Ok(token) = std::ffi::CString::new(token) else {
+            return;
+        };
+        // SAFETY: `display` is a live GdkWaylandDisplay, checked above, and
+        // GDK copies the token.
+        unsafe {
+            gdk_wayland_sys::gdk_wayland_display_set_startup_notification_id(
+                ToGlibPtr::<*mut gtk::gdk::ffi::GdkDisplay>::to_glib_none(&display)
+                    .0
+                    .cast(),
+                token.as_ptr(),
+            );
+        }
+    } else {
+        window.set_startup_id(token);
+    }
+}
+
+/// Hands this launch to the running FreeCal on the same Local Store and exits,
+/// or becomes the one later launches hand off to. Without a session bus
+/// FreeCal still starts: the core's lock keeps a second launch from opening
+/// the Local Store anyway.
+#[cfg(target_os = "linux")]
+fn hand_off_or_serve(app: &tauri::App, data_dir: &std::path::Path) {
+    let handle = app.handle().clone();
+    let name = handoff::local_store_name(&app.config().identifier, data_dir);
+    // Files to open among the arguments are ticket 30's.
+    let claimed = handoff::claim(&name, &handoff::Launch::current(), move |launch| {
+        bring_to_front(&handle, launch.activation_token)
+    });
+    match claimed {
+        Ok(handoff::Claim::Running(connection)) => {
+            app.manage(connection);
+        }
+        Ok(handoff::Claim::HandedOff) => {
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+        Err(error) => eprintln!("FreeCal can't take over from a second launch: {error}"),
+    }
 }
 
 fn main() {
@@ -249,22 +299,10 @@ fn main() {
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
-            // Before the core opens: a second launch hands its arguments to
-            // the running FreeCal here and exits.
-            // Without the hand-off FreeCal still starts: the core's lock
-            // keeps a second launch from opening the Local Store anyway.
-            let name = local_store_dbus_name(&app.config().identifier, &data_dir);
-            if let Err(error) = app.handle().plugin(
-                tauri_plugin_single_instance::Builder::new()
-                    .dbus_id(name)
-                    .callback(|app, _args, _cwd| {
-                        // Files to open among the arguments are ticket 30's.
-                        let _ = bring_to_front(app);
-                    })
-                    .build(),
-            ) {
-                eprintln!("FreeCal can't take over from a second launch: {error}");
-            }
+            // Before the core opens, so that a second launch hands off
+            // rather than failing with `LocalStoreInUse`.
+            #[cfg(target_os = "linux")]
+            hand_off_or_serve(app, &data_dir);
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
             match Core::open(&data_dir, Arc::new(SystemClock), signals) {
                 Ok(core) => {
