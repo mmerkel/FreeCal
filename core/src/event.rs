@@ -309,7 +309,7 @@ fn convert(local: NaiveDateTime, from: Tz, to: Tz) -> NaiveDateTime {
 /// the hour that is repeated when clocks go back, the first one; in a gap
 /// when clocks go forward, the time shifted by the gap, which is the wall
 /// time read with the offset from before the gap.
-fn instant(local: NaiveDateTime, zone: Tz) -> DateTime<Utc> {
+pub(crate) fn instant(local: NaiveDateTime, zone: Tz) -> DateTime<Utc> {
     match zone.from_local_datetime(&local) {
         LocalResult::Single(time) | LocalResult::Ambiguous(time, _) => time.with_timezone(&Utc),
         LocalResult::None => {

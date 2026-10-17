@@ -8,6 +8,7 @@ mod calendar;
 mod clock;
 mod error;
 mod event;
+mod import;
 mod settings;
 mod sidebar;
 mod signal;
@@ -28,6 +29,10 @@ pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
+pub use import::{
+    ImportFile, ImportPreview, ImportedEvent, ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE,
+    PinnedZone,
+};
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
@@ -331,6 +336,22 @@ impl Core {
         Ok(())
     }
 
+    /// Previews importing `file`, an `.ics` file or a `.zip` of them, into a
+    /// Calendar: how many Events are new, how many it already has (same
+    /// UID), and which zones floating times were pinned to. Stores nothing.
+    pub fn preview_import(
+        &self,
+        file: &ImportFile,
+        calendar_id: CalendarId,
+    ) -> Result<ImportPreview> {
+        let existing = {
+            let store = self.store();
+            store.find_calendar(calendar_id)?;
+            store.event_uids(calendar_id)?
+        };
+        import::preview(file, calendar_id, &existing, self.clock.time_zone())
+    }
+
     fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
         let description = description_of(&stored.fields);
         let fields = stored.fields;
@@ -376,9 +397,5 @@ fn writable(store: &Store, id: CalendarId) -> Result<()> {
 }
 
 fn description_of(fields: &EventFields) -> StructuredText {
-    if fields.description_html {
-        StructuredText::from_html(&fields.description)
-    } else {
-        StructuredText::from_plain_text(&fields.description)
-    }
+    StructuredText::from_description(&fields.description, fields.description_html)
 }

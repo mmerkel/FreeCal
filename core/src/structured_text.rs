@@ -48,6 +48,15 @@ impl StructuredText {
         Self::from_raw(html_to_raw(stored))
     }
 
+    /// A description as stored, HTML or plain text.
+    pub(crate) fn from_description(stored: &str, html: bool) -> Self {
+        if html {
+            Self::from_html(stored)
+        } else {
+            Self::from_plain_text(stored)
+        }
+    }
+
     fn from_raw(raw: Vec<Raw>) -> Self {
         let mut paragraphs = vec![Vec::new()];
         for piece in raw {

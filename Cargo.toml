@@ -6,3 +6,11 @@ members = ["core", "src-tauri"]
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+
+# The import tests deflate and inflate a .zip of over 128 MiB, which takes
+# seconds unoptimised.
+[profile.dev.package.zlib-rs]
+opt-level = 3
+
+[profile.dev.package.zip]
+opt-level = 3

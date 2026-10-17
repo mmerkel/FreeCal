@@ -176,7 +176,7 @@ fn samples_file() -> (String, Vec<String>) {
                 appearance: Some(Appearance::Light),
             },
         ]),
-        samples(&ErrorCode::ALL),
+        samples(&ErrorCode::all()),
     ];
     let mut names = Vec::new();
     let (mut values, mut types) = (String::new(), String::new());

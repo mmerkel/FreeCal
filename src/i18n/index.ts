@@ -24,6 +24,10 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   localAccountCannotBeRemoved: 'error.localAccountCannotBeRemoved',
   newerLocalStore: 'error.newerLocalStore',
   unknownProvider: 'error.unknownProvider',
+  importUnreadable: 'error.importUnreadable',
+  importNotCalendar: 'error.importNotCalendar',
+  importZipWithoutCalendars: 'error.importZipWithoutCalendars',
+  importTooLarge: 'error.importTooLarge',
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
   windowNotShown: 'error.windowNotShown',
@@ -45,8 +49,8 @@ export function startupText(failure: ErrorCode): string {
 
 /**
  * A failure in words, for the `{error}` of a message. The core reports
- * failures as codes; anything else, such as a failure inside the frontend, is
- * shown as it is.
+ * failures as codes, some with the name of the file they are about; anything
+ * else, such as a failure inside the frontend, is shown as it is.
  */
 export function errorText(error: unknown): string {
   if (
@@ -56,7 +60,9 @@ export function errorText(error: unknown): string {
     typeof error.code === 'string' &&
     Object.hasOwn(errorMessages, error.code)
   ) {
-    return t(errorMessages[error.code as ErrorCode['code']]);
+    const params: Record<string, string> =
+      'file' in error && typeof error.file === 'string' ? { file: error.file } : {};
+    return t(errorMessages[error.code as ErrorCode['code']], params);
   }
   return String(error);
 }

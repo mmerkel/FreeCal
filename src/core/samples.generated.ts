@@ -232,6 +232,22 @@ export const samples = {
       "code": "unknownProvider"
     },
     {
+      "code": "importUnreadable",
+      "file": "takeout.zip/Calendar/Work.ics"
+    },
+    {
+      "code": "importNotCalendar",
+      "file": "takeout.zip/Calendar/Work.ics"
+    },
+    {
+      "code": "importZipWithoutCalendars",
+      "file": "takeout.zip/Calendar/Work.ics"
+    },
+    {
+      "code": "importTooLarge",
+      "file": "takeout.zip/Calendar/Work.ics"
+    },
+    {
       "code": "linkNotAllowed"
     },
     {

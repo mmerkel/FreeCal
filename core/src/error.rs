@@ -35,6 +35,14 @@ pub enum CoreError {
     NewerLocalStore { found: i64, known: i64 },
     #[error("the Local Store has an Account with an unknown Provider {0:?}")]
     UnknownProvider(String),
+    #[error("{file:?} couldn't be read")]
+    ImportUnreadable { file: String },
+    #[error("{file:?} is not an iCalendar file FreeCal can read")]
+    ImportNotCalendar { file: String },
+    #[error("{file:?} has no .ics files")]
+    ImportZipWithoutCalendars { file: String },
+    #[error("{file:?} is larger than an import may be")]
+    ImportTooLarge { file: String },
 }
 
 impl CoreError {
@@ -56,14 +64,25 @@ impl CoreError {
             CoreError::LocalAccountCannotBeRemoved => ErrorCode::LocalAccountCannotBeRemoved,
             CoreError::NewerLocalStore { .. } => ErrorCode::NewerLocalStore,
             CoreError::UnknownProvider(_) => ErrorCode::UnknownProvider,
+            CoreError::ImportUnreadable { file } => {
+                ErrorCode::ImportUnreadable { file: file.clone() }
+            }
+            CoreError::ImportNotCalendar { file } => {
+                ErrorCode::ImportNotCalendar { file: file.clone() }
+            }
+            CoreError::ImportZipWithoutCalendars { file } => {
+                ErrorCode::ImportZipWithoutCalendars { file: file.clone() }
+            }
+            CoreError::ImportTooLarge { file } => ErrorCode::ImportTooLarge { file: file.clone() },
         }
     }
 }
 
 /// A failure as it crosses the application interface: a code the frontend
-/// translates through its i18n layer. Most codes stand for a [`CoreError`];
-/// the last ones are failures of the shell's own commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// translates through its i18n layer, with the names of files it is about.
+/// Most codes stand for a [`CoreError`]; the last ones are failures of the
+/// shell's own commands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "code", rename_all = "camelCase")]
 pub enum ErrorCode {
@@ -82,6 +101,26 @@ pub enum ErrorCode {
     LocalAccountCannotBeRemoved,
     NewerLocalStore,
     UnknownProvider,
+    /// A file to import couldn't be read, or a `.zip` is damaged. `file` is
+    /// the file's name, untrusted like every name.
+    ImportUnreadable {
+        file: String,
+    },
+    /// A file to import, or an `.ics` file in a `.zip` to import, isn't an
+    /// iCalendar file FreeCal can read. `file` names it, an `.ics` in a
+    /// `.zip` as `takeout.zip/Calendar/Work.ics`.
+    ImportNotCalendar {
+        file: String,
+    },
+    /// A `.zip` to import has no `.ics` files.
+    ImportZipWithoutCalendars {
+        file: String,
+    },
+    /// A file to import is larger than `MAX_IMPORT_SIZE`, or a `.zip` to
+    /// import has more entries than `MAX_IMPORT_ENTRIES` or unpacks larger.
+    ImportTooLarge {
+        file: String,
+    },
     /// The window asked to open a link that isn't `http(s)://` or `mailto:`.
     LinkNotAllowed,
     /// The system couldn't open a link in the browser.
@@ -93,25 +132,32 @@ pub enum ErrorCode {
 impl ErrorCode {
     /// Every code, for the generated TypeScript samples.
     #[cfg(test)]
-    pub(crate) const ALL: [ErrorCode; 17] = [
-        ErrorCode::LocalStoreFailed,
-        ErrorCode::DataDirectoryFailed,
-        ErrorCode::LocalStoreInUse,
-        ErrorCode::AccountNotFound,
-        ErrorCode::CalendarNotFound,
-        ErrorCode::CalendarReadOnly,
-        ErrorCode::EventNotFound,
-        ErrorCode::EndBeforeStart,
-        ErrorCode::UnreadableEventTime,
-        ErrorCode::EmptyCalendarName,
-        ErrorCode::InvalidColour,
-        ErrorCode::LocalAccountCannotBeRemoved,
-        ErrorCode::NewerLocalStore,
-        ErrorCode::UnknownProvider,
-        ErrorCode::LinkNotAllowed,
-        ErrorCode::LinkNotOpened,
-        ErrorCode::WindowNotShown,
-    ];
+    pub(crate) fn all() -> Vec<ErrorCode> {
+        let file = || "takeout.zip/Calendar/Work.ics".to_owned();
+        vec![
+            ErrorCode::LocalStoreFailed,
+            ErrorCode::DataDirectoryFailed,
+            ErrorCode::LocalStoreInUse,
+            ErrorCode::AccountNotFound,
+            ErrorCode::CalendarNotFound,
+            ErrorCode::CalendarReadOnly,
+            ErrorCode::EventNotFound,
+            ErrorCode::EndBeforeStart,
+            ErrorCode::UnreadableEventTime,
+            ErrorCode::EmptyCalendarName,
+            ErrorCode::InvalidColour,
+            ErrorCode::LocalAccountCannotBeRemoved,
+            ErrorCode::NewerLocalStore,
+            ErrorCode::UnknownProvider,
+            ErrorCode::ImportUnreadable { file: file() },
+            ErrorCode::ImportNotCalendar { file: file() },
+            ErrorCode::ImportZipWithoutCalendars { file: file() },
+            ErrorCode::ImportTooLarge { file: file() },
+            ErrorCode::LinkNotAllowed,
+            ErrorCode::LinkNotOpened,
+            ErrorCode::WindowNotShown,
+        ]
+    }
 }
 
 impl From<CoreError> for ErrorCode {

@@ -199,7 +199,8 @@ fn show_window(app: AppHandle) -> CommandResult<()> {
 /// anything else and then shows the startup error screen instead.
 #[tauri::command]
 fn startup_failure(app: AppHandle) -> Option<ErrorCode> {
-    app.try_state::<StartupFailure>().map(|failure| failure.0)
+    app.try_state::<StartupFailure>()
+        .map(|failure| failure.0.clone())
 }
 
 /// Ends FreeCal, also when it would otherwise keep running in the background.

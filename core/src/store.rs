@@ -1,5 +1,6 @@
 //! The Local Store: one SQLite database (ADR 0004).
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::types::Value;
@@ -469,6 +470,15 @@ impl Store {
             0 => Err(CoreError::EventNotFound(id)),
             _ => Ok(()),
         }
+    }
+
+    /// The UIDs of a Calendar's Events.
+    pub fn event_uids(&self, calendar_id: CalendarId) -> Result<HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT uid FROM event WHERE calendar_id = ?1")?;
+        let uids = readable(stmt.query_map([calendar_id.0], |row| row.get(0))?)?;
+        Ok(uids.into_iter().collect())
     }
 
     /// The Events of shown Calendars that overlap `range`, found by their

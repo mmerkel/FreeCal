@@ -319,8 +319,8 @@ export class FakeCore implements CoreApi {
   }
 }
 
-/** A failure as the real core reports it. */
-function failure(code: ErrorCode['code']): ErrorCode {
+/** A failure about no file, as the real core reports it. */
+function failure(code: Exclude<ErrorCode, { file: string }>['code']): ErrorCode {
   return { code };
 }
 
