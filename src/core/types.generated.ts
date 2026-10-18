@@ -40,7 +40,12 @@ name: string,
 /**
  * Its colour on the server, if it has a usable one.
  */
-colour: Colour | null, };
+colour: Colour | null,
+/**
+ * Whether the server doesn't allow the user to change it, so that it
+ * becomes a Read-only Calendar.
+ */
+readOnly: boolean, };
 
 export type Calendar = { id: CalendarId, accountId: AccountId, name: string, colour: Colour,
 /**
@@ -48,10 +53,17 @@ export type Calendar = { id: CalendarId, accountId: AccountId, name: string, col
  */
 shown: boolean,
 /**
- * A Read-only Calendar: FreeCal never changes its Events. Setting it
- * comes with ticket 17.
+ * A Read-only Calendar: FreeCal never changes its Events. It is one
+ * when its server doesn't allow changing it or the user marked it
+ * read-only; until 1.0, every newly added server Calendar starts
+ * marked. Marking comes with ticket 17.
  */
 readOnly: boolean,
+/**
+ * Whether its server doesn't allow the user to change it, so that it
+ * stays read-only whatever the user marks.
+ */
+serverReadOnly: boolean,
 /**
  * Whether its first sync is running, so that its Events are still
  * loading; the sidebar says so. Sync Status may take this over (ticket

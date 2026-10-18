@@ -2,7 +2,7 @@ mod support;
 
 use freecal_core::{AccountId, CalDavLogin, CalendarId, Changed, Core, Event, Signal};
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, date, event, ics};
+use support::{Harness, date, event, ics, make_writable};
 
 /// A user on Radicale with a Calendar "Work", and a new Core with the
 /// user's Account added and that Calendar's first sync done.
@@ -22,6 +22,14 @@ impl Synced {
     /// Calendar.
     fn with(events: &[(&str, Vec<u8>)]) -> Self {
         Self::with_calendar(NewCalendar::default(), events)
+    }
+
+    /// Like [`Synced::with`], with the Calendar unmarked read-only, so that
+    /// its changes can be undone.
+    fn writable(events: &[(&str, Vec<u8>)]) -> Self {
+        let synced = Self::with(events);
+        make_writable(&synced.harness, synced.work);
+        synced
     }
 
     fn with_calendar(calendar: NewCalendar, events: &[(&str, Vec<u8>)]) -> Self {
@@ -276,10 +284,8 @@ fn each_calendar_syncs_as_a_unit_of_its_own_with_its_own_signal() {
 #[test]
 fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
     let synced = Synced::with(&[("standup", standup("Standup"))]);
-    synced.harness.arrange_local_store(&format!(
-        "UPDATE calendar SET read_only = 1 WHERE id = {}",
-        synced.work.0
-    ));
+    // As every newly added server Calendar is, until 1.0.
+    assert!(synced.core.list_calendars().unwrap()[0].read_only);
     synced.put("standup", standup("Standup moved"));
 
     let unit = synced.sync();
@@ -293,7 +299,7 @@ mod undo {
 
     #[test]
     fn restores_the_previous_version_with_its_server_data() {
-        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        let synced = Synced::writable(&[("standup", standup("Standup"))]);
         let pulled = synced.held_etag("Standup");
         synced.put("standup", standup("Standup moved"));
         let unit = synced.sync().unwrap();
@@ -308,7 +314,7 @@ mod undo {
 
     #[test]
     fn brings_back_what_the_server_deleted_and_removes_what_it_added() {
-        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        let synced = Synced::writable(&[("standup", standup("Standup"))]);
         synced.delete("standup");
         synced.put(
             "review",

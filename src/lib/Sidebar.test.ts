@@ -102,6 +102,21 @@ test('a Calendar’s tooltip says whether it is shown and what a click does', as
   );
 });
 
+test('a Read-only Calendar’s row shows a lock, which describes it', async () => {
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  core.addCalendar({ name: 'Holidays', readOnly: true });
+
+  const local = await showApp(core);
+
+  const holidays = within(local).getByRole('switch', { name: 'Holidays' });
+  expect(holidays).toHaveAccessibleDescription('Read-only Holidays: shown, click to hide');
+  expect(holidays.querySelector('[title="Read-only"] svg')).not.toBeNull();
+  const home = within(local).getByRole('switch', { name: 'Home' });
+  expect(home.querySelector('[title="Read-only"]')).toBeNull();
+  expect(home).toHaveAccessibleDescription('Home: shown, click to hide');
+});
+
 test('clicking a Calendar’s row hides and shows it', async () => {
   const user = userEvent.setup();
   const core = new FakeCore();

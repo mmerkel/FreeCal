@@ -36,6 +36,18 @@ export function idOf(event: Pick<GridEvent, 'id'>): EventId {
   return Number.parseInt(event.id, 10) as EventId;
 }
 
+/**
+ * The Event of an Occurrence and which Occurrence it is, from the ID
+ * FullCalendar keeps (see `gridId`).
+ */
+export function occurrenceOf(id: string): { id: EventId; recurrenceId: string | null } {
+  const slash = id.indexOf('/');
+  return {
+    id: idOf({ id }),
+    recurrenceId: slash === -1 ? null : id.slice(slash + 1),
+  };
+}
+
 /** Which Occurrence of a Recurring Event this is; the grid gives it in `extendedProps`. */
 export function recurrenceIdOf(event: Pick<GridEvent, 'extendedProps'>): string | null {
   const id = event.extendedProps.recurrenceId;

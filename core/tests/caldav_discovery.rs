@@ -57,11 +57,57 @@ fn adding_an_account_discovers_its_calendars_as_available_calendars() {
                 url: home,
                 name: "home".to_owned(),
                 colour: Some(Colour::parse("#ff8800").unwrap()),
+                read_only: false,
             },
             AvailableCalendar {
                 url: work,
                 name: "Work".to_owned(),
                 colour: Some(Colour::parse("#3366cc").unwrap()),
+                read_only: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_calendar_the_server_doesnt_let_the_user_change_is_available_as_read_only() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let holidays = radicale.create_read_only_calendar(
+        &user,
+        NewCalendar {
+            name: Some("Holidays"),
+            ..NewCalendar::default()
+        },
+    );
+    let work = radicale.create_calendar(
+        &user,
+        NewCalendar {
+            name: Some("Work"),
+            ..NewCalendar::default()
+        },
+    );
+    let harness = Harness::new();
+    let core = harness.open();
+
+    let added = core
+        .add_caldav_account(&user_login(radicale, &user))
+        .unwrap();
+
+    assert_eq!(
+        added.available,
+        vec![
+            AvailableCalendar {
+                url: holidays,
+                name: "Holidays".to_owned(),
+                colour: None,
+                read_only: true,
+            },
+            AvailableCalendar {
+                url: work,
+                name: "Work".to_owned(),
+                colour: None,
+                read_only: false,
             },
         ]
     );
@@ -237,6 +283,7 @@ fn a_calendar_without_a_usable_colour_has_none() {
             url,
             name: "Red".to_owned(),
             colour: None,
+            read_only: false,
         }]
     );
 }
@@ -377,6 +424,7 @@ fn discovery_falls_back_to_the_well_known_address_and_follows_its_redirect() {
             url: format!("{}dav/calendars/alice/my%20work/", server.url),
             name: "my work".to_owned(),
             colour: None,
+            read_only: false,
         }]
     );
 }

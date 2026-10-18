@@ -51,9 +51,14 @@ pub struct Calendar {
     pub colour: Colour,
     /// Whether the user shows this Calendar's Events or has hidden them.
     pub shown: bool,
-    /// A Read-only Calendar: FreeCal never changes its Events. Setting it
-    /// comes with ticket 17.
+    /// A Read-only Calendar: FreeCal never changes its Events. It is one
+    /// when its server doesn't allow changing it or the user marked it
+    /// read-only; until 1.0, every newly added server Calendar starts
+    /// marked. Marking comes with ticket 17.
     pub read_only: bool,
+    /// Whether its server doesn't allow the user to change it, so that it
+    /// stays read-only whatever the user marks.
+    pub server_read_only: bool,
     /// Whether its first sync is running, so that its Events are still
     /// loading; the sidebar says so. Sync Status may take this over (ticket
     /// 15).
@@ -64,6 +69,7 @@ pub struct Calendar {
 /// stores nothing for it; it is fetched from the server each time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct AvailableCalendar {
     /// Where it lives on the server, which also names it to the core.
     pub url: String,
@@ -72,6 +78,9 @@ pub struct AvailableCalendar {
     pub name: String,
     /// Its colour on the server, if it has a usable one.
     pub colour: Option<Colour>,
+    /// Whether the server doesn't allow the user to change it, so that it
+    /// becomes a Read-only Calendar.
+    pub read_only: bool,
 }
 
 /// A Calendar name as the user typed it, without surrounding whitespace.

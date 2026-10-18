@@ -191,7 +191,19 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE calendar ADD COLUMN sync_token TEXT;
     ",
     ),
+    // Ticket 56: whether a server Account's Calendar is read-only because
+    // its server doesn't allow changing it. `read_only` is the user's mark.
+    Migration::Sql(
+        "
+    ALTER TABLE calendar ADD COLUMN server_read_only INTEGER NOT NULL DEFAULT 0;
+    ",
+    ),
 ];
+
+/// Whether a newly added server Calendar starts marked read-only, so that
+/// the user can watch sync work before trusting FreeCal to write (US-18).
+/// Until 1.0.
+const NEW_SERVER_CALENDARS_READ_ONLY: bool = true;
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether
 /// it is shown. The colours are the first two of the frontend's
@@ -543,7 +555,8 @@ impl Store {
 
     pub fn list_calendars(&self) -> Result<Vec<Calendar>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, account_id, name, colour, shown, read_only FROM calendar ORDER BY id",
+            "SELECT id, account_id, name, colour, shown, read_only, server_read_only \
+             FROM calendar ORDER BY id",
         )?;
         let calendars = stmt
             .query_map([], |row| {
@@ -554,7 +567,8 @@ impl Store {
                     // A stored colour is untrusted like every stored field.
                     colour: Colour::parse(&row.get::<_, String>(3)?).unwrap_or_default(),
                     shown: row.get(4)?,
-                    read_only: row.get(5)?,
+                    read_only: row.get::<_, bool>(5)? || row.get::<_, bool>(6)?,
+                    server_read_only: row.get(6)?,
                     first_sync: false,
                 })
             })?
@@ -579,12 +593,13 @@ impl Store {
             colour: colour.clone(),
             shown: true,
             read_only: false,
+            server_read_only: false,
             first_sync: false,
         })
     }
 
     /// Adds an Available Calendar as a server Account's Calendar, in the
-    /// default colour if it has none.
+    /// default colour if it has none, read-only if its server says so.
     pub fn insert_server_calendar(
         &self,
         account_id: AccountId,
@@ -592,18 +607,18 @@ impl Store {
     ) -> Result<Calendar> {
         let colour = available.colour.clone().unwrap_or_default();
         self.conn.execute(
-            "INSERT INTO calendar (account_id, url, name, colour) VALUES (?1, ?2, ?3, ?4)",
-            params![account_id.0, available.url, available.name, colour.as_str()],
+            "INSERT INTO calendar (account_id, url, name, colour, read_only, server_read_only) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                account_id.0,
+                available.url,
+                available.name,
+                colour.as_str(),
+                NEW_SERVER_CALENDARS_READ_ONLY,
+                available.read_only
+            ],
         )?;
-        Ok(Calendar {
-            id: CalendarId(self.conn.last_insert_rowid()),
-            account_id,
-            name: available.name.clone(),
-            colour,
-            shown: true,
-            read_only: false,
-            first_sync: false,
-        })
+        self.find_calendar(CalendarId(self.conn.last_insert_rowid()))
     }
 
     /// Where an Account's Calendars live on its server; none for the Local

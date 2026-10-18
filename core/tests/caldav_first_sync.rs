@@ -7,7 +7,7 @@ use freecal_core::{
     link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, all_day, date, draft, event, ics, timed};
+use support::{Harness, all_day, date, draft, event, ics, make_writable, timed};
 
 fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
     core.add_caldav_account(&CalDavLogin {
@@ -159,6 +159,7 @@ fn pulled_standup() -> (Harness, Core, CalendarId, CalendarId) {
     let core = harness.open_without_starting_calendars();
     let account = add_account(&core, radicale, &user);
     let work = core.add_calendars(account, &[work]).unwrap()[0].id;
+    make_writable(&harness, work);
     let local = core.list_accounts().unwrap()[0].id;
     let home = core
         .create_calendar(local, "Home", Colour::parse("#3366cc").unwrap())

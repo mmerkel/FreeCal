@@ -133,6 +133,7 @@ export class FakeCore implements CoreApi {
       colour: '#3366cc',
       shown: true,
       readOnly: false,
+      serverReadOnly: false,
       firstSync: false,
       ...calendar,
     };
@@ -269,6 +270,9 @@ export class FakeCore implements CoreApi {
       accountId: id,
       name: available.name,
       colour: available.colour ?? '#808080',
+      // Every newly added server Calendar, until 1.0.
+      readOnly: true,
+      serverReadOnly: available.readOnly,
       ...fields,
     });
     this.calendarUrls.set(added.id, url);

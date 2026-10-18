@@ -219,6 +219,16 @@ impl Keyring for RecordingKeyring {
     }
 }
 
+/// Unmarks a Calendar the user marked read-only, as the pre-1.0 default
+/// marks every newly added server Calendar, so that a test can change its
+/// Events. Ticket 17 lets the user do this through the interface.
+pub fn make_writable(harness: &Harness, id: CalendarId) {
+    harness.arrange_local_store(&format!(
+        "UPDATE calendar SET read_only = 0 WHERE id = {}",
+        id.0
+    ));
+}
+
 /// A new Local Calendar.
 pub fn calendar(core: &Core, name: &str) -> Calendar {
     let local = core.list_accounts().unwrap()[0].id;

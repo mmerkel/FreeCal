@@ -3,6 +3,7 @@
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import Eye from '@lucide/svelte/icons/eye';
   import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Lock from '@lucide/svelte/icons/lock';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Plus from '@lucide/svelte/icons/plus';
   import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -291,6 +292,15 @@
         {#each calendarsOf(account) as calendar (calendar.id)}
           {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
           {@const loadingId = `sidebar-loading-${calendar.id}`}
+          {@const lockId = `sidebar-lock-${calendar.id}`}
+          {@const stateId = `sidebar-state-${calendar.id}`}
+          {@const tooltip = t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
+            name: calendar.name,
+          })}
+          <!-- A description replaces the tooltip's, so it goes on in it. -->
+          {@const describedBy = [calendar.firstSync && loadingId, calendar.readOnly && lockId]
+            .filter(Boolean)
+            .join(' ')}
           <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
             {#if editing?.kind === 'renaming' && editing.id === calendar.id}
               {@render nameForm(calendar.name, calendar.colour, (name) =>
@@ -302,10 +312,8 @@
                 class="row toggle"
                 role="switch"
                 aria-checked={calendar.shown}
-                title={t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
-                  name: calendar.name,
-                })}
-                aria-describedby={calendar.firstSync ? loadingId : undefined}
+                title={tooltip}
+                aria-describedby={describedBy ? `${describedBy} ${stateId}` : undefined}
                 {...menuOpeners(calendar)}
                 onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
               >
@@ -320,6 +328,15 @@
                     </span>
                   {/if}
                 </span>
+                {#if describedBy}
+                  <span id={stateId} hidden>{tooltip}</span>
+                {/if}
+                {#if calendar.readOnly}
+                  <!-- Also the switch's description. -->
+                  <span class="lock" id={lockId} title={t('calendar.readOnly')} aria-hidden="true">
+                    <Lock size={12} aria-label={t('calendar.readOnly')} />
+                  </span>
+                {/if}
               </button>
               <button
                 type="button"
@@ -611,6 +628,13 @@
   .loading {
     color: var(--foreground-muted);
     font-size: var(--text-xs);
+  }
+
+  /* Grey and near colourless, like every marker on a row. */
+  .lock {
+    display: flex;
+    flex: none;
+    color: var(--foreground-muted);
   }
 
   .name,

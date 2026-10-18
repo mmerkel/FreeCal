@@ -820,9 +820,11 @@ mod tests {
             [hash_as(2, "dentist", &event)],
         )
         .unwrap();
-        // Back to before ticket 81's migration, undoing ticket 82's after it.
+        // Back to before ticket 81's migration, undoing those of tickets 82
+        // and 56 after it.
         conn.execute_batch(&format!(
-            "ALTER TABLE calendar DROP COLUMN synced;
+            "ALTER TABLE calendar DROP COLUMN server_read_only;
+             ALTER TABLE calendar DROP COLUMN synced;
              ALTER TABLE calendar DROP COLUMN sync_token;
              ALTER TABLE event DROP COLUMN server_href;
              ALTER TABLE event DROP COLUMN server_etag;
@@ -831,7 +833,7 @@ mod tests {
              ALTER TABLE journal_entry DROP COLUMN server_etag;
              ALTER TABLE journal_entry DROP COLUMN server_data;
              PRAGMA user_version = {};",
-            version - 2
+            version - 3
         ))
         .unwrap();
         drop(store);

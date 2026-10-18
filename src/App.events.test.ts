@@ -199,6 +199,19 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
 
   expect(within(details).queryByRole('button', { name: 'Edit' })).toBeNull();
   expect(within(details).queryByRole('button', { name: 'Delete' })).toBeNull();
+  expect(within(details).getByText('Can’t be changed: its calendar is read-only.')).toBeVisible();
+});
+
+test('an Event of a writable Calendar doesn’t say it is read-only', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  await showApp(core);
+
+  const details = await openOccurrence(user, 'Dentist');
+
+  expect(within(details).queryByText(/read-only/)).toBeNull();
 });
 
 test('editing an Event changes it and returns to its details', async () => {
@@ -485,6 +498,33 @@ test('a refused drag says why and tells the grid to put the Event back', async (
   await stubGrid.props!.onreschedule!(dentist.id, null, later);
 
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});
+
+test('trying to drag an Event of a Read-only Calendar says why it can’t move', async () => {
+  const core = new FakeCore();
+  const locked = core.addCalendar({ name: 'Holidays', readOnly: true });
+  const fixed = core.addEvent({ calendarId: locked.id, title: 'Fixed', when: monday });
+  await showApp(core);
+
+  stubGrid.props!.onrefusedrag!(fixed.id, null);
+
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '“\u2068Fixed\u2069” can’t be changed: its calendar “\u2068Holidays\u2069” is read-only.',
+  );
+  expect(core.calls).not.toContain('rescheduleEvent');
+});
+
+test('a refused drag names a hostile Event and Calendar as text', async () => {
+  const core = new FakeCore();
+  const locked = core.addCalendar({ name: hostile.calendarName, readOnly: true });
+  const fixed = core.addEvent({ calendarId: locked.id, title: hostile.title, when: monday });
+  await showApp(core);
+
+  stubGrid.props!.onrefusedrag!(fixed.id, null);
+
+  const toast = await screen.findByRole('status');
+  expect(toast.querySelector('p')!.textContent).toBe(hostile.expected.readOnlyDrag);
+  expect(document.querySelector('img, script')).toBeNull();
 });
 
 const weeklyThreeTimes: Repeat = {

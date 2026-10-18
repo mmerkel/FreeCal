@@ -23,6 +23,7 @@
   import {
     gridId,
     idOf,
+    occurrenceOf,
     recurrenceIdOf,
     rescheduleOfDrop,
     rescheduleOfResize,
@@ -61,6 +62,12 @@
      */
     onreschedule?: (id: EventId, recurrenceId: string | null, when: When) => Promise<void>;
     /**
+     * The user tried to drag an Occurrence, or its edge, that the grid
+     * doesn't offer to move: its Event and its `recurrenceId`. It is
+     * reported once per press, and the press doesn't open it.
+     */
+    onrefusedrag?: (id: EventId, recurrenceId: string | null) => void;
+    /**
      * The user started (`true`) or ended (`false`) pressing on the grid, as
      * for a drag, a resize or a drag-to-create. Meanwhile the grid holds back
      * a new today, and its owner should hold back moving the view.
@@ -89,6 +96,7 @@
     onopenevent,
     onopenday,
     onreschedule,
+    onrefusedrag,
     oninteract,
     held = false,
   }: Props = $props();
@@ -129,6 +137,39 @@
   }
 
   onDestroy(() => clearTimeout(interactionEnd));
+
+  /** How far a press moves before it is a drag: FullCalendar's `eventDragMinDistance`. */
+  const DRAG_DISTANCE = 5;
+  /** A press on an Occurrence the grid doesn't offer to move, until it becomes a drag. */
+  let fixedPress: { x: number; y: number; id: string } | undefined;
+  /** Whether this press was a refused drag, so that it doesn't open the Occurrence. */
+  let refused = false;
+
+  function press(pressed: MouseEvent) {
+    startInteracting();
+    const fixed = (pressed.target as Element).closest<HTMLElement>('.fixed-event');
+    const id = fixed?.dataset.occurrence;
+    fixedPress = id === undefined ? undefined : { x: pressed.clientX, y: pressed.clientY, id };
+    // Otherwise the refused drag selects the text it crosses; a click still
+    // follows.
+    if (fixedPress) pressed.preventDefault();
+    refused = false;
+  }
+
+  function movePressed(moved: MouseEvent) {
+    if (!fixedPress) return;
+    const distance = Math.hypot(moved.clientX - fixedPress.x, moved.clientY - fixedPress.y);
+    if (distance < DRAG_DISTANCE) return;
+    const { id, recurrenceId } = occurrenceOf(fixedPress.id);
+    fixedPress = undefined;
+    refused = true;
+    onrefusedrag?.(id, recurrenceId);
+  }
+
+  function release() {
+    fixedPress = undefined;
+    endInteracting();
+  }
 
   /** Counts drags the owner refused, so that the Occurrences are drawn again. */
   let redraws = $state(0);
@@ -185,8 +226,11 @@
       },
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
+        if (refused) return;
         onopenevent?.(idOf(clicked.event), recurrenceIdOf(clicked.event));
       },
+      // For a refused drag, which FullCalendar doesn't report.
+      eventDidMount: (mounted) => (mounted.el.dataset.occurrence = mounted.event.id),
       eventDrop: (dropped) => reschedule(rescheduleOfDrop(dropped)),
       eventResize: (resized) => reschedule(rescheduleOfResize(resized)),
     });
@@ -238,6 +282,9 @@
       const selected =
         occurrence.eventId === selectedEventId &&
         (selectedRecurrenceId === undefined || occurrence.recurrenceId === selectedRecurrenceId);
+      const editable = movable && calendar !== undefined && !calendar.readOnly;
+      // Dragging it says why it can't move (spec: "Event details").
+      const fixed = movable && calendar?.readOnly === true;
       return {
         id: gridId(occurrence),
         // Titles are untrusted; FullCalendar draws them as text, never as HTML.
@@ -245,11 +292,11 @@
         start: span?.start ?? occurrence.when.start,
         end: span?.end ?? occurrence.when.end,
         allDay: span !== undefined || occurrence.when.kind === 'allDay',
-        editable: movable && calendar !== undefined && !calendar.readOnly,
+        editable,
         extendedProps: { when: occurrence.when, recurrenceId: occurrence.recurrenceId },
         color: colour,
         contrastColor: colour && textColourOn(colour),
-        className: selected ? 'selected-event' : undefined,
+        className: [selected && 'selected-event', fixed && 'fixed-event'].filter(Boolean).join(' '),
       };
     });
     const shown = grid;
@@ -258,7 +305,8 @@
 </script>
 
 <svelte:window
-  onmouseup={endInteracting}
+  onmousemove={movePressed}
+  onmouseup={release}
   ontouchend={endInteracting}
   ontouchcancel={endInteracting}
 />
@@ -269,7 +317,7 @@
 <div
   class="calendar-grid"
   bind:this={element}
-  onmousedowncapture={startInteracting}
+  onmousedowncapture={press}
   ontouchstartcapture={startInteracting}
 ></div>
 

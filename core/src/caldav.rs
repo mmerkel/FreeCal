@@ -93,6 +93,12 @@ const CALENDAR_TIMEZONE: Property = Property {
     name: "calendar-timezone",
 };
 
+/// What the user who is logged in may do with a resource (RFC 3744).
+const CURRENT_USER_PRIVILEGE_SET: Property = Property {
+    namespace: DAV,
+    name: "current-user-privilege-set",
+};
+
 /// The ETag of a member, which names its version.
 const GETETAG: Property = Property {
     namespace: DAV,
@@ -193,6 +199,7 @@ impl Client {
                     DISPLAYNAME,
                     CALENDAR_COLOR,
                     SUPPORTED_CALENDAR_COMPONENT_SET,
+                    CURRENT_USER_PRIVILEGE_SET,
                 ],
             )?;
             calendars.extend(
@@ -598,11 +605,33 @@ fn available_calendar(home: &Url, response: &Element) -> Option<AvailableCalenda
     let colour = response
         .found(CALENDAR_COLOR)
         .and_then(|colour| calendar_colour(&colour.text));
+    // A server that doesn't say may well allow it; should it refuse a
+    // change, that becomes a Sync Error (ticket 17).
+    let read_only = response
+        .found(CURRENT_USER_PRIVILEGE_SET)
+        .is_some_and(|privileges| !may_change_events(privileges));
     Some(AvailableCalendar {
         url: url.to_string(),
         name,
         colour,
+        read_only,
     })
+}
+
+/// Whether a Calendar's `current-user-privilege-set` (RFC 3744) lets the
+/// user create, change and delete its Events: `all` or `write`, or else
+/// each of `bind`, `unbind` and `write-content`, which `write` holds.
+fn may_change_events(privileges: &Element) -> bool {
+    let held: HashSet<&str> = privileges
+        .children(DAV, "privilege")
+        .flat_map(|privilege| &privilege.children)
+        .filter(|privilege| privilege.namespace == DAV)
+        .map(|privilege| privilege.name.as_str())
+        .collect();
+    ["all", "write"].iter().any(|name| held.contains(name))
+        || ["bind", "unbind", "write-content"]
+            .iter()
+            .all(|name| held.contains(name))
 }
 
 /// The path of the member of the Calendar at `calendar` that a `response`
@@ -1025,6 +1054,37 @@ mod tests {
         assert!(follow_href(&base, "file:///etc/passwd").is_none());
         assert!(follow_href(&base, "javascript:alert(1)").is_none());
         assert!(follow_href(&base, "https://alice:pw@dav.example.org/").is_none());
+    }
+
+    #[test]
+    fn events_may_change_with_all_write_or_bind_unbind_and_write_content() {
+        let may_change = |privileges: &str| {
+            let xml = format!(
+                r#"<d:current-user-privilege-set xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">{privileges}</d:current-user-privilege-set>"#
+            );
+            may_change_events(&parse(&xml).unwrap())
+        };
+        let privilege = |name: &str| format!("<d:privilege><{name}/></d:privilege>");
+        let held = |names: &[&str]| names.iter().map(|name| privilege(name)).collect::<String>();
+
+        assert!(may_change(&held(&["d:read", "d:all"])));
+        assert!(may_change(&held(&["d:read", "d:write"])));
+        assert!(may_change(&held(&[
+            "d:read",
+            "d:bind",
+            "d:unbind",
+            "d:write-content"
+        ])));
+        assert!(!may_change(&held(&["d:read", "c:read-free-busy"])));
+        assert!(!may_change(&held(&["d:read", "d:write-content"])));
+        assert!(!may_change(&held(&[
+            "d:bind",
+            "d:unbind",
+            "d:write-properties"
+        ])));
+        // Only DAV's own privileges count.
+        assert!(!may_change(&held(&["c:write", "c:all"])));
+        assert!(!may_change(""));
     }
 
     #[test]

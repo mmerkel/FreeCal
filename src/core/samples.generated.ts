@@ -42,7 +42,8 @@ export const samples = {
         {
           "url": "https://dav.example.org/alice/work/",
           "name": "Work",
-          "colour": "#3a86ff"
+          "colour": "#3a86ff",
+          "readOnly": false
         }
       ]
     }
@@ -51,12 +52,14 @@ export const samples = {
     {
       "url": "https://dav.example.org/alice/work/",
       "name": "Work",
-      "colour": "#3a86ff"
+      "colour": "#3a86ff",
+      "readOnly": false
     },
     {
       "url": "https://dav.example.org/alice/1b2c/",
       "name": "1b2c",
-      "colour": null
+      "colour": null,
+      "readOnly": true
     }
   ],
   ServerLogin: [
@@ -79,6 +82,7 @@ export const samples = {
       "colour": "#3a86ff",
       "shown": true,
       "readOnly": false,
+      "serverReadOnly": false,
       "firstSync": false
     }
   ],

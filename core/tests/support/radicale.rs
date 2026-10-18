@@ -51,7 +51,12 @@ impl Radicale {
 
     fn start() -> Self {
         let dir = TempDir::new().expect("create Radicale's directory");
-        std::fs::write(dir.path().join("users"), "").unwrap();
+        std::fs::write(
+            dir.path().join("users"),
+            format!("{ADMIN}:{ADMIN_PASSWORD}\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("rights"), RIGHTS).unwrap();
         let config = dir.path().join("config");
         std::fs::write(
             &config,
@@ -59,10 +64,11 @@ impl Radicale {
                 "[server]\nhosts = 127.0.0.1:0\n\
                  [auth]\ntype = htpasswd\nhtpasswd_filename = {users}\n\
                  htpasswd_encryption = plain\ndelay = 0\n\
-                 [rights]\ntype = owner_only\n\
+                 [rights]\ntype = from_file\nfile = {rights}\n\
                  [storage]\nfilesystem_folder = {storage}\n\
                  [logging]\nlevel = info\n",
                 users = dir.path().join("users").display(),
+                rights = dir.path().join("rights").display(),
                 storage = dir.path().join("storage").display(),
             ),
         )
@@ -163,6 +169,23 @@ impl Radicale {
         url
     }
 
+    /// Creates a Calendar for `user` on the server that they may only read,
+    /// and returns its URL.
+    pub fn create_read_only_calendar(&self, user: &User, calendar: NewCalendar) -> String {
+        // Logging in makes the user's principal, which holds their Calendars.
+        let principal = format!("{}{}/", self.url, user.name);
+        let status = self.request(user, "PROPFIND", &principal, XML, Vec::new());
+        assert_eq!(status, 207, "log in to Radicale");
+        let url = format!("{principal}read-only-{}/", uuid::Uuid::new_v4().simple());
+        let admin = User {
+            name: ADMIN.to_owned(),
+            password: ADMIN_PASSWORD.to_owned(),
+        };
+        let status = self.request(&admin, "MKCALENDAR", &url, XML, mkcalendar_body(&calendar));
+        assert_eq!(status, 201, "create a read-only Calendar on Radicale");
+        url
+    }
+
     /// Puts an Event, an iCalendar object, into a Calendar of `user` on the
     /// server, as another app would, under the name `name`, replacing any
     /// it holds there.
@@ -237,6 +260,41 @@ impl Radicale {
         agent.run(request).unwrap()
     }
 }
+
+/// The user who may change every Calendar, to make those another user may
+/// only read.
+const ADMIN: &str = "admin";
+const ADMIN_PASSWORD: &str = "secret-of-admin";
+
+/// Radicale's `owner_only` rights, except that a user may only read their
+/// own Calendars whose names start with `read-only-`, and the admin may do
+/// anything.
+const RIGHTS: &str = "\
+[admin]
+user: admin
+collection: .*
+permissions: RWrw
+
+[root]
+user: .+
+collection:
+permissions: R
+
+[principal]
+user: .+
+collection: {user}
+permissions: RW
+
+[read-only]
+user: .+
+collection: {user}/read-only-[^/]+
+permissions: r
+
+[calendars]
+user: .+
+collection: {user}/[^/]+
+permissions: rw
+";
 
 const XML: &str = "application/xml; charset=utf-8";
 

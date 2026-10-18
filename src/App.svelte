@@ -449,6 +449,21 @@
     }
   }
 
+  /** A drag the grid refused, because the Occurrence's Calendar is read-only. */
+  function refuseDrag(id: EventId, recurrenceId: string | null) {
+    const dragged = occurrences.find(
+      (occurrence) => occurrence.eventId === id && occurrence.recurrenceId === recurrenceId,
+    );
+    const calendar = directory?.calendars.find((found) => found.id === dragged?.calendarId);
+    if (!dragged || !calendar) return;
+    toast = {
+      message: t('event.readOnlyDrag', {
+        title: dragged.title || t('event.untitled'),
+        calendar: calendar.name,
+      }),
+    };
+  }
+
   async function remove(id: EventId) {
     try {
       await core.deleteEvent(id);
@@ -689,6 +704,7 @@
         onopenevent={openDetails}
         onopenday={(date) => navigate(openDay(date))}
         onreschedule={reschedule}
+        onrefusedrag={refuseDrag}
         {oninteract}
         held={dropHeld}
       />

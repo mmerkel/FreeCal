@@ -2,7 +2,7 @@ mod support;
 
 use freecal_core::{AccountId, CalDavLogin, Calendar, Colour, Core, CoreError, ErrorCode, Signal};
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, calendar, draft, timed};
+use support::{Harness, calendar, draft, make_writable, timed};
 
 fn user_login(radicale: &Radicale, user: &User) -> CalDavLogin {
     CalDavLogin {
@@ -65,7 +65,9 @@ fn adding_an_available_calendar_makes_it_a_calendar_of_the_account() {
         name: "Work".to_owned(),
         colour: Colour::parse("#3366cc").unwrap(),
         shown: true,
-        read_only: false,
+        // Every newly added server Calendar, until 1.0.
+        read_only: true,
+        server_read_only: false,
         first_sync: false,
     }];
     assert_eq!(added, expected);
@@ -76,6 +78,58 @@ fn adding_an_available_calendar_makes_it_a_calendar_of_the_account() {
         harness.signals.received(),
         vec![Signal::CalendarsChanged, Signal::CalendarsChanged]
     );
+}
+
+#[test]
+fn a_calendar_the_server_doesnt_let_the_user_change_is_read_only_whatever_the_user_marks() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let holidays = radicale.create_read_only_calendar(&user, NewCalendar::default());
+    let work = server_calendar(radicale, &user, "Work");
+    let harness = Harness::new();
+    let core = harness.open();
+    let account = add_account(&core, radicale, &user);
+
+    let added = core.add_calendars(account, &[holidays, work]).unwrap();
+
+    let flags: Vec<_> = added
+        .iter()
+        .map(|calendar| (calendar.read_only, calendar.server_read_only))
+        .collect();
+    assert_eq!(flags, vec![(true, true), (true, false)]);
+    // Unmarked by the user, as ticket 17 will let them.
+    for calendar in &added {
+        make_writable(&harness, calendar.id);
+    }
+    let calendars = core.list_calendars().unwrap();
+    let read_only = |id| calendars.iter().find(|c| c.id == id).unwrap().read_only;
+    assert!(read_only(added[0].id));
+    assert!(!read_only(added[1].id));
+    let refused = core.create_event(draft(
+        added[0].id,
+        "Stand-up",
+        timed("2026-10-05T09:00:00", "2026-10-05T09:15:00"),
+    ));
+    assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == added[0].id));
+}
+
+#[test]
+fn a_newly_added_calendar_refuses_changes_until_1_0() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let work = server_calendar(radicale, &user, "Work");
+    let harness = Harness::new();
+    let core = harness.open();
+    let account = add_account(&core, radicale, &user);
+
+    let added = core.add_calendars(account, &[work]).unwrap()[0].clone();
+
+    let refused = core.create_event(draft(
+        added.id,
+        "Stand-up",
+        timed("2026-10-05T09:00:00", "2026-10-05T09:15:00"),
+    ));
+    assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == added.id));
 }
 
 #[test]
@@ -261,6 +315,7 @@ fn removing_a_calendar_deletes_only_its_local_copy_and_makes_it_available_again(
         .add_calendars(account, std::slice::from_ref(&work))
         .unwrap()[0]
         .clone();
+    make_writable(&harness, added.id);
     core.create_event(draft(
         added.id,
         "Stand-up",
@@ -350,6 +405,7 @@ fn removing_an_account_removes_its_calendars_their_events_and_their_history() {
         .unwrap();
     let account = add_account(&core, radicale, &user);
     let added = core.add_calendars(account, &[work]).unwrap()[0].clone();
+    make_writable(&harness, added.id);
     let created = core
         .create_event(draft(
             added.id,
@@ -396,7 +452,11 @@ fn several_accounts_side_by_side_each_keep_their_own_password_and_calendars() {
     assert_eq!(available_urls(&core, alices), vec![alices_work.clone()]);
     assert_eq!(available_urls(&core, bobs), vec![bobs_work.clone()]);
     core.add_calendars(alices, &[alices_work]).unwrap();
-    let bobs_calendar = core.add_calendars(bobs, &[bobs_work]).unwrap()[0].clone();
+    make_writable(
+        &harness,
+        core.add_calendars(bobs, &[bobs_work]).unwrap()[0].id,
+    );
+    let bobs_calendar = core.list_calendars().unwrap().pop().unwrap();
     let stand_up = core
         .create_event(draft(
             bobs_calendar.id,

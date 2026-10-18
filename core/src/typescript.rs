@@ -129,6 +129,7 @@ fn samples_file() -> (String, Vec<String>) {
         colour: Colour::parse("#3a86ff").unwrap(),
         shown: true,
         read_only: false,
+        server_read_only: false,
         first_sync: false,
     };
     let repeat = Repeat {
@@ -161,6 +162,7 @@ fn samples_file() -> (String, Vec<String>) {
         url: "https://dav.example.org/alice/work/".to_owned(),
         name: "Work".to_owned(),
         colour: Some(Colour::parse("#3a86ff").unwrap()),
+        read_only: false,
     };
     let entries = [
         samples(&[AccountId(1)]),
@@ -191,6 +193,7 @@ fn samples_file() -> (String, Vec<String>) {
                 url: "https://dav.example.org/alice/1b2c/".to_owned(),
                 name: "1b2c".to_owned(),
                 colour: None,
+                read_only: true,
             },
         ]),
         samples(&[server]),

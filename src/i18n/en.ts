@@ -96,6 +96,7 @@ export const en = {
   'calendar.deleteTitle': 'Delete “{name}”?',
   'calendar.deleteBody': 'This Calendar and all its Events will be deleted. This can’t be undone.',
   'calendar.firstSync': 'Loading for the first time…',
+  'calendar.readOnly': 'Read-only',
   'calendar.remove': 'Remove from FreeCal',
   'calendar.removeTitle': 'Remove “\u2068{name}\u2069” from FreeCal?',
   'calendar.removeBody':
@@ -139,6 +140,10 @@ export const en = {
   'event.calendar': 'Calendar',
   'event.location': 'Location',
   'event.description': 'Description',
+  'event.readOnly': 'Read-only',
+  'event.readOnlyCalendar': 'Can’t be changed: its calendar is read-only.',
+  'event.readOnlyDrag':
+    '“\u2068{title}\u2069” can’t be changed: its calendar “\u2068{calendar}\u2069” is read-only.',
   'event.pinnedZone': 'The original has no time zone, so FreeCal uses {zone}.',
   'event.save': 'Save',
   'event.edit': 'Edit',

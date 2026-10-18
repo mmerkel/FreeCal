@@ -24,6 +24,7 @@ const home: Calendar = {
   colour: '#3366cc',
   shown: true,
   readOnly: false,
+  serverReadOnly: false,
   firstSync: false,
 };
 
@@ -461,6 +462,51 @@ test('offers a resize on both edges for Events of writable Calendars only', asyn
     expect(resizer(chip('Theirs'), edge)).toBeUndefined();
     expect(resizer(chip('Their holiday'), edge)).toBeUndefined();
   }
+});
+
+test('reports a drag of an Occurrence it doesn’t offer to move, once, without opening it', async () => {
+  const shared: Calendar = { ...home, id: calendarId(2), name: 'Shared', readOnly: true };
+  const onrefusedrag = vi.fn();
+  const onopenevent = vi.fn();
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [
+      occurrence({ eventId: eventId(1), title: 'Mine' }),
+      occurrence({ ...recurring[0], title: 'Theirs', calendarId: shared.id }),
+    ],
+    calendars: [home, shared],
+    onreschedule: vi.fn(async () => {}),
+    onrefusedrag,
+    onopenevent,
+  });
+  await waitFor(() => expect(screen.getByText('Theirs')).toBeInTheDocument());
+
+  // A press that barely moves is a click.
+  fireEvent.mouseDown(chip('Theirs'), { clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 103, clientY: 102 });
+  fireEvent.mouseUp(window);
+  expect(onrefusedrag).not.toHaveBeenCalled();
+
+  fireEvent.mouseDown(chip('Theirs'), { clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: 110 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: 140 });
+  fireEvent.mouseUp(chip('Theirs'));
+  fireEvent.click(chip('Theirs'));
+
+  expect(onrefusedrag.mock.calls).toEqual([[eventId(7), recurring[0].recurrenceId]]);
+  expect(onopenevent).not.toHaveBeenCalled();
+
+  // The next click opens it again.
+  fireEvent.mouseDown(chip('Theirs'), { clientX: 100, clientY: 100 });
+  fireEvent.mouseUp(chip('Theirs'));
+  fireEvent.click(chip('Theirs'));
+  expect(onopenevent).toHaveBeenCalledOnce();
+
+  // FullCalendar drags the others itself.
+  fireEvent.mouseDown(chip('Mine'), { clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: 140 });
+  fireEvent.mouseUp(window);
+  expect(onrefusedrag).toHaveBeenCalledOnce();
 });
 
 test('offers a drag and resize for Occurrences of Recurring Events too', async () => {

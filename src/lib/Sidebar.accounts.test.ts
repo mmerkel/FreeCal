@@ -10,16 +10,19 @@ const work: AvailableCalendar = {
   url: 'https://dav.example.org/alice/work/',
   name: 'Work',
   colour: '#00897b',
+  readOnly: false,
 };
 const home: AvailableCalendar = {
   url: 'https://dav.example.org/alice/home/',
   name: 'Home',
   colour: null,
+  readOnly: false,
 };
 const birthdays: AvailableCalendar = {
   url: 'https://dav.example.org/alice/birthdays/',
   name: 'Birthdays',
   colour: '#8e24aa',
+  readOnly: false,
 };
 
 /** The sidebar's name for a CalDAV Account of `alice`. */
@@ -71,7 +74,10 @@ test('adds a CalDAV Account, then the Calendars the user chooses, which load for
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   const alice = await screen.findByRole('list', { name: ALICE });
   const row = await within(alice).findByRole('switch', { name: 'Work' });
-  expect(row).toHaveAccessibleDescription('Loading for the first time…');
+  // Every newly added server Calendar is read-only until 1.0.
+  expect(row).toHaveAccessibleDescription(
+    'Loading for the first time… Read-only Work: shown, click to hide',
+  );
   expect(within(alice).queryByRole('switch', { name: 'Home' })).not.toBeInTheDocument();
   expect([...core.calendarUrls.values()]).toEqual([work.url]);
 
@@ -81,7 +87,7 @@ test('adds a CalDAV Account, then the Calendars the user chooses, which load for
     expect(screen.queryByText('Loading for the first time…')).not.toBeInTheDocument(),
   );
   expect(within(alice).getByRole('switch', { name: 'Work' })).toHaveAccessibleDescription(
-    'Work: shown, click to hide',
+    'Read-only Work: shown, click to hide',
   );
 });
 
@@ -331,7 +337,12 @@ test('hostile Calendar names from the server are text in the chooser, the sideba
   const user = userEvent.setup();
   const core = new FakeCore();
   core.caldavServer = [
-    { url: 'https://dav.example.org/alice/x/', name: hostile.calendarName, colour: null },
+    {
+      url: 'https://dav.example.org/alice/x/',
+      name: hostile.calendarName,
+      colour: null,
+      readOnly: false,
+    },
   ];
   await showApp(core);
 

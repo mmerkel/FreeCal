@@ -1,11 +1,13 @@
 <!--
   An Event's details: its title, time, repeat, location, description and
-  Calendar, with Edit and Delete for Events of writable Calendars. Deleting
-  an Occurrence of a Recurring Event asks whether to delete it alone or all.
+  Calendar, with Edit and Delete for Events of writable Calendars; the others
+  say they are read-only and why. Deleting an Occurrence of a Recurring Event
+  asks whether to delete it alone or all.
 -->
 <script lang="ts">
   import Calendar from '@lucide/svelte/icons/calendar';
   import Clock from '@lucide/svelte/icons/clock';
+  import Lock from '@lucide/svelte/icons/lock';
   import MapPin from '@lucide/svelte/icons/map-pin';
   import Repeat from '@lucide/svelte/icons/repeat';
   import Text from '@lucide/svelte/icons/text';
@@ -97,6 +99,12 @@
           <span class="text">{calendar.name}</span>
         </dd>
       </div>
+      {#if calendar.readOnly}
+        <div class="row">
+          <dt><Lock size={14} aria-label={t('event.readOnly')} /></dt>
+          <dd>{t('event.readOnlyCalendar')}</dd>
+        </div>
+      {/if}
     {/if}
   </dl>
   {#if asking}
