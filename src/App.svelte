@@ -10,6 +10,7 @@
     EventId,
     ExistingEvents,
     Occurrence,
+    Scope,
     Settings,
     SettingsUpdate,
     SidebarState,
@@ -38,6 +39,8 @@
     toggleToday,
     type Navigation,
   } from './lib/navigation';
+  import { sameRepeat } from './lib/repeat';
+  import ScopeDialog, { type ScopeChange } from './lib/ScopeDialog.svelte';
   import { DEFAULT_SETTINGS } from './lib/settings';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
@@ -116,6 +119,11 @@
   let importFailure = $state<string>();
   /** What the modal "Working…" dialog says while a long command runs. */
   let working = $state<string>();
+  /**
+   * The open question which Occurrences of a Recurring Event a change
+   * changes, over the editor or, for a drop, the grid.
+   */
+  let scopePrompt = $state<{ change: ScopeChange; choose: (scope: Scope | null) => void }>();
   /** The message at the bottom of the window, with its Undo if it has one. */
   let toast = $state<{ message: string; undo?: () => void }>();
 
@@ -204,9 +212,15 @@
     }
   }
 
+  /**
+   * Whether the grid holds back a new today for a dropped Occurrence while
+   * the user chooses its recurrence scope, as it does during the drag.
+   */
+  const dropHeld = $derived(scopePrompt?.change === 'move');
+
   /** Moves the view to a new today if it tracks it and nothing holds it back. */
   function followToday() {
-    if (interacting) {
+    if (interacting || dropHeld) {
       dateChangeHeld = true;
     } else if (navigation && today) {
       navigation = dateChanged(navigation, today);
@@ -215,7 +229,12 @@
 
   function oninteract(active: boolean) {
     interacting = active;
-    if (!active && dateChangeHeld) {
+    followHeldDateChange();
+  }
+
+  /** Follows a "Date changed" that was held back, once nothing holds it any more. */
+  function followHeldDateChange() {
+    if (dateChangeHeld && !interacting && !dropHeld) {
       dateChangeHeld = false;
       followToday();
     }
@@ -338,10 +357,10 @@
   }
 
   /**
-   * Edits the Event; for an Occurrence of a Recurring Event, the whole
-   * Recurring Event from its first date, until ticket 08 asks for the scope.
+   * Edits the Event; for an Occurrence of a Recurring Event, that
+   * Occurrence, and Save asks which Occurrences the change is for.
    */
-  function startEditing(event: Event, recurrenceId: string | null) {
+  function startEditing(event: Event, recurrenceId: string | null, when: When) {
     session++;
     open = {
       kind: 'editing',
@@ -350,13 +369,14 @@
       draft: {
         calendarId: event.calendarId,
         title: event.title,
-        when: event.when,
+        when,
         location: event.location.text,
         description: event.description.text,
         repeat: event.repeat,
       },
       customRepeat: event.customRepeat,
-      repeatable: event.recurrenceId === null,
+      // An Exception repeats with its Recurring Event, if that is still there.
+      repeatable: event.recurrenceId === null || event.repeat !== null,
     };
   }
 
@@ -372,18 +392,56 @@
   }
 
   /**
-   * Saves an edit and returns to the Event's details: an Exception's own, a
-   * Recurring Event's as a whole, as its Occurrences may have moved.
+   * Asks which Occurrences of a Recurring Event a change changes. Resolves
+   * to `null` when the user cancels.
    */
-  async function saveEdited(id: EventId, draft: EventDraft) {
-    const { value } = await core.editEvent(id, draft);
-    openDetails(id, value.recurrenceId);
+  function askScope(change: ScopeChange): Promise<Scope | null> {
+    return new Promise((resolve) => {
+      scopePrompt = {
+        change,
+        choose: (scope) => {
+          scopePrompt = undefined;
+          followHeldDateChange();
+          resolve(scope);
+        },
+      };
+    });
   }
 
-  /** A drag or resize in the grid; the grid puts the Event back if this rejects. */
-  async function reschedule(id: EventId, when: When) {
+  /**
+   * Saves an edit and returns to the details of the Occurrence it changed.
+   * For an Occurrence of a Recurring Event it asks which Occurrences the
+   * change is for first; cancelling that leaves the editor open.
+   */
+  async function saveEdited(
+    editing: { id: EventId; recurrenceId: string | null; draft: EventDraft },
+    draft: EventDraft,
+  ) {
+    const { id, recurrenceId } = editing;
+    if (recurrenceId === null) {
+      const { value } = await core.editEvent(id, draft);
+      openDetails(id, value.recurrenceId);
+      return;
+    }
+    const scope = await askScope(
+      sameRepeat(draft.repeat, editing.draft.repeat) ? 'edit' : 'editRepeat',
+    );
+    if (scope === null) return;
+    const { value } = await core.editOccurrence(id, recurrenceId, scope, draft);
+    openDetails(value.eventId, value.recurrenceId);
+  }
+
+  /**
+   * A drag or resize in the grid; for an Occurrence of a Recurring Event it
+   * asks which Occurrences move first. The grid puts the Occurrence back if
+   * this rejects, as when the user cancels.
+   */
+  async function reschedule(id: EventId, recurrenceId: string | null, when: When) {
+    const scope = recurrenceId === null ? null : await askScope('move');
+    if (recurrenceId !== null && scope === null) throw new Error('The move was cancelled.');
     try {
-      await core.rescheduleEvent(id, when);
+      if (recurrenceId === null) await core.rescheduleEvent(id, when);
+      else await core.rescheduleOccurrence(id, recurrenceId, scope!, when);
       rescheduleFailure = undefined;
     } catch (error) {
       rescheduleFailure = t('event.rescheduleFailed', { error: errorText(error) });
@@ -632,6 +690,7 @@
         onopenday={(date) => navigate(openDay(date))}
         onreschedule={reschedule}
         {oninteract}
+        held={dropHeld}
       />
     </main>
   </div>
@@ -644,7 +703,7 @@
       calendar={directory.calendars.find((calendar) => calendar.id === event.calendarId)}
       when={openedOccurrence?.when}
       failure={dialogFailure}
-      onedit={() => startEditing(event, recurrenceId)}
+      onedit={() => startEditing(event, recurrenceId, openedOccurrence?.when ?? event.when)}
       ondelete={() => remove(event.id)}
       ondeleteoccurrence={recurrenceId === null
         ? undefined
@@ -662,7 +721,7 @@
         customRepeat={editing.kind === 'editing' && editing.customRepeat}
         repeatable={editing.kind === 'creating' || editing.repeatable}
         onsave={(draft) =>
-          editing.kind === 'editing' ? saveEdited(editing.id, draft) : saveNew(draft)}
+          editing.kind === 'editing' ? saveEdited(editing, draft) : saveNew(draft)}
         oncancel={() =>
           editing.kind === 'editing' ? openDetails(editing.id, editing.recurrenceId) : close()}
       />
@@ -696,6 +755,10 @@
         </button>
       {/snippet}
     </Dialog>
+  {/if}
+
+  {#if scopePrompt}
+    <ScopeDialog change={scopePrompt.change} onchoose={scopePrompt.choose} />
   {/if}
 
   {#if toast}

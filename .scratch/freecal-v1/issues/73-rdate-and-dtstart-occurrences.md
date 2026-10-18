@@ -23,3 +23,4 @@ Out of scope: writing `RDATE` on export (ticket 09); splitting extra dates when 
 ## Comments
 
 - 2026-10-18: Ticket 07 dropped `RDATE` on import, and found the first-start gap while checking which parts of RFC 5545's recurrence FreeCal reads. Both belong together: the recurrence set is built from the same parts, and the `rrule` crate's `RRuleSet` takes `rdate`s.
+- 2026-10-18 (from ticket 08): Splitting a Recurring Event lives in `following` in `core/src/scope.rs`: it ends the rule with `recurrence::rule_until` and splits `exdates` with `recurrence::exdates_where`. Extra dates split the same way there, and "all" moves them with `recurrence::moved_id` as it moves `exdates`.

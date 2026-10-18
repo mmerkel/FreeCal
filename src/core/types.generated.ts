@@ -59,9 +59,9 @@ export type Event = { id: EventId, calendarId: CalendarId, title: string, when: 
  */
 pinnedZone: string | null,
 /**
- * A Recurring Event's repeat rule as the editor shows it; none for an
- * Event that doesn't repeat, and for a rule the editor can't show, such
- * as an hourly one.
+ * A Recurring Event's repeat rule as the editor shows it, for an
+ * Exception its Recurring Event's; none for an Event that doesn't
+ * repeat, and for a rule the editor can't show, such as an hourly one.
  */
 repeat: Repeat | null,
 /**
@@ -165,6 +165,11 @@ interval: number, end: RepeatEnd, };
  * When a Recurring Event stops.
  */
 export type RepeatEnd = { "kind": "never" } | { "kind": "until", date: string, } | { "kind": "count", count: number, };
+
+/**
+ * Which Occurrences of a Recurring Event a change to one of them changes.
+ */
+export type Scope = "this" | "thisAndFollowing" | "all";
 
 /**
  * The settings of the Settings dialog, as the Local Store keeps them.

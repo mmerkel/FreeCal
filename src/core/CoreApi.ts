@@ -12,6 +12,7 @@ import type {
   ImportOutcome,
   ImportSummary,
   Occurrence,
+  Scope,
   Settings,
   SettingsUpdate,
   SidebarState,
@@ -73,7 +74,8 @@ export interface CoreApi {
   createEvent(draft: EventDraft): Promise<Changed<Event>>;
   /**
    * Changes an Event, possibly moving it to another writable Calendar. A
-   * repeat rule left as the Event's `repeat` keeps its stored rule.
+   * repeat rule left as the Event's `repeat` keeps its stored rule. A
+   * Recurring Event changes as a whole, an Exception alone.
    */
   editEvent(id: EventId, draft: EventDraft): Promise<Changed<Event>>;
   /**
@@ -81,6 +83,25 @@ export interface CoreApi {
    * and leaves everything else as it is.
    */
   rescheduleEvent(id: EventId, when: When): Promise<Changed<Event>>;
+  /**
+   * Changes one Occurrence of a Recurring Event, given by its `eventId` and
+   * `recurrenceId`, in `scope`: alone, with every later one, or with all of
+   * them. What the user changed is what differs from the Occurrence as it
+   * was. Resolves to the Occurrence as it is now.
+   */
+  editOccurrence(
+    id: EventId,
+    recurrenceId: string,
+    scope: Scope,
+    draft: EventDraft,
+  ): Promise<Changed<Occurrence>>;
+  /** Moves one Occurrence of a Recurring Event to another time in `scope`, as a drag or a resize does. */
+  rescheduleOccurrence(
+    id: EventId,
+    recurrenceId: string,
+    scope: Scope,
+    when: When,
+  ): Promise<Changed<Occurrence>>;
   /**
    * Deletes an Event; for a Recurring Event or one of its Exceptions, the
    * whole Recurring Event.

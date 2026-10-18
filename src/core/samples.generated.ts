@@ -156,8 +156,15 @@ export const samples = {
         "text": "Agenda: notes (https://example.org/notes)"
       },
       "pinnedZone": "Europe/Berlin",
-      "repeat": null,
-      "customRepeat": false,
+      "repeat": {
+        "frequency": "weekly",
+        "interval": 2,
+        "end": {
+          "kind": "until",
+          "date": "2026-10-31"
+        }
+      },
+      "customRepeat": true,
       "recurrenceId": "2026-10-19T09:30:00"
     }
   ],
@@ -213,6 +220,11 @@ export const samples = {
       "kind": "count",
       "count": 10
     }
+  ],
+  Scope: [
+    "this",
+    "thisAndFollowing",
+    "all"
   ],
   StructuredText: [
     {
@@ -532,6 +544,7 @@ type Samples = {
   Repeat: Unbranded<T.Repeat>[];
   Frequency: Unbranded<T.Frequency>[];
   RepeatEnd: Unbranded<T.RepeatEnd>[];
+  Scope: Unbranded<T.Scope>[];
   StructuredText: Unbranded<T.StructuredText>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];

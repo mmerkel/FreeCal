@@ -1,6 +1,6 @@
 /**
  * What FullCalendar reports when the user drops or resizes an Occurrence, as
- * the Event and `When` to reschedule it to.
+ * the Occurrence and the `When` to reschedule it to.
  */
 import type { EventId, Occurrence, When } from '../core/types';
 import { whenAfterDrag, type Shift } from './when';
@@ -17,6 +17,8 @@ export interface GridEvent {
 
 export interface Reschedule {
   id: EventId;
+  /** Which Occurrence of a Recurring Event it is; `null` for a single Event. */
+  recurrenceId: string | null;
   when: When;
 }
 
@@ -68,5 +70,5 @@ function reschedule(event: GridEvent, oldEvent: GridEvent, startBy: Shift, endBy
     startBy,
     endBy,
   });
-  return { id: idOf(event), when };
+  return { id: idOf(event), recurrenceId: recurrenceIdOf(event), when };
 }

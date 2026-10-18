@@ -12,6 +12,7 @@ import type {
   ImportOutcome,
   Occurrence,
   PinnedZone,
+  Scope,
   Settings,
   SettingsUpdate,
   SidebarState,
@@ -45,6 +46,15 @@ interface Entry {
 interface Unit {
   entries: Entry[];
   undone: boolean;
+}
+
+/** A change to an Occurrence in a recurrence scope: a draft from the editor, or a drag's new time. */
+export interface ScopedChange {
+  id: EventId;
+  recurrenceId: string;
+  scope: Scope;
+  draft?: EventDraft;
+  when?: When;
 }
 
 /**
@@ -92,6 +102,8 @@ export class FakeCore implements CoreApi {
   uids = new Map<EventId, string>();
   /** The recurrence IDs of each Recurring Event's cancelled Occurrences. */
   cancelled = new Map<EventId, string[]>();
+  /** The changes made to Occurrences in a recurrence scope, in order. */
+  scopedChanges: ScopedChange[] = [];
   private units = new Map<UnitId, Unit>();
   private nextUnitId = 1;
   private subscribers = new Set<(signal: Signal) => void>();
@@ -356,6 +368,74 @@ export class FakeCore implements CoreApi {
     event.when = { ...when };
     const unit = this.record([this.entry(id, before, event)]);
     return { unit, value: structuredClone(event) };
+  }
+
+  /**
+   * Like the core, "this event" makes the Occurrence an Exception and "all
+   * events" changes the Recurring Event, here without moving its times. The
+   * fake doesn't split for "this and following"; the test reads what was
+   * asked in `scopedChanges`. Nothing of this is in the fake's Change Journal.
+   */
+  async editOccurrence(id: EventId, recurrenceId: string, scope: Scope, draft: EventDraft) {
+    this.calls.push('editOccurrence');
+    this.scopedChanges.push({ id, recurrenceId, scope, draft: structuredClone(draft) });
+    return this.changeOccurrence(id, recurrenceId, scope, draft);
+  }
+
+  async rescheduleOccurrence(id: EventId, recurrenceId: string, scope: Scope, when: When) {
+    this.calls.push('rescheduleOccurrence');
+    this.scopedChanges.push({ id, recurrenceId, scope, when: { ...when } });
+    const event = this.findEvent(id);
+    const draft: EventDraft = {
+      calendarId: event.calendarId,
+      title: event.title,
+      when,
+      location: event.location.text,
+      description: event.description.text,
+      repeat: event.repeat,
+    };
+    return this.changeOccurrence(id, recurrenceId, scope, draft);
+  }
+
+  private changeOccurrence(
+    id: EventId,
+    recurrenceId: string,
+    scope: Scope,
+    draft: EventDraft,
+  ): { unit: null; value: Occurrence } {
+    const event = this.findEvent(id);
+    this.writable(event.calendarId);
+    const fields = {
+      calendarId: draft.calendarId,
+      title: draft.title,
+      location: plainText(draft.location),
+      description: plainText(draft.description),
+    };
+    let changed = event;
+    if (scope === 'this' && event.recurrenceId === null) {
+      this.cancelled.set(id, [...(this.cancelled.get(id) ?? []), recurrenceId]);
+      changed = this.addEvent({
+        ...fields,
+        when: draft.when,
+        recurrenceId,
+        uid: this.uids.get(id),
+      });
+    } else {
+      Object.assign(
+        event,
+        fields,
+        scope === 'all' ? { repeat: draft.repeat } : { when: draft.when },
+      );
+    }
+    this.emit({ kind: 'occurrencesChanged', calendarIds: [event.calendarId, draft.calendarId] });
+    const value: Occurrence = {
+      eventId: changed.id,
+      calendarId: changed.calendarId,
+      title: changed.title,
+      when: draft.when,
+      recurrenceId: changed.recurrenceId ?? recurrenceId,
+    };
+    return { unit: null, value };
   }
 
   /** Like the core, deleting a Recurring Event or an Exception deletes all Events of its UID. */

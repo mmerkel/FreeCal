@@ -12,8 +12,8 @@ use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, Calendar, CalendarId, Changed, Colour, Core, ErrorCode, Event, EventDraft,
     EventId, ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence,
-    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When,
-    link_allowed,
+    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View,
+    When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -177,6 +177,30 @@ fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResul
 #[tauri::command]
 fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult<Changed<Event>> {
     core.reschedule_event(id, when).map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+fn edit_occurrence(
+    core: State<Core>,
+    id: EventId,
+    recurrence_id: String,
+    scope: Scope,
+    draft: EventDraft,
+) -> CommandResult<Changed<Occurrence>> {
+    core.edit_occurrence(id, &recurrence_id, scope, draft)
+        .map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+fn reschedule_occurrence(
+    core: State<Core>,
+    id: EventId,
+    recurrence_id: String,
+    scope: Scope,
+    when: When,
+) -> CommandResult<Changed<Occurrence>> {
+    core.reschedule_occurrence(id, &recurrence_id, scope, when)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
@@ -481,6 +505,8 @@ fn main() {
             create_event,
             edit_event,
             reschedule_event,
+            edit_occurrence,
+            reschedule_occurrence,
             delete_event,
             delete_occurrence,
             pick_import_file,

@@ -460,7 +460,7 @@ test('dragging an Event to another time reschedules it through the core', async 
   await showApp(core);
   const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
 
-  await stubGrid.props!.onreschedule!(dentist.id, later);
+  await stubGrid.props!.onreschedule!(dentist.id, null, later);
 
   expect(core.calls.filter((call) => call === 'rescheduleEvent')).toHaveLength(1);
   expect(core.events[0]).toMatchObject({ title: 'Dentist', when: later });
@@ -475,14 +475,14 @@ test('a refused drag says why and tells the grid to put the Event back', async (
   vi.spyOn(core, 'rescheduleEvent').mockRejectedValueOnce(new Error('disk full'));
   const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
 
-  await expect(stubGrid.props!.onreschedule!(dentist.id, later)).rejects.toThrow('disk full');
+  await expect(stubGrid.props!.onreschedule!(dentist.id, null, later)).rejects.toThrow('disk full');
 
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'The event couldn’t be moved: Error: disk full',
   );
   expect(core.events[0]?.when).toEqual(monday);
 
-  await stubGrid.props!.onreschedule!(dentist.id, later);
+  await stubGrid.props!.onreschedule!(dentist.id, null, later);
 
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
@@ -584,25 +584,156 @@ test('a new Event can repeat', async () => {
   expect(occurrencesTitled(grid, 'Yoga').length).toBeGreaterThan(20);
 });
 
-test('editing an Occurrence edits its Recurring Event, from its first date and its rule', async () => {
-  const user = userEvent.setup();
+/** Opens the Occurrence of Yoga on `index`'s date, of three weekly ones from Monday, in the editor. */
+async function editYoga(user: ReturnType<typeof userEvent.setup>, index: number) {
   const core = new FakeCore();
   const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+  const yoga = core.addEvent({
+    calendarId: home.id,
+    title: 'Yoga',
+    when: monday,
+    repeat: weeklyThreeTimes,
+  });
   const grid = await showApp(core);
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
-  await user.click(occurrencesTitled(grid, 'Yoga')[2]);
+  await user.click(occurrencesTitled(grid, 'Yoga')[index]);
   const details = await screen.findByRole('dialog', { name: 'Yoga' });
-
   await user.click(within(details).getByRole('button', { name: 'Edit' }));
-  const editor = screen.getByRole('dialog', { name: 'Edit event' });
+  return { core, grid, yoga, editor: screen.getByRole('dialog', { name: 'Edit event' }) };
+}
 
-  expect(within(editor).getByLabelText('Start date')).toHaveValue('2026-10-05');
+test('editing an Occurrence starts from its date and asks which events to change on Save', async () => {
+  const user = userEvent.setup();
+  const { core, yoga, editor } = await editYoga(user, 2);
+
+  expect(within(editor).getByLabelText('Start date')).toHaveValue('2026-10-19');
   expect(within(editor).getByRole('combobox', { name: 'Repeat' })).toHaveDisplayValue('Weekly');
+  const title = within(editor).getByRole('textbox', { name: 'Title' });
+  await user.clear(title);
+  await user.type(title, 'Pilates');
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  expect(await screen.findByRole('dialog', { name: 'Yoga' })).toHaveTextContent(
-    'Every week, 3 times',
+  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  expect(prompt).toHaveTextContent(
+    'Change only this event, this and following events, or all events?',
   );
+  await user.click(within(prompt).getByRole('button', { name: 'This and following events' }));
+
+  expect(core.scopedChanges).toEqual([
+    {
+      id: yoga.id,
+      recurrenceId: '2026-10-19T09:00:00',
+      scope: 'thisAndFollowing',
+      draft: expect.objectContaining({
+        title: 'Pilates',
+        when: { ...monday, start: '2026-10-19T09:00:00', end: '2026-10-19T10:30:00' },
+      }),
+    },
+  ]);
+  expect(await screen.findByRole('dialog', { name: 'Pilates' })).toHaveTextContent(
+    'Monday, October 19, 2026',
+  );
+});
+
+test('“This event” changes only that Occurrence, “All events” the whole', async () => {
+  const user = userEvent.setup();
+  const { core, grid, yoga, editor } = await editYoga(user, 1);
+
+  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  await user.click(within(prompt).getByRole('button', { name: 'This event' }));
+
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga outside')).toHaveLength(1));
+  expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2);
+  await user.click(
+    within(screen.getByRole('dialog', { name: 'Yoga outside' })).getByRole('button', {
+      name: 'Close',
+    }),
+  );
+
+  await user.click(occurrencesTitled(grid, 'Yoga')[0]);
+  await user.click(
+    within(await screen.findByRole('dialog', { name: 'Yoga' })).getByRole('button', {
+      name: 'Edit',
+    }),
+  );
+  const again = screen.getByRole('dialog', { name: 'Edit event' });
+  await user.type(within(again).getByRole('textbox', { name: 'Title' }), ' class');
+  await user.click(within(again).getByRole('button', { name: 'Save' }));
+  await user.click(
+    within(screen.getByRole('dialog', { name: 'Change a recurring event' })).getByRole('button', {
+      name: 'All events',
+    }),
+  );
+
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga class')).toHaveLength(2));
+  expect(core.scopedChanges.map(({ id, scope }) => [id, scope])).toEqual([
+    [yoga.id, 'this'],
+    [yoga.id, 'all'],
+  ]);
+});
+
+test('cancelling the question keeps the editor open with what was typed', async () => {
+  const user = userEvent.setup();
+  const { core, editor } = await editYoga(user, 1);
+
+  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+  await user.click(
+    within(screen.getByRole('dialog', { name: 'Change a recurring event' })).getByRole('button', {
+      name: 'Cancel',
+    }),
+  );
+
+  expect(screen.queryByRole('dialog', { name: 'Change a recurring event' })).toBeNull();
+  expect(within(editor).getByRole('textbox', { name: 'Title' })).toHaveValue('Yoga outside');
+  expect(core.scopedChanges).toEqual([]);
+});
+
+test('a changed repeat can’t be for this event alone', async () => {
+  const user = userEvent.setup();
+  const { editor } = await editYoga(user, 1);
+
+  await user.selectOptions(within(editor).getByRole('combobox', { name: 'Repeat' }), 'Daily');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+
+  expect(prompt).toHaveTextContent('Change this and following events, or all events?');
+  expect(within(prompt).queryByRole('button', { name: 'This event' })).toBeNull();
+  expect(within(prompt).getByRole('button', { name: 'All events' })).toBeInTheDocument();
+});
+
+test('dropping an Occurrence asks which events to move, and Cancel puts it back', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const yoga = core.addEvent({
+    calendarId: home.id,
+    title: 'Yoga',
+    when: monday,
+    repeat: weeklyThreeTimes,
+  });
+  await showApp(core);
+  const later: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
+
+  const cancelled = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
+  await tick();
+  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  expect(prompt).toHaveTextContent(
+    'Move only this event, this and following events, or all events?',
+  );
+  within(prompt).getByRole('button', { name: 'Cancel' }).click();
+  await expect(cancelled).rejects.toBeDefined();
+  expect(core.scopedChanges).toEqual([]);
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  const moved = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
+  await tick();
+  screen.getByRole('button', { name: 'This event' }).click();
+  await moved;
+  expect(core.scopedChanges).toEqual([
+    { id: yoga.id, recurrenceId: '2026-10-12T09:00:00', scope: 'this', when: later },
+  ]);
+  expect(core.calls).not.toContain('rescheduleEvent');
 });
 
 test('an Exception edits without a repeat, and Delete still asks', async () => {

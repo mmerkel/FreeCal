@@ -488,7 +488,11 @@ fn an_import_carries_the_rule_the_cancelled_occurrences_and_the_changed_ones() {
         ]
     );
     let moved = core.event(found[2].event_id).unwrap();
-    assert_eq!(moved.repeat, None);
+    // An Exception shows the repeat rule of its Recurring Event.
+    assert_eq!(
+        moved.repeat,
+        Some(repeat(Frequency::Weekly, 1, until("2026-11-02")))
+    );
     assert_eq!(moved.recurrence_id, found[2].recurrence_id);
     assert!(moved.recurrence_id.is_some());
     assert_eq!(

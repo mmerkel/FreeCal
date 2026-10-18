@@ -31,3 +31,15 @@ export const intervalUnits: Record<Frequency, CountKey> = {
   monthly: 'repeat.months',
   yearly: 'repeat.years',
 };
+
+/** Whether two repeat rules, as the editor sets them, are the same. */
+export function sameRepeat(a: Repeat | null, b: Repeat | null): boolean {
+  if (a === null || b === null) return a === b;
+  const end = (repeat: Repeat) =>
+    repeat.end.kind === 'count'
+      ? `count ${repeat.end.count}`
+      : repeat.end.kind === 'until'
+        ? `until ${repeat.end.date}`
+        : 'never';
+  return a.frequency === b.frequency && a.interval === b.interval && end(a) === end(b);
+}

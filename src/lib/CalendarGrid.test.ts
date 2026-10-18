@@ -462,8 +462,7 @@ test('offers a resize on both edges for Events of writable Calendars only', asyn
   }
 });
 
-// Moving one needs the recurrence scope prompt (ticket 08).
-test('offers no drag or resize for Occurrences of Recurring Events', async () => {
+test('offers a drag and resize for Occurrences of Recurring Events too', async () => {
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: recurring,
@@ -473,8 +472,8 @@ test('offers no drag or resize for Occurrences of Recurring Events', async () =>
   await waitFor(() => expect(screen.getByText('Yoga 06')).toBeInTheDocument());
 
   for (const edge of ['start', 'end'] as const) {
-    expect(resizer(chip('Yoga 05'), edge)).toBeUndefined();
-    expect(resizer(chip('Yoga 06'), edge)).toBeUndefined();
+    expect(resizer(chip('Yoga 05'), edge)).toBeDefined();
+    expect(resizer(chip('Yoga 06'), edge)).toBeDefined();
   }
 });
 
@@ -524,6 +523,22 @@ test('holds back a new today during a drag-to-create', async () => {
   await holdsBackTodayWhilePressing(() =>
     document.querySelector('[role="gridcell"][data-date="2026-10-08"]')!,
   );
+});
+
+test('holds back a new today while held, as while a drop waits for its recurrence scope', async () => {
+  const shown = render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [],
+    calendars: [],
+    held: true,
+  });
+  await waitFor(() => expect(highlighted()).toBe('2026-10-10'));
+
+  await shown.rerender({ today: newToday });
+  expect(highlighted()).toBe('2026-10-10');
+
+  await shown.rerender({ held: false });
+  await waitFor(() => expect(highlighted()).toBe('2026-10-11'));
 });
 
 test('shows a new today straight away when nothing is pressed', async () => {

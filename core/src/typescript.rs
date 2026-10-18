@@ -16,8 +16,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Changed, Colour, ErrorCode, Event,
     EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome, ImportSummary, Occurrence,
-    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Settings, SettingsUpdate, SidebarState, Signal,
-    StructuredText, UnitId, View, When,
+    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, Settings, SettingsUpdate, SidebarState,
+    Signal, StructuredText, UnitId, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -64,6 +64,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<Occurrence>();
     types.visit::<Event>();
     types.visit::<EventDraft>();
+    types.visit::<Scope>();
     types.visit::<Signal>();
     types.visit::<View>();
     types.visit::<SidebarState>();
@@ -147,8 +148,6 @@ fn samples_file() -> (String, Vec<String>) {
     };
     let exception = Event {
         id: EventId(4),
-        repeat: None,
-        custom_repeat: false,
         recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
         ..event.clone()
     };
@@ -201,6 +200,7 @@ fn samples_file() -> (String, Vec<String>) {
             RepeatEnd::Until { date: date(31) },
             RepeatEnd::Count { count: 10 },
         ]),
+        samples(&[Scope::This, Scope::ThisAndFollowing, Scope::All]),
         samples(&[description]),
         samples(&[text, link]),
         samples(&[

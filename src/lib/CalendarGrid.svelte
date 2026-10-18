@@ -55,16 +55,22 @@
     /** The user clicked a day number or a day's heading. */
     onopenday?: (date: Temporal.PlainDate) => void;
     /**
-     * The user dragged an Occurrence to another time or dragged its edge. If
-     * the promise rejects, the Occurrence goes back to where it was.
+     * The user dragged an Occurrence to another time or dragged its edge:
+     * its Event, its `recurrenceId` and its new time. If the promise
+     * rejects, the Occurrence goes back to where it was.
      */
-    onreschedule?: (id: EventId, when: When) => Promise<void>;
+    onreschedule?: (id: EventId, recurrenceId: string | null, when: When) => Promise<void>;
     /**
      * The user started (`true`) or ended (`false`) pressing on the grid, as
      * for a drag, a resize or a drag-to-create. Meanwhile the grid holds back
      * a new today, and its owner should hold back moving the view.
      */
     oninteract?: (interacting: boolean) => void;
+    /**
+     * Holds back a new today as during a press, such as while a dropped
+     * Occurrence waits for the user to choose its recurrence scope.
+     */
+    held?: boolean;
   }
 
   /** FullCalendar's names for FreeCal's views. */
@@ -84,6 +90,7 @@
     onopenday,
     onreschedule,
     oninteract,
+    held = false,
   }: Props = $props();
 
   let element: HTMLDivElement;
@@ -99,7 +106,7 @@
 
   $effect(() => {
     const next = today;
-    if (!interacting) shownToday = next;
+    if (!interacting && !held) shownToday = next;
   });
 
   function startInteracting() {
@@ -126,10 +133,10 @@
   /** Counts drags the owner refused, so that the Occurrences are drawn again. */
   let redraws = $state(0);
 
-  function reschedule({ id, when }: Reschedule) {
+  function reschedule({ id, recurrenceId, when }: Reschedule) {
     // The grid may be a new one by the time the core answers, so the
     // Occurrences are drawn again rather than the drag reverted.
-    onreschedule?.(id, when).catch(() => redraws++);
+    onreschedule?.(id, recurrenceId, when).catch(() => redraws++);
   }
 
   // FullCalendar reads `now` only when it is created, so a new today, once a
@@ -238,13 +245,7 @@
         start: span?.start ?? occurrence.when.start,
         end: span?.end ?? occurrence.when.end,
         allDay: span !== undefined || occurrence.when.kind === 'allDay',
-        // Moving an Occurrence of a Recurring Event asks for the recurrence
-        // scope first (ticket 08).
-        editable:
-          movable &&
-          calendar !== undefined &&
-          !calendar.readOnly &&
-          occurrence.recurrenceId === null,
+        editable: movable && calendar !== undefined && !calendar.readOnly,
         extendedProps: { when: occurrence.when, recurrenceId: occurrence.recurrenceId },
         color: colour,
         contrastColor: colour && textColourOn(colour),

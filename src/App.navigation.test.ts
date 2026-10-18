@@ -206,6 +206,39 @@ test('a “Date changed” during a press on the grid waits for its end to move 
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('a “Date changed” while the question for a drop is open waits for the answer', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const yoga = core.addEvent({
+    calendarId: home.id,
+    title: 'Yoga',
+    when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
+    repeat: { frequency: 'weekly', interval: 1, end: { kind: 'never' } },
+  });
+  await showApp(core);
+
+  // The press ends as the Occurrence is dropped, and the question opens.
+  stubGrid.props!.oninteract!(true);
+  const dropped = stubGrid.props!.onreschedule!(yoga.id, '2026-10-05T09:00:00', {
+    kind: 'timed',
+    start: '2026-10-06T09:00:00',
+    end: '2026-10-06T10:00:00',
+  });
+  stubGrid.props!.oninteract!(false);
+  core.changeDate('2026-10-04');
+  await tick();
+
+  expect(stubGrid.props!.held).toBe(true);
+  expect(shown()).toMatchObject({ date: '2026-10-03', today: '2026-10-04' });
+
+  screen.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dropped).rejects.toBeDefined();
+  await tick();
+
+  expect(stubGrid.props!.held).toBe(false);
+  expect(shown()).toMatchObject({ date: '2026-10-04', today: '2026-10-04' });
+});
+
 test('a press on the grid without a “Date changed” leaves the view where it is', async () => {
   const { core, user } = await showApp();
   await user.click(screen.getByRole('button', { name: 'Next month' }));

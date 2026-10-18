@@ -11,6 +11,7 @@ mod event;
 mod import;
 mod journal;
 mod recurrence;
+mod scope;
 mod settings;
 mod sidebar;
 mod signal;
@@ -37,6 +38,7 @@ pub use import::{
 };
 pub use journal::{Changed, UnitId};
 pub use recurrence::{Frequency, Repeat, RepeatEnd};
+pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
@@ -296,22 +298,21 @@ impl Core {
     /// A timed Event keeps its Event Time Zones, and what the user left as
     /// it was stays exactly as stored: an unchanged time its wall time, an
     /// unchanged description its original bytes, even if it was HTML, and an
-    /// unchanged repeat rule its stored rule. An Exception can't repeat.
+    /// unchanged repeat rule its stored rule. A Recurring Event changes with
+    /// all its Occurrences, from its first date, and an Exception alone (see
+    /// [`Core::edit_occurrence`]).
     pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Changed<Event>> {
+        if self.recurring(id)? {
+            return self.edit_whole(id, scope::Edit::Draft(draft));
+        }
         let zone = self.clock.time_zone();
         let edited = self.record(Origin::UserAction, |unit| {
             let old = unit.find_event(id)?.fields;
             let when = old.when.edit(draft.when, zone)?;
-            let rule = if old.recurrence_id.is_some() && draft.repeat.is_some() {
-                return Err(CoreError::InvalidRepeat);
-            } else if draft.repeat == recurrence::repeat_of(&old).0 {
-                old.rule.clone()
-            } else {
-                draft
-                    .repeat
-                    .map(|repeat| recurrence::rule_text(repeat, old.rule.as_deref(), &when))
-                    .transpose()?
-            };
+            let rule = draft
+                .repeat
+                .map(|repeat| recurrence::rule_text(repeat, None, &when))
+                .transpose()?;
             let (description, description_html) = if draft.description == description_of(&old).text
             {
                 (old.description.clone(), old.description_html)
@@ -327,13 +328,8 @@ impl Core {
                     location: draft.location,
                     description,
                     description_html,
-                    exdates: if rule.is_some() {
-                        old.exdates.clone()
-                    } else {
-                        String::new()
-                    },
                     rule,
-                    recurrence_id: old.recurrence_id.clone(),
+                    ..old
                 },
             };
             unit.replace(id, &after)?;
@@ -344,8 +340,12 @@ impl Core {
 
     /// Moves an Event to another time, as a drag or a resize in the grid
     /// does, and leaves everything else as stored. `when` is in the Display
-    /// Time Zone; a timed Event keeps its Event Time Zones.
+    /// Time Zone; a timed Event keeps its Event Time Zones. A Recurring Event
+    /// moves with all its Occurrences, and an Exception alone.
     pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Changed<Event>> {
+        if self.recurring(id)? {
+            return self.edit_whole(id, scope::Edit::Reschedule(when));
+        }
         let zone = self.clock.time_zone();
         let rescheduled = self.record(Origin::UserAction, |unit| {
             let mut event = unit.find_event(id)?;
@@ -357,6 +357,75 @@ impl Core {
             Ok((id, event))
         })?;
         self.changed_event(rescheduled)
+    }
+
+    /// Whether the Event `id` is a Recurring Event or an Exception.
+    fn recurring(&self, id: EventId) -> Result<bool> {
+        let fields = self.store().find_event(id)?.fields;
+        Ok(fields.rule.is_some() || fields.recurrence_id.is_some())
+    }
+
+    fn edit_whole(&self, id: EventId, edit: scope::Edit) -> Result<Changed<Event>> {
+        let zone = self.clock.time_zone();
+        let edited = self.record(Origin::UserAction, |unit| {
+            scope::edit_whole(unit, zone, id, edit)
+        })?;
+        let value = self.event(edited.value.id)?;
+        Ok(Changed {
+            unit: edited.unit,
+            value,
+        })
+    }
+
+    /// Changes one Occurrence of a Recurring Event, given by the Event and
+    /// the recurrence ID its [`Occurrence`] has, in `scope`: alone, as an
+    /// Exception; with every later one, as a Recurring Event of their own;
+    /// or with all of them. What the user changed is what differs from the
+    /// Occurrence as it was. Returns the Occurrence as it is now.
+    pub fn edit_occurrence(
+        &self,
+        id: EventId,
+        recurrence_id: &str,
+        scope: Scope,
+        draft: EventDraft,
+    ) -> Result<Changed<Occurrence>> {
+        self.edit_in_scope(id, recurrence_id, scope, scope::Edit::Draft(draft))
+    }
+
+    /// Moves one Occurrence of a Recurring Event to another time in `scope`,
+    /// as a drag or a resize in the grid does (see [`Core::edit_occurrence`]).
+    pub fn reschedule_occurrence(
+        &self,
+        id: EventId,
+        recurrence_id: &str,
+        scope: Scope,
+        when: When,
+    ) -> Result<Changed<Occurrence>> {
+        self.edit_in_scope(id, recurrence_id, scope, scope::Edit::Reschedule(when))
+    }
+
+    fn edit_in_scope(
+        &self,
+        id: EventId,
+        recurrence_id: &str,
+        scope: Scope,
+        edit: scope::Edit,
+    ) -> Result<Changed<Occurrence>> {
+        let zone = self.clock.time_zone();
+        let edited = self.record(Origin::UserAction, |unit| {
+            scope::edit(unit, zone, id, recurrence_id, scope, edit)
+        })?;
+        let occurrence = edited.value;
+        Ok(Changed {
+            unit: edited.unit,
+            value: Occurrence {
+                event_id: occurrence.id,
+                calendar_id: occurrence.calendar_id,
+                title: occurrence.title,
+                when: occurrence.when.to_when(zone)?,
+                recurrence_id: occurrence.recurrence_id,
+            },
+        })
     }
 
     /// Deletes an Event from a writable Calendar. For a Recurring Event or
@@ -501,7 +570,21 @@ impl Core {
 
     fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
         let description = description_of(&stored.fields);
-        let (repeat, custom_repeat) = recurrence::repeat_of(&stored.fields);
+        // An Exception repeats with its Recurring Event, which the editor
+        // can change from it.
+        let recurring = match stored.fields.recurrence_id {
+            Some(_) => {
+                let store = self.store();
+                let uid = store.event_uid(id)?;
+                store.find_event_by_uid(stored.calendar_id, &uid)?
+            }
+            None => None,
+        };
+        let (repeat, custom_repeat) = recurrence::repeat_of(
+            recurring
+                .as_ref()
+                .map_or(&stored.fields, |(_, fields)| fields),
+        );
         let fields = stored.fields;
         Ok(Event {
             id,

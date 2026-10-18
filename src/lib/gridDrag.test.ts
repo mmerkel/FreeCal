@@ -23,7 +23,26 @@ test('a drop moves the Event’s start and end by the drag’s shift', () => {
 
   expect(rescheduleOfDrop({ event, oldEvent, delta: by })).toEqual({
     id: 7,
+    recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-07T10:00:00', end: '2026-10-07T11:00:00' },
+  });
+});
+
+test('a drop of an Occurrence of a Recurring Event says which one it was', () => {
+  const occurrence = (start: Date, end: Date): GridEvent => ({
+    id: '7/2026-10-05T09:00:00',
+    allDay: false,
+    start,
+    end,
+    extendedProps: { when: monday, recurrenceId: '2026-10-05T09:00:00' },
+  });
+  const oldEvent = occurrence(new Date(2026, 9, 5, 9), new Date(2026, 9, 5, 10));
+  const event = occurrence(new Date(2026, 9, 6, 9), new Date(2026, 9, 6, 10));
+
+  expect(rescheduleOfDrop({ event, oldEvent, delta: { ...still, days: 1 } })).toEqual({
+    id: 7,
+    recurrenceId: '2026-10-05T09:00:00',
+    when: { kind: 'timed', start: '2026-10-06T09:00:00', end: '2026-10-06T10:00:00' },
   });
 });
 
@@ -40,6 +59,7 @@ test('a resize moves each edge by its own shift', () => {
     }),
   ).toEqual({
     id: 7,
+    recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T11:30:00' },
   });
 });
@@ -57,6 +77,7 @@ test('a resize from the start keeps the end', () => {
     }),
   ).toEqual({
     id: 7,
+    recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-05T08:30:00', end: '2026-10-05T10:00:00' },
   });
 });

@@ -88,9 +88,9 @@ pub struct Event {
     /// The zone FreeCal gave the Event when it arrived with a time of day but
     /// no time zone (ADR 0007), which its details mention.
     pub pinned_zone: Option<String>,
-    /// A Recurring Event's repeat rule as the editor shows it; none for an
-    /// Event that doesn't repeat, and for a rule the editor can't show, such
-    /// as an hourly one.
+    /// A Recurring Event's repeat rule as the editor shows it, for an
+    /// Exception its Recurring Event's; none for an Event that doesn't
+    /// repeat, and for a rule the editor can't show, such as an hourly one.
     pub repeat: Option<Repeat>,
     /// Whether the repeat rule has more than `repeat` shows, such as the
     /// weekdays of a weekly rule. Those are kept while the frequency stays.

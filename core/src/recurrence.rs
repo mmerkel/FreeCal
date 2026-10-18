@@ -238,6 +238,209 @@ pub(crate) fn occurrences_in(
     Ok(Some(found))
 }
 
+/// The time of the Occurrence of a Recurring Event with the recurrence ID
+/// `id`, as its rule gives it; none when the rule gives no such Occurrence
+/// or it is cancelled.
+pub(crate) fn occurrence_at(fields: &EventFields, id: &str) -> Result<Option<StoredWhen>> {
+    let (Some(starts), Some(wanted)) = (OccurrenceStarts::of(fields), start_of_id(id)) else {
+        return Ok(None);
+    };
+    if split_ids(&fields.exdates).any(|cancelled| start_of_id(cancelled) == Some(wanted)) {
+        return Ok(None);
+    }
+    for start in starts.into_iter().take(MAX_COUNTED) {
+        if start == wanted {
+            return occurrence(&fields.when, start).map(Some);
+        }
+        if start > wanted {
+            break;
+        }
+    }
+    Ok(None)
+}
+
+/// Whether FreeCal can read a Recurring Event's rule and expand it.
+pub(crate) fn readable(fields: &EventFields) -> bool {
+    OccurrenceStarts::of(fields).is_some()
+}
+
+/// A rule of an Event whose first Occurrence moved from `from` to `to`, with
+/// the days it names moved by as many days: "Mondays and Wednesdays" a day
+/// later is "Tuesdays and Thursdays", "the 5th" the 6th. A day of the month
+/// moved outside 1 to 31 can't be kept, and the rule repeats from its start
+/// instead. A rule FreeCal can't read stays as it is.
+pub(crate) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> String {
+    let (Some(rule), Ok(from), Ok(to)) = (Rule::parse(text), first_start(from), first_start(to))
+    else {
+        return text.to_owned();
+    };
+    let days = (to.date() - from.date()).num_days();
+    if days == 0 {
+        return text.to_owned();
+    }
+    let parts: Vec<String> = rule
+        .parts
+        .iter()
+        .filter_map(|(key, value)| {
+            let value = match key.as_str() {
+                "BYDAY" => value
+                    .split(',')
+                    .map(|day| weekday_moved(day, days))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(","),
+                "BYMONTHDAY" => value
+                    .split(',')
+                    .map(|day| month_day_moved(day, days))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(","),
+                _ => value.clone(),
+            };
+            Some(format!("{key}={value}"))
+        })
+        .collect();
+    parts.join(";")
+}
+
+const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+
+/// A `BYDAY` value, such as `MO` or `-1FR`, `days` later; its ordinal stays.
+fn weekday_moved(value: &str, days: i64) -> Option<String> {
+    let value = value.trim();
+    let (ordinal, day) = value.split_at(value.len().checked_sub(2)?);
+    let index = WEEKDAYS
+        .iter()
+        .position(|known| known.eq_ignore_ascii_case(day))?;
+    let moved = (index as i64 + days).rem_euclid(7) as usize;
+    Some(format!("{ordinal}{}", WEEKDAYS[moved]))
+}
+
+/// A `BYMONTHDAY` value `days` later; none when it leaves 1 to 31. Days
+/// counted from the end of the month stay.
+fn month_day_moved(value: &str, days: i64) -> Option<String> {
+    let day: i64 = value.trim().parse().ok()?;
+    if day < 0 {
+        return Some(day.to_string());
+    }
+    (1..=31)
+        .contains(&(day + days))
+        .then(|| (day + days).to_string())
+}
+
+/// Whether a Recurring Event's rule, which FreeCal can read, gives no
+/// Occurrence at all.
+pub(crate) fn gives_none(fields: &EventFields) -> bool {
+    OccurrenceStarts::of(fields).is_some_and(|starts| starts.into_iter().next().is_none())
+}
+
+/// `when` changed as the change from `from` to `to` changed another time:
+/// its start and its end moved by as much as theirs, in wall time. A change
+/// between all-day and timed puts `to` on `when`'s date instead.
+pub(crate) fn shifted(when: &StoredWhen, from: &StoredWhen, to: &StoredWhen) -> Result<StoredWhen> {
+    if when.all_day != from.all_day || from.all_day != to.all_day {
+        let days = first_start(when)?.date() - first_start(from)?.date();
+        return occurrence(to, first_start(to)? + days);
+    }
+    let start = first_start(when)? + (first_start(to)? - first_start(from)?);
+    let end = last_end(when)? + (last_end(to)? - last_end(from)?);
+    let valid = if when.all_day {
+        end > start
+    } else {
+        end >= start
+    };
+    if !valid {
+        return Err(CoreError::EndBeforeStart);
+    }
+    let text = |time: NaiveDateTime| {
+        if when.all_day {
+            time.date().to_string()
+        } else {
+            wall_text(time)
+        }
+    };
+    Ok(StoredWhen {
+        start: text(start),
+        end: text(end),
+        ..when.clone()
+    })
+}
+
+/// The recurrence ID `id` of a Recurring Event whose first Occurrence moved
+/// from `from` to `to`, moved by as much; none when `id` isn't one.
+pub(crate) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<String> {
+    let start = start_of_id(id)? + (first_start(to).ok()? - first_start(from).ok()?);
+    Some(if to.all_day {
+        start.date().to_string()
+    } else {
+        wall_text(start)
+    })
+}
+
+/// Whether the recurrence ID `id` names the same Occurrence as `split` or a
+/// later one. One that isn't a recurrence ID is never later.
+pub(crate) fn is_from(id: &str, split: &str) -> bool {
+    match (start_of_id(id), start_of_id(split)) {
+        (Some(id), Some(split)) => id >= split,
+        _ => false,
+    }
+}
+
+/// The recurrence IDs in `exdates` that `keep` keeps, changed by `map`.
+pub(crate) fn exdates_where(
+    exdates: &str,
+    keep: impl Fn(&str) -> bool,
+    map: impl Fn(&str) -> Option<String>,
+) -> String {
+    split_ids(exdates)
+        .filter(|id| keep(id))
+        .filter_map(map)
+        .fold(String::new(), |kept, id| with_exdate(&kept, &id))
+}
+
+/// A Recurring Event's rule for its Occurrences from the one with the
+/// recurrence ID `id` on: a `COUNT` less the Occurrences before it.
+pub(crate) fn rule_from(fields: &EventFields, id: &str) -> Option<String> {
+    let text = fields.rule.as_deref()?;
+    let (Some(rule), Some(start)) = (Rule::parse(text), start_of_id(id)) else {
+        return Some(text.to_owned());
+    };
+    let Some(count) = rule.rrule.get_count() else {
+        return Some(text.to_owned());
+    };
+    let before = OccurrenceStarts::of(fields)?
+        .into_iter()
+        .take(MAX_COUNTED)
+        .take_while(|earlier| *earlier < start)
+        .count();
+    let left = count.saturating_sub(u32::try_from(before).unwrap_or(u32::MAX));
+    Some(format!(
+        "{};COUNT={}",
+        rule.without(&["COUNT"]),
+        left.max(1)
+    ))
+}
+
+/// A Recurring Event's rule ended with the last Occurrence before the one
+/// with the recurrence ID `id`; none when FreeCal can't read it or there is
+/// none before.
+pub(crate) fn rule_until(fields: &EventFields, id: &str) -> Option<String> {
+    let rule = Rule::parse(fields.rule.as_deref()?)?;
+    let start = start_of_id(id)?;
+    let last = OccurrenceStarts::of(fields)?
+        .into_iter()
+        .take(MAX_COUNTED)
+        .take_while(|earlier| *earlier < start)
+        .last()?;
+    // RFC 5545: a date for an all-day Event, otherwise a UTC instant.
+    let until = if fields.when.all_day {
+        last.format("%Y%m%d").to_string()
+    } else {
+        instant(last, start_zone(&fields.when).ok()?)
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
+    };
+    Some(format!("{};UNTIL={until}", rule.without(&["COUNT"])))
+}
+
 /// A recurrence ID as the Local Store writes it, from the text the window
 /// gives back; none when it isn't one.
 pub(crate) fn recurrence_id(text: &str) -> Option<String> {
@@ -319,6 +522,19 @@ fn first_start(when: &StoredWhen) -> Result<NaiveDateTime> {
         Ok(date.and_time(NaiveTime::MIN))
     } else {
         NaiveDateTime::parse_from_str(&when.start, WALL_TIME).map_err(|_| unreadable(when))
+    }
+}
+
+/// The end of an Event, midnight for an all-day one.
+fn last_end(when: &StoredWhen) -> Result<NaiveDateTime> {
+    if when.all_day {
+        let date = when
+            .end
+            .parse::<NaiveDate>()
+            .map_err(|_| unreadable(when))?;
+        Ok(date.and_time(NaiveTime::MIN))
+    } else {
+        NaiveDateTime::parse_from_str(&when.end, WALL_TIME).map_err(|_| unreadable(when))
     }
 }
 
