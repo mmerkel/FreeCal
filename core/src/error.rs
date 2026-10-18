@@ -57,6 +57,13 @@ pub enum CoreError {
     AlreadyUndone(UnitId),
     #[error("Account {0:?} gets its Calendars from its server")]
     NotLocalAccount(AccountId),
+    #[error("Calendar {0:?} comes from a server and is removed, not deleted")]
+    NotLocalCalendar(CalendarId),
+    #[error("Calendar {0:?} is a Local Calendar and is deleted, not removed")]
+    NotServerCalendar(CalendarId),
+    /// The URL is the frontend's, untrusted.
+    #[error("the Account's server doesn't offer the Calendar {0:?}, or it was added already")]
+    CalendarNotAvailable(String),
     #[error("a server's address must start with http:// or https://")]
     InvalidServerUrl,
     #[error("the server didn't accept the username and password")]
@@ -115,6 +122,9 @@ impl CoreError {
             CoreError::ChangedSinceUnit(_) => ErrorCode::ChangedSinceUnit,
             CoreError::AlreadyUndone(_) => ErrorCode::AlreadyUndone,
             CoreError::NotLocalAccount(_) => ErrorCode::NotLocalAccount,
+            CoreError::NotLocalCalendar(_) => ErrorCode::NotLocalCalendar,
+            CoreError::NotServerCalendar(_) => ErrorCode::NotServerCalendar,
+            CoreError::CalendarNotAvailable(_) => ErrorCode::CalendarNotAvailable,
             CoreError::InvalidServerUrl => ErrorCode::InvalidServerUrl,
             CoreError::WrongCredentials => ErrorCode::WrongCredentials,
             CoreError::ServerUnreachable(_) => ErrorCode::ServerUnreachable,
@@ -188,6 +198,15 @@ pub enum ErrorCode {
     /// Calendars can be created only in the Local Account; a server
     /// Account's come from its server.
     NotLocalAccount,
+    /// A server Account's Calendar is removed from FreeCal, which leaves it
+    /// on the server, rather than deleted.
+    NotLocalCalendar,
+    /// A Local Calendar is deleted rather than removed: it has no server to
+    /// stay on.
+    NotServerCalendar,
+    /// A Calendar to add isn't among the Account's Available Calendars: its
+    /// server no longer offers it, or it was added already.
+    CalendarNotAvailable,
     /// A server's address isn't an `http://` or `https://` URL.
     InvalidServerUrl,
     /// The server didn't accept the username and password.
@@ -261,6 +280,9 @@ impl ErrorCode {
             ErrorCode::ChangedSinceUnit,
             ErrorCode::AlreadyUndone,
             ErrorCode::NotLocalAccount,
+            ErrorCode::NotLocalCalendar,
+            ErrorCode::NotServerCalendar,
+            ErrorCode::CalendarNotAvailable,
             ErrorCode::InvalidServerUrl,
             ErrorCode::WrongCredentials,
             ErrorCode::ServerUnreachable,

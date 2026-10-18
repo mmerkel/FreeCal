@@ -21,3 +21,4 @@
 ## Comments
 
 - 2026-10-13: Split from ticket 14.
+- 2026-10-18 (from 78): the core has `add_calendars(account_id, urls)` (several at once, all or none) and `remove_calendar(id)` for server Calendars; `delete_calendar` now refuses them (`notLocalCalendar`), so the sidebar must offer "Remove from FreeCal" instead of Delete for them. Neither is a shell command yet. `calendarName` from the hostile fixture still needs its `expected` entry here.

@@ -231,6 +231,10 @@ export const en = {
   'error.changedSinceUnit': 'events it changed were changed since',
   'error.alreadyUndone': 'it was undone already',
   'error.notLocalAccount': 'this account’s calendars come from its server',
+  'error.notLocalCalendar': 'this calendar comes from a server; remove it from FreeCal instead',
+  'error.notServerCalendar': 'this calendar lives only on this computer; delete it instead',
+  'error.calendarNotAvailable':
+    'the server no longer offers this calendar, or it was added already',
   'error.invalidServerUrl': 'the server address must start with http:// or https://',
   'error.wrongCredentials': 'the server didn’t accept the username and password',
   'error.serverUnreachable': 'the server couldn’t be reached',

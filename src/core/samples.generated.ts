@@ -565,6 +565,15 @@ export const samples = {
       "code": "notLocalAccount"
     },
     {
+      "code": "notLocalCalendar"
+    },
+    {
+      "code": "notServerCalendar"
+    },
+    {
+      "code": "calendarNotAvailable"
+    },
+    {
       "code": "invalidServerUrl"
     },
     {

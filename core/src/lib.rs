@@ -182,8 +182,45 @@ impl Core {
     }
 
     /// The Available Calendars of a server Account, fetched from its server
-    /// each time; none for the Local Account. Stores nothing.
+    /// each time: those it offers that aren't added yet. None for the Local
+    /// Account. Stores nothing.
     pub fn available_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
+        let mut offered = self.offered_calendars(id)?;
+        let added = self.store().calendar_urls(id)?;
+        offered.retain(|calendar| !added.contains(&calendar.url));
+        Ok(offered)
+    }
+
+    /// Adds Available Calendars of a server Account, named by their `url`,
+    /// as its Calendars, all or none. Their names and colours are the
+    /// server's as it offers them now.
+    pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
+        let offered = self.offered_calendars(account_id)?;
+        let added = {
+            let store = self.store();
+            // Added already, or earlier in `urls`.
+            let mut taken = store.calendar_urls(account_id)?;
+            store.transaction(|| {
+                urls.iter()
+                    .map(|url| {
+                        let available = offered.iter().find(|calendar| &calendar.url == url);
+                        match available {
+                            Some(available) if taken.insert(url.clone()) => {
+                                store.insert_server_calendar(account_id, available)
+                            }
+                            _ => Err(CoreError::CalendarNotAvailable(url.clone())),
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?
+        };
+        self.signals.send(Signal::CalendarsChanged);
+        Ok(added)
+    }
+
+    /// Every Calendar a server Account's server offers now, added or not;
+    /// none for the Local Account.
+    fn offered_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
         let (account, key) = {
             let store = self.store();
             (store.find_account(id)?, store.account_keyring_key(id)?)
@@ -197,7 +234,6 @@ impl Core {
             .secret(&key)
             .map_err(CoreError::KeyringUnavailable)?
             .ok_or(CoreError::PasswordNotInKeyring)?;
-        // Every Calendar it offers is available until ticket 78 adds some.
         caldav::Client::new(&CalDavLogin {
             url: server.url,
             username: server.username,
@@ -236,7 +272,7 @@ impl Core {
     }
 
     /// Creates a Calendar in the Local Account. Server Accounts' Calendars
-    /// are added from their Available Calendars instead (ticket 78).
+    /// are added from their Available Calendars instead.
     pub fn create_calendar(
         &self,
         account_id: AccountId,
@@ -275,7 +311,35 @@ impl Core {
     /// Deletes a Local Calendar with all its Events.
     /// Its changes leave the Change Journal (ADR 0009).
     pub fn delete_calendar(&self, id: CalendarId) -> Result<()> {
-        journal::delete_calendar(&self.store(), id)?;
+        self.delete_local_copy(id, false)
+    }
+
+    /// Removes a server Account's Calendar from FreeCal: deletes its local
+    /// copy with all its Events, as [`Core::delete_calendar`] does, and
+    /// leaves it on the server, where it is an Available Calendar again.
+    pub fn remove_calendar(&self, id: CalendarId) -> Result<()> {
+        self.delete_local_copy(id, true)
+    }
+
+    /// Deletes a Calendar's local copy if it is a server Account's Calendar,
+    /// as `from_server` asks, or a Local Calendar if not.
+    fn delete_local_copy(&self, id: CalendarId, from_server: bool) -> Result<()> {
+        {
+            let store = self.store();
+            let account_id = store.find_calendar(id)?.account_id;
+            let account = store.find_account(account_id)?;
+            match (
+                account
+                    .ok_or(CoreError::AccountNotFound(account_id))?
+                    .provider,
+                from_server,
+            ) {
+                (Provider::Local, false) | (Provider::CalDav, true) => {}
+                (Provider::Local, true) => return Err(CoreError::NotServerCalendar(id)),
+                (Provider::CalDav, false) => return Err(CoreError::NotLocalCalendar(id)),
+            }
+            journal::delete_calendar(&store, id)?;
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }

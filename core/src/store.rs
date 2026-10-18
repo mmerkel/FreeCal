@@ -8,8 +8,8 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
-    Result, ServerLogin, Settings, SidebarState, View,
+    Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
+    EventId, Provider, Result, ServerLogin, Settings, SidebarState, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -159,6 +159,14 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE account ADD COLUMN url TEXT;
     ALTER TABLE account ADD COLUMN username TEXT;
     ALTER TABLE account ADD COLUMN keyring_key TEXT;
+    ",
+    ),
+    // Ticket 78: a server Account's Calendar has the URL it lives at on the
+    // server, which names its Available Calendar; none for a Local Calendar.
+    Migration::Sql(
+        "
+    ALTER TABLE calendar ADD COLUMN url TEXT;
+    CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
     ",
     ),
 ];
@@ -526,6 +534,38 @@ impl Store {
             shown: true,
             read_only: false,
         })
+    }
+
+    /// Adds an Available Calendar as a server Account's Calendar, in the
+    /// default colour if it has none.
+    pub fn insert_server_calendar(
+        &self,
+        account_id: AccountId,
+        available: &AvailableCalendar,
+    ) -> Result<Calendar> {
+        let colour = available.colour.clone().unwrap_or_default();
+        self.conn.execute(
+            "INSERT INTO calendar (account_id, url, name, colour) VALUES (?1, ?2, ?3, ?4)",
+            params![account_id.0, available.url, available.name, colour.as_str()],
+        )?;
+        Ok(Calendar {
+            id: CalendarId(self.conn.last_insert_rowid()),
+            account_id,
+            name: available.name.clone(),
+            colour,
+            shown: true,
+            read_only: false,
+        })
+    }
+
+    /// Where an Account's Calendars live on its server; none for the Local
+    /// Account.
+    pub fn calendar_urls(&self, account_id: AccountId) -> Result<HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT url FROM calendar WHERE account_id = ?1 AND url IS NOT NULL")?;
+        let urls = readable(stmt.query_map([account_id.0], |row| row.get(0))?)?;
+        Ok(urls.into_iter().collect())
     }
 
     pub fn find_calendar(&self, id: CalendarId) -> Result<Calendar> {
