@@ -1,6 +1,6 @@
 # 49: Display Time Zone shown and followed
 
-**What to build:** The window shows the Display Time Zone (the system time zone), and FreeCal follows it when the system time zone changes: the core sends "Display Time Zone changed" and the frontend redraws the shown range and its label. FullCalendar uses the Display Time Zone rather than the browser's local zone. Spec: user stories 50 and 51. Split from ticket 06.
+**What to build:** The window shows the Display Time Zone (the system time zone), and FreeCal follows it when the system time zone changes: the core sends "Display Time Zone changed" and the frontend redraws the shown range and its label. FullCalendar uses the Display Time Zone rather than the browser's local zone. Spec: US-50 and US-51. Split from ticket 06.
 
 **Blocked by:** 03, 35
 

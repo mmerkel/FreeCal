@@ -1,6 +1,6 @@
 # 77: Discover a CalDAV Account's Available Calendars
 
-**What to build:** Adding a CalDAV Account discovers the server's Calendars, and listing the Account's Calendars fetches the server's current list each time. Calendars the user hasn't added are Available Calendars: FreeCal stores nothing for them. Spec: user story 15. Split from ticket 53.
+**What to build:** Adding a CalDAV Account discovers the server's Calendars, and listing the Account's Calendars fetches the server's current list each time. Calendars the user hasn't added are Available Calendars: FreeCal stores nothing for them. Spec: US-15. Split from ticket 53.
 
 **Blocked by:** 76
 

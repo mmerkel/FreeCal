@@ -1,6 +1,6 @@
 # 55: Add a CalDAV Account and manage its Calendars in the window
 
-**What to build:** The user adds a CalDAV Account with a server URL, username and password, chooses which of its Available Calendars to add, and sees them in the sidebar under the Account. The Account's line offers "Manage Calendars…" to add or remove Calendars later, and the user can remove the whole Account. Spec: user story 15. Split from ticket 14.
+**What to build:** The user adds a CalDAV Account with a server URL, username and password, chooses which of its Available Calendars to add, and sees them in the sidebar under the Account. The Account's line offers "Manage Calendars…" to add or remove Calendars later, and the user can remove the whole Account. Spec: US-15. Split from ticket 14.
 
 **Blocked by:** 79, 54
 

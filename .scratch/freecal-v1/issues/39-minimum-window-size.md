@@ -1,6 +1,6 @@
 # 39: Minimum window size
 
-**What to build:** The window can't be made smaller than a size at which the sidebar at its default width and the week view still fit. Spec: user story 138, "Window size" under Frontend.
+**What to build:** The window can't be made smaller than a size at which the sidebar at its default width and the week view still fit. Spec: US-138, "Window size" under Frontend.
 
 **Blocked by:** none
 

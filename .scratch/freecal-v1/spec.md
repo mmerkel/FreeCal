@@ -16,198 +16,198 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 
 ### Accounts and Calendars
 
-1. As a user, I want a Local Account to exist from the first launch, so that I can start using FreeCal without connecting anything.
-2. As a user, I want the Local Account to be impossible to remove, so that my local-only Calendars always have a home.
-3. As a user, I want to create, rename, recolour and delete Calendars in the Local Account, so that I can organise Events that live only on this computer.
-132. As a new user, I want FreeCal to start with a shown "Work" and a hidden "Home" Calendar, a hint when the Local Account has no Calendars, and a tooltip on each Calendar saying whether it is shown, so that I learn the sidebar without reading anything.
-4. As a user, I want to add a CalDAV Account by entering a server URL, username and password, so that I can use my Nextcloud, Fastmail, iCloud or other CalDAV calendars.
-5. As a user, I want FreeCal to discover all Calendars of a CalDAV Account automatically and let me choose which of them to add, so that I don't have to enter each Calendar's URL and only see the ones I want.
-6. As a user, I want to add a Google Account by logging in through my browser and choose which of its Calendars to add, so that I never type my Google password into FreeCal and only see the Calendars I want.
-7. As a user of the public 1.0, I want a guided "bring your own client" setup for Google, so that I can connect Google even though FreeCal's shared client isn't verified yet.
-8. As a developer or tester, I want to use FreeCal's shared (unverified) Google client, so that I can connect Google without creating my own client.
-9. As a user, I want to connect several Accounts of each Provider, so that work and personal calendars appear side by side.
-10. As a user, I want my passwords and tokens kept in the system keyring, so that they are protected by my desktop login.
-11. As a user without a working system keyring, I want a clear error explaining why I can't add a server Account, so that I know what to fix.
-12. As a user, I want to remove a Google or CalDAV Account, so that its Calendars disappear from FreeCal and its credentials are deleted from the keyring.
-13. As a user, I want each Calendar to have a colour, so that I can tell Events apart at a glance.
-14. As a user, I want to show and hide individual Calendars from a sidebar, so that I can focus on what matters right now.
-15. As a user, I want Calendars grouped by Account in the sidebar, with each server Account's line letting me fetch the server's current list of Calendars and add or remove them, so that I can see where each Calendar comes from and pick up Calendars created on the server later.
-16. As a user, I want Calendars the server doesn't let me change to be Read-only Calendars automatically, so that FreeCal never tries edits that will fail.
-17. As a user, I want to mark any Calendar as read-only in FreeCal, so that I can protect a Calendar from accidental edits.
-18. As a user before FreeCal 1.0, I want newly connected Google and CalDAV Calendars to start as read-only, so that I can watch sync work before trusting FreeCal to write.
-19. As a user, I want to switch a Calendar from read-only to writable myself, so that I decide when FreeCal may change it.
+- **US-1** As a user, I want a Local Account to exist from the first launch, so that I can start using FreeCal without connecting anything.
+- **US-2** As a user, I want the Local Account to be impossible to remove, so that my local-only Calendars always have a home.
+- **US-3** As a user, I want to create, rename, recolour and delete Calendars in the Local Account, so that I can organise Events that live only on this computer.
+- **US-145** As a new user, I want FreeCal to start with a shown "Work" and a hidden "Home" Calendar, a hint when the Local Account has no Calendars, and a tooltip on each Calendar saying whether it is shown, so that I learn the sidebar without reading anything.
+- **US-4** As a user, I want to add a CalDAV Account by entering a server URL, username and password, so that I can use my Nextcloud, Fastmail, iCloud or other CalDAV calendars.
+- **US-5** As a user, I want FreeCal to discover all Calendars of a CalDAV Account automatically and let me choose which of them to add, so that I don't have to enter each Calendar's URL and only see the ones I want.
+- **US-6** As a user, I want to add a Google Account by logging in through my browser and choose which of its Calendars to add, so that I never type my Google password into FreeCal and only see the Calendars I want.
+- **US-7** As a user of the public 1.0, I want a guided "bring your own client" setup for Google, so that I can connect Google even though FreeCal's shared client isn't verified yet.
+- **US-8** As a developer or tester, I want to use FreeCal's shared (unverified) Google client, so that I can connect Google without creating my own client.
+- **US-9** As a user, I want to connect several Accounts of each Provider, so that work and personal calendars appear side by side.
+- **US-10** As a user, I want my passwords and tokens kept in the system keyring, so that they are protected by my desktop login.
+- **US-11** As a user without a working system keyring, I want a clear error explaining why I can't add a server Account, so that I know what to fix.
+- **US-12** As a user, I want to remove a Google or CalDAV Account, so that its Calendars disappear from FreeCal and its credentials are deleted from the keyring.
+- **US-13** As a user, I want each Calendar to have a colour, so that I can tell Events apart at a glance.
+- **US-14** As a user, I want to show and hide individual Calendars from a sidebar, so that I can focus on what matters right now.
+- **US-15** As a user, I want Calendars grouped by Account in the sidebar, with each server Account's line letting me fetch the server's current list of Calendars and add or remove them, so that I can see where each Calendar comes from and pick up Calendars created on the server later.
+- **US-16** As a user, I want Calendars the server doesn't let me change to be Read-only Calendars automatically, so that FreeCal never tries edits that will fail.
+- **US-17** As a user, I want to mark any Calendar as read-only in FreeCal, so that I can protect a Calendar from accidental edits.
+- **US-18** As a user before FreeCal 1.0, I want newly connected Google and CalDAV Calendars to start as read-only, so that I can watch sync work before trusting FreeCal to write.
+- **US-19** As a user, I want to switch a Calendar from read-only to writable myself, so that I decide when FreeCal may change it.
 
 ### Viewing
 
-20. As a new user, I want FreeCal to open in month view on first launch, so that I immediately get an overview.
-21. As a returning user, I want FreeCal to reopen in the view I last used, so that it matches my habit.
-22. As a returning user, I want FreeCal to always open on today, so that I'm not shown some date from weeks ago.
-23. As a user, I want day, week and month views, so that I can see my time at different scales.
-24. As a user, I want to move to the previous or next period and jump back to today, so that I can browse my calendar.
-25. As a user, I want the view to follow today, while the Today button is pressed (from when FreeCal opens or I press Today, until I un-press it or move to another date), so that the view moves to the new day after midnight or sleep, but never pulls me away from a date I chose.
-26. As a user, I want overlapping Events laid out side by side in day and week views, so that none of them is hidden.
-27. As a user, I want all-day and multi-day Events shown in an all-day area, so that they don't clutter the time grid.
-28. As a user, I want to open an Event to see its details, so that I can read its title, time, location, description and Calendar.
-29. As a user, I want Occurrences of Recurring Events to appear on every date they fall on, so that my calendar is complete.
-30. As a user, I want Read-only Calendars marked with a lock in the sidebar, and an Event's details to say when it is read-only, so that I can find out without the grid getting cluttered.
-31. As a user, I want an Event's details to say when it has other attendees ("has guests") and that I should edit it in Google or on my server for now, so that I know why it's read-only and where to go.
-32. As a user, when I try to drag or resize a read-only Event, I want a short message explaining why it can't change, so that a refused drag doesn't look like a bug.
-33. As a user, I want Events with a Conflict to carry a visible badge, so that I notice they need my decision.
-132. As a user, I want an Event's details to offer Edit, Delete and Close as icons at the top right, and to close with ✕ or a click outside, as in Google Calendar, so that dismissing them feels natural.
-139. As a user, I want timed Events in the month view to carry a dot in their Calendar's colour, so that I can tell at a glance which Calendar they belong to.
-140. As a user, I want links in an Event's location to be clickable, like those in its description, so that I can join a video call in one click.
-141. As a user, I want the pointer to be a hand over the whole of an Event, never a text cursor, so that it's clear that the Event can be opened.
+- **US-20** As a new user, I want FreeCal to open in month view on first launch, so that I immediately get an overview.
+- **US-21** As a returning user, I want FreeCal to reopen in the view I last used, so that it matches my habit.
+- **US-22** As a returning user, I want FreeCal to always open on today, so that I'm not shown some date from weeks ago.
+- **US-23** As a user, I want day, week and month views, so that I can see my time at different scales.
+- **US-24** As a user, I want to move to the previous or next period and jump back to today, so that I can browse my calendar.
+- **US-25** As a user, I want the view to follow today, while the Today button is pressed (from when FreeCal opens or I press Today, until I un-press it or move to another date), so that the view moves to the new day after midnight or sleep, but never pulls me away from a date I chose.
+- **US-26** As a user, I want overlapping Events laid out side by side in day and week views, so that none of them is hidden.
+- **US-27** As a user, I want all-day and multi-day Events shown in an all-day area, so that they don't clutter the time grid.
+- **US-28** As a user, I want to open an Event to see its details, so that I can read its title, time, location, description and Calendar.
+- **US-29** As a user, I want Occurrences of Recurring Events to appear on every date they fall on, so that my calendar is complete.
+- **US-30** As a user, I want Read-only Calendars marked with a lock in the sidebar, and an Event's details to say when it is read-only, so that I can find out without the grid getting cluttered.
+- **US-31** As a user, I want an Event's details to say when it has other attendees ("has guests") and that I should edit it in Google or on my server for now, so that I know why it's read-only and where to go.
+- **US-32** As a user, when I try to drag or resize a read-only Event, I want a short message explaining why it can't change, so that a refused drag doesn't look like a bug.
+- **US-33** As a user, I want Events with a Conflict to carry a visible badge, so that I notice they need my decision.
+- **US-132** As a user, I want an Event's details to offer Edit, Delete and Close as icons at the top right, and to close with ✕ or a click outside, as in Google Calendar, so that dismissing them feels natural.
+- **US-139** As a user, I want timed Events in the month view to carry a dot in their Calendar's colour, so that I can tell at a glance which Calendar they belong to.
+- **US-140** As a user, I want links in an Event's location to be clickable, like those in its description, so that I can join a video call in one click.
+- **US-141** As a user, I want the pointer to be a hand over the whole of an Event, never a text cursor, so that it's clear that the Event can be opened.
 
 ### Creating and editing Events
 
-34. As a user, I want to click an empty slot to create an Event there, so that adding an Event takes one gesture.
-35. As a user, I want to drag across a time range to create an Event covering it, so that I can set the duration directly.
-36. As a user, I want to choose which writable Calendar a new Event goes into, so that it lands in the right place.
-37. As a user, I want to edit an Event's title, time, all-day flag, location, description and Calendar, so that I can keep it accurate.
-38. As a user, I want to drag an Event to another time or day, so that rescheduling is quick.
-39. As a user, I want to drag an Event's edge to change its duration, so that I don't have to open the editor.
-40. As a user, I want to delete an Event, so that I can remove things that won't happen.
-41. As a user, I want to set an Event's repeat rule (daily, weekly, monthly, yearly, with an interval and an end), so that I can create Recurring Events.
-133. As a user, I want FreeCal to ask before it deletes an Event, so that a stray click on the trash icon doesn't remove it.
-134. As a user, I want to be asked "Discard changes?" when I close the editor after changing something, so that ✕ or Escape doesn't throw away what I typed.
-135. As a user, I want to type a time the way I think of it (`14`, `1430`, `14:30`, `14.30`, `14h30`, `2:30p`) or pick it from a list in 15-minute steps, with durations shown for the end time, so that setting a time is quick.
-136. As a user, I want `a` and `p` pressed anywhere in a time field to make it AM or PM, and an hour from 13 to 23 to mean PM on a 12-hour clock, so that I never have to aim at the AM/PM part.
-137. As a user, I want the end to move with the start when I change an Event's start, keeping its length, so that rescheduling in the editor takes one change.
-142. As a user, I want to type a date in my date format or pick it from a small month calendar that shows the Event's range, so that setting a date is quick and looks like the rest of FreeCal.
-42. As a user, when I change an Occurrence of a Recurring Event, I want to choose "this event", "this and following events" or "all events", so that I change exactly what I mean.
-43. As a user, when I drag an Occurrence, I want the same three-way choice, and I want the drag to be undone if I cancel, so that a stray drag never changes my series.
-44. As a user, I want to delete a single Occurrence, so that a cancelled meeting disappears without ending the series.
-45. As a user, I want my Exceptions kept when I change unrelated parts of a Recurring Event where possible, so that individual changes aren't lost.
-46. As a user, I want edits to Events in Read-only Calendars or with other attendees to be impossible, so that I can't cause damage by accident.
-47. As a user, I want FreeCal to preserve every Event detail it doesn't show (attendees, conference links, custom properties) whenever it changes an Event, so that I never lose data elsewhere.
-48. As a user, I want to move an Event to a Calendar in another Account, so that I can turn a local draft into a real meeting.
-49. As a user, I want to be warned before such a move only if the Event has details that would be lost, so that I'm not nagged needlessly.
+- **US-34** As a user, I want to click an empty slot to create an Event there, so that adding an Event takes one gesture.
+- **US-35** As a user, I want to drag across a time range to create an Event covering it, so that I can set the duration directly.
+- **US-36** As a user, I want to choose which writable Calendar a new Event goes into, so that it lands in the right place.
+- **US-37** As a user, I want to edit an Event's title, time, all-day flag, location, description and Calendar, so that I can keep it accurate.
+- **US-38** As a user, I want to drag an Event to another time or day, so that rescheduling is quick.
+- **US-39** As a user, I want to drag an Event's edge to change its duration, so that I don't have to open the editor.
+- **US-40** As a user, I want to delete an Event, so that I can remove things that won't happen.
+- **US-41** As a user, I want to set an Event's repeat rule (daily, weekly, monthly, yearly, with an interval and an end), so that I can create Recurring Events.
+- **US-133** As a user, I want FreeCal to ask before it deletes an Event, so that a stray click on the trash icon doesn't remove it.
+- **US-134** As a user, I want to be asked "Discard changes?" when I close the editor after changing something, so that ✕ or Escape doesn't throw away what I typed.
+- **US-135** As a user, I want to type a time the way I think of it (`14`, `1430`, `14:30`, `14.30`, `14h30`, `2:30p`) or pick it from a list in 15-minute steps, with durations shown for the end time, so that setting a time is quick.
+- **US-136** As a user, I want `a` and `p` pressed anywhere in a time field to make it AM or PM, and an hour from 13 to 23 to mean PM on a 12-hour clock, so that I never have to aim at the AM/PM part.
+- **US-137** As a user, I want the end to move with the start when I change an Event's start, keeping its length, so that rescheduling in the editor takes one change.
+- **US-142** As a user, I want to type a date in my date format or pick it from a small month calendar that shows the Event's range, so that setting a date is quick and looks like the rest of FreeCal.
+- **US-42** As a user, when I change an Occurrence of a Recurring Event, I want to choose "this event", "this and following events" or "all events", so that I change exactly what I mean.
+- **US-43** As a user, when I drag an Occurrence, I want the same three-way choice, and I want the drag to be undone if I cancel, so that a stray drag never changes my series.
+- **US-44** As a user, I want to delete a single Occurrence, so that a cancelled meeting disappears without ending the series.
+- **US-45** As a user, I want my Exceptions kept when I change unrelated parts of a Recurring Event where possible, so that individual changes aren't lost.
+- **US-46** As a user, I want edits to Events in Read-only Calendars or with other attendees to be impossible, so that I can't cause damage by accident.
+- **US-47** As a user, I want FreeCal to preserve every Event detail it doesn't show (attendees, conference links, custom properties) whenever it changes an Event, so that I never lose data elsewhere.
+- **US-48** As a user, I want to move an Event to a Calendar in another Account, so that I can turn a local draft into a real meeting.
+- **US-49** As a user, I want to be warned before such a move only if the Event has details that would be lost, so that I'm not nagged needlessly.
 
 ### Time zones and locale
 
-50. As a user, I want Events shown in my system time zone by default, so that times match my clock.
-51. As a user, I want the Display Time Zone shown in the UI, so that I always know which time zone I'm looking at.
-52. As a user, I want new Events to get the Display Time Zone by default, so that I rarely need to think about it.
-53. As a user, I want to choose a different time zone for an Event in the editor, so that I can enter "9:00 New York" correctly.
-54. As a user, I want Events created in other time zones to appear at the correct local time, so that I never miss a meeting when travelling.
-55. As a user, I want the date format to follow my system locale, weeks to start on Monday and times shown on a 24-hour clock by default, so that FreeCal looks right without configuration.
-56. As a user, I want all UI text to come from a translation layer, so that FreeCal can be translated later (v1 ships English only).
+- **US-50** As a user, I want Events shown in my system time zone by default, so that times match my clock.
+- **US-51** As a user, I want the Display Time Zone shown in the UI, so that I always know which time zone I'm looking at.
+- **US-52** As a user, I want new Events to get the Display Time Zone by default, so that I rarely need to think about it.
+- **US-53** As a user, I want to choose a different time zone for an Event in the editor, so that I can enter "9:00 New York" correctly.
+- **US-54** As a user, I want Events created in other time zones to appear at the correct local time, so that I never miss a meeting when travelling.
+- **US-55** As a user, I want the date format to follow my system locale, weeks to start on Monday and times shown on a 24-hour clock by default, so that FreeCal looks right without configuration.
+- **US-56** As a user, I want all UI text to come from a translation layer, so that FreeCal can be translated later (v1 ships English only).
 
 ### Keyboard
 
-57. As a keyboard user, I want Google-style shortcuts to switch views (day, week, month), so that I don't need the mouse.
-58. As a keyboard user, I want shortcuts for previous, next and today, so that I can browse quickly.
-59. As a keyboard user, I want a shortcut to create an Event, so that adding one is instant.
-60. As a keyboard user, I want a shortcut to sync now, so that I can force a refresh.
+- **US-57** As a keyboard user, I want Google-style shortcuts to switch views (day, week, month), so that I don't need the mouse.
+- **US-58** As a keyboard user, I want shortcuts for previous, next and today, so that I can browse quickly.
+- **US-59** As a keyboard user, I want a shortcut to create an Event, so that adding one is instant.
+- **US-60** As a keyboard user, I want a shortcut to sync now, so that I can force a refresh.
 
 ### Sync
 
-61. As a user, I want every synced Calendar stored locally, so that FreeCal opens instantly and works offline.
-62. As a user, I want to create, edit, move and delete Events while offline, so that I'm never blocked by the network.
-63. As a user, I want my offline changes sent automatically when the connection returns, so that I don't have to remember them.
-64. As a user, I want changes made elsewhere (phone, web) to appear in FreeCal within about two minutes while the window is open, so that I see up-to-date data.
-65. As a user, I want FreeCal to sync every 15 minutes while running in the background, so that reminders and the tray stay accurate without wasting resources.
-66. As a user, I want FreeCal to sync when I focus its window, when my computer wakes from sleep and right after I change something, so that it's fresh when I need it.
-67. As a user, I want a manual "sync now", so that I can refresh on demand.
-68. As a user, I want the window to show when FreeCal is syncing and when the last sync finished, so that I know whether what I see is current.
-69. As a user, I want each Account and Calendar in the sidebar to show whether it is syncing, offline or has a Sync Error, so that I can see which one is affected.
-70. As a user, I want changes pulled from a server to appear in the open view without a manual refresh, so that the window is never out of date.
-71. As a user, I want new Conflicts and Sync Errors to appear in the window as soon as they happen, so that I don't have to reopen anything to see them.
-72. As a user, I want to see which of my changes haven't reached the server yet (a count per Account or Calendar, a subtle mark on the Event and the reason in its details), so that I know whether my edits made offline have gone out.
-73. As a user, when an Event was changed both in FreeCal and on the server, I want to see both versions and choose one, so that no change is lost silently.
-74. As a user, when I edited an Event that was deleted on the server, I want to choose "restore with my changes" or "accept the delete", so that I decide.
-75. As a user, when I deleted an Event that was edited on the server, I want to choose "delete anyway" or "keep the server version", so that I decide.
-76. As a user, when a change to a whole Recurring Event collides with a remote change to one Occurrence, I want a Conflict on the whole Recurring Event showing both versions, so that I can resolve it as one decision.
-77. As a user, I want a list of all open Conflicts, so that I can work through them.
-78. As a user, I want Sync Errors (expired login, server refusing a request, a paused Calendar) reported per Account or Calendar with a clear message, so that I know what's wrong and where.
-79. As a user, I want being offline not to count as an error, so that I'm not alarmed by normal situations.
-80. As a user with an expired Google login, I want to be asked to log in again, so that sync resumes.
+- **US-61** As a user, I want every synced Calendar stored locally, so that FreeCal opens instantly and works offline.
+- **US-62** As a user, I want to create, edit, move and delete Events while offline, so that I'm never blocked by the network.
+- **US-63** As a user, I want my offline changes sent automatically when the connection returns, so that I don't have to remember them.
+- **US-64** As a user, I want changes made elsewhere (phone, web) to appear in FreeCal within about two minutes while the window is open, so that I see up-to-date data.
+- **US-65** As a user, I want FreeCal to sync every 15 minutes while running in the background, so that reminders and the tray stay accurate without wasting resources.
+- **US-66** As a user, I want FreeCal to sync when I focus its window, when my computer wakes from sleep and right after I change something, so that it's fresh when I need it.
+- **US-67** As a user, I want a manual "sync now", so that I can refresh on demand.
+- **US-68** As a user, I want the window to show when FreeCal is syncing and when the last sync finished, so that I know whether what I see is current.
+- **US-69** As a user, I want each Account and Calendar in the sidebar to show whether it is syncing, offline or has a Sync Error, so that I can see which one is affected.
+- **US-70** As a user, I want changes pulled from a server to appear in the open view without a manual refresh, so that the window is never out of date.
+- **US-71** As a user, I want new Conflicts and Sync Errors to appear in the window as soon as they happen, so that I don't have to reopen anything to see them.
+- **US-72** As a user, I want to see which of my changes haven't reached the server yet (a count per Account or Calendar, a subtle mark on the Event and the reason in its details), so that I know whether my edits made offline have gone out.
+- **US-73** As a user, when an Event was changed both in FreeCal and on the server, I want to see both versions and choose one, so that no change is lost silently.
+- **US-74** As a user, when I edited an Event that was deleted on the server, I want to choose "restore with my changes" or "accept the delete", so that I decide.
+- **US-75** As a user, when I deleted an Event that was edited on the server, I want to choose "delete anyway" or "keep the server version", so that I decide.
+- **US-76** As a user, when a change to a whole Recurring Event collides with a remote change to one Occurrence, I want a Conflict on the whole Recurring Event showing both versions, so that I can resolve it as one decision.
+- **US-77** As a user, I want a list of all open Conflicts, so that I can work through them.
+- **US-78** As a user, I want Sync Errors (expired login, server refusing a request, a paused Calendar) reported per Account or Calendar with a clear message, so that I know what's wrong and where.
+- **US-79** As a user, I want being offline not to count as an error, so that I'm not alarmed by normal situations.
+- **US-80** As a user with an expired Google login, I want to be asked to log in again, so that sync resumes.
 
 ### Safety
 
-81. As a user, I want every change to an Event recorded with its previous version, whether I made it in FreeCal, in any Calendar, or a sync pulled it from a server, so that any change can be reversed exactly.
-82. As a user, I want to undo any one change, so that a mistake or bug can be repaired with the original ID and all details intact.
-83. As a user, I want to undo all changes to a Calendar since a given time, so that I can recover from a bad sync session.
-84. As a user, I want Change Journal entries kept for 90 days, so that I have time to notice problems.
-85. As a user, if one sync would delete or change more than 10 Events or more than 5% of a Calendar, I want that Calendar paused and myself asked first, so that a bug can't wipe a Calendar.
-86. As a user, I want a paused Calendar to show as a Sync Error with an explanation ("Paused: 120 Events would be deleted. Review?"), so that I understand what happened.
-87. As a user, I want to approve or reject the paused changes, so that sync can continue the way I choose.
-88. As a user, I want a compressed Snapshot of each changed Calendar taken daily, with the last 14 kept, so that I have a last-resort backup.
-89. As a user, I want Snapshots to skip Calendars that haven't changed, so that disk usage stays small.
-90. As a user, I want to restore a Calendar from a Snapshot, so that I can recover even if the Change Journal can't help.
+- **US-81** As a user, I want every change to an Event recorded with its previous version, whether I made it in FreeCal, in any Calendar, or a sync pulled it from a server, so that any change can be reversed exactly.
+- **US-82** As a user, I want to undo any one change, so that a mistake or bug can be repaired with the original ID and all details intact.
+- **US-83** As a user, I want to undo all changes to a Calendar since a given time, so that I can recover from a bad sync session.
+- **US-84** As a user, I want Change Journal entries kept for 90 days, so that I have time to notice problems.
+- **US-85** As a user, if one sync would delete or change more than 10 Events or more than 5% of a Calendar, I want that Calendar paused and myself asked first, so that a bug can't wipe a Calendar.
+- **US-86** As a user, I want a paused Calendar to show as a Sync Error with an explanation ("Paused: 120 Events would be deleted. Review?"), so that I understand what happened.
+- **US-87** As a user, I want to approve or reject the paused changes, so that sync can continue the way I choose.
+- **US-88** As a user, I want a compressed Snapshot of each changed Calendar taken daily, with the last 14 kept, so that I have a last-resort backup.
+- **US-89** As a user, I want Snapshots to skip Calendars that haven't changed, so that disk usage stays small.
+- **US-90** As a user, I want to restore a Calendar from a Snapshot, so that I can recover even if the Change Journal can't help.
 
 ### Import and export
 
-91. As a user, I want to export any Calendar to an `.ics` file, so that I have a portable copy.
-92. As a user, I want to export everything to a `.zip` with one `.ics` per Calendar organised by Account, so that I can back up or migrate in one step.
-93. As a user, I want exports to keep Google-only details, so that a Google Event can be restored completely.
-94. As a user, I want to import an `.ics` file into any writable Calendar, so that I can bring Events in from elsewhere.
-95. As a user, I want to import a `.zip` of `.ics` files (e.g. a Google Takeout export), choosing a Calendar for each file or having FreeCal create a Local Calendar for it, so that I can migrate several Calendars at once.
-96. As a user, I want an import preview showing how many Events are new and how many already exist, so that I know what will happen.
-97. As a user, when some imported Events already exist (same UID), I want to choose once per import whether to update them, skip them or import them as copies, so that restores don't create duplicates.
-98. As a user, I want the import preview's confirmation to count as my approval, so that the Mass-Change Guard doesn't stop an import I just confirmed.
-99. As a user, I want to undo an entire import in one step, so that a wrong import is easy to reverse.
-100. As a user, I want import to be unavailable for Read-only Calendars, so that I can't write where FreeCal mustn't.
+- **US-91** As a user, I want to export any Calendar to an `.ics` file, so that I have a portable copy.
+- **US-92** As a user, I want to export everything to a `.zip` with one `.ics` per Calendar organised by Account, so that I can back up or migrate in one step.
+- **US-93** As a user, I want exports to keep Google-only details, so that a Google Event can be restored completely.
+- **US-94** As a user, I want to import an `.ics` file into any writable Calendar, so that I can bring Events in from elsewhere.
+- **US-95** As a user, I want to import a `.zip` of `.ics` files (e.g. a Google Takeout export), choosing a Calendar for each file or having FreeCal create a Local Calendar for it, so that I can migrate several Calendars at once.
+- **US-96** As a user, I want an import preview showing how many Events are new and how many already exist, so that I know what will happen.
+- **US-97** As a user, when some imported Events already exist (same UID), I want to choose once per import whether to update them, skip them or import them as copies, so that restores don't create duplicates.
+- **US-98** As a user, I want the import preview's confirmation to count as my approval, so that the Mass-Change Guard doesn't stop an import I just confirmed.
+- **US-99** As a user, I want to undo an entire import in one step, so that a wrong import is easy to reverse.
+- **US-100** As a user, I want import to be unavailable for Read-only Calendars, so that I can't write where FreeCal mustn't.
 
 ### Desktop integration
 
-101. As a user, I want desktop notifications for the reminders stored on my Events, so that I don't miss meetings.
-102. As a user, I want to snooze or dismiss a reminder notification, so that I can handle it on my terms.
-103. As a user with a system tray, I want FreeCal to keep running in the background when I close the window (on by default), so that sync and reminders continue.
-104. As a user without a system tray, I want closing the window to quit FreeCal, so that it never runs invisibly with no way back.
-105. As a user who enables a tray while FreeCal runs (e.g. the GNOME AppIndicator extension), I want FreeCal to notice the next time I close the window, so that I don't need to restart it.
-106. As a user, I want to turn background running off, so that closing always quits.
-107. As a user, I want an option to start FreeCal at login (off by default), so that reminders work from the moment I log in.
-108. As a KDE Plasma user, I want the tray icon to work natively, so that FreeCal fits my desktop.
-109. As a user, I want one tray icon showing the most important state (Conflict, then Sync Error, then Offline, then Syncing, then Online and synced), so that I can see FreeCal's health at a glance.
-110. As a user, I want the tray menu to offer Open FreeCal, Sync now and Quit, so that I can control FreeCal without its window.
-111. As a user, I want the tray menu to list current Conflicts and Sync Errors, so that I can go straight to them.
-112. As a user with FreeCal in the background, I want one desktop notification per new Conflict or Sync Error, so that problems don't go unnoticed for days.
+- **US-101** As a user, I want desktop notifications for the reminders stored on my Events, so that I don't miss meetings.
+- **US-102** As a user, I want to snooze or dismiss a reminder notification, so that I can handle it on my terms.
+- **US-103** As a user with a system tray, I want FreeCal to keep running in the background when I close the window (on by default), so that sync and reminders continue.
+- **US-104** As a user without a system tray, I want closing the window to quit FreeCal, so that it never runs invisibly with no way back.
+- **US-105** As a user who enables a tray while FreeCal runs (e.g. the GNOME AppIndicator extension), I want FreeCal to notice the next time I close the window, so that I don't need to restart it.
+- **US-106** As a user, I want to turn background running off, so that closing always quits.
+- **US-107** As a user, I want an option to start FreeCal at login (off by default), so that reminders work from the moment I log in.
+- **US-108** As a KDE Plasma user, I want the tray icon to work natively, so that FreeCal fits my desktop.
+- **US-109** As a user, I want one tray icon showing the most important state (Conflict, then Sync Error, then Offline, then Syncing, then Online and synced), so that I can see FreeCal's health at a glance.
+- **US-110** As a user, I want the tray menu to offer Open FreeCal, Sync now and Quit, so that I can control FreeCal without its window.
+- **US-111** As a user, I want the tray menu to list current Conflicts and Sync Errors, so that I can go straight to them.
+- **US-112** As a user with FreeCal in the background, I want one desktop notification per new Conflict or Sync Error, so that problems don't go unnoticed for days.
 
 ### Distribution
 
-113. As a Debian or Ubuntu user, I want a `.deb` package, so that FreeCal installs natively.
-114. As a Fedora or openSUSE user, I want an `.rpm` package, so that FreeCal installs natively.
-115. As a user of any distribution, I want an AppImage, so that I can run FreeCal without installing it.
-116. As a future Flathub user, I want FreeCal built to use desktop portals for autostart, keyring and file dialogs, so that a sandboxed version works without loss of function.
+- **US-113** As a Debian or Ubuntu user, I want a `.deb` package, so that FreeCal installs natively.
+- **US-114** As a Fedora or openSUSE user, I want an `.rpm` package, so that FreeCal installs natively.
+- **US-115** As a user of any distribution, I want an AppImage, so that I can run FreeCal without installing it.
+- **US-116** As a future Flathub user, I want FreeCal built to use desktop portals for autostart, keyring and file dialogs, so that a sandboxed version works without loss of function.
 
 ### Running and opening files
 
-117. As a user with FreeCal in the tray, I want starting FreeCal again to bring the running FreeCal to the front, so that I never end up with two copies that disagree or sync twice.
-118. As a user, I want to open an `.ics` or `.zip` file with FreeCal, from the command line or with "Open with" (for example an invitation attached to an email), so that I can import it without first starting an import by hand.
-119. As a user opening a file while FreeCal is busy or already showing an import preview, I want the file to wait its turn, so that nothing I started is thrown away and no file is lost.
-120. As a user opening several files at once, I want one import per file, so that each can go into its own Calendar and be undone on its own.
-121. As a user, if FreeCal can't start (its data was written by a newer FreeCal, it is already running and couldn't be reached, or its data is damaged), I want a window that tells me why, so that it doesn't just fail to appear.
+- **US-117** As a user with FreeCal in the tray, I want starting FreeCal again to bring the running FreeCal to the front, so that I never end up with two copies that disagree or sync twice.
+- **US-118** As a user, I want to open an `.ics` or `.zip` file with FreeCal, from the command line or with "Open with" (for example an invitation attached to an email), so that I can import it without first starting an import by hand.
+- **US-119** As a user opening a file while FreeCal is busy or already showing an import preview, I want the file to wait its turn, so that nothing I started is thrown away and no file is lost.
+- **US-120** As a user opening several files at once, I want one import per file, so that each can go into its own Calendar and be undone on its own.
+- **US-121** As a user, if FreeCal can't start (its data was written by a newer FreeCal, it is already running and couldn't be reached, or its data is damaged), I want a window that tells me why, so that it doesn't just fail to appear.
 
 ### Window layout
 
-122. As a user, I want to hide the sidebar and change its width, and have FreeCal remember both, so that the grid gets the room I want for it.
-123. As a user, I want a Calendar's menu in the sidebar to offer "Show only this", which shows that Calendar and hides all others, so that I can focus on one Calendar in one step.
-124. As a user, I want FreeCal to follow my system's light or dark style by default, so that it fits my desktop.
-138. As a user, I want the window to have a minimum size at which the sidebar and the week view still fit, so that shrinking it never breaks the layout.
-143. As a user, I want the window's content to follow smoothly while I drag its size, so that resizing doesn't feel sluggish.
-144. As a user, I want FreeCal to stay usable when my desktop tiles its window smaller than its minimum size, so that I can put it next to another window.
+- **US-122** As a user, I want to hide the sidebar and change its width, and have FreeCal remember both, so that the grid gets the room I want for it.
+- **US-123** As a user, I want a Calendar's menu in the sidebar to offer "Show only this", which shows that Calendar and hides all others, so that I can focus on one Calendar in one step.
+- **US-124** As a user, I want FreeCal to follow my system's light or dark style by default, so that it fits my desktop.
+- **US-138** As a user, I want the window to have a minimum size at which the sidebar and the week view still fit, so that shrinking it never breaks the layout.
+- **US-143** As a user, I want the window's content to follow smoothly while I drag its size, so that resizing doesn't feel sluggish.
+- **US-144** As a user, I want FreeCal to stay usable when my desktop tiles its window smaller than its minimum size, so that I can put it next to another window.
 
 ### Settings
 
-125. As a user, I want a Settings dialog, opened from the main menu or with Ctrl+,, where every change takes effect at once, so that I can adjust FreeCal without a separate save step.
-126. As a user, I want to choose a light or dark look, or follow the system, so that FreeCal looks the way I like.
-127. As a user, I want to override the Display Time Zone, so that I can view my calendar in a time zone other than the system's.
-128. As a user, I want to override the date format region (with an example date for each), to start weeks on Saturday or Sunday, and to switch to a 12-hour clock, so that dates look the way I'm used to even when my system locale doesn't match.
-129. As a user, I want the background running and start-at-login options in the Settings dialog, so that I find them in one place.
-130. As a user, I want an About dialog showing the version, the licence and a link to the source code, so that I know what I'm running.
+- **US-125** As a user, I want a Settings dialog, opened from the main menu or with Ctrl+,, where every change takes effect at once, so that I can adjust FreeCal without a separate save step.
+- **US-126** As a user, I want to choose a light or dark look, or follow the system, so that FreeCal looks the way I like.
+- **US-127** As a user, I want to override the Display Time Zone, so that I can view my calendar in a time zone other than the system's.
+- **US-128** As a user, I want to override the date format region (with an example date for each), to start weeks on Saturday or Sunday, and to switch to a 12-hour clock, so that dates look the way I'm used to even when my system locale doesn't match.
+- **US-129** As a user, I want the background running and start-at-login options in the Settings dialog, so that I find them in one place.
+- **US-130** As a user, I want an About dialog showing the version, the licence and a link to the source code, so that I know what I'm running.
 
 ### Quitting
 
-131. As a user, I want to be warned when I quit with changes not yet sent, so that I know my other devices don't have them yet.
+- **US-131** As a user, I want to be warned when I quit with changes not yet sent, so that I know my other devices don't have them yet.
 
 ### Undo
 
-132. As a user, I want Ctrl+Z to undo my latest action and each further press the one before, during this session, and Ctrl+Shift+Z to redo, so that undo works as everywhere else.
-133. As a user, I want a toast with Undo after each of my changes, lasting a few seconds and staying while I point at or focus it, so that I can take a change back without remembering a shortcut.
-134. As a user, I want to see an Event's History and undo any change in it, so that I can repair one Event without touching others.
-135. As a user, I want to undo a single Event of an import or a sync, so that I don't have to undo all of it.
-136. As a user, I want to be asked before an undo that also undoes later changes, overwrites a change from a server or touches many Events, and not otherwise, so that undo is quick but never surprising.
+- **US-146** As a user, I want Ctrl+Z to undo my latest action and each further press the one before, during this session, and Ctrl+Shift+Z to redo, so that undo works as everywhere else.
+- **US-147** As a user, I want a toast with Undo after each of my changes, lasting a few seconds and staying while I point at or focus it, so that I can take a change back without remembering a shortcut.
+- **US-148** As a user, I want to see an Event's History and undo any change in it, so that I can repair one Event without touching others.
+- **US-149** As a user, I want to undo a single Event of an import or a sync, so that I don't have to undo all of it.
+- **US-150** As a user, I want to be asked before an undo that also undoes later changes, overwrites a change from a server or touches many Events, and not otherwise, so that undo is quick but never surprising.
 
 ## Implementation Decisions
 

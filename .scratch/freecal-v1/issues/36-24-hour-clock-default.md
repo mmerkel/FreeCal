@@ -1,6 +1,6 @@
 # 36: 24-hour clock by default
 
-**What to build:** Times are shown on a 24-hour clock by default, whatever the system locale. All time formatting (the grid's slot labels and Event times, the details, the editor) reads one shared clock value, so that ticket 06's 12-hour option only has to change that value. Spec: user story 55, "Time zones and locale" under Implementation Decisions.
+**What to build:** Times are shown on a 24-hour clock by default, whatever the system locale. All time formatting (the grid's slot labels and Event times, the details, the editor) reads one shared clock value, so that ticket 06's 12-hour option only has to change that value. Spec: US-55, "Time zones and locale" under Implementation Decisions.
 
 **Blocked by:** none
 

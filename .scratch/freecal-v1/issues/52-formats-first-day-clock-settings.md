@@ -1,6 +1,6 @@
 # 52: Date format from the locale, with formats, first day and clock in Settings
 
-**What to build:** The date format follows the system locale, and FullCalendar's own labels use it. The Date & time section of the Settings dialog (ticket 33) lets the user override the format region, start weeks on Saturday or Sunday, and switch to a 12-hour clock. Spec: user stories 55 and 128. Split from ticket 06.
+**What to build:** The date format follows the system locale, and FullCalendar's own labels use it. The Date & time section of the Settings dialog (ticket 33) lets the user override the format region, start weeks on Saturday or Sunday, and switch to a 12-hour clock. Spec: US-55 and US-128. Split from ticket 06.
 
 **Blocked by:** 33, 36, 46
 

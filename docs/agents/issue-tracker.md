@@ -6,6 +6,7 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The spec is `.scratch/<feature-slug>/spec.md`
+- User stories in a spec carry permanent IDs, written as `- **US-N** As a …`: a new story takes the next unused number wherever it goes, and a number is never reused or renumbered. Tickets cite them by ID, with the spec's other sections by heading: `Spec: US-15; "Untrusted content".`
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `**Status:** <label>` line near the top of each issue file (see `triage-labels.md` for the role strings), and blockers as `**Blocked by:** NN, NN` (or `none`)
 - Effort is recorded as an `**Effort:** S|M|L|XL` line after the Status line: S ≈ ½ day, M ≈ 1–2 days, L ≈ 3–5 days, XL ≈ 1–2 weeks of agent-driven work. Size it from the ticket's scope when writing the ticket; re-size it when a ticket is split or grows. A split ticket carries no Effort; its parts do

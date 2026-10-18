@@ -1,6 +1,6 @@
 # 47: Sidebar tab and narrower width limits
 
-**What to build:** A tab in the middle of the sidebar's right edge hides and shows the sidebar with a click and pulls it in or out by dragging. It replaces ticket 31's ☰ button. The width limits get narrower: default 12rem, minimum 8rem, maximum a fixed 20rem. A drag stops at the minimum, and only a pull well past it hides the sidebar. Spec: user story 122. Changes ticket 31.
+**What to build:** A tab in the middle of the sidebar's right edge hides and shows the sidebar with a click and pulls it in or out by dragging. It replaces ticket 31's ☰ button. The width limits get narrower: default 12rem, minimum 8rem, maximum a fixed 20rem. A drag stops at the minimum, and only a pull well past it hides the sidebar. Spec: US-122. Changes ticket 31.
 
 **Blocked by:** none
 

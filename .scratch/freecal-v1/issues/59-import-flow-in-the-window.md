@@ -1,6 +1,6 @@
 # 59: Import flow in the window
 
-**What to build:** The user picks a file and a writable Calendar, sees the preview, chooses once what to do with existing Events, confirms, and can undo the import afterwards. The import runs under the modal "Working…" dialog. Spec: user stories 94–100. Split from ticket 10.
+**What to build:** The user picks a file and a writable Calendar, sees the preview, chooses once what to do with existing Events, confirms, and can undo the import afterwards. The import runs under the modal "Working…" dialog. Spec: US-94–US-100. Split from ticket 10.
 
 **Blocked by:** 58
 

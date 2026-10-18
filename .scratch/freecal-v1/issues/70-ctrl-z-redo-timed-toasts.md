@@ -1,6 +1,6 @@
 # 70: Ctrl+Z, redo and timed toasts
 
-**What to build:** The user undoes their own latest actions with Ctrl+Z and redoes with Ctrl+Shift+Z, and gets an Undo toast after each change. Undos that are dangerous ask first. Spec: user stories 132, 133 and 136; "Change Journal" and "Toasts" under Implementation Decisions.
+**What to build:** The user undoes their own latest actions with Ctrl+Z and redoes with Ctrl+Shift+Z, and gets an Undo toast after each change. Undos that are dangerous ask first. Spec: US-146, US-147 and US-150; "Change Journal" and "Toasts" under Implementation Decisions.
 
 **Blocked by:** 72
 

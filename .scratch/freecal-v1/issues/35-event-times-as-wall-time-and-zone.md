@@ -1,6 +1,6 @@
 # 35: Store Event times as wall time and Event Time Zone
 
-**What to build:** The Local Store keeps a timed Event's start and end as wall-clock times, each with its own Event Time Zone, as decided in ADR 0007. UTC instants are derived from them for range queries and ordering, and recomputed when FreeCal ships new time zone rules. All-day Events stay dates. This replaces ticket 03's storage, where the UTC instant was the truth. Nothing changes in the UI. Spec: user stories 52–54, "Time zones and locale" under Implementation Decisions.
+**What to build:** The Local Store keeps a timed Event's start and end as wall-clock times, each with its own Event Time Zone, as decided in ADR 0007. UTC instants are derived from them for range queries and ordering, and recomputed when FreeCal ships new time zone rules. All-day Events stay dates. This replaces ticket 03's storage, where the UTC instant was the truth. Nothing changes in the UI. Spec: US-52–US-54, "Time zones and locale" under Implementation Decisions.
 
 **Blocked by:** 03
 

@@ -1,6 +1,6 @@
 # 32: Visual style: shared base and restyled sidebar
 
-**What to build:** FreeCal gets one neutral, flat look (in the style of Notion Calendar and shadcn/ui) that follows the system's light or dark style, built as a shared base the whole window uses. The sidebar is restyled with it: colour dots instead of checkboxes, a ⋮ menu per Calendar row with a new "Show only this", and a modal dialog to confirm deleting a Calendar. Spec: user stories 14, 123, 124 and "Visual style" under Frontend.
+**What to build:** FreeCal gets one neutral, flat look (in the style of Notion Calendar and shadcn/ui) that follows the system's light or dark style, built as a shared base the whole window uses. The sidebar is restyled with it: colour dots instead of checkboxes, a ⋮ menu per Calendar row with a new "Show only this", and a modal dialog to confirm deleting a Calendar. Spec: US-14, US-123, US-124 and "Visual style" under Frontend.
 
 **Blocked by:** 02
 

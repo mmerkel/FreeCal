@@ -1,6 +1,6 @@
 # 18: Offline editing and replay
 
-**What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: user story 131 and "Quitting" under Frontend.
+**What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: US-131 and "Quitting" under Frontend.
 
 **Blocked by:** 13, 16, 17, 33
 

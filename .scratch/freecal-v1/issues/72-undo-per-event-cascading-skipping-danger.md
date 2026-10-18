@@ -1,6 +1,6 @@
 # 72: Undo per Event: cascading, skipping and danger
 
-**What to build:** Undo goes per Event as ADR 0009 describes, on top of ticket 69's Change Journal module: an Event changed since an entry has its later entries undone first, a unit can be undone one Event at a time, Events that can't be undone are skipped with a reason, and the core says whether an undo is benign or dangerous. Spec: user stories 81, 82 and 135; "Change Journal" under Implementation Decisions.
+**What to build:** Undo goes per Event as ADR 0009 describes, on top of ticket 69's Change Journal module: an Event changed since an entry has its later entries undone first, a unit can be undone one Event at a time, Events that can't be undone are skipped with a reason, and the core says whether an undo is benign or dangerous. Spec: US-81, US-82 and US-149; "Change Journal" under Implementation Decisions.
 
 **Blocked by:** 69
 

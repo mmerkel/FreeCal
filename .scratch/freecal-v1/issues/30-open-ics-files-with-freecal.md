@@ -1,6 +1,6 @@
 # 30: Open .ics and .zip files with FreeCal
 
-**What to build:** The user can open an `.ics` or `.zip` file with FreeCal, from the command line or through "Open with" (for example an invitation attached to an email). Whether FreeCal was running or not, the file goes through ticket 59's import flow as one undoable import. Spec: user stories 118–120, "Opening files" under Import/export, the "Waiting imports changed" Signal and the "File hand-off" desktop interface.
+**What to build:** The user can open an `.ics` or `.zip` file with FreeCal, from the command line or through "Open with" (for example an invitation attached to an email). Whether FreeCal was running or not, the file goes through ticket 59's import flow as one undoable import. Spec: US-118–US-120, "Opening files" under Import/export, the "Waiting imports changed" Signal and the "File hand-off" desktop interface.
 
 **Blocked by:** 29, 59
 

@@ -1,6 +1,6 @@
 # 57: Read .ics and .zip files into an import preview
 
-**What to build:** The core reads an `.ics` file, or a `.zip` of `.ics` files such as a Google Takeout export, and previews an import into a chosen Calendar: how many Events are new, how many already exist (same UID), and how many floating times were pinned to which zone. Nothing is stored yet; running the import is ticket 58 and the window's flow is ticket 59. Spec: user stories 94–96. Split from ticket 10.
+**What to build:** The core reads an `.ics` file, or a `.zip` of `.ics` files such as a Google Takeout export, and previews an import into a chosen Calendar: how many Events are new, how many already exist (same UID), and how many floating times were pinned to which zone. Nothing is stored yet; running the import is ticket 58 and the window's flow is ticket 59. Spec: US-94–US-96. Split from ticket 10.
 
 **Blocked by:** 03
 

@@ -1,6 +1,6 @@
 # 56: Read-only CalDAV Calendars
 
-**What to build:** Calendars the server doesn't allow changing are Read-only Calendars, and before 1.0 every newly added CalDAV Calendar starts read-only. A lock shows in the sidebar, the Event details say the Event is read-only, and trying to drag or resize it explains why. Spec: user stories 16, 18, 30 and 32. Split from ticket 14.
+**What to build:** Calendars the server doesn't allow changing are Read-only Calendars, and before 1.0 every newly added CalDAV Calendar starts read-only. A lock shows in the sidebar, the Event details say the Event is read-only, and trying to drag or resize it explains why. Spec: US-16, US-18, US-30 and US-32. Split from ticket 14.
 
 **Blocked by:** 54, 55
 

@@ -1,6 +1,6 @@
 # 37: Event details with icon buttons, ✕ on dialogs, safer delete and close
 
-**What to build:** The Event details get Google-style icon buttons at the top right: Edit, Delete and ✕. Every plain dialog gets a ✕. Deleting an Event asks first, and closing the editor after changing something asks "Discard changes?". Spec: user stories 132–134, "Dialog close button", "Event details" and "Event editor" under Frontend.
+**What to build:** The Event details get Google-style icon buttons at the top right: Edit, Delete and ✕. Every plain dialog gets a ✕. Deleting an Event asks first, and closing the editor after changing something asks "Discard changes?". Spec: US-132–US-134, "Dialog close button", "Event details" and "Event editor" under Frontend.
 
 **Blocked by:** none
 

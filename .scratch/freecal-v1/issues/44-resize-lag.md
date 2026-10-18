@@ -1,6 +1,6 @@
 # 44: Diagnose the lag when resizing the window
 
-**What to build:** While the user drags the window's size, the content follows a little sluggishly, in both debug and release builds (X11, KDE). Find the cause by measuring, then fix it. Use the `diagnosing-bugs` skill. Spec: user story 143.
+**What to build:** While the user drags the window's size, the content follows a little sluggishly, in both debug and release builds (X11, KDE). Find the cause by measuring, then fix it. Use the `diagnosing-bugs` skill. Spec: US-143.
 
 **Blocked by:** none
 

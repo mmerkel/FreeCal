@@ -1,6 +1,6 @@
 # 33: Settings dialog, main menu and appearance
 
-**What to build:** A ⋮ main menu at the right end of the toolbar offers Settings…, About FreeCal and Quit. Settings opens a modal dialog where every change takes effect at once and is kept in the Local Store. Its first setting is Appearance: System, Light or Dark. Tickets 06 and 13 add their settings to the same dialog. Spec: user stories 125, 126 and 130, "App state and settings" in the core application interface, "Startup failures" and "Settings" under Frontend.
+**What to build:** A ⋮ main menu at the right end of the toolbar offers Settings…, About FreeCal and Quit. Settings opens a modal dialog where every change takes effect at once and is kept in the Local Store. Its first setting is Appearance: System, Light or Dark. Tickets 06 and 13 add their settings to the same dialog. Spec: US-125, US-126 and US-130, "App state and settings" in the core application interface, "Startup failures" and "Settings" under Frontend.
 
 **Blocked by:** 04, 32
 

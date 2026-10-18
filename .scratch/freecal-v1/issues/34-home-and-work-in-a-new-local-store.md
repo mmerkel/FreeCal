@@ -1,6 +1,6 @@
 # 34: Home and Work in a new Local Store, an empty hint and row tooltips
 
-**What to build:** A new Local Store starts with two Local Calendars, "Home" (shown) and "Work" (hidden), so a new user sees a filled dot and a ring side by side and has a Calendar to put Events in from the first launch. When the Local Account has no Calendars, its section shows a hint pointing to "+". Each Calendar row's tooltip says whether it is shown and what a click does. The Local Store allows only one Local Account. Spec: user stories 1–3 and 132, "Local Store" under Implementation Decisions and "Sidebar" under Frontend.
+**What to build:** A new Local Store starts with two Local Calendars, "Home" (shown) and "Work" (hidden), so a new user sees a filled dot and a ring side by side and has a Calendar to put Events in from the first launch. When the Local Account has no Calendars, its section shows a hint pointing to "+". Each Calendar row's tooltip says whether it is shown and what a click does. The Local Store allows only one Local Account. Spec: US-1–US-3 and US-145, "Local Store" under Implementation Decisions and "Sidebar" under Frontend.
 
 **Blocked by:** 02, 32
 

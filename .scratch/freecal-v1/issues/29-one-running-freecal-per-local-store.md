@@ -1,6 +1,6 @@
 # 29: One running FreeCal per Local Store
 
-**What to build:** Only one FreeCal runs per Local Store (ADR 0005). Starting FreeCal again brings the running one to the front and the second launch exits, passing on its command-line arguments. If the core can't open its Local Store for any reason, the window shows a translated startup error screen instead of FreeCal failing to appear. Spec: user stories 117 and 121, and "One running FreeCal" and "Startup failures" under Implementation Decisions.
+**What to build:** Only one FreeCal runs per Local Store (ADR 0005). Starting FreeCal again brings the running one to the front and the second launch exits, passing on its command-line arguments. If the core can't open its Local Store for any reason, the window shows a translated startup error screen instead of FreeCal failing to appear. Spec: US-117 and US-121, and "One running FreeCal" and "Startup failures" under Implementation Decisions.
 
 **Blocked by:** 01
 

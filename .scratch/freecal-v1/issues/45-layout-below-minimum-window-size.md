@@ -1,6 +1,6 @@
 # 45: Layout below the minimum window size
 
-**What to build:** When a tiling window manager makes the window smaller than its minimum size (ticket 39), FreeCal currently keeps its 880×560 layout and the page scrolls. Instead, the layout should adapt so that FreeCal stays usable at about half of a 1366 px screen (≈ 680 px) and below. Start by brainstorming the options with the user (use the `grilling` skill), record the chosen ones here and in the spec, and then build them. Spec: user story 144, "Window size" under Frontend.
+**What to build:** When a tiling window manager makes the window smaller than its minimum size (ticket 39), FreeCal currently keeps its 880×560 layout and the page scrolls. Instead, the layout should adapt so that FreeCal stays usable at about half of a 1366 px screen (≈ 680 px) and below. Start by brainstorming the options with the user (use the `grilling` skill), record the chosen ones here and in the spec, and then build them. Spec: US-144, "Window size" under Frontend.
 
 **Blocked by:** 04, 31
 

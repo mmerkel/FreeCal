@@ -1,6 +1,6 @@
 # 78: Add and remove a CalDAV Account's Calendars in the core
 
-**What to build:** The core can add an Available Calendar of a CalDAV Account as a Calendar, and remove it again. Removing deletes only the local copy and makes it an Available Calendar again. Pulling the added Calendar's Events is ticket 54. Spec: user story 15. Split from ticket 53.
+**What to build:** The core can add an Available Calendar of a CalDAV Account as a Calendar, and remove it again. Removing deletes only the local copy and makes it an Available Calendar again. Pulling the added Calendar's Events is ticket 54. Spec: US-15. Split from ticket 53.
 
 **Blocked by:** 77
 

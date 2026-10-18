@@ -1,6 +1,6 @@
 # 43: Date field with typed entry and a month popover
 
-**What to build:** The editor's start and end dates use a field of FreeCal's own instead of the native `type="date"` input, whose GTK popover draws a grey band over the field and which shows US order whatever the locale. The user can type a date in their date format or pick it from a small month calendar that shows the Event's range. Spec: user story 142, "Date field" under Frontend.
+**What to build:** The editor's start and end dates use a field of FreeCal's own instead of the native `type="date"` input, whose GTK popover draws a grey band over the field and which shows US order whatever the locale. The user can type a date in their date format or pick it from a small month calendar that shows the Event's range. Spec: US-142, "Date field" under Frontend.
 
 **Blocked by:** 38, 46
 

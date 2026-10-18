@@ -1,6 +1,6 @@
 # 51: Override the Display Time Zone in Settings
 
-**What to build:** The Date & time section of the Settings dialog (ticket 33) lets the user view their calendar in a time zone other than the system's. Spec: user story 127. Split from ticket 06.
+**What to build:** The Date & time section of the Settings dialog (ticket 33) lets the user view their calendar in a time zone other than the system's. Spec: US-127. Split from ticket 06.
 
 **Blocked by:** 49, 50
 

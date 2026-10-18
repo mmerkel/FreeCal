@@ -1,6 +1,6 @@
 # 06: Time zones and locale
 
-**What to build:** Events are shown in the Display Time Zone (the system time zone), which is shown in the UI. New Events get it by default, and the editor lets the user pick a different time zone for an Event. The date format follows the system locale; weeks start on Monday (ticket 46) and the clock is 24-hour (ticket 36) by default. The Date & time section of the Settings dialog (ticket 33) lets the user override the Display Time Zone, the format region, first day of week and the clock. Spec: user stories 50–55, 127 and 128.
+**What to build:** Events are shown in the Display Time Zone (the system time zone), which is shown in the UI. New Events get it by default, and the editor lets the user pick a different time zone for an Event. The date format follows the system locale; weeks start on Monday (ticket 46) and the clock is 24-hour (ticket 36) by default. The Date & time section of the Settings dialog (ticket 33) lets the user override the Display Time Zone, the format region, first day of week and the clock. Spec: US-50–US-55, US-127 and US-128.
 
 **Blocked by:** 03, 33, 35, 36, 46
 

@@ -1,6 +1,6 @@
 # 50: Event Time Zone in the editor
 
-**What to build:** New Events get the Display Time Zone, and the editor lets the user choose a different time zone for an Event, so "9:00 New York" can be entered as such. Events created in other time zones appear at the correct local time. An open editor keeps its draft, including the draft's own time zone, when the Display Time Zone changes. Spec: user stories 52–54. Split from ticket 06.
+**What to build:** New Events get the Display Time Zone, and the editor lets the user choose a different time zone for an Event, so "9:00 New York" can be entered as such. Events created in other time zones appear at the correct local time. An open editor keeps its draft, including the draft's own time zone, when the Display Time Zone changes. Spec: US-52–US-54. Split from ticket 06.
 
 **Blocked by:** 49
 

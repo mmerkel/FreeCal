@@ -1,6 +1,6 @@
 # 42: Hand cursor over Events
 
-**What to build:** The pointer is a hand over the whole of an Event in the grid, for every Event, since all of them open their details. Text in Event chips can't be selected, so the text cursor never shows. Spec: user story 141, "Event chips stay sparse" under Frontend.
+**What to build:** The pointer is a hand over the whole of an Event in the grid, for every Event, since all of them open their details. Text in Event chips can't be selected, so the text cursor never shows. Spec: US-141, "Event chips stay sparse" under Frontend.
 
 **Blocked by:** none
 

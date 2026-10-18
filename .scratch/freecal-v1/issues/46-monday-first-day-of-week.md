@@ -1,6 +1,6 @@
 # 46: Weeks start on Monday by default
 
-**What to build:** Weeks start on Monday by default, whatever the system locale. Everything that lays out weeks (the grid's month and week views, the date field's popover) reads one shared first-day-of-week value, so that ticket 06's Settings option only has to change that value. The value only affects display, never repeat rules. Spec: user story 55, "Time zones and locale" under Implementation Decisions.
+**What to build:** Weeks start on Monday by default, whatever the system locale. Everything that lays out weeks (the grid's month and week views, the date field's popover) reads one shared first-day-of-week value, so that ticket 06's Settings option only has to change that value. The value only affects display, never repeat rules. Spec: US-55, "Time zones and locale" under Implementation Decisions.
 
 **Blocked by:** none
 

@@ -1,6 +1,6 @@
 # 38: Time field with typed entry and a time list
 
-**What to build:** The editor's start and end times use a combobox of FreeCal's own instead of the native `type="time"` input: the user can type a time freely or pick it from a list in 15-minute steps, `a` and `p` set AM or PM, and changing the start moves the end with it. Spec: user stories 135–137, "Time field" and "Event editor" under Frontend.
+**What to build:** The editor's start and end times use a combobox of FreeCal's own instead of the native `type="time"` input: the user can type a time freely or pick it from a list in 15-minute steps, `a` and `p` set AM or PM, and changing the start moves the end with it. Spec: US-135–US-137, "Time field" and "Event editor" under Frontend.
 
 **Blocked by:** 36
 

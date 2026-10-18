@@ -1,6 +1,6 @@
 # 79: Remove a CalDAV Account, and several side by side
 
-**What to build:** The core can remove a whole CalDAV Account, with its Calendars and its credentials, and several CalDAV Accounts can be connected side by side. Spec: user story 15. Split from ticket 53.
+**What to build:** The core can remove a whole CalDAV Account, with its Calendars and its credentials, and several CalDAV Accounts can be connected side by side. Spec: US-15. Split from ticket 53.
 
 **Blocked by:** 78
 

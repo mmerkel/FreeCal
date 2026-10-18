@@ -1,6 +1,6 @@
 # 53: CalDAV Accounts and Available Calendars in the core
 
-**What to build:** The core can add a CalDAV Account from a server URL, username and password, discover its Calendars as Available Calendars, add or remove Calendars of it, and remove the whole Account. Credentials live in the system keyring. This ticket is core only and tested against a real Radicale server; pulling Events is ticket 54 and the UI is ticket 55. Spec: user story 15. Split from ticket 14.
+**What to build:** The core can add a CalDAV Account from a server URL, username and password, discover its Calendars as Available Calendars, add or remove Calendars of it, and remove the whole Account. Credentials live in the system keyring. This ticket is core only and tested against a real Radicale server; pulling Events is ticket 54 and the UI is ticket 55. Spec: US-15. Split from ticket 14.
 
 **Blocked by:** 02, 03
 

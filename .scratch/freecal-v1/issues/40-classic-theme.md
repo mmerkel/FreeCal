@@ -1,6 +1,6 @@
 # 40: The `classic` FullCalendar theme, with FreeCal's colours
 
-**What to build:** The grid switches from FullCalendar's `breezy` theme to `classic`. In the month view, `classic` draws each timed Event as a dot in its Calendar's exact colour, then the time, then the title, as in Google Calendar; `breezy` draws no dot and puts the time at the end. FreeCal adapts `classic` to its own look: readable text on every Calendar colour, the window's light and dark colours instead of the theme's, and "…" on titles that don't fit. Spec: user story 139, "Visual style" and "Event chips stay sparse" under Frontend.
+**What to build:** The grid switches from FullCalendar's `breezy` theme to `classic`. In the month view, `classic` draws each timed Event as a dot in its Calendar's exact colour, then the time, then the title, as in Google Calendar; `breezy` draws no dot and puts the time at the end. FreeCal adapts `classic` to its own look: readable text on every Calendar colour, the window's light and dark colours instead of the theme's, and "…" on titles that don't fit. Spec: US-139, "Visual style" and "Event chips stay sparse" under Frontend.
 
 **Blocked by:** none
 

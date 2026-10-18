@@ -1,6 +1,6 @@
 # 69: Change Journal for every local change
 
-**What to build:** Every change FreeCal makes to an Event is a Change Journal entry, in any Calendar, Local Calendars included, and every change's unit can be undone and redone whole. One core module, the Change Journal module, is the only writer of Events, so no change can skip the Journal (ADR 0009). This replaces ticket 58's import-only Journal; the undo rules that go per Event are ticket 72. Spec: user stories 81, 82 and 99; "Change Journal" under Implementation Decisions.
+**What to build:** Every change FreeCal makes to an Event is a Change Journal entry, in any Calendar, Local Calendars included, and every change's unit can be undone and redone whole. One core module, the Change Journal module, is the only writer of Events, so no change can skip the Journal (ADR 0009). This replaces ticket 58's import-only Journal; the undo rules that go per Event are ticket 72. Spec: US-81, US-82 and US-99; "Change Journal" under Implementation Decisions.
 
 **Blocked by:** none
 

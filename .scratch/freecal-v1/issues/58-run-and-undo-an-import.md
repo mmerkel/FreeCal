@@ -1,6 +1,6 @@
 # 58: Run an import as one undoable unit
 
-**What to build:** The core runs a previewed import into a writable Calendar, applying the user's one update / skip / copy choice for existing UIDs, and records it as one Change Journal unit so the whole import can be undone in one step, including imports into Local Calendars. Spec: user stories 97 and 99. Split from ticket 10.
+**What to build:** The core runs a previewed import into a writable Calendar, applying the user's one update / skip / copy choice for existing UIDs, and records it as one Change Journal unit so the whole import can be undone in one step, including imports into Local Calendars. Spec: US-97 and US-99. Split from ticket 10.
 
 **Blocked by:** 57
 

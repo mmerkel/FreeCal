@@ -1,6 +1,6 @@
 # 13: Background running, tray basics and autostart
 
-**What to build:** Where a system tray exists, closing the window keeps FreeCal running in the background (on by default); without a tray, closing quits. A tray enabled while FreeCal runs is noticed at the next close. The user can turn background running off and turn start-at-login on. The tray menu offers Open FreeCal and Quit. Both options live in the Background section of the Settings dialog (ticket 33). Spec: user stories 103–108 and 129.
+**What to build:** Where a system tray exists, closing the window keeps FreeCal running in the background (on by default); without a tray, closing quits. A tray enabled while FreeCal runs is noticed at the next close. The user can turn background running off and turn start-at-login on. The tray menu offers Open FreeCal and Quit. Both options live in the Background section of the Settings dialog (ticket 33). Spec: US-103–US-108 and US-129.
 
 **Blocked by:** 01, 33
 

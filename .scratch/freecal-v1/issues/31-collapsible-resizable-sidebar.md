@@ -1,6 +1,6 @@
 # 31: Collapsible, resizable sidebar
 
-**What to build:** The user can hide the sidebar completely and show it again, with a button at the left end of the toolbar or with F9, and can change its width by dragging its right edge. FreeCal remembers both across launches. Spec: user story 122, "App state and settings" in the core application interface.
+**What to build:** The user can hide the sidebar completely and show it again, with a button at the left end of the toolbar or with F9, and can change its width by dragging its right edge. FreeCal remembers both across launches. Spec: US-122, "App state and settings" in the core application interface.
 
 **Blocked by:** 02, 04, 32
 

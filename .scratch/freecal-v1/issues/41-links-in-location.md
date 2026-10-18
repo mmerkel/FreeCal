@@ -1,6 +1,6 @@
 # 41: Clickable links in an Event's location
 
-**What to build:** Links in an Event's location become clickable in the details, exactly like those in the description: the core turns the location into text and link pieces, and the details draw them with the description's link display. Spec: user story 140, "Links" under "Untrusted content".
+**What to build:** Links in an Event's location become clickable in the details, exactly like those in the description: the core turns the location into text and link pieces, and the details draw them with the description's link display. Spec: US-140, "Links" under "Untrusted content".
 
 **Blocked by:** none
 

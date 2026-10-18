@@ -1,6 +1,6 @@
 # 71: A Takeout `.zip` into several Calendars
 
-**What to build:** Importing a `.zip` gives each `.ics` in it its own target Calendar, which can be a new Local Calendar, so a Google Takeout export migrates several Calendars at once. Spec: user story 95; "Import/export" under Implementation Decisions.
+**What to build:** Importing a `.zip` gives each `.ics` in it its own target Calendar, which can be a new Local Calendar, so a Google Takeout export migrates several Calendars at once. Spec: US-95; "Import/export" under Implementation Decisions.
 
 **Blocked by:** 69
 
