@@ -171,6 +171,16 @@ impl Radicale {
         assert_eq!(status, 201, "put an Event on Radicale");
     }
 
+    /// The ETag and the iCalendar object of the Event `name` in a Calendar
+    /// of `user`, as the server serves it.
+    pub fn get_event(&self, user: &User, calendar_url: &str, name: &str) -> (String, String) {
+        let url = format!("{calendar_url}{name}.ics");
+        let mut response = self.send(user, "GET", &url, "text/plain", Vec::new());
+        assert_eq!(response.status(), 200, "get an Event from Radicale");
+        let etag = response.headers()["ETag"].to_str().unwrap().to_owned();
+        (etag, response.body_mut().read_to_string().unwrap())
+    }
+
     /// Deletes a Calendar of `user` on the server.
     pub fn delete_calendar(&self, user: &User, url: &str) {
         let status = self.request(user, "DELETE", url, XML, Vec::new());
@@ -185,6 +195,19 @@ impl Radicale {
         content_type: &str,
         body: Vec<u8>,
     ) -> u16 {
+        self.send(user, method, url, content_type, body)
+            .status()
+            .as_u16()
+    }
+
+    fn send(
+        &self,
+        user: &User,
+        method: &str,
+        url: &str,
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> ureq::http::Response<ureq::Body> {
         let credentials = base64::engine::general_purpose::STANDARD
             .encode(format!("{}:{}", user.name, user.password));
         let agent = ureq::Agent::config_builder()
@@ -199,7 +222,7 @@ impl Radicale {
             .header("Content-Type", content_type)
             .body(body)
             .unwrap();
-        agent.run(request).unwrap().status().as_u16()
+        agent.run(request).unwrap()
     }
 }
 

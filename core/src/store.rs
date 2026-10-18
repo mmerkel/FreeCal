@@ -169,6 +169,18 @@ const MIGRATIONS: &[Migration] = &[
     CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
     ",
     ),
+    // Ticket 81: a server Event's original server data (ADR 0004), which the
+    // Change Journal's entries hold too, and its hashes cover.
+    Migration::Sql(
+        "
+    ALTER TABLE event ADD COLUMN server_href TEXT;
+    ALTER TABLE event ADD COLUMN server_etag TEXT;
+    ALTER TABLE event ADD COLUMN server_data TEXT;
+    ALTER TABLE journal_entry ADD COLUMN server_href TEXT;
+    ALTER TABLE journal_entry ADD COLUMN server_etag TEXT;
+    ALTER TABLE journal_entry ADD COLUMN server_data TEXT;
+    ",
+    ),
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether
@@ -263,7 +275,7 @@ fn event_times_as_wall_time(tx: &Transaction) -> Result<()> {
 /// cancelled Occurrences; a changed Occurrence, an Exception, is an Event of
 /// its own with the UID of its Recurring Event and the recurrence ID of the
 /// Occurrence it changed. The Change Journal's entries hold them too, and its
-/// hashes, which now cover them, are made again.
+/// hashes, which now cover them, are made again once every migration ran.
 fn recurring_events(tx: &Transaction) -> Result<()> {
     tx.execute_batch(
         "
@@ -276,7 +288,7 @@ fn recurring_events(tx: &Transaction) -> Result<()> {
         UPDATE journal_entry SET exdates = '' WHERE calendar_id IS NOT NULL;
         ",
     )?;
-    crate::journal::rehash(tx, 1)
+    Ok(())
 }
 
 /// The time zone rules FreeCal was built with, which the derived UTC columns
@@ -334,7 +346,8 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
 pub(crate) const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
-     description, description_html, zone_pinned, rrule, exdates, recurrence_id";
+     description, description_html, zone_pinned, rrule, exdates, recurrence_id, server_href, \
+     server_etag, server_data";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
 pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
@@ -348,7 +361,19 @@ pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFie
         rule: row.get(first + 10)?,
         exdates: row.get(first + 11)?,
         recurrence_id: row.get(first + 12)?,
+        server_data: original_server_data(row, first + 13)?,
     })
+}
+
+/// Reads an Event's `server_href, server_etag, server_data` starting at
+/// column `first`: none unless it has an address and data.
+fn original_server_data(row: &Row, first: usize) -> rusqlite::Result<Option<OriginalServerData>> {
+    let href: Option<String> = row.get(first)?;
+    let etag = row.get(first + 1)?;
+    let data: Option<String> = row.get(first + 2)?;
+    Ok(href
+        .zip(data)
+        .map(|(href, data)| OriginalServerData { href, etag, data }))
 }
 
 /// Reads an Event's `all_day, start_at, end_at, start_zone, end_zone`
@@ -388,6 +413,23 @@ pub struct EventFields {
     pub exdates: String,
     /// For an Exception, the recurrence ID of the Occurrence it changed.
     pub recurrence_id: Option<String>,
+    /// For an Event pulled from a server, what the server sent for it. An
+    /// Exception has none: its Recurring Event's holds it.
+    pub server_data: Option<OriginalServerData>,
+}
+
+/// An Event's original server data (ADR 0004): the object a server holds
+/// it in, as received, so that fields FreeCal doesn't understand survive
+/// writes, and Change Journal entries restore exact versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginalServerData {
+    /// The object's address on the server, as the server gave it.
+    pub href: String,
+    /// The object's ETag, which names its version; none if the server gave
+    /// none.
+    pub etag: Option<String>,
+    /// The object as received, such as a CalDAV iCalendar object.
+    pub data: String,
 }
 
 impl EventFields {
@@ -827,6 +869,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     }
     if applied == 0 {
         add_starting_calendars(&tx)?;
+    } else if applied < known {
+        // After every migration, as a migration that adds a field Event
+        // hashes cover adds it to the Change Journal's entries too.
+        crate::journal::rehash(&tx)?;
     }
     recompute_instants(&tx)?;
     tx.commit()?;

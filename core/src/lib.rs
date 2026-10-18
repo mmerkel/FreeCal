@@ -48,6 +48,7 @@ pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
+pub use store::OriginalServerData;
 pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
@@ -473,6 +474,13 @@ impl Core {
         self.to_event(id, stored)
     }
 
+    /// What the server sent for an Event pulled from it, its original
+    /// server data (ADR 0004); none for an Event that didn't come from a
+    /// server, and for an Exception, whose Recurring Event holds it.
+    pub fn original_server_data(&self, id: EventId) -> Result<Option<OriginalServerData>> {
+        Ok(self.store().find_event(id)?.fields.server_data)
+    }
+
     /// Creates an Event in a writable Calendar, a Recurring Event when the
     /// draft has a repeat rule.
     pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
@@ -493,6 +501,7 @@ impl Core {
                 rule,
                 exdates: String::new(),
                 recurrence_id: None,
+                server_data: None,
             },
         };
         let created = self.record(Origin::UserAction, |unit| {

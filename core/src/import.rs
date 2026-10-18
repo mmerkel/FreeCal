@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::event::{StoredWhen, instant, wall_text};
 use crate::journal::{Unit, UnitId};
 use crate::recurrence;
-use crate::store::{EventFields, StoredEvent};
+use crate::store::{EventFields, OriginalServerData, StoredEvent};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -150,6 +150,9 @@ pub struct ImportedEvent {
     pub recurrence_id: Option<String>,
     /// A Recurring Event's Exceptions, which share its UID.
     pub exceptions: Vec<ImportedEvent>,
+    /// For an Event from a server, the object the server holds it in; an
+    /// Exception has none, as its Recurring Event's holds it.
+    pub server_data: Option<OriginalServerData>,
 }
 
 impl ImportedEvent {
@@ -191,6 +194,7 @@ impl ImportedEvent {
             rule: self.rule.clone(),
             exdates: self.exdates.clone(),
             recurrence_id: self.recurrence_id.clone(),
+            server_data: self.server_data.clone(),
         }
     }
 
@@ -346,15 +350,18 @@ pub(crate) fn preview(
     })
 }
 
-/// The Events of iCalendar objects as a server holds them, each given by a
-/// name for errors and its text, read as [`preview`] reads files. Floating
-/// times are pinned to `zone`. An object FreeCal can't read is left out.
-pub(crate) fn read_server_events(objects: &[(String, String)], zone: Tz) -> Vec<ImportedEvent> {
-    assemble(
-        objects
-            .iter()
-            .filter_map(|(name, text)| read_events(name, text.as_bytes(), zone).ok()),
-    )
+/// The Events of iCalendar objects as a server holds them, read as
+/// [`preview`] reads files, each with the object as its original server
+/// data. Floating times are pinned to `zone`. An object FreeCal can't read
+/// is left out.
+pub(crate) fn read_server_events(objects: &[OriginalServerData], zone: Tz) -> Vec<ImportedEvent> {
+    assemble(objects.iter().filter_map(|object| {
+        let mut read = read_events(&object.href, object.data.as_bytes(), zone).ok()?;
+        for event in &mut read.events {
+            event.server_data = Some(object.clone());
+        }
+        Some(read)
+    }))
 }
 
 /// The Events of `.ics` files read together, in order and each UID once.
@@ -510,6 +517,7 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                 exdates,
                 recurrence_id: None,
                 exceptions: Vec::new(),
+                server_data: None,
             };
             match original {
                 None => read.events.push(imported),

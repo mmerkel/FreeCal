@@ -14,7 +14,10 @@ use quick_xml::{NsReader, Writer};
 use url::Url;
 
 use crate::remote::FIRST_SYNC_PAGE;
-use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, Result, import};
+use crate::{
+    AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, OriginalServerData, Result,
+    import,
+};
 
 const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
@@ -87,6 +90,12 @@ const CALENDAR_COLOR: Property = Property {
 const CALENDAR_TIMEZONE: Property = Property {
     namespace: CALDAV,
     name: "calendar-timezone",
+};
+
+/// The ETag of a member, which names its version.
+const GETETAG: Property = Property {
+    namespace: DAV,
+    name: "getetag",
 };
 
 /// An Event's iCalendar object, as the server holds it (RFC 4791).
@@ -221,13 +230,14 @@ impl Client {
                 Depth::One,
                 calendar_multiget_body(hrefs),
             )?;
-            let objects: Vec<(String, String)> = answer
+            let objects: Vec<OriginalServerData> = answer
                 .children(DAV, "response")
                 .filter_map(|response| {
-                    Some((
-                        response.child(DAV, "href")?.text.clone(),
-                        response.found(CALENDAR_DATA)?.text.clone(),
-                    ))
+                    Some(OriginalServerData {
+                        href: response.child(DAV, "href")?.text.clone(),
+                        etag: response.found(GETETAG).map(|etag| etag.text.clone()),
+                        data: response.found(CALENDAR_DATA)?.text.clone(),
+                    })
                 })
                 .collect();
             page(import::read_server_events(&objects, zone))?;
@@ -531,6 +541,7 @@ fn calendar_multiget_body(hrefs: &[String]) -> Vec<u8> {
             writer
                 .create_element("D:prop")
                 .write_inner_content(|writer| {
+                    writer.create_element("D:getetag").write_empty()?;
                     writer.create_element("C:calendar-data").write_empty()?;
                     Ok(())
                 })?;
@@ -831,6 +842,25 @@ mod tests {
         assert_eq!(last_segment(&url("https://x.org/")), "https://x.org/");
     }
 
+    /// An Event's original server data is kept as received (ADR 0004),
+    /// line breaks included.
+    #[test]
+    fn calendar_data_keeps_its_line_breaks_and_references() {
+        let answer = parse(
+            "<multistatus xmlns=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\
+             <response><href>/a.ics</href><propstat><prop>\
+             <C:calendar-data>BEGIN:VCALENDAR\r\nX-A:&lt;b&gt;&#13;\nEND:VCALENDAR\r\n\
+             </C:calendar-data></prop><status>HTTP/1.1 200 OK</status></propstat>\
+             </response></multistatus>",
+        )
+        .unwrap();
+
+        assert_eq!(
+            answer.property(CALENDAR_DATA).unwrap().text,
+            "BEGIN:VCALENDAR\r\nX-A:<b>\r\nEND:VCALENDAR\r\n"
+        );
+    }
+
     #[test]
     fn a_calendar_multiget_body_names_each_href_as_text() {
         let hrefs = ["/alice/work/a.ics".to_owned(), "/x/<b>&amp;.ics".to_owned()];
@@ -840,7 +870,8 @@ mod tests {
         let root = parse(&body).unwrap();
         assert!(root.is(CALDAV, "calendar-multiget"));
         let prop = root.child(DAV, "prop").unwrap();
-        assert!(prop.children[0].is(CALDAV, "calendar-data"));
+        assert!(prop.children[0].is(DAV, "getetag"));
+        assert!(prop.children[1].is(CALDAV, "calendar-data"));
         let named: Vec<_> = root
             .children(DAV, "href")
             .map(|href| href.text.as_str())

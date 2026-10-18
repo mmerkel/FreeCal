@@ -3,10 +3,11 @@ mod support;
 use std::sync::{Arc, Mutex, Weak};
 
 use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Core, FIRST_SYNC_PAGE, Piece, Signal, link_allowed,
+    AccountId, CalDavLogin, CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal,
+    link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, all_day, date, event, ics, timed};
+use support::{Harness, all_day, date, draft, event, ics, timed};
 
 fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
     core.add_caldav_account(&CalDavLogin {
@@ -119,9 +120,134 @@ fn a_recurring_event_comes_with_its_exceptions() {
     let core = harness.open_without_starting_calendars();
     let account = add_account(&core, radicale, &user);
 
-    let added = core.add_calendars(account, &[work]).unwrap();
+    let added = core
+        .add_calendars(account, std::slice::from_ref(&work))
+        .unwrap();
 
     assert_eq!(titles(&core, added[0].id), ["Weekly", "Moved", "Weekly"]);
+    // The Recurring Event holds the object, which holds its Exceptions too.
+    let occurrences = core
+        .occurrences(date("2026-10-01"), date("2026-11-01"))
+        .unwrap();
+    let (_, served) = radicale.get_event(&user, &work, "weekly");
+    let held = |occurrence: usize| {
+        core.original_server_data(occurrences[occurrence].event_id)
+            .unwrap()
+            .map(|server| server.data)
+    };
+    assert_eq!(held(0), Some(served));
+    assert_eq!(held(1), None);
+}
+
+/// A pulled Event, in a Calendar of a new Core, and the Core's Local
+/// Calendar "Home".
+fn pulled_standup() -> (Harness, Core, CalendarId, CalendarId) {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let work = server_calendar(radicale, &user);
+    radicale.put_event(
+        &user,
+        &work,
+        "standup",
+        ics(&event(
+            "standup",
+            "DTSTART:20261005T070000Z",
+            "DTEND:20261005T073000Z",
+        )),
+    );
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let account = add_account(&core, radicale, &user);
+    let work = core.add_calendars(account, &[work]).unwrap()[0].id;
+    let local = core.list_accounts().unwrap()[0].id;
+    let home = core
+        .create_calendar(local, "Home", Colour::parse("#3366cc").unwrap())
+        .unwrap()
+        .id;
+    (harness, core, work, home)
+}
+
+mod original_server_data {
+    use super::*;
+
+    fn standup(core: &Core) -> EventId {
+        core.occurrences(date("2026-10-05"), date("2026-10-06"))
+            .unwrap()[0]
+            .event_id
+    }
+
+    #[test]
+    fn an_event_freecal_makes_has_none() {
+        let (_harness, core, work, home) = pulled_standup();
+
+        for calendar_id in [work, home] {
+            let made = core
+                .create_event(draft(
+                    calendar_id,
+                    "Lunch",
+                    timed("2026-10-06T12:00:00", "2026-10-06T13:00:00"),
+                ))
+                .unwrap()
+                .value;
+            assert_eq!(core.original_server_data(made.id).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn stays_through_an_edit() {
+        let (_harness, core, work, _) = pulled_standup();
+        let id = standup(&core);
+        let pulled = core.original_server_data(id).unwrap();
+
+        core.edit_event(
+            id,
+            draft(
+                work,
+                "Standup, longer",
+                timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
+            ),
+        )
+        .unwrap();
+
+        assert!(pulled.is_some());
+        assert_eq!(core.original_server_data(id).unwrap(), pulled);
+    }
+
+    #[test]
+    fn goes_with_a_move_to_another_calendar_and_comes_back_with_its_undo() {
+        let (_harness, core, _, home) = pulled_standup();
+        let id = standup(&core);
+        let pulled = core.original_server_data(id).unwrap();
+
+        let moved = core
+            .edit_event(
+                id,
+                draft(
+                    home,
+                    "standup",
+                    timed("2026-10-05T09:00:00", "2026-10-05T09:30:00"),
+                ),
+            )
+            .unwrap();
+        assert_eq!(core.original_server_data(moved.value.id).unwrap(), None);
+        core.undo_unit(moved.unit.unwrap()).unwrap();
+
+        assert!(pulled.is_some());
+        assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);
+    }
+
+    #[test]
+    fn comes_back_with_the_undo_of_a_delete() {
+        let (_harness, core, _, _) = pulled_standup();
+        let id = standup(&core);
+        let pulled = core.original_server_data(id).unwrap();
+
+        let deleted = core.delete_event(id).unwrap();
+        core.undo_unit(deleted.unit.unwrap()).unwrap();
+
+        assert!(pulled.is_some());
+        assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);
+    }
 }
 
 #[test]
@@ -376,8 +502,9 @@ mod hostile {
         fixture()[name].as_str().unwrap().to_owned()
     }
 
-    #[test]
-    fn it_is_pulled_and_stored_as_text_and_allowed_links() {
+    /// Radicale holding the hostile Event in the Calendar at the URL it
+    /// returns, as the object "hostile", for the user it returns.
+    fn on_radicale() -> (User, String) {
         let radicale = Radicale::shared();
         let user = radicale.user();
         let work = server_calendar(radicale, &user);
@@ -396,6 +523,13 @@ mod hostile {
             .to_string()
             .into_bytes();
         radicale.put_event(&user, &work, "hostile", file);
+        (user, work)
+    }
+
+    #[test]
+    fn it_is_pulled_and_stored_as_text_and_allowed_links() {
+        let radicale = Radicale::shared();
+        let (user, work) = on_radicale();
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
         let account = add_account(&core, radicale, &user);
@@ -428,5 +562,29 @@ mod hostile {
                 assert!(link_allowed(url), "{url:?} must not be a link");
             }
         }
+    }
+
+    #[test]
+    fn its_server_data_is_stored_as_the_server_serves_it() {
+        let radicale = Radicale::shared();
+        let (user, work) = on_radicale();
+        let harness = Harness::new();
+        let core = harness.open_without_starting_calendars();
+        let account = add_account(&core, radicale, &user);
+
+        core.add_calendars(account, std::slice::from_ref(&work))
+            .unwrap();
+
+        let occurrences = core
+            .occurrences(date("2026-10-05"), date("2026-10-06"))
+            .unwrap();
+        let stored = core
+            .original_server_data(occurrences[0].event_id)
+            .unwrap()
+            .unwrap();
+        let (etag, served) = radicale.get_event(&user, &work, "hostile");
+        assert_eq!(stored.data, served);
+        assert_eq!(stored.etag, Some(etag));
+        assert!(stored.href.ends_with("/hostile.ics"), "{}", stored.href);
     }
 }
