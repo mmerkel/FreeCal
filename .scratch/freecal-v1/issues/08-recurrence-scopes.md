@@ -17,3 +17,5 @@
 ## Comments
 - 2026-10-18 (from ticket 07): The grid offers no drag or resize for any Occurrence of a Recurring Event yet (`CalendarGrid.svelte`, `editable`); enable it with the scope prompt. Editing an Occurrence edits the whole Recurring Event from its first date. Cancelled Occurrences (`exdates`) and Exceptions' `recurrence_id` are wall starts in the start's Event Time Zone, so an edit that moves the start must move them too, or cancelled Occurrences come back and changed ones show twice. Removing the repeat clears `exdates` but leaves Exceptions behind as Events of their own.
 
+- 2026-10-18 (from ticket 73): Once ticket 73 stores `RDATE`, splitting a Recurring Event at an Occurrence splits its extra dates too: those before the Occurrence stay, the rest go to the new Recurring Event.
+- 2026-10-18 (from ticket 75): Ticket 75, blocked by this one, keeps an imported Exception with `RANGE=THISANDFUTURE` and applies it to every later Occurrence; it extends these scopes to Occurrences such a range changed. Keep the scope code open to that.

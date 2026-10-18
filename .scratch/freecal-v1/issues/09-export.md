@@ -20,3 +20,5 @@
 ## Comments
 - 2026-10-18 (from ticket 07): A kept rule can have an `UNTIL` in the other form after an Event switches between all-day and timed (the core reads both); write it in the form RFC 5545 asks for the Event as exported. Exceptions are Events with the UID of their Recurring Event and a `recurrence_id`; cancelled Occurrences are `exdates`.
 
+- 2026-10-18 (from ticket 73): Once ticket 73 stores `RDATE`, export writes it back, in the same form as `EXDATE`.
+- 2026-10-18 (from tickets 74 and 75): Once stored, export writes back every `RRULE` and `EXRULE` of an Event (ticket 74) and the `RANGE=THISANDFUTURE` of an Exception (ticket 75).
