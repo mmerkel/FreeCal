@@ -20,3 +20,4 @@ Out of scope: timing and triggers (ticket 16); Sync Status (ticket 15); read-onl
 ## Comments
 
 - 2026-10-18: Split from ticket 54 so each part fits one session.
+- 2026-10-18 (from 80): a first sync that fails leaves its Calendar with the Events of the pages committed so far, and the Calendars after it with none; `add_calendars` returns the error but keeps them. Nothing stores that a first sync didn't finish (`Calendar.first_sync` is in memory only), so the sync state kept per Calendar must tell "never fully synced" apart, and such a Calendar needs a full fetch, not an incremental one. Pages pair Exceptions with their Recurring Event within one page only; RFC 4791 keeps one UID in one resource. The Provider interface is `Remote` in `core/src/remote.rs`.

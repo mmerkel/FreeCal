@@ -66,11 +66,16 @@ fn adding_an_available_calendar_makes_it_a_calendar_of_the_account() {
         colour: Colour::parse("#3366cc").unwrap(),
         shown: true,
         read_only: false,
+        first_sync: false,
     }];
     assert_eq!(added, expected);
     assert_eq!(core.list_calendars().unwrap(), expected);
     assert_eq!(available_urls(&core, account), vec![home]);
-    assert_eq!(harness.signals.received(), vec![Signal::CalendarsChanged]);
+    // As its first sync starts, and as it ends.
+    assert_eq!(
+        harness.signals.received(),
+        vec![Signal::CalendarsChanged, Signal::CalendarsChanged]
+    );
 }
 
 #[test]

@@ -129,6 +129,7 @@ fn samples_file() -> (String, Vec<String>) {
         colour: Colour::parse("#3a86ff").unwrap(),
         shown: true,
         read_only: false,
+        first_sync: false,
     };
     let repeat = Repeat {
         frequency: Frequency::Weekly,

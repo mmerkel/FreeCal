@@ -503,6 +503,7 @@ impl Store {
                     colour: Colour::parse(&row.get::<_, String>(3)?).unwrap_or_default(),
                     shown: row.get(4)?,
                     read_only: row.get(5)?,
+                    first_sync: false,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -526,6 +527,7 @@ impl Store {
             colour: colour.clone(),
             shown: true,
             read_only: false,
+            first_sync: false,
         })
     }
 
@@ -548,6 +550,7 @@ impl Store {
             colour,
             shown: true,
             read_only: false,
+            first_sync: false,
         })
     }
 

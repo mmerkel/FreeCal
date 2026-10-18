@@ -30,20 +30,26 @@ pub struct Changed<T> {
 }
 
 /// Where a unit's changes came from, which decides where they may write.
-/// Sync, Snapshot restore and Conflict resolution come with their tickets.
+/// Incremental sync, Snapshot restore and Conflict resolution come with
+/// their tickets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
     UserAction,
     Import,
     Undo,
+    /// A Calendar's first sync, the baseline: it writes like any origin but
+    /// records nothing (ADR 0009), so its unit is never stored.
+    FirstSync,
 }
 
 impl Origin {
-    fn as_str(self) -> &'static str {
+    /// How a stored unit records it; none for an origin that isn't recorded.
+    fn recorded_as(self) -> Option<&'static str> {
         match self {
-            Origin::UserAction => "user",
-            Origin::Import => "import",
-            Origin::Undo => "undo",
+            Origin::UserAction => Some("user"),
+            Origin::Import => Some("import"),
+            Origin::Undo => Some("undo"),
+            Origin::FirstSync => None,
         }
     }
 }
@@ -270,7 +276,8 @@ impl Unit<'_> {
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
-    /// every origin so far. Incremental syncs will write there (ticket 54).
+    /// every origin but a first sync, which loads what the server has.
+    /// Incremental syncs will write there too (ticket 82).
     /// Every write checks this itself; a change that targets a Calendar, such
     /// as an import, checks it first, so that it is refused even when it
     /// would write nothing.
@@ -286,6 +293,7 @@ impl Unit<'_> {
 
     /// Records that the Event `id` went from `previous` to `new`, none for
     /// an Event created or deleted, starting the unit with its first entry.
+    /// An origin that isn't recorded only notes the Calendars.
     fn entry(
         &mut self,
         id: EventId,
@@ -298,13 +306,16 @@ impl Unit<'_> {
                 self.calendars.push(event.calendar_id);
             }
         }
+        let Some(origin) = self.origin.recorded_as() else {
+            return Ok(());
+        };
         let conn = self.store.connection();
         let unit = match self.id {
             Some(unit) => unit,
             None => {
                 conn.execute(
                     "INSERT INTO journal_unit (origin, made_at) VALUES (?1, ?2)",
-                    params![self.origin.as_str(), self.made_at],
+                    params![origin, self.made_at],
                 )?;
                 *self.id.insert(UnitId(conn.last_insert_rowid()))
             }
@@ -607,6 +618,37 @@ mod tests {
             hex(hash_as(1, "dentist", &dentist())),
             "b58a7dada5f3790c3b13fafabbe5a5b084fed79180f02f4a973156a43a3cd67e"
         );
+    }
+
+    /// A first sync writes, into a Read-only Calendar too, and records
+    /// nothing.
+    #[test]
+    fn a_first_sync_writes_without_recording() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+        let mut event = dentist();
+        event.calendar_id = store.list_calendars().unwrap()[0].id;
+        let conn = store.connection();
+        conn.execute(
+            "UPDATE calendar SET read_only = 1 WHERE id = ?1",
+            [event.calendar_id.0],
+        )
+        .unwrap();
+
+        let recorded = record(&store, Origin::FirstSync, 0, |unit| {
+            unit.create("dentist", &event)
+        })
+        .unwrap();
+
+        assert_eq!(recorded.unit, None);
+        assert_eq!(recorded.calendars, [event.calendar_id]);
+        assert_eq!(
+            store.find_event(recorded.value).unwrap().fields.title,
+            "Dentist"
+        );
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM journal_unit"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM journal_entry"), 0);
     }
 
     /// After a migration that added fields, an entry's hash in the format

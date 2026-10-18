@@ -14,6 +14,7 @@ const calendars: Calendar[] = [
     colour: '#3366cc',
     shown: true,
     readOnly: false,
+    firstSync: false,
   },
   {
     id: calendarId(2),
@@ -22,6 +23,7 @@ const calendars: Calendar[] = [
     colour: '#dc3912',
     shown: false,
     readOnly: false,
+    firstSync: false,
   },
 ];
 

@@ -132,6 +132,9 @@ pub struct NewCalendar<'a> {
     pub colour: Option<&'a str>,
     /// The components it takes, such as `VEVENT`.
     pub components: &'a [&'a str],
+    /// Its `calendar-timezone` (RFC 4791): an iCalendar object with one
+    /// `VTIMEZONE`.
+    pub timezone: Option<&'a str>,
 }
 
 impl Default for NewCalendar<'_> {
@@ -140,6 +143,7 @@ impl Default for NewCalendar<'_> {
             name: None,
             colour: None,
             components: &["VEVENT"],
+            timezone: None,
         }
     }
 }
@@ -154,18 +158,33 @@ impl Radicale {
             user.name,
             uuid::Uuid::new_v4().simple()
         );
-        let status = self.request(user, "MKCALENDAR", &url, mkcalendar_body(&calendar));
+        let status = self.request(user, "MKCALENDAR", &url, XML, mkcalendar_body(&calendar));
         assert_eq!(status, 201, "create a Calendar on Radicale");
         url
     }
 
+    /// Puts an Event, an iCalendar object, into a Calendar of `user` on the
+    /// server, as another app would, under the name `name`.
+    pub fn put_event(&self, user: &User, calendar_url: &str, name: &str, ics: Vec<u8>) {
+        let url = format!("{calendar_url}{name}.ics");
+        let status = self.request(user, "PUT", &url, "text/calendar; charset=utf-8", ics);
+        assert_eq!(status, 201, "put an Event on Radicale");
+    }
+
     /// Deletes a Calendar of `user` on the server.
     pub fn delete_calendar(&self, user: &User, url: &str) {
-        let status = self.request(user, "DELETE", url, Vec::new());
+        let status = self.request(user, "DELETE", url, XML, Vec::new());
         assert_eq!(status, 200, "delete a Calendar on Radicale");
     }
 
-    fn request(&self, user: &User, method: &str, url: &str, body: Vec<u8>) -> u16 {
+    fn request(
+        &self,
+        user: &User,
+        method: &str,
+        url: &str,
+        content_type: &str,
+        body: Vec<u8>,
+    ) -> u16 {
         let credentials = base64::engine::general_purpose::STANDARD
             .encode(format!("{}:{}", user.name, user.password));
         let agent = ureq::Agent::config_builder()
@@ -177,12 +196,14 @@ impl Radicale {
             .method(ureq::http::Method::from_bytes(method.as_bytes()).unwrap())
             .uri(url)
             .header("Authorization", format!("Basic {credentials}"))
-            .header("Content-Type", "application/xml; charset=utf-8")
+            .header("Content-Type", content_type)
             .body(body)
             .unwrap();
         agent.run(request).unwrap().status().as_u16()
     }
 }
+
+const XML: &str = "application/xml; charset=utf-8";
 
 /// A `MKCALENDAR` request body (RFC 4791), written with the XML writer like
 /// FreeCal's own requests, so that any name stays text.
@@ -210,6 +231,13 @@ fn mkcalendar_body(calendar: &NewCalendar) -> Vec<u8> {
                                     .create_element("I:calendar-color")
                                     .write_text_content(quick_xml::events::BytesText::new(
                                         colour,
+                                    ))?;
+                            }
+                            if let Some(timezone) = calendar.timezone {
+                                writer
+                                    .create_element("C:calendar-timezone")
+                                    .write_text_content(quick_xml::events::BytesText::new(
+                                        timezone,
                                     ))?;
                             }
                             writer

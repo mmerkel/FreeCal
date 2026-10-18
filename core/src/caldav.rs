@@ -6,13 +6,15 @@
 use std::time::Duration;
 
 use base64::Engine;
+use chrono_tz::Tz;
 use percent_encoding::percent_decode_str;
-use quick_xml::events::{BytesStart, Event as XmlEvent};
+use quick_xml::events::{BytesStart, BytesText, Event as XmlEvent};
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result};
+use crate::remote::FIRST_SYNC_PAGE;
+use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, Result, import};
 
 const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
@@ -79,6 +81,18 @@ const SUPPORTED_CALENDAR_COMPONENT_SET: Property = Property {
 const CALENDAR_COLOR: Property = Property {
     namespace: APPLE_ICAL,
     name: "calendar-color",
+};
+
+/// A Calendar's own time zone, for its floating times (RFC 4791).
+const CALENDAR_TIMEZONE: Property = Property {
+    namespace: CALDAV,
+    name: "calendar-timezone",
+};
+
+/// An Event's iCalendar object, as the server holds it (RFC 4791).
+const CALENDAR_DATA: Property = Property {
+    namespace: CALDAV,
+    name: "calendar-data",
 };
 
 /// A connection to one CalDAV server, logged in as one user.
@@ -178,6 +192,49 @@ impl Client {
         Ok(calendars)
     }
 
+    /// Every Event of the Calendar at `calendar`, handed to `page`
+    /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
+    /// then fetched with `calendar-multiget` (RFC 4791). Floating times are
+    /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`.
+    pub fn all_events(
+        &self,
+        calendar: &str,
+        display: Tz,
+        page: &mut dyn FnMut(Vec<ImportedEvent>) -> Result<()>,
+    ) -> Result<()> {
+        // A stored address is untrusted too.
+        let calendar = follow_href(&self.url, calendar).ok_or(CoreError::InvalidServerUrl)?;
+        let (answer, calendar) =
+            self.propfind(&calendar, Depth::One, &[RESOURCETYPE, CALENDAR_TIMEZONE])?;
+        let zone = answer
+            .property(CALENDAR_TIMEZONE)
+            .and_then(|zone| import::calendar_zone(&zone.text))
+            .unwrap_or(display);
+        let members: Vec<String> = answer
+            .children(DAV, "response")
+            .filter_map(|response| member(&calendar, response))
+            .collect();
+        for hrefs in members.chunks(FIRST_SYNC_PAGE) {
+            let (answer, _) = self.send(
+                b"REPORT",
+                &calendar,
+                Depth::One,
+                calendar_multiget_body(hrefs),
+            )?;
+            let objects: Vec<(String, String)> = answer
+                .children(DAV, "response")
+                .filter_map(|response| {
+                    Some((
+                        response.child(DAV, "href")?.text.clone(),
+                        response.found(CALENDAR_DATA)?.text.clone(),
+                    ))
+                })
+                .collect();
+            page(import::read_server_events(&objects, zone))?;
+        }
+        Ok(())
+    }
+
     /// The URL of the principal of the user who is logged in. Asking for it
     /// checks the username and password, and that the server speaks WebDAV.
     /// Where the server's URL doesn't lead to it, as when it is a web page,
@@ -223,16 +280,30 @@ impl Client {
     /// [`Depth::One`], of its members. Follows redirects within the server. Returns the
     /// `multistatus` answer and the URL that gave it.
     fn propfind(&self, url: &Url, depth: Depth, properties: &[Property]) -> Result<(Element, Url)> {
+        self.send(b"PROPFIND", url, depth, propfind_body(properties))
+    }
+
+    /// Sends a WebDAV request whose answer is a `multistatus`, such as a
+    /// `PROPFIND` or a `REPORT`, with the XML `body`. Follows redirects
+    /// within the server. Returns the answer and the URL that gave it.
+    fn send(
+        &self,
+        method: &[u8],
+        url: &Url,
+        depth: Depth,
+        body: Vec<u8>,
+    ) -> Result<(Element, Url)> {
+        let method = ureq::http::Method::from_bytes(method).expect("a WebDAV method is a token");
         let mut url = url.clone();
         let mut redirects = 0;
         loop {
             let request = ureq::http::Request::builder()
-                .method(ureq::http::Method::from_bytes(b"PROPFIND").unwrap())
+                .method(method.clone())
                 .uri(url.as_str())
                 .header("Authorization", &self.authorization)
                 .header("Depth", depth.header())
                 .header("Content-Type", "application/xml; charset=utf-8")
-                .body(propfind_body(properties))
+                .body(body.clone())
                 .map_err(|_| CoreError::InvalidServerUrl)?;
             let response = self.agent.run(request).map_err(transport_error)?;
             let status = response.status().as_u16();
@@ -342,6 +413,18 @@ fn available_calendar(home: &Url, response: &Element) -> Option<AvailableCalenda
     })
 }
 
+/// The path of the member of the Calendar at `calendar` that a `response`
+/// of a `PROPFIND` of it describes, if it is one that may hold an Event: not
+/// the Calendar itself or another collection, and on the same server.
+fn member(calendar: &Url, response: &Element) -> Option<String> {
+    let url = follow_href(calendar, &response.child(DAV, "href")?.text)?;
+    let collection = response
+        .found(RESOURCETYPE)
+        .is_some_and(|kind| kind.child(DAV, "collection").is_some());
+    (url != *calendar && !collection && url.origin() == calendar.origin())
+        .then(|| url.path().to_owned())
+}
+
 /// The last part of a URL's path, decoded, to name a Calendar without a name.
 fn last_segment(url: &Url) -> String {
     url.path_segments()
@@ -428,6 +511,34 @@ fn propfind_body(properties: &[Property]) -> Vec<u8> {
                     }
                     Ok(())
                 })?;
+            Ok(())
+        })
+        .expect("writing to memory doesn't fail");
+    let mut body = br#"<?xml version="1.0" encoding="utf-8"?>"#.to_vec();
+    body.extend(writer.into_inner());
+    body
+}
+
+/// A `calendar-multiget` request body (RFC 4791) asking for the iCalendar
+/// objects at `hrefs`.
+fn calendar_multiget_body(hrefs: &[String]) -> Vec<u8> {
+    let mut writer = Writer::new(Vec::new());
+    writer
+        .create_element("C:calendar-multiget")
+        .with_attribute(("xmlns:D", DAV))
+        .with_attribute(("xmlns:C", CALDAV))
+        .write_inner_content(|writer| {
+            writer
+                .create_element("D:prop")
+                .write_inner_content(|writer| {
+                    writer.create_element("C:calendar-data").write_empty()?;
+                    Ok(())
+                })?;
+            for href in hrefs {
+                writer
+                    .create_element("D:href")
+                    .write_text_content(BytesText::new(href))?;
+            }
             Ok(())
         })
         .expect("writing to memory doesn't fail");
@@ -718,6 +829,49 @@ mod tests {
         );
         assert_eq!(last_segment(&url("https://x.org/cal/home")), "home");
         assert_eq!(last_segment(&url("https://x.org/")), "https://x.org/");
+    }
+
+    #[test]
+    fn a_calendar_multiget_body_names_each_href_as_text() {
+        let hrefs = ["/alice/work/a.ics".to_owned(), "/x/<b>&amp;.ics".to_owned()];
+
+        let body = String::from_utf8(calendar_multiget_body(&hrefs)).unwrap();
+
+        let root = parse(&body).unwrap();
+        assert!(root.is(CALDAV, "calendar-multiget"));
+        let prop = root.child(DAV, "prop").unwrap();
+        assert!(prop.children[0].is(CALDAV, "calendar-data"));
+        let named: Vec<_> = root
+            .children(DAV, "href")
+            .map(|href| href.text.as_str())
+            .collect();
+        assert_eq!(named, hrefs);
+    }
+
+    #[test]
+    fn a_calendars_members_leave_out_itself_collections_and_other_servers() {
+        let calendar = Url::parse("https://dav.example.org/alice/work/").unwrap();
+        let answer = parse(
+            r#"<multistatus xmlns="DAV:">
+               <response><href>/alice/work/</href><propstat><prop><resourcetype>
+                 <collection/></resourcetype></prop><status>HTTP/1.1 200 OK</status></propstat></response>
+               <response><href>/alice/work/inner/</href><propstat><prop><resourcetype>
+                 <collection/></resourcetype></prop><status>HTTP/1.1 200 OK</status></propstat></response>
+               <response><href>a%20b.ics</href><propstat><prop><resourcetype/></prop>
+                 <status>HTTP/1.1 200 OK</status></propstat></response>
+               <response><href>https://evil.example.org/x.ics</href></response>
+               <response><href>http://dav.example.org/alice/work/c.ics</href></response>
+               <response><href>/alice/work/d.ics</href></response>
+               </multistatus>"#,
+        )
+        .unwrap();
+
+        let members: Vec<_> = answer
+            .children(DAV, "response")
+            .filter_map(|response| member(&calendar, response))
+            .collect();
+
+        assert_eq!(members, ["/alice/work/a%20b.ics", "/alice/work/d.ics"]);
     }
 
     #[test]

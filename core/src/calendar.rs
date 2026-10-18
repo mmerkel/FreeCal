@@ -54,6 +54,10 @@ pub struct Calendar {
     /// A Read-only Calendar: FreeCal never changes its Events. Setting it
     /// comes with ticket 17.
     pub read_only: bool,
+    /// Whether its first sync is running, so that its Events are still
+    /// loading; the sidebar says so. Sync Status may take this over (ticket
+    /// 15).
+    pub first_sync: bool,
 }
 
 /// A Calendar a server Account offers that the user hasn't added. FreeCal

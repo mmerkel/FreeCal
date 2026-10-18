@@ -13,6 +13,7 @@ mod import;
 mod journal;
 mod keyring;
 mod recurrence;
+mod remote;
 mod scope;
 mod settings;
 mod sidebar;
@@ -23,6 +24,7 @@ mod structured_text;
 mod typescript;
 mod view;
 
+use std::collections::HashSet;
 use std::fs::{File, TryLockError};
 use std::path::Path;
 
@@ -41,6 +43,7 @@ pub use import::{
 pub use journal::{Changed, UnitId};
 pub use keyring::{Keyring, KeyringError};
 pub use recurrence::{Frequency, Repeat, RepeatEnd};
+pub use remote::FIRST_SYNC_PAGE;
 pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
@@ -51,6 +54,7 @@ pub use view::View;
 use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
 use journal::{Origin, Unit};
+use remote::Remote;
 use store::{EventFields, Store, StoredEvent};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -67,6 +71,9 @@ pub struct Core {
     keyring: Arc<dyn Keyring>,
     /// The local date as [`Core::check_date`] last saw it.
     date: Mutex<NaiveDate>,
+    /// The Calendars whose first sync is running. Locked inside the Store
+    /// lock, never around it.
+    first_syncs: Mutex<HashSet<CalendarId>>,
 }
 
 impl Core {
@@ -90,6 +97,7 @@ impl Core {
             signals,
             keyring,
             date,
+            first_syncs: Mutex::new(HashSet::new()),
         })
     }
 
@@ -194,13 +202,22 @@ impl Core {
     /// Adds Available Calendars of a server Account, named by their `url`,
     /// as its Calendars, all or none. Their names and colours are the
     /// server's as it offers them now.
+    ///
+    /// Then each one's first sync pulls its Events, one after the other. It
+    /// is the baseline, which the Change Journal doesn't record (ADR 0009).
+    /// While it runs, the Calendar says so ([`Calendar::first_sync`]), with
+    /// "Calendars changed" as it starts and ends, and it commits page by page,
+    /// with "Occurrences changed" for each page. A Calendar removed meanwhile
+    /// stops its first sync. Should one fail, the Calendars stay added, the
+    /// Events it pulled so far stay too, and the error is returned.
     pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
-        let offered = self.offered_calendars(account_id)?;
+        let remote = self.remote(account_id)?;
+        let offered = offered_by(remote.as_deref())?;
         let added = {
             let store = self.store();
             // Added already, or earlier in `urls`.
             let mut taken = store.calendar_urls(account_id)?;
-            store.transaction(|| {
+            let added = store.transaction(|| {
                 urls.iter()
                     .map(|url| {
                         let available = offered.iter().find(|calendar| &calendar.url == url);
@@ -212,34 +229,74 @@ impl Core {
                         }
                     })
                     .collect::<Result<Vec<_>>>()
-            })?
+            })?;
+            let mut first_syncs = self.first_syncs.lock().unwrap();
+            first_syncs.extend(added.iter().map(|calendar| calendar.id));
+            added
         };
         self.signals.send(Signal::CalendarsChanged);
-        Ok(added)
+        let Some(remote) = remote else {
+            return Ok(added);
+        };
+        let synced = added
+            .iter()
+            .zip(urls)
+            .try_for_each(|(calendar, url)| self.first_sync(remote.as_ref(), calendar.id, url));
+        {
+            let _store = self.store();
+            let mut first_syncs = self.first_syncs.lock().unwrap();
+            for calendar in &added {
+                first_syncs.remove(&calendar.id);
+            }
+        }
+        self.signals.send(Signal::CalendarsChanged);
+        synced.map(|()| added)
+    }
+
+    /// Pulls every Event of the Calendar `id` at `url` on the server, page by
+    /// page, as a first sync. A Calendar removed meanwhile ends it.
+    fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
+        let pulled = remote.all_events(url, self.clock.time_zone(), &mut |events| {
+            self.record(Origin::FirstSync, |unit| {
+                for event in &events {
+                    // A server may list an Event twice.
+                    if unit.find_event_by_uid(id, &event.uid)?.is_none() {
+                        event.create_in(unit, id, &event.uid)?;
+                    }
+                }
+                Ok(())
+            })
+            .map(drop)
+        });
+        match pulled {
+            Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(()),
+            pulled => pulled,
+        }
     }
 
     /// Every Calendar a server Account's server offers now, added or not;
     /// none for the Local Account.
     fn offered_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
+        offered_by(self.remote(id)?.as_deref())
+    }
+
+    /// The Provider interface to a server Account's server, logged in with
+    /// the password from the keyring; none for the Local Account.
+    fn remote(&self, id: AccountId) -> Result<Option<Box<dyn Remote>>> {
         let (account, key) = {
             let store = self.store();
             (store.find_account(id)?, store.account_keyring_key(id)?)
         };
         let account = account.ok_or(CoreError::AccountNotFound(id))?;
         let (Some(server), Some(key)) = (account.server, key) else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
         let password = self
             .keyring
             .secret(&key)
             .map_err(CoreError::KeyringUnavailable)?
             .ok_or(CoreError::PasswordNotInKeyring)?;
-        caldav::Client::new(&CalDavLogin {
-            url: server.url,
-            username: server.username,
-            password,
-        })?
-        .discover()
+        remote::connect(account.provider, server, password)
     }
 
     /// Removes a server Account with its Calendars, as
@@ -268,7 +325,13 @@ impl Core {
 
     /// Every Calendar of every Account, in the order they were added.
     pub fn list_calendars(&self) -> Result<Vec<Calendar>> {
-        self.store().list_calendars()
+        let store = self.store();
+        let first_syncs = self.first_syncs.lock().unwrap();
+        let mut calendars = store.list_calendars()?;
+        for calendar in &mut calendars {
+            calendar.first_sync = first_syncs.contains(&calendar.id);
+        }
+        Ok(calendars)
     }
 
     /// Creates a Calendar in the Local Account. Server Accounts' Calendars
@@ -768,6 +831,11 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(CoreError::LocalStoreInUse),
         Err(TryLockError::Error(error)) => Err(error.into()),
     }
+}
+
+/// Every Calendar a server offers, added or not; none without a server.
+fn offered_by(remote: Option<&dyn Remote>) -> Result<Vec<AvailableCalendar>> {
+    remote.map_or_else(|| Ok(Vec::new()), Remote::discover)
 }
 
 fn description_of(fields: &EventFields) -> StructuredText {

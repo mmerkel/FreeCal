@@ -78,7 +78,8 @@ export const samples = {
       "name": "Home",
       "colour": "#3a86ff",
       "shown": true,
-      "readOnly": false
+      "readOnly": false,
+      "firstSync": false
     }
   ],
   EventId: [

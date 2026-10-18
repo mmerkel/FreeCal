@@ -161,6 +161,25 @@ impl ImportedEvent {
         StructuredText::from_plain_text(&self.location)
     }
 
+    /// Adds it with its Exceptions to the Calendar `calendar_id`, under the
+    /// UID `uid`.
+    pub(crate) fn create_in(
+        &self,
+        unit: &mut Unit,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<()> {
+        let new = |fields| StoredEvent {
+            calendar_id,
+            fields,
+        };
+        unit.create(uid, &new(self.fields()))?;
+        for exception in &self.exceptions {
+            unit.create(uid, &new(exception.fields()))?;
+        }
+        Ok(())
+    }
+
     fn fields(&self) -> EventFields {
         EventFields {
             title: self.title.clone(),
@@ -284,10 +303,7 @@ pub(crate) fn run(
                     None => event.uid.clone(),
                     Some(_) => uuid::Uuid::new_v4().to_string(),
                 };
-                unit.create(&uid, &new(event.fields()))?;
-                for exception in &event.exceptions {
-                    unit.create(&uid, &new(exception.fields()))?;
-                }
+                event.create_in(unit, calendar_id, &uid)?;
             }
         }
     }
@@ -303,39 +319,13 @@ pub(crate) fn preview(
     existing: &HashSet<String>,
     display: Tz,
 ) -> Result<ImportPreview> {
-    let mut seen = HashMap::new();
-    let mut events: Vec<ImportedEvent> = Vec::new();
-    let mut exceptions = Vec::new();
-    for (name, contents) in calendar_files(file)? {
-        let read = read_events(&name, &contents, display)?;
-        for mut event in read.events {
-            if !seen.contains_key(&event.uid) {
-                seen.insert(event.uid.clone(), events.len());
-                event.exists = existing.contains(&event.uid);
-                events.push(event);
-            }
-        }
-        exceptions.extend(read.exceptions);
-    }
-    // An Exception joins its Recurring Event, once per Occurrence; one
-    // without it in the file is left out.
-    for (original, mut exception) in exceptions {
-        let Some(&index) = seen.get(&exception.uid) else {
-            continue;
-        };
-        let recurring = &mut events[index];
-        if recurring.rule.is_none() {
-            continue;
-        }
-        let id = recurrence_id_of(&original, &recurring.when);
-        if recurring
-            .exceptions
-            .iter()
-            .all(|known| known.recurrence_id.as_ref() != Some(&id))
-        {
-            exception.recurrence_id = Some(id);
-            recurring.exceptions.push(exception);
-        }
+    let read = calendar_files(file)?
+        .into_iter()
+        .map(|(name, contents)| read_events(&name, &contents, display))
+        .collect::<Result<Vec<_>>>()?;
+    let mut events = assemble(read);
+    for event in &mut events {
+        event.exists = existing.contains(&event.uid);
     }
     let existing_events = events.iter().filter(|event| event.exists).count();
     let mut pinned = BTreeMap::<String, usize>::new();
@@ -354,6 +344,54 @@ pub(crate) fn preview(
             .collect(),
         events,
     })
+}
+
+/// The Events of iCalendar objects as a server holds them, each given by a
+/// name for errors and its text, read as [`preview`] reads files. Floating
+/// times are pinned to `zone`. An object FreeCal can't read is left out.
+pub(crate) fn read_server_events(objects: &[(String, String)], zone: Tz) -> Vec<ImportedEvent> {
+    assemble(
+        objects
+            .iter()
+            .filter_map(|(name, text)| read_events(name, text.as_bytes(), zone).ok()),
+    )
+}
+
+/// The Events of `.ics` files read together, in order and each UID once.
+/// An Exception joins its Recurring Event, once per Occurrence; one without
+/// it in the files is left out.
+fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
+    let mut seen = HashMap::new();
+    let mut events: Vec<ImportedEvent> = Vec::new();
+    let mut exceptions = Vec::new();
+    for read in files {
+        for event in read.events {
+            if !seen.contains_key(&event.uid) {
+                seen.insert(event.uid.clone(), events.len());
+                events.push(event);
+            }
+        }
+        exceptions.extend(read.exceptions);
+    }
+    for (original, mut exception) in exceptions {
+        let Some(&index) = seen.get(&exception.uid) else {
+            continue;
+        };
+        let recurring = &mut events[index];
+        if recurring.rule.is_none() {
+            continue;
+        }
+        let id = recurrence_id_of(&original, &recurring.when);
+        if recurring
+            .exceptions
+            .iter()
+            .all(|known| known.recurrence_id.as_ref() != Some(&id))
+        {
+            exception.recurrence_id = Some(id);
+            recurring.exceptions.push(exception);
+        }
+    }
+    events
 }
 
 /// The `.ics` files in `file`, each with the name its errors give: the file
@@ -421,22 +459,7 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
         file: name.to_owned(),
     };
     let text = std::str::from_utf8(contents).map_err(|_| not_calendar())?;
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let unfolded = icalendar::parser::unfold(text);
-    let calendars: Vec<_> = icalendar::parser::read_components(&unfolded)
-        .map_err(|_| not_calendar())?
-        .into_iter()
-        .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
-        .map(|root| {
-            icalendar::Calendar::from(icalendar::parser::Calendar {
-                properties: root.properties,
-                components: root.components,
-            })
-        })
-        .collect();
-    if calendars.is_empty() {
-        return Err(not_calendar());
-    }
+    let calendars = calendars(text).ok_or_else(not_calendar)?;
     let mut read = ReadFile {
         events: Vec::new(),
         exceptions: Vec::new(),
@@ -495,6 +518,43 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
         }
     }
     Ok(read)
+}
+
+/// The `VCALENDAR`s of iCalendar text, none if it has none or can't be read.
+fn calendars(text: &str) -> Option<Vec<icalendar::Calendar>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let unfolded = icalendar::parser::unfold(text);
+    let calendars: Vec<_> = icalendar::parser::read_components(&unfolded)
+        .ok()?
+        .into_iter()
+        .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
+        .map(|root| {
+            icalendar::Calendar::from(icalendar::parser::Calendar {
+                properties: root.properties,
+                components: root.components,
+            })
+        })
+        .collect();
+    (!calendars.is_empty()).then_some(calendars)
+}
+
+/// The IANA time zone of a CalDAV Calendar's `calendar-timezone` (RFC 4791),
+/// an iCalendar object with one `VTIMEZONE`, if FreeCal can tell.
+pub(crate) fn calendar_zone(text: &str) -> Option<Tz> {
+    calendars(text)?.iter().find_map(|calendar| {
+        let zones = Zones::of(calendar);
+        calendar
+            .components
+            .iter()
+            .find_map(|component| match component {
+                CalendarComponent::Other(other)
+                    if other.component_kind().eq_ignore_ascii_case("VTIMEZONE") =>
+                {
+                    zones.zone(other.property_value("TZID")?)
+                }
+                _ => None,
+            })
+    })
 }
 
 /// A property such as `EXDATE` with one value per property, for each value

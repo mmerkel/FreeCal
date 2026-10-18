@@ -129,12 +129,22 @@ fn parse(rfc3339: &str) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(rfc3339).expect("valid RFC 3339 time")
 }
 
+/// What a test does with each Signal as it is sent.
+type Reaction = Arc<dyn Fn(&Signal) + Send + Sync>;
+
 #[derive(Default)]
 pub struct RecordingSignals {
     received: Mutex<Vec<Signal>>,
+    on_receive: Mutex<Option<Reaction>>,
 }
 
 impl RecordingSignals {
+    /// Calls `react` with each Signal from now on, as a subscriber that
+    /// reads the core on a Signal would.
+    pub fn on_receive(&self, react: impl Fn(&Signal) + Send + Sync + 'static) {
+        *self.on_receive.lock().unwrap() = Some(Arc::new(react));
+    }
+
     pub fn received(&self) -> Vec<Signal> {
         self.received.lock().unwrap().clone()
     }
@@ -146,7 +156,12 @@ impl RecordingSignals {
 
 impl SignalSink for RecordingSignals {
     fn send(&self, signal: Signal) {
-        self.received.lock().unwrap().push(signal);
+        self.received.lock().unwrap().push(signal.clone());
+        // Unlocked while it reacts, which may send Signals of its own.
+        let react = self.on_receive.lock().unwrap().clone();
+        if let Some(react) = react {
+            react(&signal);
+        }
     }
 }
 

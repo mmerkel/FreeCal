@@ -118,6 +118,7 @@ export class FakeCore implements CoreApi {
       colour: '#3366cc',
       shown: true,
       readOnly: false,
+      firstSync: false,
       ...calendar,
     };
     this.calendars.push(added);

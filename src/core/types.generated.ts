@@ -51,7 +51,13 @@ shown: boolean,
  * A Read-only Calendar: FreeCal never changes its Events. Setting it
  * comes with ticket 17.
  */
-readOnly: boolean, };
+readOnly: boolean,
+/**
+ * Whether its first sync is running, so that its Events are still
+ * loading; the sidebar says so. Sync Status may take this over (ticket
+ * 15).
+ */
+firstSync: boolean, };
 
 /**
  * Branded in TypeScript, so that it can't be mixed up with other IDs.

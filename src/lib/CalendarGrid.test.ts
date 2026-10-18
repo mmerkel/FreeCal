@@ -24,6 +24,7 @@ const home: Calendar = {
   colour: '#3366cc',
   shown: true,
   readOnly: false,
+  firstSync: false,
 };
 
 function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Occurrence {

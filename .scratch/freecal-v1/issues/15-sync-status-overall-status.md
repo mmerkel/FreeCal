@@ -14,3 +14,7 @@
 - [ ] Overall status: Conflict, else Sync Error, else Offline (at least one server Account and every server Account Offline), else Syncing, else Online and synced; correct with no server Accounts
 - [ ] "Syncing" is displayed only after a sync has run for about 1 second, or immediately if the user started it; the Signals are still sent straight away
 - [ ] Component tests check that the indicator and sidebar markers follow "Sync status changed"
+
+## Comments
+
+- 2026-10-18 (from 80): ticket 80 reports a running first sync as `Calendar.first_sync` with "Calendars changed"; decide whether "Sync status changed" takes it over or it stays alongside.
