@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::AvailableCalendar;
+
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[cfg_attr(
@@ -45,6 +47,14 @@ pub struct Account {
     /// Where a server Account syncs and who it logs in as; none for the
     /// Local Account.
     pub server: Option<ServerLogin>,
+}
+
+/// A server Account just added, with the Calendars its server offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AddedAccount {
+    pub account: Account,
+    pub available: Vec<AvailableCalendar>,
 }
 
 /// A server Account's server and the username it logs in with. Its

@@ -36,6 +36,12 @@ test('the hostile server text stays text in a refusal', () => {
   );
 });
 
+test('the hostile redirect address stays text', () => {
+  expect(errorText({ code: 'redirectedElsewhere', url: hostile.redirectUrl })).toBe(
+    hostile.expected.redirectedElsewhere,
+  );
+});
+
 test('a refusal without text from the server gives the status alone', () => {
   expect(errorText({ code: 'serverRefused', status: 503, message: '' })).toBe(
     'the server refused (status 503)',

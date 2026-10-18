@@ -54,6 +54,8 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   notCalDavServer: 'error.notCalDavServer',
   serverRefused: 'error.serverRefused',
   keyringUnavailable: 'error.keyringUnavailable',
+  passwordNotInKeyring: 'error.passwordNotInKeyring',
+  redirectedElsewhere: 'error.redirectedElsewhere',
   noFileToImport: 'error.noFileToImport',
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
@@ -76,9 +78,9 @@ export function startupText(failure: ErrorCode): string {
 
 /**
  * A failure in words, for the `{error}` of a message. The core reports
- * failures as codes, some with the name of the file they are about or a
- * server's status and own text; anything else, such as a failure inside the
- * frontend, is shown as it is.
+ * failures as codes, some with the name of the file they are about, a
+ * server's status and own text, or the address a server redirected to;
+ * anything else, such as a failure inside the frontend, is shown as it is.
  */
 export function errorText(error: unknown): string {
   if (
@@ -92,6 +94,7 @@ export function errorText(error: unknown): string {
     if ('file' in error && typeof error.file === 'string') params.file = error.file;
     if ('status' in error && typeof error.status === 'number') params.status = String(error.status);
     if ('message' in error && typeof error.message === 'string') params.message = error.message;
+    if ('url' in error && typeof error.url === 'string') params.url = error.url;
     if (error.code === 'serverRefused' && !params.message) {
       return t('error.serverRefusedWithoutText', params);
     }

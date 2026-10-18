@@ -56,6 +56,20 @@ pub struct Calendar {
     pub read_only: bool,
 }
 
+/// A Calendar a server Account offers that the user hasn't added. FreeCal
+/// stores nothing for it; it is fetched from the server each time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AvailableCalendar {
+    /// Where it lives on the server, which also names it to the core.
+    pub url: String,
+    /// Its name on the server, untrusted like every name; the last part of
+    /// its address when the server gives none.
+    pub name: String,
+    /// Its colour on the server, if it has a usable one.
+    pub colour: Option<Colour>,
+}
+
 /// A Calendar name as the user typed it, without surrounding whitespace.
 pub(crate) fn calendar_name(text: &str) -> Result<&str> {
     match text.trim() {

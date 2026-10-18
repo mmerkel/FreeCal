@@ -73,6 +73,11 @@ pub enum CoreError {
     ServerRefused { status: u16, message: String },
     #[error("the system keyring couldn't be used: {0}")]
     KeyringUnavailable(KeyringError),
+    #[error("the system keyring has no password for the Account")]
+    PasswordNotInKeyring,
+    /// Only redirects within the server the user named are followed.
+    #[error("the server redirected to another server: {0}")]
+    RedirectedElsewhere(url::Url),
 }
 
 impl CoreError {
@@ -120,6 +125,10 @@ impl CoreError {
                 message: message.clone(),
             },
             CoreError::KeyringUnavailable(_) => ErrorCode::KeyringUnavailable,
+            CoreError::PasswordNotInKeyring => ErrorCode::PasswordNotInKeyring,
+            CoreError::RedirectedElsewhere(url) => ErrorCode::RedirectedElsewhere {
+                url: url.to_string(),
+            },
         }
     }
 }
@@ -202,6 +211,15 @@ pub enum ErrorCode {
     /// There is no working system keyring to keep a password in, or it
     /// stayed locked.
     KeyringUnavailable,
+    /// The system keyring has no password for a server Account, as when
+    /// the user deleted it there.
+    PasswordNotInKeyring,
+    /// The server sent FreeCal on to `url` on another server, where it
+    /// doesn't take the password. `url` comes from the server, untrusted,
+    /// and is ASCII, as a parsed URL is written.
+    RedirectedElsewhere {
+        url: String,
+    },
     /// The window asked to preview or run an import before a file was
     /// picked, or after it was run or discarded.
     NoFileToImport,
@@ -253,6 +271,10 @@ impl ErrorCode {
                 message: "Access to the requested resource forbidden.".to_owned(),
             },
             ErrorCode::KeyringUnavailable,
+            ErrorCode::PasswordNotInKeyring,
+            ErrorCode::RedirectedElsewhere {
+                url: "https://caldav.example.org/dav/".to_owned(),
+            },
             ErrorCode::NoFileToImport,
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,

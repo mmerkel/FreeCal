@@ -164,6 +164,11 @@ impl RecordingKeyring {
         self.secrets.lock().unwrap().values().cloned().collect()
     }
 
+    /// Deletes every secret, as a user can in an app that shows the keyring.
+    pub fn forget_all(&self) {
+        self.secrets.lock().unwrap().clear();
+    }
+
     /// Makes every further request fail, as without a keyring.
     pub fn break_it(&self) {
         self.broken.store(true, Ordering::Relaxed);

@@ -14,9 +14,33 @@ server: ServerLogin | null, };
 export type AccountId = number & { readonly __brand: "AccountId" };
 
 /**
+ * A server Account just added, with the Calendars its server offers.
+ */
+export type AddedAccount = { account: Account, available: Array<AvailableCalendar>, };
+
+/**
  * Whether the window is light or dark.
  */
 export type Appearance = "system" | "light" | "dark";
+
+/**
+ * A Calendar a server Account offers that the user hasn't added. FreeCal
+ * stores nothing for it; it is fetched from the server each time.
+ */
+export type AvailableCalendar = {
+/**
+ * Where it lives on the server, which also names it to the core.
+ */
+url: string,
+/**
+ * Its name on the server, untrusted like every name; the last part of
+ * its address when the server gives none.
+ */
+name: string,
+/**
+ * Its colour on the server, if it has a usable one.
+ */
+colour: Colour | null, };
 
 export type Calendar = { id: CalendarId, accountId: AccountId, name: string, colour: Colour,
 /**
@@ -52,7 +76,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.

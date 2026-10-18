@@ -17,3 +17,4 @@ Out of scope: pulling Events (ticket 54).
 ## Comments
 
 - 2026-10-18: Split from ticket 53 so each part fits one session.
+- 2026-10-18 (from 77): `Core::available_calendars` returns every Calendar on the server; leaving out the ones already added is this ticket's. An `AvailableCalendar` is named by its `url`.

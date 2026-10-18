@@ -240,6 +240,9 @@ export const en = {
   'error.serverRefusedWithoutText': 'the server refused (status {status})',
   'error.keyringUnavailable':
     'there is no system keyring to keep the password in, or it stayed locked',
+  'error.passwordNotInKeyring': 'the system keyring no longer has the password for this account',
+  'error.redirectedElsewhere':
+    'the server sends FreeCal on to “\u2068{url}\u2069”; enter that address if you trust it',
   'error.noFileToImport': 'the file is no longer open; choose it again',
   'error.linkNotAllowed': 'FreeCal opens only web and email links',
   'error.linkNotOpened': 'the system couldn’t open it',

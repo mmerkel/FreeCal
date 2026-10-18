@@ -21,7 +21,8 @@ fn adding_an_account_checks_its_credentials_and_keeps_its_password_in_the_keyrin
 
     let account = core
         .add_caldav_account(&login(&radicale.url(), &user.name, &user.password))
-        .unwrap();
+        .unwrap()
+        .account;
 
     assert_eq!(account.provider, Provider::CalDav);
     assert_eq!(
@@ -44,7 +45,8 @@ fn an_added_account_is_still_there_after_a_relaunch() {
     let account = harness
         .open()
         .add_caldav_account(&login(&radicale.url(), &user.name, &user.password))
-        .unwrap();
+        .unwrap()
+        .account;
 
     let accounts = harness.open().list_accounts().unwrap();
 
@@ -276,7 +278,8 @@ fn removing_an_account_deletes_its_password_from_the_keyring() {
     let core = harness.open();
     let account = core
         .add_caldav_account(&login(&radicale.url(), &user.name, &user.password))
-        .unwrap();
+        .unwrap()
+        .account;
     harness.signals.clear();
 
     core.remove_account(account.id).unwrap();
@@ -294,7 +297,8 @@ fn a_server_account_gets_no_calendars_created_in_freecal() {
     let core = harness.open();
     let account = core
         .add_caldav_account(&login(&radicale.url(), &user.name, &user.password))
-        .unwrap();
+        .unwrap()
+        .account;
 
     let result = core.create_calendar(
         account.id,

@@ -29,8 +29,8 @@ use std::path::Path;
 use chrono::NaiveDate;
 use std::sync::{Arc, Mutex};
 
-pub use account::{Account, AccountId, CalDavLogin, Provider, ServerLogin};
-pub use calendar::{Calendar, CalendarId, Colour};
+pub use account::{Account, AccountId, AddedAccount, CalDavLogin, Provider, ServerLogin};
+pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
@@ -150,11 +150,12 @@ impl Core {
     }
 
     /// Adds a CalDAV Account once its server accepts the username and
-    /// password, which go into the keyring. Stores nothing when the server
-    /// or the keyring fails.
-    pub fn add_caldav_account(&self, login: &CalDavLogin) -> Result<Account> {
+    /// password, which go into the keyring, and returns it with the
+    /// Calendars its server offers. Stores nothing when the server or the
+    /// keyring fails.
+    pub fn add_caldav_account(&self, login: &CalDavLogin) -> Result<AddedAccount> {
         let client = caldav::Client::new(login)?;
-        client.current_user_principal()?;
+        let available = client.discover()?;
         let server = ServerLogin {
             url: client.url().to_string(),
             username: login.username.clone(),
@@ -177,7 +178,32 @@ impl Core {
         }
         let account = added?;
         self.signals.send(Signal::CalendarsChanged);
-        Ok(account)
+        Ok(AddedAccount { account, available })
+    }
+
+    /// The Available Calendars of a server Account, fetched from its server
+    /// each time; none for the Local Account. Stores nothing.
+    pub fn available_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
+        let (account, key) = {
+            let store = self.store();
+            (store.find_account(id)?, store.account_keyring_key(id)?)
+        };
+        let account = account.ok_or(CoreError::AccountNotFound(id))?;
+        let (Some(server), Some(key)) = (account.server, key) else {
+            return Ok(Vec::new());
+        };
+        let password = self
+            .keyring
+            .secret(&key)
+            .map_err(CoreError::KeyringUnavailable)?
+            .ok_or(CoreError::PasswordNotInKeyring)?;
+        // Every Calendar it offers is available until ticket 78 adds some.
+        caldav::Client::new(&CalDavLogin {
+            url: server.url,
+            username: server.username,
+            password,
+        })?
+        .discover()
     }
 
     /// Removes a server Account and deletes its secret from the keyring.

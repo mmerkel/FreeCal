@@ -8,8 +8,10 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use base64::Engine;
+use quick_xml::Writer;
 use tempfile::TempDir;
 
 /// Runs Radicale and exits as soon as its standard input closes, which
@@ -123,6 +125,114 @@ impl Radicale {
     }
 }
 
+/// What a Calendar created on the server is like.
+pub struct NewCalendar<'a> {
+    /// Its name; none leaves the server's `displayname` unset.
+    pub name: Option<&'a str>,
+    pub colour: Option<&'a str>,
+    /// The components it takes, such as `VEVENT`.
+    pub components: &'a [&'a str],
+}
+
+impl Default for NewCalendar<'_> {
+    fn default() -> Self {
+        Self {
+            name: None,
+            colour: None,
+            components: &["VEVENT"],
+        }
+    }
+}
+
+impl Radicale {
+    /// Creates a Calendar for `user` on the server, as another app would,
+    /// and returns its URL.
+    pub fn create_calendar(&self, user: &User, calendar: NewCalendar) -> String {
+        let url = format!(
+            "{}{}/{}/",
+            self.url,
+            user.name,
+            uuid::Uuid::new_v4().simple()
+        );
+        let status = self.request(user, "MKCALENDAR", &url, mkcalendar_body(&calendar));
+        assert_eq!(status, 201, "create a Calendar on Radicale");
+        url
+    }
+
+    /// Deletes a Calendar of `user` on the server.
+    pub fn delete_calendar(&self, user: &User, url: &str) {
+        let status = self.request(user, "DELETE", url, Vec::new());
+        assert_eq!(status, 200, "delete a Calendar on Radicale");
+    }
+
+    fn request(&self, user: &User, method: &str, url: &str, body: Vec<u8>) -> u16 {
+        let credentials = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", user.name, user.password));
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .allow_non_standard_methods(true)
+            .build()
+            .new_agent();
+        let request = ureq::http::Request::builder()
+            .method(ureq::http::Method::from_bytes(method.as_bytes()).unwrap())
+            .uri(url)
+            .header("Authorization", format!("Basic {credentials}"))
+            .header("Content-Type", "application/xml; charset=utf-8")
+            .body(body)
+            .unwrap();
+        agent.run(request).unwrap().status().as_u16()
+    }
+}
+
+/// A `MKCALENDAR` request body (RFC 4791), written with the XML writer like
+/// FreeCal's own requests, so that any name stays text.
+fn mkcalendar_body(calendar: &NewCalendar) -> Vec<u8> {
+    let mut writer = Writer::new(Vec::new());
+    writer
+        .create_element("C:mkcalendar")
+        .with_attribute(("xmlns:D", "DAV:"))
+        .with_attribute(("xmlns:C", "urn:ietf:params:xml:ns:caldav"))
+        .with_attribute(("xmlns:I", "http://apple.com/ns/ical/"))
+        .write_inner_content(|writer| {
+            writer
+                .create_element("D:set")
+                .write_inner_content(|writer| {
+                    writer
+                        .create_element("D:prop")
+                        .write_inner_content(|writer| {
+                            if let Some(name) = calendar.name {
+                                writer
+                                    .create_element("D:displayname")
+                                    .write_text_content(quick_xml::events::BytesText::new(name))?;
+                            }
+                            if let Some(colour) = calendar.colour {
+                                writer
+                                    .create_element("I:calendar-color")
+                                    .write_text_content(quick_xml::events::BytesText::new(
+                                        colour,
+                                    ))?;
+                            }
+                            writer
+                                .create_element("C:supported-calendar-component-set")
+                                .write_inner_content(|writer| {
+                                    for component in calendar.components {
+                                        writer
+                                            .create_element("C:comp")
+                                            .with_attribute(("name", *component))
+                                            .write_empty()?;
+                                    }
+                                    Ok(())
+                                })?;
+                            Ok(())
+                        })?;
+                    Ok(())
+                })?;
+            Ok(())
+        })
+        .unwrap();
+    writer.into_inner()
+}
+
 /// A server that answers every request with `response`, a whole HTTP
 /// response as it goes over the wire. Returns its URL.
 pub fn http_stub(response: &str) -> String {
@@ -139,10 +249,66 @@ pub fn http_stub(response: &str) -> String {
     url
 }
 
+/// A stand-in server that answers by path, from whole HTTP responses as
+/// they go over the wire, and 404 for any other path. It records the
+/// requests it gets.
+pub struct RoutingStub {
+    pub url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl RoutingStub {
+    pub fn new(routes: &[(&str, String)]) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let routes: Vec<(String, String)> = routes
+            .iter()
+            .map(|(path, response)| (path.to_string(), response.clone()))
+            .collect();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let request = read_request(&mut stream);
+                let path = request.split(' ').nth(1).unwrap_or_default().to_owned();
+                recorded.lock().unwrap().push(request);
+                let response = routes
+                    .iter()
+                    .find(|(route, _)| *route == path)
+                    .map(|(_, response)| response.as_str())
+                    .unwrap_or("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        Self { url, requests }
+    }
+
+    /// The request lines it got, such as `PROPFIND /dav/ HTTP/1.1`.
+    pub fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+/// A `207 Multi-Status` answer with `body`, a WebDAV `multistatus`.
+pub fn multistatus(body: &str) -> String {
+    format!(
+        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// A redirect to `location`.
+pub fn redirect(location: &str) -> String {
+    format!("HTTP/1.1 301 Moved Permanently\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n")
+}
+
 /// Reads a whole request, so that closing the connection after answering
-/// doesn't reset it.
-fn read_request(stream: &mut impl Read) {
+/// doesn't reset it, and returns its request line.
+fn read_request(stream: &mut impl Read) -> String {
     let mut reader = BufReader::new(stream);
+    let mut request_line = String::new();
+    let _ = reader.read_line(&mut request_line);
     let mut length = 0;
     let mut line = String::new();
     while reader.read_line(&mut line).is_ok_and(|read| read > 0) && line != "\r\n" {
@@ -154,6 +320,7 @@ fn read_request(stream: &mut impl Read) {
         line.clear();
     }
     let _ = reader.read_exact(&mut vec![0; length]);
+    request_line.trim_end().to_owned()
 }
 
 /// The URL of a server that isn't there: nothing listens on its port.

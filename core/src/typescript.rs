@@ -14,10 +14,10 @@ use serde::Serialize;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Changed, Colour, ErrorCode, Event,
-    EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome, ImportSummary, Occurrence,
-    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, ServerLogin, Settings, SettingsUpdate,
-    SidebarState, Signal, StructuredText, UnitId, View, When,
+    Account, AccountId, AddedAccount, Appearance, AvailableCalendar, Calendar, CalendarId, Changed,
+    Colour, ErrorCode, Event, EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome,
+    ImportSummary, Occurrence, Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, ServerLogin,
+    Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -60,6 +60,7 @@ fn types() -> (String, Vec<String>) {
     };
     // The types the commands and Signals take and return.
     types.visit::<Account>();
+    types.visit::<AddedAccount>();
     types.visit::<Calendar>();
     types.visit::<Occurrence>();
     types.visit::<Event>();
@@ -155,6 +156,11 @@ fn samples_file() -> (String, Vec<String>) {
         url: "https://dav.example.org/".to_owned(),
         username: "alice".to_owned(),
     };
+    let available = AvailableCalendar {
+        url: "https://dav.example.org/alice/work/".to_owned(),
+        name: "Work".to_owned(),
+        colour: Some(Colour::parse("#3a86ff").unwrap()),
+    };
     let entries = [
         samples(&[AccountId(1)]),
         samples(&[Provider::Local, Provider::CalDav]),
@@ -168,6 +174,22 @@ fn samples_file() -> (String, Vec<String>) {
                 id: AccountId(2),
                 provider: Provider::CalDav,
                 server: Some(server.clone()),
+            },
+        ]),
+        samples(&[AddedAccount {
+            account: Account {
+                id: AccountId(2),
+                provider: Provider::CalDav,
+                server: Some(server.clone()),
+            },
+            available: vec![available.clone()],
+        }]),
+        samples(&[
+            available,
+            AvailableCalendar {
+                url: "https://dav.example.org/alice/1b2c/".to_owned(),
+                name: "1b2c".to_owned(),
+                colour: None,
             },
         ]),
         samples(&[server]),

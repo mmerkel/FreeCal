@@ -28,6 +28,37 @@ export const samples = {
       }
     }
   ],
+  AddedAccount: [
+    {
+      "account": {
+        "id": 2,
+        "provider": "caldav",
+        "server": {
+          "url": "https://dav.example.org/",
+          "username": "alice"
+        }
+      },
+      "available": [
+        {
+          "url": "https://dav.example.org/alice/work/",
+          "name": "Work",
+          "colour": "#3a86ff"
+        }
+      ]
+    }
+  ],
+  AvailableCalendar: [
+    {
+      "url": "https://dav.example.org/alice/work/",
+      "name": "Work",
+      "colour": "#3a86ff"
+    },
+    {
+      "url": "https://dav.example.org/alice/1b2c/",
+      "name": "1b2c",
+      "colour": null
+    }
+  ],
   ServerLogin: [
     {
       "url": "https://dav.example.org/",
@@ -557,6 +588,13 @@ export const samples = {
       "code": "keyringUnavailable"
     },
     {
+      "code": "passwordNotInKeyring"
+    },
+    {
+      "code": "redirectedElsewhere",
+      "url": "https://caldav.example.org/dav/"
+    },
+    {
       "code": "noFileToImport"
     },
     {
@@ -575,6 +613,8 @@ type Samples = {
   AccountId: Unbranded<T.AccountId>[];
   Provider: Unbranded<T.Provider>[];
   Account: Unbranded<T.Account>[];
+  AddedAccount: Unbranded<T.AddedAccount>[];
+  AvailableCalendar: Unbranded<T.AvailableCalendar>[];
   ServerLogin: Unbranded<T.ServerLogin>[];
   CalendarId: Unbranded<T.CalendarId>[];
   Colour: Unbranded<T.Colour>[];

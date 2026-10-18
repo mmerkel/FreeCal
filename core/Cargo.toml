@@ -12,6 +12,7 @@ chrono-tz = "0.10"
 iana-time-zone = "0.1"
 icalendar = { version = "0.17", default-features = false, features = ["parser"] }
 iso8601 = { version = "0.6", default-features = false }
+percent-encoding = "2"
 quick-xml = "0.38"
 rrule = "0.14"
 rusqlite = { version = "0.40", features = ["bundled"] }
