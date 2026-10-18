@@ -1,0 +1,28 @@
+# `cargo deny check licenses`: every Rust dependency is GPLv3-compatible
+# (ADR 0003). The pre-commit hook runs it when Cargo.toml or Cargo.lock
+# changes. Add a licence here only after checking it against the FSF's list.
+
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "GPL-3.0-or-later",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+# Root certificates as data; ADR 0003 says why they're acceptable.
+exceptions = [
+    { name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]

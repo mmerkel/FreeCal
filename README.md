@@ -15,6 +15,7 @@ You need:
 - The system packages Tauri needs on Linux, such as WebKitGTK. See Tauri's [prerequisites](https://v2.tauri.app/start/prerequisites/).
 - OpenSSL's development files (`libssl-dev` on Debian and Ubuntu, `openssl-devel` on Fedora), for connections to CalDAV servers
 - For the tests, the [Radicale](https://radicale.org) CalDAV server, installed for `python3` (`pip install --user radicale`). The tests start it themselves; `FREECAL_RADICALE_PYTHON` names another Python to run it with.
+- For the licence check, [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`cargo install cargo-deny --locked`)
 
 Then:
 
@@ -30,6 +31,7 @@ Checks:
 cargo test --workspace
 cargo clippy --workspace --all-targets
 cargo fmt --all --check
+cargo deny check licenses
 npm run lint
 npm run check
 npm test

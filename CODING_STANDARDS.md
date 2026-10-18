@@ -24,4 +24,4 @@ Every stored field is untrusted, whatever its origin (spec: "Untrusted content" 
 
 ## Dependencies
 
-- Every dependency is GPLv3-compatible (ADR 0003).
+- Every npm dependency is GPLv3-compatible (ADR 0003). `cargo deny check licenses` checks the Rust ones.

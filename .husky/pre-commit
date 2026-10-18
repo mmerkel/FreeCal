@@ -16,5 +16,8 @@ quiet() {
 quiet npm run --silent lint
 quiet npm run --silent check
 quiet npm test
+if git diff --cached --name-only | grep -qE '(^|/)Cargo\.(toml|lock)$|^deny\.toml$'; then
+  quiet cargo deny --log-level error check licenses
+fi
 quiet cargo clippy --all-targets -- -D warnings
 quiet cargo test
