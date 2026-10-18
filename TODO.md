@@ -1,6 +1,9 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
+- [ ] implement 37, rest of 56, 15, 16
 - [ ] test add caldav account & calendar by hand
+  - [ ] rename accounts (keep account type in parens)
+- [ ] architecture check
 - [ ] caldav sync: I would like to understand all ids and tokens involved (event ID, UID, etag, sync token, etc), and how the code deals with it
 - [ ] repeat rules edit in the frontend (edit event): partially hide and only show all of it when the user actually wants to change it (somewhat like Google calendar)
 - [ ] font - which one is currently used; what are the rights; what about constant-width, so that times align more often?
