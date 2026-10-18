@@ -1,8 +1,8 @@
 # 19: Undo through the Change Journal
 
-**What to build:** The user can see every change in the Change Journal as one timeline, undo any one of them, or undo everything in a Calendar since a given time, and can see and undo an Event's History from its details. Undo follows ADR 0009 and ticket 69's rules.
+**What to build:** The user can see every change in the Change Journal as one timeline, undo any one of them, or undo everything in a Calendar since a given time, and can see and undo an Event's History from its details. Undo follows ADR 0009 and the rules of tickets 69 and 72.
 
-**Blocked by:** 17, 69, 70
+**Blocked by:** 17, 70, 72
 
 **Status:** ready-for-agent
 
@@ -18,3 +18,4 @@
 
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009). The 90-day removal moved to ticket 69.
+- 2026-10-18: Ticket 69 was split; the per-Event undo rules and the 90-day removal are now ticket 72.

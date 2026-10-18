@@ -79,7 +79,7 @@ _Avoid_: Connection state, health
 ## Safety
 
 **Change Journal**:
-The local record of every change to an Event, whether made in FreeCal or pulled from a server, each entry holding the Event's previous version so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one unit.
+The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is an entry holding the Event's previous version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one unit, which records where its changes came from.
 _Avoid_: History, log, audit trail, undo stack
 
 **Mass-Change Guard**:

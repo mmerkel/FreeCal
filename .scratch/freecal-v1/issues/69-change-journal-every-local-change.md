@@ -1,27 +1,28 @@
-# 69: Change Journal for every local change, undo per Event
+# 69: Change Journal for every local change
 
-**What to build:** Every change FreeCal makes to an Event is a Change Journal entry, in any Calendar, Local Calendars included, and undo goes per Event as ADR 0009 describes. This replaces ticket 58's import undo, which matched Events by ID and UID. Spec: user stories 81, 82, 99 and 135; "Change Journal" under Implementation Decisions.
+**What to build:** Every change FreeCal makes to an Event is a Change Journal entry, in any Calendar, Local Calendars included, and every change's unit can be undone and redone whole. One core module, the Change Journal module, is the only writer of Events, so no change can skip the Journal (ADR 0009). This replaces ticket 58's import-only Journal; the undo rules that go per Event are ticket 72. Spec: user stories 81, 82 and 99; "Change Journal" under Implementation Decisions.
 
 **Blocked by:** none
 
 **Status:** ready-for-agent
 
-**Effort:** L
+**Effort:** M
 
-- [ ] Creating, editing, moving and deleting an Event in any Calendar records an entry with the previous version and a hash of the new one; ticket 58's `journal_import` / `journal_entry` grow into this (rename to a general unit)
-- [ ] Imports, Snapshot restores (ticket 11) and Conflict resolutions (tickets 20 and 21) are units; a single change is a unit of one
-- [ ] Undoing an entry writes the previous version back under the same identity, and is itself recorded as an entry, so it can be undone; undone entries are marked
-- [ ] An Event that no longer matches the entry's hash has its later entries undone first, newest first; the core reports them before running, so the frontend can ask (ticket 70)
-- [ ] A unit can be undone whole or one Event at a time; undoing the rest of a partly undone unit works
-- [ ] Events in Read-only Calendars are skipped and their Calendars named; the rest is undone (replaces ticket 58's refusal of the whole undo)
-- [ ] An Event whose current version matches no entry is skipped with "Can't undo “<title>”: its current version isn't in the Change Journal of the Local Store." (title as text in bidi isolates, through `t()`)
-- [ ] The core classifies an undo as benign or dangerous (also undoes later changes, reverts a change pulled from a server, or exceeds the Mass-Change Guard's thresholds) and says why
-- [ ] Undo and redo send "Occurrences changed" for the affected Calendars
-- [ ] Entries older than 90 days are removed (controllable clock); moved here from ticket 19
-- [ ] Core tests for every point above, including ticket 58's cases: an imported Event moved since, an updated one edited or deleted since
+- [ ] A new `core/src/journal.rs` is the only code that writes the `event` table and the Journal tables; the Event-write SQL moves there from `store.rs` and its four copies of the Event row become one. `Store` keeps the reads and the Calendar and settings writes
+- [ ] Its interface is one closure over a unit, `journal::record(&store, origin, now, |unit| …)`, returning `Recorded<T> { unit: Option<UnitId>, calendars, value }`: inside one transaction the unit offers reads and `create`, `replace` and `delete`, reads each previous version itself and records it with a hash of the new one
+- [ ] `journal_import` / `journal_entry` become general units and entries (migrations may change freely before the first release, ADR 0008). Each unit records its origin: user action, import or undo in this ticket; sync, Snapshot restore and Conflict resolution come with their tickets
+- [ ] The module decides writability from the origin, so no caller calls `writable()`: a user action or an import touching a Read-only Calendar is refused with `CalendarReadOnly` (an edit moving an Event checks both Calendars), and an undo too until ticket 72 skips instead. Incremental syncs will write into Read-only Calendars (ticket 54)
+- [ ] The hash is SHA-256 (`sha2`) over a length-prefixed list of the Event's Calendar, UID and fields, starting with a format version byte; a comment says how a migration re-hashes when a field such as the original server data (ADR 0004) is added
+- [ ] A unit with no changes (an import that skips every Event, an edit or reschedule that changes nothing, found by comparing hashes) is not stored, returns no unit and sends no Signal
+- [ ] `create_event`, `edit_event`, `reschedule_event` and `delete_event` return `Changed<T> { unit: Option<UnitId>, value }`; `ImportOutcome` carries its `UnitId`. `Core` sends "Occurrences changed" for `calendars` after releasing the Store lock
+- [ ] `Core::undo_unit(UnitId)` replaces `undo_import`: it writes every previous version of the unit back under the same identity when no Event changed since its entry, and otherwise refuses with a new `ChangedSinceUnit`; it also refuses when a previous version's Calendar has been deleted. The undo is recorded as a unit of origin undo and the original's entries are marked undone; undoing an undone unit is refused with `AlreadyUndone`. Redo is `undo_unit` on the undo's unit
+- [ ] Deleting a Local Calendar isn't recorded (ADR 0009): the module deletes its Events, removes their entries by Event identity and drops units left empty. Entries of Events that were once in it but live elsewhere now stay
+- [ ] Frontend: `CoreApi` gets `Changed<T>` and `undoUnit` in place of `undoImport`; the import toast offers Undo exactly when a unit came back, replacing the `imported + updated > 0` rule in `App.svelte`, `fakeCore.ts` and `lib.rs`; `errorText` words `changedSinceUnit` and `alreadyUndone` through `t()`. `fakeCore.ts` records a unit for every change and does the simple undo. Toasts for other changes stay ticket 70's
+- [ ] Core tests through `Core` and the `Harness` only, plus one unit test pinning the hash format: each of create, edit, reschedule, delete and import returns a unit that `undo_unit` reverses exactly; an edit moving an Event between Calendars, undone; no unit and no Signal for a change that changes nothing; undo, redo and `AlreadyUndone`; refusals in Read-only Calendars per origin; ticket 58's "moved since" and "edited since" cases refused with `ChangedSinceUnit`; deleting a Calendar makes undoing an import into it `UnitNotFound`; an Event moved out of a Calendar that was deleted since is refused; the Signals each undo sends
 
-Out of scope: recording incremental syncs (tickets 54 and 25); server writes of an undo (ticket 17); Ctrl+Z, toasts and confirmations (ticket 70); the list and History (ticket 19).
+Out of scope: undo per Event, cascading through later changes, skipping, benign and dangerous undos, the 90-day removal (ticket 72); recording incremental syncs (tickets 54 and 25); server writes of an undo (ticket 17); Ctrl+Z, toasts and confirmations (ticket 70); the list and History (ticket 19).
 
 ## Comments
 
 - 2026-10-18: From grilling ticket 58's decisions (TODO.md). ADR 0009 records why.
+- 2026-10-18: Split after an architecture review (deepening the Event write path into one Change Journal module) and its grilling. The undo rules moved to ticket 72; this ticket builds the module, records every change and undoes whole units with simple rules.

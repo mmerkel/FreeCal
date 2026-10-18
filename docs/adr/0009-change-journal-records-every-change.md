@@ -20,3 +20,4 @@ A Calendar's first sync is the baseline and is not recorded: undoing it would de
 - Undoing a change pulled from a server writes the previous version back to the server, so it overwrites someone else's change, or the user's change made on another device. Hence the confirmation.
 - Read-only Calendars record incoming changes too, so they can be seen. Undo skips their Events and names the Calendar.
 - An import that created Calendars removes them on undo if they are empty by then.
+- Deleting a Local Calendar isn't recorded: it already asks first, and undoing it would mean journaling Calendars. The entries for its Events are removed with it.
