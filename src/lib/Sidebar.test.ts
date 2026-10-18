@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { expect, onTestFinished, test, vi } from 'vitest';
 import App from '../App.svelte';
 import { expectAnchoredTo } from '../test/anchored';
+import hostile from '../../fixtures/hostile-event.json';
 import { FakeCore } from '../test/fakeCore';
+import { accountId } from '../test/ids';
 
 async function showApp(core: FakeCore) {
   render(App, { core });
@@ -24,6 +26,20 @@ test('subscribes to Signals before reading anything a Signal could change', asyn
   // Whether FreeCal started comes first; no Signal changes that.
   expect(core.calls.slice(0, 2)).toEqual(['startupFailure', 'subscribe']);
   expect(core.calls).toContain('listCalendars');
+});
+
+test('a CalDAV Account is named by its hostile username as text', async () => {
+  const core = new FakeCore();
+  core.accounts.push({
+    id: accountId(2),
+    provider: 'caldav',
+    server: { url: 'https://dav.example.org/', username: hostile.username },
+  });
+
+  await showApp(core);
+
+  expect(screen.getByRole('list', { name: hostile.expected.accountName })).toBeInTheDocument();
+  expect(document.querySelector('img')).toBeNull();
 });
 
 test('shows each Calendar under its Account as a switch', async () => {

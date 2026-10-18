@@ -3,6 +3,7 @@
 
 #[cfg(target_os = "linux")]
 mod handoff;
+mod keyring;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -452,7 +453,7 @@ fn main() {
             #[cfg(target_os = "linux")]
             hand_off_or_serve(app, &data_dir);
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
-            match Core::open(&data_dir, Arc::new(SystemClock), signals) {
+            match Core::open(&data_dir, Arc::new(SystemClock), signals, keyring::system()) {
                 Ok(core) => {
                     app.manage(core);
                     let handle = app.handle().clone();

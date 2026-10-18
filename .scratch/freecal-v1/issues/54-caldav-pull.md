@@ -2,7 +2,7 @@
 
 **What to build:** Calendars added from a CalDAV Account are pulled into the Local Store and kept up to date incrementally, through a Provider interface that later Providers (Google, Microsoft Graph, ICS feeds) plug into without changing the sync engine. Split from ticket 14.
 
-**Blocked by:** 53, 69
+**Blocked by:** 78, 69
 
 **Status:** ready-for-agent
 

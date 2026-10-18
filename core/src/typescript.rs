@@ -16,8 +16,8 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Changed, Colour, ErrorCode, Event,
     EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome, ImportSummary, Occurrence,
-    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, Settings, SettingsUpdate, SidebarState,
-    Signal, StructuredText, UnitId, View, When,
+    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, ServerLogin, Settings, SettingsUpdate,
+    SidebarState, Signal, StructuredText, UnitId, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -151,13 +151,26 @@ fn samples_file() -> (String, Vec<String>) {
         recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
         ..event.clone()
     };
+    let server = ServerLogin {
+        url: "https://dav.example.org/".to_owned(),
+        username: "alice".to_owned(),
+    };
     let entries = [
         samples(&[AccountId(1)]),
-        samples(&[Provider::Local]),
-        samples(&[Account {
-            id: AccountId(1),
-            provider: Provider::Local,
-        }]),
+        samples(&[Provider::Local, Provider::CalDav]),
+        samples(&[
+            Account {
+                id: AccountId(1),
+                provider: Provider::Local,
+                server: None,
+            },
+            Account {
+                id: AccountId(2),
+                provider: Provider::CalDav,
+                server: Some(server.clone()),
+            },
+        ]),
+        samples(&[server]),
         samples(&[CalendarId(2)]),
         samples(std::slice::from_ref(&calendar.colour)),
         samples(&[calendar]),

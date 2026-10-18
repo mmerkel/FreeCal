@@ -64,7 +64,7 @@ export interface ScopedChange {
  * for it. Tests can also emit Signals themselves.
  */
 export class FakeCore implements CoreApi {
-  accounts: Account[] = [{ id: accountId(1), provider: 'local' }];
+  accounts: Account[] = [{ id: accountId(1), provider: 'local', server: null }];
   calendars: Calendar[] = [];
   events: Event[] = [];
   currentDate = Temporal.PlainDate.from('2026-10-03');
@@ -640,9 +640,12 @@ export class FakeCore implements CoreApi {
   }
 }
 
-/** A failure about no file, as the real core reports it. */
-function failure(code: Exclude<ErrorCode, { file: string }>['code']): ErrorCode {
-  return { code };
+/** A failure about no file or server, as the real core reports it. */
+type PlainFailure = Exclude<ErrorCode, { file: string } | { status: number }>;
+
+function failure(code: PlainFailure['code']): ErrorCode {
+  // TypeScript matches `{ code }` against a union of only up to 25 codes.
+  return { code } as PlainFailure;
 }
 
 /** Plain text as the core would structure it, without links. */

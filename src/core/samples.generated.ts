@@ -10,12 +10,28 @@ export const samples = {
     1
   ],
   Provider: [
-    "local"
+    "local",
+    "caldav"
   ],
   Account: [
     {
       "id": 1,
-      "provider": "local"
+      "provider": "local",
+      "server": null
+    },
+    {
+      "id": 2,
+      "provider": "caldav",
+      "server": {
+        "url": "https://dav.example.org/",
+        "username": "alice"
+      }
+    }
+  ],
+  ServerLogin: [
+    {
+      "url": "https://dav.example.org/",
+      "username": "alice"
     }
   ],
   CalendarId: [
@@ -515,6 +531,32 @@ export const samples = {
       "code": "alreadyUndone"
     },
     {
+      "code": "notLocalAccount"
+    },
+    {
+      "code": "invalidServerUrl"
+    },
+    {
+      "code": "wrongCredentials"
+    },
+    {
+      "code": "serverUnreachable"
+    },
+    {
+      "code": "secureConnectionFailed"
+    },
+    {
+      "code": "notCalDavServer"
+    },
+    {
+      "code": "serverRefused",
+      "status": 403,
+      "message": "Access to the requested resource forbidden."
+    },
+    {
+      "code": "keyringUnavailable"
+    },
+    {
       "code": "noFileToImport"
     },
     {
@@ -533,6 +575,7 @@ type Samples = {
   AccountId: Unbranded<T.AccountId>[];
   Provider: Unbranded<T.Provider>[];
   Account: Unbranded<T.Account>[];
+  ServerLogin: Unbranded<T.ServerLogin>[];
   CalendarId: Unbranded<T.CalendarId>[];
   Colour: Unbranded<T.Colour>[];
   Calendar: Unbranded<T.Calendar>[];

@@ -10,9 +10,11 @@ Early development. FreeCal launches and shows an empty month view, but it can't 
 
 You need:
 
-- Rust (stable, 1.85 or newer, for the 2024 edition)
+- Rust (stable, 1.92 or newer)
 - Node.js (a current LTS release) and npm
 - The system packages Tauri needs on Linux, such as WebKitGTK. See Tauri's [prerequisites](https://v2.tauri.app/start/prerequisites/).
+- OpenSSL's development files (`libssl-dev` on Debian and Ubuntu, `openssl-devel` on Fedora), for connections to CalDAV servers
+- For the tests, the [Radicale](https://radicale.org) CalDAV server, installed for `python3` (`pip install --user radicale`). The tests start it themselves; `FREECAL_RADICALE_PYTHON` names another Python to run it with.
 
 Then:
 

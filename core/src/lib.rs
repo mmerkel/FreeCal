@@ -4,12 +4,14 @@
 //! pushes [`Signal`]s to a [`SignalSink`].
 
 mod account;
+mod caldav;
 mod calendar;
 mod clock;
 mod error;
 mod event;
 mod import;
 mod journal;
+mod keyring;
 mod recurrence;
 mod scope;
 mod settings;
@@ -27,7 +29,7 @@ use std::path::Path;
 use chrono::NaiveDate;
 use std::sync::{Arc, Mutex};
 
-pub use account::{Account, AccountId, Provider};
+pub use account::{Account, AccountId, CalDavLogin, Provider, ServerLogin};
 pub use calendar::{Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
@@ -37,6 +39,7 @@ pub use import::{
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use journal::{Changed, UnitId};
+pub use keyring::{Keyring, KeyringError};
 pub use recurrence::{Frequency, Repeat, RepeatEnd};
 pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
@@ -61,6 +64,7 @@ pub struct Core {
     store: Mutex<Store>,
     clock: Arc<dyn Clock>,
     signals: Arc<dyn SignalSink>,
+    keyring: Arc<dyn Keyring>,
     /// The local date as [`Core::check_date`] last saw it.
     date: Mutex<NaiveDate>,
 }
@@ -73,6 +77,7 @@ impl Core {
         data_dir: &Path,
         clock: Arc<dyn Clock>,
         signals: Arc<dyn SignalSink>,
+        keyring: Arc<dyn Keyring>,
     ) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
         let lock = lock_local_store(data_dir)?;
@@ -83,6 +88,7 @@ impl Core {
             store: Mutex::new(store),
             clock,
             signals,
+            keyring,
             date,
         })
     }
@@ -143,11 +149,59 @@ impl Core {
         self.store().list_accounts()
     }
 
-    pub fn remove_account(&self, id: AccountId) -> Result<()> {
-        let account = self.store().find_account(id)?;
-        match account.ok_or(CoreError::AccountNotFound(id))?.provider {
-            Provider::Local => Err(CoreError::LocalAccountCannotBeRemoved),
+    /// Adds a CalDAV Account once its server accepts the username and
+    /// password, which go into the keyring. Stores nothing when the server
+    /// or the keyring fails.
+    pub fn add_caldav_account(&self, login: &CalDavLogin) -> Result<Account> {
+        let client = caldav::Client::new(login)?;
+        client.current_user_principal()?;
+        let server = ServerLogin {
+            url: client.url().to_string(),
+            username: login.username.clone(),
+        };
+        let key = uuid::Uuid::new_v4().to_string();
+        let label = format!(
+            "FreeCal: {} on {}",
+            login.username,
+            client.url().host_str().unwrap_or_default()
+        );
+        self.keyring
+            .store(&key, &label, &login.password)
+            .map_err(CoreError::KeyringUnavailable)?;
+        let added = self
+            .store()
+            .insert_server_account(Provider::CalDav, &server, &key);
+        if added.is_err() {
+            // Best effort: the Account failed already.
+            let _ = self.keyring.delete(&key);
         }
+        let account = added?;
+        self.signals.send(Signal::CalendarsChanged);
+        Ok(account)
+    }
+
+    /// Removes a server Account and deletes its secret from the keyring.
+    /// The Local Account stays.
+    pub fn remove_account(&self, id: AccountId) -> Result<()> {
+        let (account, key) = {
+            let store = self.store();
+            (store.find_account(id)?, store.account_keyring_key(id)?)
+        };
+        match account.ok_or(CoreError::AccountNotFound(id))?.provider {
+            Provider::Local => return Err(CoreError::LocalAccountCannotBeRemoved),
+            // Its Calendars leave with it once it can have some (ticket 79).
+            Provider::CalDav => {}
+        }
+        // The keyring first: should it fail, the Account stays, and removing
+        // it again can delete the secret.
+        if let Some(key) = key {
+            self.keyring
+                .delete(&key)
+                .map_err(CoreError::KeyringUnavailable)?;
+        }
+        self.store().delete_account(id)?;
+        self.signals.send(Signal::CalendarsChanged);
+        Ok(())
     }
 
     /// Every Calendar of every Account, in the order they were added.
@@ -156,7 +210,7 @@ impl Core {
     }
 
     /// Creates a Calendar in the Local Account. Server Accounts' Calendars
-    /// are added from their Available Calendars instead (ticket 14).
+    /// are added from their Available Calendars instead (ticket 78).
     pub fn create_calendar(
         &self,
         account_id: AccountId,
@@ -172,6 +226,7 @@ impl Core {
                 .provider
             {
                 Provider::Local => store.insert_calendar(account_id, name, &colour)?,
+                Provider::CalDav => return Err(CoreError::NotLocalAccount(account_id)),
             }
         };
         self.signals.send(Signal::CalendarsChanged);

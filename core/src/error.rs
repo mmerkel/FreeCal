@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{AccountId, CalendarId, EventId, UnitId};
+use crate::{AccountId, CalendarId, EventId, KeyringError, UnitId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -55,6 +55,24 @@ pub enum CoreError {
     ChangedSinceUnit(UnitId),
     #[error("Change Journal unit {0:?} is undone already")]
     AlreadyUndone(UnitId),
+    #[error("Account {0:?} gets its Calendars from its server")]
+    NotLocalAccount(AccountId),
+    #[error("a server's address must start with http:// or https://")]
+    InvalidServerUrl,
+    #[error("the server didn't accept the username and password")]
+    WrongCredentials,
+    #[error("the server couldn't be reached: {0}")]
+    ServerUnreachable(String),
+    #[error("no secure connection to the server could be made: {0}")]
+    SecureConnectionFailed(String),
+    #[error("the server answered, but not as a CalDAV server")]
+    NotCalDavServer,
+    /// `message` is the server's own text, untrusted, made plain by
+    /// [`crate::caldav`].
+    #[error("the server refused with status {status}: {message:?}")]
+    ServerRefused { status: u16, message: String },
+    #[error("the system keyring couldn't be used: {0}")]
+    KeyringUnavailable(KeyringError),
 }
 
 impl CoreError {
@@ -91,6 +109,17 @@ impl CoreError {
             CoreError::UnitNotFound(_) => ErrorCode::UnitNotFound,
             CoreError::ChangedSinceUnit(_) => ErrorCode::ChangedSinceUnit,
             CoreError::AlreadyUndone(_) => ErrorCode::AlreadyUndone,
+            CoreError::NotLocalAccount(_) => ErrorCode::NotLocalAccount,
+            CoreError::InvalidServerUrl => ErrorCode::InvalidServerUrl,
+            CoreError::WrongCredentials => ErrorCode::WrongCredentials,
+            CoreError::ServerUnreachable(_) => ErrorCode::ServerUnreachable,
+            CoreError::SecureConnectionFailed(_) => ErrorCode::SecureConnectionFailed,
+            CoreError::NotCalDavServer => ErrorCode::NotCalDavServer,
+            CoreError::ServerRefused { status, message } => ErrorCode::ServerRefused {
+                status: *status,
+                message: message.clone(),
+            },
+            CoreError::KeyringUnavailable(_) => ErrorCode::KeyringUnavailable,
         }
     }
 }
@@ -147,6 +176,32 @@ pub enum ErrorCode {
     ChangedSinceUnit,
     /// A change to undo was undone already.
     AlreadyUndone,
+    /// Calendars can be created only in the Local Account; a server
+    /// Account's come from its server.
+    NotLocalAccount,
+    /// A server's address isn't an `http://` or `https://` URL.
+    InvalidServerUrl,
+    /// The server didn't accept the username and password.
+    WrongCredentials,
+    /// The server couldn't be reached at the network level: no such host,
+    /// connection refused, or no answer in time.
+    ServerUnreachable,
+    /// No secure connection could be made, as when the server's certificate
+    /// isn't trusted.
+    SecureConnectionFailed,
+    /// The server answered, but not as a CalDAV server.
+    NotCalDavServer,
+    /// The server answered with an error `status`. `message` is the
+    /// server's own text, untrusted and only ever shown as text: plain, on
+    /// one line, at most 200 characters, empty unless the server sent plain
+    /// text.
+    ServerRefused {
+        status: u16,
+        message: String,
+    },
+    /// There is no working system keyring to keep a password in, or it
+    /// stayed locked.
+    KeyringUnavailable,
     /// The window asked to preview or run an import before a file was
     /// picked, or after it was run or discarded.
     NoFileToImport,
@@ -187,6 +242,17 @@ impl ErrorCode {
             ErrorCode::UnitNotFound,
             ErrorCode::ChangedSinceUnit,
             ErrorCode::AlreadyUndone,
+            ErrorCode::NotLocalAccount,
+            ErrorCode::InvalidServerUrl,
+            ErrorCode::WrongCredentials,
+            ErrorCode::ServerUnreachable,
+            ErrorCode::SecureConnectionFailed,
+            ErrorCode::NotCalDavServer,
+            ErrorCode::ServerRefused {
+                status: 403,
+                message: "Access to the requested resource forbidden.".to_owned(),
+            },
+            ErrorCode::KeyringUnavailable,
             ErrorCode::NoFileToImport,
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,

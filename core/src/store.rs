@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
-    Result, Settings, SidebarState, View,
+    Result, ServerLogin, Settings, SidebarState, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -152,6 +152,15 @@ const MIGRATIONS: &[Migration] = &[
     ",
     ),
     Migration::Code(recurring_events),
+    // Ticket 76: server Accounts. A CalDAV Account has its server's URL and
+    // a username; its password lives in the keyring under `keyring_key`.
+    Migration::Sql(
+        "
+    ALTER TABLE account ADD COLUMN url TEXT;
+    ALTER TABLE account ADD COLUMN username TEXT;
+    ALTER TABLE account ADD COLUMN keyring_key TEXT;
+    ",
+    ),
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether
@@ -407,19 +416,69 @@ impl Store {
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, provider FROM account ORDER BY id")?;
+            .prepare("SELECT id, provider, url, username FROM account ORDER BY id")?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?
-            .collect::<rusqlite::Result<Vec<(i64, String)>>>()?;
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         rows.into_iter()
-            .map(|(id, provider)| {
+            .map(|(id, provider, url, username)| {
                 Ok(Account {
                     id: AccountId(id),
                     provider: Provider::parse(&provider)
                         .ok_or(CoreError::UnknownProvider(provider))?,
+                    server: url
+                        .zip(username)
+                        .map(|(url, username)| ServerLogin { url, username }),
                 })
             })
             .collect()
+    }
+
+    /// Adds a server Account whose secret is in the keyring under
+    /// `keyring_key`.
+    pub fn insert_server_account(
+        &self,
+        provider: Provider,
+        server: &ServerLogin,
+        keyring_key: &str,
+    ) -> Result<Account> {
+        self.conn.execute(
+            "INSERT INTO account (provider, url, username, keyring_key) VALUES (?1, ?2, ?3, ?4)",
+            params![provider.as_str(), server.url, server.username, keyring_key],
+        )?;
+        Ok(Account {
+            id: AccountId(self.conn.last_insert_rowid()),
+            provider,
+            server: Some(server.clone()),
+        })
+    }
+
+    /// Where the keyring keeps the Account's secret; none for the Local
+    /// Account.
+    pub fn account_keyring_key(&self, id: AccountId) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT keyring_key FROM account WHERE id = ?1",
+                [id.0],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Deletes an Account with its Calendars and their Events.
+    pub fn delete_account(&self, id: AccountId) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM account WHERE id = ?1", [id.0])?;
+        Ok(())
     }
 
     pub fn find_account(&self, id: AccountId) -> Result<Option<Account>> {

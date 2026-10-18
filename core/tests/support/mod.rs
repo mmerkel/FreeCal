@@ -1,15 +1,20 @@
 //! Test harness for the core application interface: a real SQLite Local Store
-//! in a temporary directory, a controllable clock and a recording Signal
-//! subscriber.
+//! in a temporary directory, a controllable clock, a recording Signal
+//! subscriber, a recording keyring and a real Radicale server.
 
 #![allow(dead_code)]
 
+pub mod radicale;
+
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
-    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, Signal, SignalSink, When,
+    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, Keyring, KeyringError,
+    Signal, SignalSink, When,
 };
 use tempfile::TempDir;
 
@@ -17,6 +22,7 @@ pub struct Harness {
     data_dir: TempDir,
     pub clock: Arc<TestClock>,
     pub signals: Arc<RecordingSignals>,
+    pub keyring: Arc<RecordingKeyring>,
 }
 
 impl Harness {
@@ -25,6 +31,7 @@ impl Harness {
             data_dir: TempDir::new().expect("create temporary data directory"),
             clock: Arc::new(TestClock::at("2026-10-03T12:00:00+02:00")),
             signals: Arc::new(RecordingSignals::default()),
+            keyring: Arc::new(RecordingKeyring::default()),
         }
     }
 
@@ -40,6 +47,7 @@ impl Harness {
             self.data_dir.path(),
             self.clock.clone(),
             self.signals.clone(),
+            self.keyring.clone(),
         )
     }
 
@@ -67,6 +75,17 @@ impl Harness {
     pub fn try_arrange_local_store(&self, sql: &str) -> rusqlite::Result<()> {
         let path = self.data_dir.path().join("freecal.sqlite3");
         rusqlite::Connection::open(path).and_then(|conn| conn.execute_batch(sql))
+    }
+}
+
+impl Harness {
+    /// Whether any file in the data directory holds `bytes`, as written to
+    /// disk so far.
+    pub fn data_dir_contains(&self, bytes: &[u8]) -> bool {
+        std::fs::read_dir(self.data_dir.path())
+            .unwrap()
+            .map(|entry| std::fs::read(entry.unwrap().path()).unwrap())
+            .any(|file| file.windows(bytes.len()).any(|window| window == bytes))
     }
 }
 
@@ -128,6 +147,55 @@ impl RecordingSignals {
 impl SignalSink for RecordingSignals {
     fn send(&self, signal: Signal) {
         self.received.lock().unwrap().push(signal);
+    }
+}
+
+/// A keyring that keeps secrets in memory, or fails like a system without a
+/// working keyring once broken.
+#[derive(Default)]
+pub struct RecordingKeyring {
+    secrets: Mutex<BTreeMap<String, String>>,
+    broken: AtomicBool,
+}
+
+impl RecordingKeyring {
+    /// The secrets it holds, in the order of their keys.
+    pub fn secrets(&self) -> Vec<String> {
+        self.secrets.lock().unwrap().values().cloned().collect()
+    }
+
+    /// Makes every further request fail, as without a keyring.
+    pub fn break_it(&self) {
+        self.broken.store(true, Ordering::Relaxed);
+    }
+
+    fn working(&self) -> Result<(), KeyringError> {
+        match self.broken.load(Ordering::Relaxed) {
+            true => Err(KeyringError("no keyring in this test".to_owned())),
+            false => Ok(()),
+        }
+    }
+}
+
+impl Keyring for RecordingKeyring {
+    fn store(&self, key: &str, _label: &str, secret: &str) -> Result<(), KeyringError> {
+        self.working()?;
+        self.secrets
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), secret.to_owned());
+        Ok(())
+    }
+
+    fn secret(&self, key: &str) -> Result<Option<String>, KeyringError> {
+        self.working()?;
+        Ok(self.secrets.lock().unwrap().get(key).cloned())
+    }
+
+    fn delete(&self, key: &str) -> Result<(), KeyringError> {
+        self.working()?;
+        self.secrets.lock().unwrap().remove(key);
+        Ok(())
     }
 }
 

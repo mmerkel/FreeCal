@@ -36,6 +36,8 @@
     switch (account.provider) {
       case 'local':
         return t('account.local');
+      case 'caldav':
+        return t('account.caldav', { username: account.server?.username ?? '' });
     }
   }
 

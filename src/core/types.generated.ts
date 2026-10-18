@@ -1,7 +1,12 @@
 // Generated from the Rust core by core/src/typescript.rs. Don't edit;
 // run `FREECAL_WRITE_TYPES=1 cargo test -p freecal-core` instead.
 
-export type Account = { id: AccountId, provider: Provider, };
+export type Account = { id: AccountId, provider: Provider,
+/**
+ * Where a server Account syncs and who it logs in as; none for the
+ * Local Account.
+ */
+server: ServerLogin | null, };
 
 /**
  * Branded in TypeScript, so that it can't be mixed up with other IDs.
@@ -47,7 +52,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -150,7 +155,7 @@ export type PinnedZone = { zone: string, events: number, };
 /**
  * A kind of calendar service FreeCal can talk to.
  */
-export type Provider = "local";
+export type Provider = "local" | "caldav";
 
 /**
  * A repeat rule as the editor sets it.
@@ -170,6 +175,12 @@ export type RepeatEnd = { "kind": "never" } | { "kind": "until", date: string, }
  * Which Occurrences of a Recurring Event a change to one of them changes.
  */
 export type Scope = "this" | "thisAndFollowing" | "all";
+
+/**
+ * A server Account's server and the username it logs in with. Its
+ * password lives in the keyring.
+ */
+export type ServerLogin = { url: string, username: string, };
 
 /**
  * The settings of the Settings dialog, as the Local Store keeps them.

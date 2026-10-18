@@ -24,6 +24,24 @@ test('a refused undo says why', () => {
   expect(errorText({ code: 'unitNotFound' })).toBe('the change is no longer in the Change Journal');
 });
 
+test('a server’s own text is quoted as text, never read for placeholders', () => {
+  expect(errorText({ code: 'serverRefused', status: 403, message: '<b>No</b> {status}' })).toBe(
+    'the server refused (status 403): “\u2068<b>No</b> {status}\u2069”',
+  );
+});
+
+test('the hostile server text stays text in a refusal', () => {
+  expect(errorText({ code: 'serverRefused', status: 500, message: hostile.serverMessage })).toBe(
+    hostile.expected.serverRefused,
+  );
+});
+
+test('a refusal without text from the server gives the status alone', () => {
+  expect(errorText({ code: 'serverRefused', status: 503, message: '' })).toBe(
+    'the server refused (status 503)',
+  );
+});
+
 test('a count takes its form for one or for any other number', () => {
   expect(tCount('import.newEvents', 1)).toBe('1 new event');
   expect(tCount('import.newEvents', 0)).toBe('0 new events');

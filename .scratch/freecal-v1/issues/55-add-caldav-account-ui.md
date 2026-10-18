@@ -2,7 +2,7 @@
 
 **What to build:** The user adds a CalDAV Account with a server URL, username and password, chooses which of its Available Calendars to add, and sees them in the sidebar under the Account. The Account's line offers "Manage Calendars…" to add or remove Calendars later, and the user can remove the whole Account. Spec: user story 15. Split from ticket 14.
 
-**Blocked by:** 53, 54
+**Blocked by:** 79, 54
 
 **Status:** ready-for-agent
 

@@ -46,6 +46,14 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   unitNotFound: 'error.unitNotFound',
   changedSinceUnit: 'error.changedSinceUnit',
   alreadyUndone: 'error.alreadyUndone',
+  notLocalAccount: 'error.notLocalAccount',
+  invalidServerUrl: 'error.invalidServerUrl',
+  wrongCredentials: 'error.wrongCredentials',
+  serverUnreachable: 'error.serverUnreachable',
+  secureConnectionFailed: 'error.secureConnectionFailed',
+  notCalDavServer: 'error.notCalDavServer',
+  serverRefused: 'error.serverRefused',
+  keyringUnavailable: 'error.keyringUnavailable',
   noFileToImport: 'error.noFileToImport',
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
@@ -68,8 +76,9 @@ export function startupText(failure: ErrorCode): string {
 
 /**
  * A failure in words, for the `{error}` of a message. The core reports
- * failures as codes, some with the name of the file they are about; anything
- * else, such as a failure inside the frontend, is shown as it is.
+ * failures as codes, some with the name of the file they are about or a
+ * server's status and own text; anything else, such as a failure inside the
+ * frontend, is shown as it is.
  */
 export function errorText(error: unknown): string {
   if (
@@ -79,8 +88,13 @@ export function errorText(error: unknown): string {
     typeof error.code === 'string' &&
     Object.hasOwn(errorMessages, error.code)
   ) {
-    const params: Record<string, string> =
-      'file' in error && typeof error.file === 'string' ? { file: error.file } : {};
+    const params: Record<string, string> = {};
+    if ('file' in error && typeof error.file === 'string') params.file = error.file;
+    if ('status' in error && typeof error.status === 'number') params.status = String(error.status);
+    if ('message' in error && typeof error.message === 'string') params.message = error.message;
+    if (error.code === 'serverRefused' && !params.message) {
+      return t('error.serverRefusedWithoutText', params);
+    }
     return t(errorMessages[error.code as ErrorCode['code']], params);
   }
   return String(error);

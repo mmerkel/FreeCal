@@ -4,9 +4,9 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
-**Effort:** L
+**Split into:** 76, 77, 78, 79
 
 - [ ] Tests run against a real Radicale server started per test run, with a recording fake keyring
 - [ ] Credentials are stored in the system keyring (Secret Service) behind a fakeable interface; without a working keyring, adding a server Account fails with a clear error
@@ -24,3 +24,4 @@ Out of scope: pulling Events (ticket 54); the dialogs and sidebar (ticket 55); r
 ## Comments
 
 - 2026-10-13: Split from ticket 14.
+- 2026-10-18: Split into 76 (add a CalDAV Account), 77 (discover Available Calendars), 78 (add and remove Calendars) and 79 (remove an Account, several side by side), so each part fits one session. Work from those; this file stays for its history.
