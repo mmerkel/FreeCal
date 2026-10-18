@@ -111,7 +111,10 @@ pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<(
 }
 
 /// Deletes a Calendar with its Events. This isn't recorded (ADR 0009): the
-/// entries of its Events go too, and units left without entries.
+/// entries of its Events go too, and units left without entries. So do the
+/// entries that would put an Event back into it, such as one moved out or
+/// deleted, with that Event's earlier entries, which are undone only through
+/// them; its later entries stay.
 pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
     store.transaction(|| {
         let conn = store.connection();
@@ -119,6 +122,12 @@ pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
             "DELETE FROM journal_entry WHERE EXISTS (SELECT 1 FROM event \
              WHERE event.calendar_id = ?1 AND event.id = journal_entry.event_id \
                AND event.uid = journal_entry.uid)",
+            [id.0],
+        )?;
+        conn.execute(
+            "DELETE FROM journal_entry WHERE id <= (SELECT MAX(back.id) \
+             FROM journal_entry AS back WHERE back.calendar_id = ?1 \
+               AND back.event_id = journal_entry.event_id AND back.uid = journal_entry.uid)",
             [id.0],
         )?;
         conn.execute("DELETE FROM event WHERE calendar_id = ?1", [id.0])?;

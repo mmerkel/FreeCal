@@ -236,11 +236,23 @@ export class FakeCore implements CoreApi {
     this.calls.push('deleteCalendar');
     this.calendar(id);
     this.calendars = this.calendars.filter((calendar) => calendar.id !== id);
-    // Like the real core, its Events leave the Change Journal with it.
-    const gone = new Set(this.events.filter((event) => event.calendarId === id).map((e) => e.id));
+    // Like the real core, its Events leave the Change Journal with it, and
+    // so does each Event's history up to its last version in it.
+    const gone = new Set(
+      this.events.filter((event) => event.calendarId === id).map((event) => event.id),
+    );
     this.events = this.events.filter((event) => !gone.has(event.id));
-    for (const [unit, { entries }] of this.units) {
-      const kept = entries.filter((entry) => !gone.has(entry.id));
+    const units = [...this.units];
+    const lastBack = new Map<EventId, number>();
+    units.forEach(([, { entries }], index) => {
+      for (const entry of entries) {
+        if (entry.before?.calendarId === id) lastBack.set(entry.id, index);
+      }
+    });
+    for (const [index, [unit, { entries }]] of units.entries()) {
+      const kept = entries.filter(
+        (entry) => !gone.has(entry.id) && index > (lastBack.get(entry.id) ?? -1),
+      );
       if (kept.length === 0) this.units.delete(unit);
       else this.units.get(unit)!.entries = kept;
     }

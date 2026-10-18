@@ -389,22 +389,42 @@ fn deleting_a_calendar_removes_the_units_of_its_events() {
     assert_eq!(harness.signals.received(), []);
 }
 
+/// The entries of an Event moved out of a Calendar deleted since can't be
+/// undone: undoing the move would put it back there, and its earlier
+/// entries are undone only through the move.
 #[test]
-fn an_event_moved_out_of_a_calendar_deleted_since_is_not_moved_back() {
+fn deleting_a_calendar_removes_the_entries_that_would_put_an_event_back_into_it() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
-    let (home, dentist) = home_with_dentist(&harness, &core);
+    let home = calendar(&core, "Home");
+    let created = core
+        .create_event(draft(
+            home.id,
+            "Dentist",
+            all_day("2026-10-05", "2026-10-06"),
+        ))
+        .unwrap();
+    let dentist = created.value;
     let work = calendar(&core, "Work");
     let moved = core
         .edit_event(dentist.id, draft(work.id, "Dentist", dentist.when))
         .unwrap();
+    let renamed = core
+        .edit_event(dentist.id, draft(work.id, "Orthodontist", dentist.when))
+        .unwrap();
+    let gone = core
+        .create_event(draft(home.id, "Gone", all_day("2026-10-07", "2026-10-08")))
+        .unwrap()
+        .value;
+    let deleted = core.delete_event(gone.id).unwrap();
     core.delete_calendar(home.id).unwrap();
-    let since = contents(&core);
     harness.signals.clear();
 
-    let refused = core.undo_unit(moved.unit.unwrap());
-
-    assert!(matches!(refused, Err(CoreError::CalendarNotFound(id)) if id == home.id));
-    assert_eq!(contents(&core), since);
+    for unit in [created.unit, moved.unit, deleted.unit].map(Option::unwrap) {
+        let refused = core.undo_unit(unit);
+        assert!(matches!(refused, Err(CoreError::UnitNotFound(id)) if id == unit));
+    }
     assert_eq!(harness.signals.received(), []);
+    core.undo_unit(renamed.unit.unwrap()).unwrap();
+    assert_eq!(the_one(&core, "Dentist").calendar_id, work.id);
 }
