@@ -2,7 +2,7 @@
  * What FullCalendar reports when the user drops or resizes an Occurrence, as
  * the Event and `When` to reschedule it to.
  */
-import type { EventId, When } from '../core/types';
+import type { EventId, Occurrence, When } from '../core/types';
 import { whenAfterDrag, type Shift } from './when';
 
 /** The parts of FullCalendar's `EventApi` that a drop or resize needs. */
@@ -20,9 +20,24 @@ export interface Reschedule {
   when: When;
 }
 
-/** FullCalendar keeps the ID as a string; it came from an Occurrence. */
+/**
+ * The ID FullCalendar keeps for an Occurrence: its Event's, followed by its
+ * recurrence ID for one of a Recurring Event, so that each is told apart.
+ */
+export function gridId(occurrence: Occurrence): string {
+  const id = String(occurrence.eventId);
+  return occurrence.recurrenceId === null ? id : `${id}/${occurrence.recurrenceId}`;
+}
+
+/** The Event of an Occurrence, from the ID FullCalendar keeps (see `gridId`). */
 export function idOf(event: Pick<GridEvent, 'id'>): EventId {
-  return Number(event.id) as EventId;
+  return Number.parseInt(event.id, 10) as EventId;
+}
+
+/** Which Occurrence of a Recurring Event this is; the grid gives it in `extendedProps`. */
+export function recurrenceIdOf(event: Pick<GridEvent, 'extendedProps'>): string | null {
+  const id = event.extendedProps.recurrenceId;
+  return typeof id === 'string' ? id : null;
 }
 
 export function rescheduleOfDrop(dropped: {

@@ -34,6 +34,7 @@ export const tauriCore: CoreApi = {
   editEvent: (id, draft) => invoke('edit_event', { id, draft }),
   rescheduleEvent: (id, when) => invoke('reschedule_event', { id, when }),
   deleteEvent: (id) => invoke('delete_event', { id }),
+  deleteOccurrence: (id, recurrenceId) => invoke('delete_occurrence', { id, recurrenceId }),
   pickImportFile: (title, filter) => invoke('pick_import_file', { title, filter }),
   previewImport: (calendarId) => invoke('preview_import', { calendarId }),
   runImport: (calendarId, existing) => invoke('run_import', { calendarId, existing }),

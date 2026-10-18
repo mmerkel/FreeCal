@@ -257,6 +257,11 @@ input[type='radio'] {
   color: var(--danger);
 }
 
+/* A remark beside a field or a value, such as what FreeCal did with it. */
+.note {
+  color: var(--foreground-muted);
+}
+
 /* A checkbox or radio with its words. */
 .check {
   display: flex;

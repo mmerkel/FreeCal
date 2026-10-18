@@ -10,6 +10,7 @@ mod error;
 mod event;
 mod import;
 mod journal;
+mod recurrence;
 mod settings;
 mod sidebar;
 mod signal;
@@ -35,6 +36,7 @@ pub use import::{
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use journal::{Changed, UnitId};
+pub use recurrence::{Frequency, Repeat, RepeatEnd};
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
@@ -210,24 +212,48 @@ impl Core {
     }
 
     /// The Occurrences of shown Calendars on the dates `from` up to `to`
-    /// (exclusive), in the Display Time Zone and ordered by start.
+    /// (exclusive), in the Display Time Zone and ordered by start. Recurring
+    /// Events are expanded here, in wall time in their Event Time Zone, and
+    /// their Exceptions stand in for the Occurrences they changed.
     pub fn occurrences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Occurrence>> {
         let zone = self.clock.time_zone();
-        let events = self
-            .store()
-            .shown_events_in(&StoredRange::new(from, to, zone))?;
-        let occurrences = events
-            .into_iter()
-            .map(|event| {
-                let occurrence = Occurrence {
+        let range = StoredRange::new(from, to, zone);
+        let mut occurrences = Vec::new();
+        let store = self.store();
+        for event in store.shown_events_in(&range)? {
+            let expanded = match event.fields.rule {
+                None => None,
+                Some(_) => {
+                    let exceptions: Vec<String> = store
+                        .exceptions(event.calendar_id, &event.uid)?
+                        .into_iter()
+                        .filter_map(|(_, fields)| fields.recurrence_id)
+                        .collect();
+                    recurrence::occurrences_in(&event.fields, &exceptions, &range)?
+                }
+            };
+            let occurrence = |when: &StoredWhen, recurrence_id| -> Result<Occurrence> {
+                Ok(Occurrence {
                     event_id: event.id,
                     calendar_id: event.calendar_id,
-                    title: event.title,
-                    when: event.when.to_when(zone)?,
-                };
-                Ok((event.start_utc, occurrence))
-            })
-            .collect::<Result<Vec<_>>>()?;
+                    title: event.fields.title.clone(),
+                    when: when.to_when(zone)?,
+                    recurrence_id,
+                })
+            };
+            match expanded {
+                Some(found) => {
+                    for (recurrence_id, when) in found {
+                        let start_utc = when.instants()?.0;
+                        occurrences.push((start_utc, occurrence(&when, Some(recurrence_id))?));
+                    }
+                }
+                None => occurrences.push((
+                    event.start_utc,
+                    occurrence(&event.fields.when, event.fields.recurrence_id.clone())?,
+                )),
+            }
+        }
         Ok(Occurrence::ordered(occurrences))
     }
 
@@ -237,17 +263,26 @@ impl Core {
         self.to_event(id, stored)
     }
 
-    /// Creates an Event in a writable Calendar.
+    /// Creates an Event in a writable Calendar, a Recurring Event when the
+    /// draft has a repeat rule.
     pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
+        let when = StoredWhen::new(draft.when, self.clock.time_zone())?;
+        let rule = draft
+            .repeat
+            .map(|repeat| recurrence::rule_text(repeat, None, &when))
+            .transpose()?;
         let event = StoredEvent {
             calendar_id: draft.calendar_id,
             fields: EventFields {
                 title: draft.title,
-                when: StoredWhen::new(draft.when, self.clock.time_zone())?,
+                when,
                 location: draft.location,
                 description: draft.description,
                 description_html: false,
                 zone_pinned: false,
+                rule,
+                exdates: String::new(),
+                recurrence_id: None,
             },
         };
         let created = self.record(Origin::UserAction, |unit| {
@@ -259,13 +294,24 @@ impl Core {
 
     /// Changes an Event, possibly moving it to another writable Calendar.
     /// A timed Event keeps its Event Time Zones, and what the user left as
-    /// it was stays exactly as stored: an unchanged time its wall time and an
-    /// unchanged description its original bytes, even if it was HTML.
+    /// it was stays exactly as stored: an unchanged time its wall time, an
+    /// unchanged description its original bytes, even if it was HTML, and an
+    /// unchanged repeat rule its stored rule. An Exception can't repeat.
     pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
         let edited = self.record(Origin::UserAction, |unit| {
             let old = unit.find_event(id)?.fields;
             let when = old.when.edit(draft.when, zone)?;
+            let rule = if old.recurrence_id.is_some() && draft.repeat.is_some() {
+                return Err(CoreError::InvalidRepeat);
+            } else if draft.repeat == recurrence::repeat_of(&old).0 {
+                old.rule.clone()
+            } else {
+                draft
+                    .repeat
+                    .map(|repeat| recurrence::rule_text(repeat, old.rule.as_deref(), &when))
+                    .transpose()?
+            };
             let (description, description_html) = if draft.description == description_of(&old).text
             {
                 (old.description.clone(), old.description_html)
@@ -281,6 +327,13 @@ impl Core {
                     location: draft.location,
                     description,
                     description_html,
+                    exdates: if rule.is_some() {
+                        old.exdates.clone()
+                    } else {
+                        String::new()
+                    },
+                    rule,
+                    recurrence_id: old.recurrence_id.clone(),
                 },
             };
             unit.replace(id, &after)?;
@@ -306,9 +359,71 @@ impl Core {
         self.changed_event(rescheduled)
     }
 
-    /// Deletes an Event from a writable Calendar.
+    /// Deletes an Event from a writable Calendar. For a Recurring Event or
+    /// one of its Exceptions, that is the whole Recurring Event with all its
+    /// Exceptions.
     pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
-        self.record(Origin::UserAction, |unit| unit.delete(id))
+        self.record(Origin::UserAction, |unit| {
+            let event = unit.find_event(id)?;
+            let uid = unit.event_uid(id)?;
+            let mut deleted = vec![id];
+            if event.fields.recurrence_id.is_some() {
+                deleted.extend(
+                    unit.find_event_by_uid(event.calendar_id, &uid)?
+                        .map(|(id, _)| id),
+                );
+            }
+            if event.fields.rule.is_some() || event.fields.recurrence_id.is_some() {
+                deleted.extend(
+                    unit.exceptions(event.calendar_id, &uid)?
+                        .into_iter()
+                        .map(|(id, _)| id),
+                );
+            }
+            deleted.sort_unstable_by_key(|id| id.0);
+            deleted.dedup();
+            deleted.into_iter().try_for_each(|id| unit.delete(id))
+        })
+    }
+
+    /// Deletes one Occurrence of a Recurring Event, given by the Event and
+    /// the recurrence ID its [`Occurrence`] has, and leaves the rest of the
+    /// Recurring Event in place: the Occurrence becomes a cancelled
+    /// Exception, and an Exception that changed it is deleted. The only
+    /// Occurrence of a single Event is the Event.
+    pub fn delete_occurrence(&self, id: EventId, recurrence_id: &str) -> Result<Changed<()>> {
+        let cancelled =
+            recurrence::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
+        self.record(Origin::UserAction, |unit| {
+            let event = unit.find_event(id)?;
+            let calendar_id = event.calendar_id;
+            let uid = unit.event_uid(id)?;
+            let recurring = match &event.fields.recurrence_id {
+                Some(_) => unit.find_event_by_uid(calendar_id, &uid)?,
+                None => Some((id, event.fields)),
+            }
+            .filter(|(_, fields)| fields.rule.is_some());
+            for (exception, fields) in unit.exceptions(calendar_id, &uid)? {
+                let changed = fields.recurrence_id.as_deref();
+                if changed.and_then(recurrence::recurrence_id).as_ref() == Some(&cancelled) {
+                    unit.delete(exception)?;
+                }
+            }
+            match recurring {
+                Some((recurring_id, fields)) => unit.replace(
+                    recurring_id,
+                    &StoredEvent {
+                        calendar_id,
+                        fields: EventFields {
+                            exdates: recurrence::with_exdate(&fields.exdates, &cancelled),
+                            ..fields
+                        },
+                    },
+                ),
+                None if unit.exists(id)? => unit.delete(id),
+                None => Ok(()),
+            }
+        })
     }
 
     /// Previews importing `file`, an `.ics` file or a `.zip` of them, into a
@@ -386,6 +501,7 @@ impl Core {
 
     fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
         let description = description_of(&stored.fields);
+        let (repeat, custom_repeat) = recurrence::repeat_of(&stored.fields);
         let fields = stored.fields;
         Ok(Event {
             id,
@@ -398,6 +514,9 @@ impl Core {
                 .zone_pinned
                 .then_some(fields.when.start_zone)
                 .flatten(),
+            repeat,
+            custom_repeat,
+            recurrence_id: fields.recurrence_id,
         })
     }
 

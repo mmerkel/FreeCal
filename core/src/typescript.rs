@@ -15,9 +15,9 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Changed, Colour, ErrorCode, Event,
-    EventDraft, EventId, ExistingEvents, ImportOutcome, ImportSummary, Occurrence, Piece,
-    PinnedZone, Provider, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId,
-    View, When,
+    EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome, ImportSummary, Occurrence,
+    Piece, PinnedZone, Provider, Repeat, RepeatEnd, Settings, SettingsUpdate, SidebarState, Signal,
+    StructuredText, UnitId, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -128,6 +128,11 @@ fn samples_file() -> (String, Vec<String>) {
         shown: true,
         read_only: false,
     };
+    let repeat = Repeat {
+        frequency: Frequency::Weekly,
+        interval: 2,
+        end: RepeatEnd::Until { date: date(31) },
+    };
     let event = Event {
         id: EventId(3),
         calendar_id: CalendarId(2),
@@ -136,6 +141,16 @@ fn samples_file() -> (String, Vec<String>) {
         location: StructuredText::from_plain_text("Main Street 1"),
         description: description.clone(),
         pinned_zone: Some("Europe/Berlin".to_owned()),
+        repeat: Some(repeat),
+        custom_repeat: true,
+        recurrence_id: None,
+    };
+    let exception = Event {
+        id: EventId(4),
+        repeat: None,
+        custom_repeat: false,
+        recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
+        ..event.clone()
     };
     let entries = [
         samples(&[AccountId(1)]),
@@ -155,14 +170,37 @@ fn samples_file() -> (String, Vec<String>) {
             when: timed,
             location: "Main Street 1".to_owned(),
             description: description.text.clone(),
+            repeat: Some(repeat),
         }]),
-        samples(std::slice::from_ref(&event)),
-        samples(&[Occurrence {
-            event_id: EventId(3),
-            calendar_id: CalendarId(2),
-            title: "Holiday".to_owned(),
-            when: all_day,
-        }]),
+        samples(&[event.clone(), exception]),
+        samples(&[
+            Occurrence {
+                event_id: EventId(3),
+                calendar_id: CalendarId(2),
+                title: "Holiday".to_owned(),
+                when: all_day,
+                recurrence_id: None,
+            },
+            Occurrence {
+                event_id: EventId(3),
+                calendar_id: CalendarId(2),
+                title: "Dentist".to_owned(),
+                when: timed,
+                recurrence_id: Some("2026-10-05T09:30:00".to_owned()),
+            },
+        ]),
+        samples(&[repeat]),
+        samples(&[
+            Frequency::Daily,
+            Frequency::Weekly,
+            Frequency::Monthly,
+            Frequency::Yearly,
+        ]),
+        samples(&[
+            RepeatEnd::Never,
+            RepeatEnd::Until { date: date(31) },
+            RepeatEnd::Count { count: 10 },
+        ]),
         samples(&[description]),
         samples(&[text, link]),
         samples(&[

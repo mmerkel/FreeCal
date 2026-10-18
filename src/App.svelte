@@ -62,11 +62,19 @@
 
   /**
    * What is open over the grid, if anything. The Event of `details` and
-   * `editing` is the selected one, which the grid marks.
+   * `editing` is the selected one, which the grid marks. `recurrenceId` says
+   * which Occurrence of a Recurring Event was opened, none for the whole.
    */
   type Open =
-    | { kind: 'details'; id: EventId }
-    | { kind: 'editing'; id: EventId; draft: EventDraft }
+    | { kind: 'details'; id: EventId; recurrenceId: string | null }
+    | {
+        kind: 'editing';
+        id: EventId;
+        recurrenceId: string | null;
+        draft: EventDraft;
+        customRepeat: boolean;
+        repeatable: boolean;
+      }
     | { kind: 'creating'; draft: EventDraft }
     | { kind: 'importing'; file: string; calendarId: CalendarId }
     | { kind: 'notice'; title: string; body: string }
@@ -116,6 +124,21 @@
   );
   const selectedEventId = $derived(
     open?.kind === 'details' || open?.kind === 'editing' ? open.id : undefined,
+  );
+  const selectedRecurrenceId = $derived(
+    open?.kind === 'details' || open?.kind === 'editing'
+      ? (open.recurrenceId ?? undefined)
+      : undefined,
+  );
+  /** The Occurrence of a Recurring Event whose details are open, as the grid shows it. */
+  const openedOccurrence = $derived(
+    open?.kind === 'details' && open.recurrenceId !== null
+      ? occurrences.find(
+          (occurrence) =>
+            occurrence.eventId === selectedEventId &&
+            occurrence.recurrenceId === selectedRecurrenceId,
+        )
+      : undefined,
   );
 
   // Reads can overtake each other; only the latest one of each kind may land.
@@ -296,29 +319,44 @@
     session++;
     open = {
       kind: 'creating',
-      draft: { calendarId: target.id, title: '', when, location: '', description: '' },
+      draft: {
+        calendarId: target.id,
+        title: '',
+        when,
+        location: '',
+        description: '',
+        repeat: null,
+      },
     };
   }
 
-  function openDetails(id: EventId) {
+  function openDetails(id: EventId, recurrenceId: string | null = null) {
     opened = undefined;
     dialogFailure = undefined;
-    open = { kind: 'details', id };
+    open = { kind: 'details', id, recurrenceId };
     readOpenedEvent();
   }
 
-  function startEditing(event: Event) {
+  /**
+   * Edits the Event; for an Occurrence of a Recurring Event, the whole
+   * Recurring Event from its first date, until ticket 08 asks for the scope.
+   */
+  function startEditing(event: Event, recurrenceId: string | null) {
     session++;
     open = {
       kind: 'editing',
       id: event.id,
+      recurrenceId,
       draft: {
         calendarId: event.calendarId,
         title: event.title,
         when: event.when,
         location: event.location.text,
         description: event.description.text,
+        repeat: event.repeat,
       },
+      customRepeat: event.customRepeat,
+      repeatable: event.recurrenceId === null,
     };
   }
 
@@ -333,9 +371,13 @@
     close();
   }
 
+  /**
+   * Saves an edit and returns to the Event's details: an Exception's own, a
+   * Recurring Event's as a whole, as its Occurrences may have moved.
+   */
   async function saveEdited(id: EventId, draft: EventDraft) {
-    await core.editEvent(id, draft);
-    openDetails(id);
+    const { value } = await core.editEvent(id, draft);
+    openDetails(id, value.recurrenceId);
   }
 
   /** A drag or resize in the grid; the grid puts the Event back if this rejects. */
@@ -352,6 +394,15 @@
   async function remove(id: EventId) {
     try {
       await core.deleteEvent(id);
+      close();
+    } catch (error) {
+      dialogFailure = t('event.deleteFailed', { error: errorText(error) });
+    }
+  }
+
+  async function removeOccurrence(id: EventId, recurrenceId: string) {
+    try {
+      await core.deleteOccurrence(id, recurrenceId);
       close();
     } catch (error) {
       dialogFailure = t('event.deleteFailed', { error: errorText(error) });
@@ -574,6 +625,7 @@
         {occurrences}
         calendars={directory.calendars}
         {selectedEventId}
+        {selectedRecurrenceId}
         {onrangechange}
         onselectslot={startCreating}
         onopenevent={openDetails}
@@ -586,12 +638,17 @@
 
   {#if open?.kind === 'details' && opened}
     {@const event = opened}
+    {@const recurrenceId = open.recurrenceId}
     <EventDetails
       {event}
       calendar={directory.calendars.find((calendar) => calendar.id === event.calendarId)}
+      when={openedOccurrence?.when}
       failure={dialogFailure}
-      onedit={() => startEditing(event)}
+      onedit={() => startEditing(event, recurrenceId)}
       ondelete={() => remove(event.id)}
+      ondeleteoccurrence={recurrenceId === null
+        ? undefined
+        : () => removeOccurrence(event.id, recurrenceId)}
       onclose={close}
       onopenlink={openLink}
     />
@@ -602,9 +659,12 @@
         mode={editing.kind === 'creating' ? 'create' : 'edit'}
         initial={editing.draft}
         calendars={writableCalendars}
+        customRepeat={editing.kind === 'editing' && editing.customRepeat}
+        repeatable={editing.kind === 'creating' || editing.repeatable}
         onsave={(draft) =>
           editing.kind === 'editing' ? saveEdited(editing.id, draft) : saveNew(draft)}
-        oncancel={() => (editing.kind === 'editing' ? openDetails(editing.id) : close())}
+        oncancel={() =>
+          editing.kind === 'editing' ? openDetails(editing.id, editing.recurrenceId) : close()}
       />
     {/key}
   {:else if open?.kind === 'settings'}

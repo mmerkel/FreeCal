@@ -59,7 +59,15 @@ export const samples = {
         "end": "2026-10-05T10:00:00"
       },
       "location": "Main Street 1",
-      "description": "Agenda: notes (https://example.org/notes)"
+      "description": "Agenda: notes (https://example.org/notes)",
+      "repeat": {
+        "frequency": "weekly",
+        "interval": 2,
+        "end": {
+          "kind": "until",
+          "date": "2026-10-31"
+        }
+      }
     }
   ],
   Event: [
@@ -99,7 +107,58 @@ export const samples = {
         ],
         "text": "Agenda: notes (https://example.org/notes)"
       },
-      "pinnedZone": "Europe/Berlin"
+      "pinnedZone": "Europe/Berlin",
+      "repeat": {
+        "frequency": "weekly",
+        "interval": 2,
+        "end": {
+          "kind": "until",
+          "date": "2026-10-31"
+        }
+      },
+      "customRepeat": true,
+      "recurrenceId": null
+    },
+    {
+      "id": 4,
+      "calendarId": 2,
+      "title": "Dentist",
+      "when": {
+        "kind": "timed",
+        "start": "2026-10-05T09:30:00",
+        "end": "2026-10-05T10:00:00"
+      },
+      "location": {
+        "paragraphs": [
+          [
+            {
+              "kind": "text",
+              "text": "Main Street 1"
+            }
+          ]
+        ],
+        "text": "Main Street 1"
+      },
+      "description": {
+        "paragraphs": [
+          [
+            {
+              "kind": "text",
+              "text": "Agenda: "
+            },
+            {
+              "kind": "link",
+              "text": "notes",
+              "url": "https://example.org/notes"
+            }
+          ]
+        ],
+        "text": "Agenda: notes (https://example.org/notes)"
+      },
+      "pinnedZone": "Europe/Berlin",
+      "repeat": null,
+      "customRepeat": false,
+      "recurrenceId": "2026-10-19T09:30:00"
     }
   ],
   Occurrence: [
@@ -111,7 +170,48 @@ export const samples = {
         "kind": "allDay",
         "start": "2026-10-05",
         "end": "2026-10-06"
+      },
+      "recurrenceId": null
+    },
+    {
+      "eventId": 3,
+      "calendarId": 2,
+      "title": "Dentist",
+      "when": {
+        "kind": "timed",
+        "start": "2026-10-05T09:30:00",
+        "end": "2026-10-05T10:00:00"
+      },
+      "recurrenceId": "2026-10-05T09:30:00"
+    }
+  ],
+  Repeat: [
+    {
+      "frequency": "weekly",
+      "interval": 2,
+      "end": {
+        "kind": "until",
+        "date": "2026-10-31"
       }
+    }
+  ],
+  Frequency: [
+    "daily",
+    "weekly",
+    "monthly",
+    "yearly"
+  ],
+  RepeatEnd: [
+    {
+      "kind": "never"
+    },
+    {
+      "kind": "until",
+      "date": "2026-10-31"
+    },
+    {
+      "kind": "count",
+      "count": 10
     }
   ],
   StructuredText: [
@@ -263,7 +363,17 @@ export const samples = {
           ],
           "text": "Agenda: notes (https://example.org/notes)"
         },
-        "pinnedZone": "Europe/Berlin"
+        "pinnedZone": "Europe/Berlin",
+        "repeat": {
+          "frequency": "weekly",
+          "interval": 2,
+          "end": {
+            "kind": "until",
+            "date": "2026-10-31"
+          }
+        },
+        "customRepeat": true,
+        "recurrenceId": null
       }
     },
     {
@@ -304,7 +414,17 @@ export const samples = {
           ],
           "text": "Agenda: notes (https://example.org/notes)"
         },
-        "pinnedZone": "Europe/Berlin"
+        "pinnedZone": "Europe/Berlin",
+        "repeat": {
+          "frequency": "weekly",
+          "interval": 2,
+          "end": {
+            "kind": "until",
+            "date": "2026-10-31"
+          }
+        },
+        "customRepeat": true,
+        "recurrenceId": null
       }
     }
   ],
@@ -332,6 +452,12 @@ export const samples = {
     },
     {
       "code": "endBeforeStart"
+    },
+    {
+      "code": "invalidRepeat"
+    },
+    {
+      "code": "occurrenceNotFound"
     },
     {
       "code": "unreadableEventTime"
@@ -403,6 +529,9 @@ type Samples = {
   EventDraft: Unbranded<T.EventDraft>[];
   Event: Unbranded<T.Event>[];
   Occurrence: Unbranded<T.Occurrence>[];
+  Repeat: Unbranded<T.Repeat>[];
+  Frequency: Unbranded<T.Frequency>[];
+  RepeatEnd: Unbranded<T.RepeatEnd>[];
   StructuredText: Unbranded<T.StructuredText>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];

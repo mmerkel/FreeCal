@@ -3,7 +3,7 @@
 //! previous version and a hash of its new one, so that no change can skip
 //! the Journal. Changes made together, such as an import, are one unit.
 
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -166,10 +166,31 @@ impl Unit<'_> {
         self.store.find_event_by_uid(calendar_id, uid)
     }
 
+    pub fn exceptions(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Vec<(EventId, EventFields)>> {
+        self.store.exceptions(calendar_id, uid)
+    }
+
+    pub fn event_uid(&self, id: EventId) -> Result<String> {
+        self.store.event_uid(id)
+    }
+
+    /// Whether the Event `id` is still there.
+    pub fn exists(&self, id: EventId) -> Result<bool> {
+        Ok(self.store.connection().query_row(
+            "SELECT EXISTS (SELECT 1 FROM event WHERE id = ?1)",
+            [id.0],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Adds an Event with the UID `uid`.
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
         self.writable(event.calendar_id)?;
-        let id = write(self.store, None, uid, event, event.fields.when.instants()?)?;
+        let id = write(self.store, None, uid, event, event.fields.instants()?)?;
         self.entry(id, uid, None, Some(event))?;
         Ok(id)
     }
@@ -183,13 +204,7 @@ impl Unit<'_> {
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
-        write(
-            self.store,
-            Some(id),
-            &uid,
-            event,
-            event.fields.when.instants()?,
-        )?;
+        write(self.store, Some(id), &uid, event, event.fields.instants()?)?;
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
@@ -217,7 +232,7 @@ impl Unit<'_> {
         )?;
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
-        let instants = event.fields.when.instants().unwrap_or_default();
+        let instants = event.fields.instants().unwrap_or_default();
         let id = write(self.store, (!taken).then_some(id), uid, event, instants)?;
         self.entry(id, uid, None, Some(event))
     }
@@ -280,7 +295,8 @@ impl Unit<'_> {
             &format!(
                 "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, \
                  {EVENT_FIELDS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
+                   ?16, ?17, ?18)"
             ),
             params![
                 unit.0,
@@ -298,6 +314,9 @@ impl Unit<'_> {
                 fields.map(|fields| &fields.description),
                 fields.map(|fields| fields.description_html),
                 fields.map(|fields| fields.zone_pinned),
+                fields.and_then(|fields| fields.rule.as_ref()),
+                fields.map(|fields| &fields.exdates),
+                fields.and_then(|fields| fields.recurrence_id.as_ref()),
             ],
         )?;
         Ok(())
@@ -318,8 +337,8 @@ fn write(
     conn.execute(
         "INSERT INTO event (id, uid, calendar_id, title, all_day, start_at, end_at, \
          start_zone, end_zone, start_utc, end_utc, location, description, \
-         description_html, zone_pinned) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) \
+         description_html, zone_pinned, rrule, exdates, recurrence_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
          ON CONFLICT (id) DO UPDATE SET uid = excluded.uid, \
            calendar_id = excluded.calendar_id, title = excluded.title, \
            all_day = excluded.all_day, start_at = excluded.start_at, \
@@ -328,7 +347,8 @@ fn write(
            end_utc = excluded.end_utc, location = excluded.location, \
            description = excluded.description, \
            description_html = excluded.description_html, \
-           zone_pinned = excluded.zone_pinned",
+           zone_pinned = excluded.zone_pinned, rrule = excluded.rrule, \
+           exdates = excluded.exdates, recurrence_id = excluded.recurrence_id",
         params![
             id.map(|id| id.0),
             uid,
@@ -345,6 +365,9 @@ fn write(
             fields.description,
             fields.description_html,
             fields.zone_pinned,
+            fields.rule,
+            fields.exdates,
+            fields.recurrence_id,
         ],
     )?;
     Ok(id.unwrap_or(EventId(conn.last_insert_rowid())))
@@ -412,8 +435,9 @@ fn stored_event(row: &Row, first: usize) -> rusqlite::Result<StoredEvent> {
     })
 }
 
-/// The version of [`hash`]'s format, its first byte.
-const HASH_FORMAT: u8 = 1;
+/// The version of [`hash`]'s format, its first byte. Format 2 added the
+/// repeat rule, the cancelled Occurrences and the recurrence ID (ticket 07).
+const HASH_FORMAT: u8 = 2;
 
 /// The SHA-256 hash of an Event's version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
@@ -423,16 +447,21 @@ const HASH_FORMAT: u8 = 1;
 /// entry: the new version an entry hashes is the previous version the next
 /// entry for that Event holds, or the Event as it is now for its last entry.
 fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
+    hash_as(HASH_FORMAT, uid, event)
+}
+
+/// [`hash`] in the format `format`, for [`rehash`].
+fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
     let fields = &event.fields;
     let when = &fields.when;
     let mut hasher = Sha256::new();
-    hasher.update([HASH_FORMAT]);
+    hasher.update([format]);
     let mut item = |bytes: &[u8]| {
         hasher.update((bytes.len() as u64).to_be_bytes());
         hasher.update(bytes);
     };
-    // An absent zone is told apart from an empty one by its first byte.
-    let zone = |zone: &Option<String>| match zone {
+    // An absent value is told apart from an empty one by its first byte.
+    let optional = |value: &Option<String>| match value {
         None => vec![0],
         Some(zone) => [&[1], zone.as_bytes()].concat(),
     };
@@ -442,13 +471,71 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     item(&[when.all_day.into()]);
     item(when.start.as_bytes());
     item(when.end.as_bytes());
-    item(&zone(&when.start_zone));
-    item(&zone(&when.end_zone));
+    item(&optional(&when.start_zone));
+    item(&optional(&when.end_zone));
     item(fields.location.as_bytes());
     item(fields.description.as_bytes());
     item(&[fields.description_html.into()]);
     item(&[fields.zone_pinned.into()]);
+    if format >= 2 {
+        item(&optional(&fields.rule));
+        item(fields.exdates.as_bytes());
+        item(&optional(&fields.recurrence_id));
+    }
     hasher.finalize().to_vec()
+}
+
+/// Makes every entry's hash in the format `before` again in the current
+/// [`HASH_FORMAT`], for a
+/// migration that added fields to Events: the new version an entry hashes is
+/// the previous version the next entry for that Event holds, or the Event as
+/// it is now for its last entry. A hash that doesn't match that version in
+/// the format before stays as it is, so that it still doesn't match.
+pub(crate) fn rehash(conn: &Connection, before: u8) -> Result<()> {
+    let entries: Vec<(i64, EventId, String, Vec<u8>)> = conn
+        .prepare("SELECT id, event_id, uid, hash FROM journal_entry WHERE hash IS NOT NULL")?
+        .query_map([], |row| {
+            Ok((row.get(0)?, EventId(row.get(1)?), row.get(2)?, row.get(3)?))
+        })?
+        .filter_map(|entry| entry.ok())
+        .collect();
+    for (id, event_id, uid, stored) in entries {
+        let next = conn
+            .query_row(
+                &format!(
+                    "SELECT calendar_id, {EVENT_FIELDS} FROM journal_entry \
+                     WHERE event_id = ?1 AND uid = ?2 AND id > ?3 ORDER BY id LIMIT 1"
+                ),
+                params![event_id.0, uid, id],
+                |row| {
+                    let created = row.get::<_, Option<i64>>(0)?.is_none();
+                    Ok((!created).then(|| stored_event(row, 0)).transpose())
+                },
+            )
+            .optional()?;
+        let version = match next {
+            Some(previous) => previous.ok().flatten(),
+            None => conn
+                .query_row(
+                    &format!(
+                        "SELECT calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1 AND uid = ?2"
+                    ),
+                    params![event_id.0, uid],
+                    |row| Ok(stored_event(row, 0).ok()),
+                )
+                .optional()?
+                .flatten(),
+        };
+        if let Some(version) = version
+            && hash_as(before, &uid, &version) == stored
+        {
+            conn.execute(
+                "UPDATE journal_entry SET hash = ?2 WHERE id = ?1",
+                params![id, hash(&uid, &version)],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -456,11 +543,8 @@ mod tests {
     use super::*;
     use crate::event::StoredWhen;
 
-    /// Stored hashes must stay comparable: a change here needs a new
-    /// [`HASH_FORMAT`] and a migration.
-    #[test]
-    fn the_hash_format_is_pinned() {
-        let event = StoredEvent {
+    fn dentist() -> StoredEvent {
+        StoredEvent {
             calendar_id: CalendarId(2),
             fields: EventFields {
                 title: "Dentist".to_owned(),
@@ -475,17 +559,79 @@ mod tests {
                 description: "<b>Bring the card</b>".to_owned(),
                 description_html: true,
                 zone_pinned: false,
+                rule: Some("FREQ=WEEKLY;INTERVAL=2".to_owned()),
+                exdates: "2026-10-19T09:00:00".to_owned(),
+                recurrence_id: None,
             },
-        };
+        }
+    }
 
-        let hex: String = hash("dentist", &event)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+    fn hex(hash: Vec<u8>) -> String {
+        hash.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
 
+    /// Stored hashes must stay comparable: a change here needs a new
+    /// [`HASH_FORMAT`] and a migration.
+    #[test]
+    fn the_hash_format_is_pinned() {
         assert_eq!(
-            hex,
+            hex(hash("dentist", &dentist())),
+            "f7e0c2e491d467b8c3f69ffe92aa06fc17219b6f1613034bf2b49ddb1628dc37"
+        );
+    }
+
+    /// [`rehash`] recognises entries by their hash in the format before.
+    #[test]
+    fn the_format_before_is_pinned_too() {
+        assert_eq!(
+            hex(hash_as(1, "dentist", &dentist())),
             "b58a7dada5f3790c3b13fafabbe5a5b084fed79180f02f4a973156a43a3cd67e"
         );
+    }
+
+    /// After a migration that added fields, an entry's hash in the format
+    /// before is made again in the current one; any other hash stays.
+    #[test]
+    fn rehash_makes_hashes_of_the_format_before_again() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+        let mut event = dentist();
+        event.calendar_id = store.list_calendars().unwrap()[0].id;
+        let mut moved = event.clone();
+        moved.fields.title = "Dentist, moved".to_owned();
+        let created = record(&store, Origin::UserAction, 0, |unit| {
+            unit.create("dentist", &event)
+        })
+        .unwrap()
+        .value;
+        record(&store, Origin::UserAction, 0, |unit| {
+            unit.replace(created, &moved)
+        })
+        .unwrap();
+        let conn = store.connection();
+        let hashes = || -> Vec<Vec<u8>> {
+            conn.prepare("SELECT hash FROM journal_entry ORDER BY id")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let set = |id: i64, hash: Vec<u8>| {
+            conn.execute(
+                "UPDATE journal_entry SET hash = ?2 WHERE id = (SELECT MIN(id) FROM journal_entry) + ?1",
+                params![id, hash],
+            )
+            .unwrap();
+        };
+        set(0, hash_as(1, "dentist", &event));
+        set(1, b"unknown".to_vec());
+
+        rehash(conn, 1).unwrap();
+
+        assert_eq!(hashes(), [hash("dentist", &event), b"unknown".to_vec()]);
+        set(1, hash_as(1, "dentist", &moved));
+        rehash(conn, 1).unwrap();
+        assert_eq!(hashes()[1], hash("dentist", &moved));
     }
 }

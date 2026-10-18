@@ -20,7 +20,14 @@
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
   import { firstWeekdayNumber } from './week.svelte';
-  import { idOf, rescheduleOfDrop, rescheduleOfResize, type Reschedule } from './gridDrag';
+  import {
+    gridId,
+    idOf,
+    recurrenceIdOf,
+    rescheduleOfDrop,
+    rescheduleOfResize,
+    type Reschedule,
+  } from './gridDrag';
   import { allDaySpan, plainDateOf, whenOfSelection, type VisibleRange } from './when';
 
   interface Props {
@@ -34,12 +41,17 @@
     calendars: Calendar[];
     /** The Event that is open, which the grid marks. */
     selectedEventId?: EventId;
+    /**
+     * Which Occurrence of the open Event is open, if it is one of a Recurring
+     * Event; without it, all its Occurrences are marked.
+     */
+    selectedRecurrenceId?: string | null;
     /** The view now shows these dates. */
     onrangechange?: (range: VisibleRange) => void;
     /** The user clicked an empty slot or dragged across a range. */
     onselectslot?: (when: When) => void;
-    /** The user clicked an Occurrence. */
-    onopenevent?: (id: EventId) => void;
+    /** The user clicked an Occurrence: its Event and its `recurrenceId`. */
+    onopenevent?: (id: EventId, recurrenceId: string | null) => void;
     /** The user clicked a day number or a day's heading. */
     onopenday?: (date: Temporal.PlainDate) => void;
     /**
@@ -65,6 +77,7 @@
     occurrences,
     calendars,
     selectedEventId,
+    selectedRecurrenceId,
     onrangechange,
     onselectslot,
     onopenevent,
@@ -165,7 +178,7 @@
       },
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
-        onopenevent?.(idOf(clicked.event));
+        onopenevent?.(idOf(clicked.event), recurrenceIdOf(clicked.event));
       },
       eventDrop: (dropped) => reschedule(rescheduleOfDrop(dropped)),
       eventResize: (resized) => reschedule(rescheduleOfResize(resized)),
@@ -215,18 +228,27 @@
       // A timed Occurrence of a day or more goes to the all-day area, so that
       // it doesn't cover the time grid.
       const span = timeGrid ? allDaySpan(occurrence.when) : undefined;
+      const selected =
+        occurrence.eventId === selectedEventId &&
+        (selectedRecurrenceId === undefined || occurrence.recurrenceId === selectedRecurrenceId);
       return {
-        id: String(occurrence.eventId),
+        id: gridId(occurrence),
         // Titles are untrusted; FullCalendar draws them as text, never as HTML.
         title: occurrence.title || t('event.untitled'),
         start: span?.start ?? occurrence.when.start,
         end: span?.end ?? occurrence.when.end,
         allDay: span !== undefined || occurrence.when.kind === 'allDay',
-        editable: movable && calendar !== undefined && !calendar.readOnly,
-        extendedProps: { when: occurrence.when },
+        // Moving an Occurrence of a Recurring Event asks for the recurrence
+        // scope first (ticket 08).
+        editable:
+          movable &&
+          calendar !== undefined &&
+          !calendar.readOnly &&
+          occurrence.recurrenceId === null,
+        extendedProps: { when: occurrence.when, recurrenceId: occurrence.recurrenceId },
         color: colour,
         contrastColor: colour && textColourOn(colour),
-        className: occurrence.eventId === selectedEventId ? 'selected-event' : undefined,
+        className: selected ? 'selected-event' : undefined,
       };
     });
     const shown = grid;

@@ -13,6 +13,7 @@ function gridEvent(when: When, allDay: boolean, start: Date, end: Date | null): 
 
 test('FullCalendar’s string ID is the Event’s ID again', () => {
   expect(idOf({ id: '42' })).toBe(42);
+  expect(idOf({ id: '42/2026-10-05T09:00:00' })).toBe(42);
 });
 
 test('a drop moves the Event’s start and end by the drag’s shift', () => {

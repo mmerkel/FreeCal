@@ -169,6 +169,7 @@ pub fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
         when,
         location: String::new(),
         description: String::new(),
+        repeat: None,
     }
 }
 

@@ -184,6 +184,16 @@ fn delete_event(core: State<Core>, id: EventId) -> CommandResult<Changed<()>> {
     core.delete_event(id).map_err(ErrorCode::from)
 }
 
+#[tauri::command]
+fn delete_occurrence(
+    core: State<Core>,
+    id: EventId,
+    recurrence_id: String,
+) -> CommandResult<Changed<()>> {
+    core.delete_occurrence(id, &recurrence_id)
+        .map_err(ErrorCode::from)
+}
+
 /// Asks the user for an `.ics` or `.zip` file to import through the system's
 /// file dialog (the portal's, where there is one) and reads it. Returns its
 /// name, or `None` when the user cancels. `title` and `filter` are the
@@ -472,6 +482,7 @@ fn main() {
             edit_event,
             reschedule_event,
             delete_event,
+            delete_occurrence,
             pick_import_file,
             preview_import,
             run_import,

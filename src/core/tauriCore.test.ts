@@ -81,6 +81,7 @@ test('the Event commands pass their arguments under the names the shell expects'
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     location: '',
     description: '',
+    repeat: null,
   } as const;
 
   await tauriCore.listOccurrences(
@@ -92,6 +93,7 @@ test('the Event commands pass their arguments under the names the shell expects'
   await tauriCore.editEvent(eventId(7), draft);
   await tauriCore.rescheduleEvent(eventId(7), draft.when);
   await tauriCore.deleteEvent(eventId(7));
+  await tauriCore.deleteOccurrence(eventId(7), '2026-10-12T09:00:00');
   await tauriCore.openLink('https://example.com');
 
   expect(invoked).toEqual([
@@ -101,6 +103,7 @@ test('the Event commands pass their arguments under the names the shell expects'
     ['edit_event', { id: 7, draft }],
     ['reschedule_event', { id: 7, when: draft.when }],
     ['delete_event', { id: 7 }],
+    ['delete_occurrence', { id: 7, recurrenceId: '2026-10-12T09:00:00' }],
     ['open_link', { url: 'https://example.com' }],
   ]);
 });

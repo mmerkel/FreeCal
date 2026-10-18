@@ -6,7 +6,7 @@ import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
 import App from './App.svelte';
-import type { StructuredText, When } from './core/types';
+import type { Repeat, StructuredText, When } from './core/types';
 import { FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
 
@@ -485,4 +485,143 @@ test('a refused drag says why and tells the grid to put the Event back', async (
   await stubGrid.props!.onreschedule!(dentist.id, later);
 
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+});
+
+const weeklyThreeTimes: Repeat = {
+  frequency: 'weekly',
+  interval: 1,
+  end: { kind: 'count', count: 3 },
+};
+
+/** The Occurrences the grid shows titled `title`, as its buttons. */
+function occurrencesTitled(grid: HTMLElement, title: string) {
+  return within(grid).queryAllByRole('button', { name: title });
+}
+
+test('a Recurring Event is on every date, and an Occurrence opens with its date and repeat', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+  const grid = await showApp(core);
+
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
+  await user.click(occurrencesTitled(grid, 'Yoga')[1]);
+  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+
+  expect(details).toHaveTextContent('Monday, October 12, 2026');
+  expect(details).toHaveTextContent('Every week, 3 times');
+  expect(occurrencesTitled(grid, 'Yoga').map((button) => button.ariaCurrent)).toEqual([
+    'false',
+    'true',
+    'false',
+  ]);
+});
+
+test('deleting an Occurrence asks, and “This event” deletes only that one', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  const event = core.addEvent({
+    calendarId: home.id,
+    title: 'Yoga',
+    when: monday,
+    repeat: weeklyThreeTimes,
+  });
+  const grid = await showApp(core);
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
+  await user.click(occurrencesTitled(grid, 'Yoga')[1]);
+  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  expect(details).toHaveTextContent('Delete only this event, or all events it repeats with?');
+  await user.click(within(details).getByRole('button', { name: 'This event' }));
+
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(core.cancelled.get(event.id)).toEqual(['2026-10-12T09:00:00']);
+});
+
+test('“All events” deletes the whole Recurring Event, and Cancel keeps it', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+  const grid = await showApp(core);
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
+  await user.click(occurrencesTitled(grid, 'Yoga')[2]);
+  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  await user.click(within(details).getByRole('button', { name: 'Cancel' }));
+  expect(within(details).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  await user.click(within(details).getByRole('button', { name: 'All events' }));
+
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(0));
+  expect(core.events).toEqual([]);
+});
+
+test('a new Event can repeat', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  const grid = await showApp(core);
+
+  await selectSlot(monday);
+  const editor = screen.getByRole('dialog', { name: 'New event' });
+  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), 'Yoga');
+  await user.selectOptions(within(editor).getByRole('combobox', { name: 'Repeat' }), 'Daily');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+
+  await waitFor(() =>
+    expect(core.events[0]?.repeat).toEqual({
+      frequency: 'daily',
+      interval: 1,
+      end: { kind: 'never' },
+    }),
+  );
+  expect(occurrencesTitled(grid, 'Yoga').length).toBeGreaterThan(20);
+});
+
+test('editing an Occurrence edits its Recurring Event, from its first date and its rule', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+  const grid = await showApp(core);
+  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
+  await user.click(occurrencesTitled(grid, 'Yoga')[2]);
+  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+
+  await user.click(within(details).getByRole('button', { name: 'Edit' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit event' });
+
+  expect(within(editor).getByLabelText('Start date')).toHaveValue('2026-10-05');
+  expect(within(editor).getByRole('combobox', { name: 'Repeat' })).toHaveDisplayValue('Weekly');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+  expect(await screen.findByRole('dialog', { name: 'Yoga' })).toHaveTextContent(
+    'Every week, 3 times',
+  );
+});
+
+test('an Exception edits without a repeat, and Delete still asks', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({
+    calendarId: home.id,
+    title: 'Moved',
+    when: monday,
+    recurrenceId: '2026-10-05T08:00:00',
+  });
+  await showApp(core);
+  const details = await openOccurrence(user, 'Moved');
+
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  expect(within(details).getByRole('button', { name: 'This event' })).toBeInTheDocument();
+  await user.click(within(details).getByRole('button', { name: 'Cancel' }));
+  await user.click(within(details).getByRole('button', { name: 'Edit' }));
+
+  expect(screen.queryByRole('combobox', { name: 'Repeat' })).toBeNull();
 });

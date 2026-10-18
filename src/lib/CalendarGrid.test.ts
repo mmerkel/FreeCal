@@ -31,9 +31,20 @@ function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Oc
     eventId: eventId(1),
     calendarId: home.id,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
+    recurrenceId: null,
     ...fields,
   };
 }
+
+/** Occurrences of one Recurring Event on Monday and Tuesday at 9:00, titled after their day. */
+const recurring = ['05', '06'].map((day) =>
+  occurrence({
+    eventId: eventId(7),
+    title: `Yoga ${day}`,
+    when: { kind: 'timed', start: `2026-10-${day}T09:00:00`, end: `2026-10-${day}T10:00:00` },
+    recurrenceId: `2026-10-${day}T09:00:00`,
+  }),
+);
 
 /** An Occurrence's chip in the grid, found by its title. */
 function chip(title: string): HTMLElement {
@@ -268,7 +279,34 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
   chip('Dentist').focus();
   await user.keyboard('{Enter}');
 
-  expect(onopenevent.mock.calls).toEqual([[7], [7]]);
+  expect(onopenevent.mock.calls).toEqual([
+    [7, null],
+    [7, null],
+  ]);
+});
+
+test('reports which Occurrence of a Recurring Event was clicked', async () => {
+  const user = userEvent.setup();
+  const onopenevent = vi.fn();
+  render(CalendarGrid, { ...thisMonth, occurrences: recurring, calendars: [home], onopenevent });
+  await waitFor(() => expect(screen.getByText('Yoga 06')).toBeInTheDocument());
+
+  await user.click(chip('Yoga 06'));
+
+  expect(onopenevent.mock.calls).toEqual([[7, '2026-10-06T09:00:00']]);
+});
+
+test('marks only the open Occurrence of a Recurring Event', async () => {
+  render(CalendarGrid, {
+    ...thisMonth,
+    occurrences: recurring,
+    calendars: [home],
+    selectedEventId: eventId(7),
+    selectedRecurrenceId: '2026-10-06T09:00:00',
+  });
+
+  await waitFor(() => expect(chip('Yoga 06')).toHaveClass('selected-event'));
+  expect(chip('Yoga 05')).not.toHaveClass('selected-event');
 });
 
 test('marks the selected Event', async () => {
@@ -421,6 +459,22 @@ test('offers a resize on both edges for Events of writable Calendars only', asyn
     expect(resizer(chip('Holiday'), edge)).toBeDefined();
     expect(resizer(chip('Theirs'), edge)).toBeUndefined();
     expect(resizer(chip('Their holiday'), edge)).toBeUndefined();
+  }
+});
+
+// Moving one needs the recurrence scope prompt (ticket 08).
+test('offers no drag or resize for Occurrences of Recurring Events', async () => {
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: recurring,
+    calendars: [home],
+    onreschedule: vi.fn(async () => {}),
+  });
+  await waitFor(() => expect(screen.getByText('Yoga 06')).toBeInTheDocument());
+
+  for (const edge of ['start', 'end'] as const) {
+    expect(resizer(chip('Yoga 05'), edge)).toBeUndefined();
+    expect(resizer(chip('Yoga 06'), edge)).toBeUndefined();
   }
 });
 

@@ -10,6 +10,7 @@ import type {
   EventId,
   ExistingEvents,
   ImportOutcome,
+  Occurrence,
   PinnedZone,
   Settings,
   SettingsUpdate,
@@ -89,6 +90,8 @@ export class FakeCore implements CoreApi {
   fileDialogs: { title: string; filter: string }[] = [];
   /** Each Event's UID. */
   uids = new Map<EventId, string>();
+  /** The recurrence IDs of each Recurring Event's cancelled Occurrences. */
+  cancelled = new Map<EventId, string[]>();
   private units = new Map<UnitId, Unit>();
   private nextUnitId = 1;
   private subscribers = new Set<(signal: Signal) => void>();
@@ -129,6 +132,9 @@ export class FakeCore implements CoreApi {
       id: eventId(this.nextEventId++),
       title: '',
       pinnedZone: null,
+      repeat: null,
+      customRepeat: false,
+      recurrenceId: null,
       ...fields,
       location: structured(location),
       description: structured(description),
@@ -275,13 +281,38 @@ export class FakeCore implements CoreApi {
     this.calls.push('listOccurrences');
     const shown = new Set(this.calendars.filter((c) => c.shown).map((c) => c.id));
     return this.events
-      .filter((event) => shown.has(event.calendarId) && overlaps(event.when, from, to))
-      .map((event) => ({
-        eventId: event.id,
-        calendarId: event.calendarId,
-        title: event.title,
-        when: { ...event.when },
-      }));
+      .filter((event) => shown.has(event.calendarId))
+      .flatMap((event) => this.occurrencesOf(event))
+      .filter((occurrence) => overlaps(occurrence.when, from, to));
+  }
+
+  /**
+   * An Event's Occurrences. The fake stands in for the core, which expands
+   * repeat rules: it repeats the first one by the rule's frequency and
+   * interval, at most 400 times.
+   */
+  private occurrencesOf(event: Event): Occurrence[] {
+    const occurrence = (when: When, recurrenceId: string | null): Occurrence => ({
+      eventId: event.id,
+      calendarId: event.calendarId,
+      title: event.title,
+      when,
+      recurrenceId,
+    });
+    if (!event.repeat) return [occurrence({ ...event.when }, event.recurrenceId)];
+    const { frequency, interval, end } = event.repeat;
+    const unit = ({ daily: 'days', weekly: 'weeks', monthly: 'months', yearly: 'years' } as const)[
+      frequency
+    ];
+    const cancelled = this.cancelled.get(event.id) ?? [];
+    const found: Occurrence[] = [];
+    for (let index = 0; index < 400; index++) {
+      if (end.kind === 'count' && index >= end.count) break;
+      const when = shifted(event.when, { [unit]: index * interval });
+      if (end.kind === 'until' && when.start.slice(0, 10) > end.date) break;
+      if (!cancelled.includes(when.start)) found.push(occurrence(when, when.start));
+    }
+    return found;
   }
 
   async event(id: EventId) {
@@ -327,12 +358,39 @@ export class FakeCore implements CoreApi {
     return { unit, value: structuredClone(event) };
   }
 
+  /** Like the core, deleting a Recurring Event or an Exception deletes all Events of its UID. */
   async deleteEvent(id: EventId) {
     this.calls.push('deleteEvent');
-    const before = this.findEvent(id);
-    this.writable(before.calendarId);
-    this.events = this.events.filter((event) => event.id !== id);
-    return { unit: this.record([this.entry(id, before, undefined)]), value: null };
+    const deleted = this.findEvent(id);
+    this.writable(deleted.calendarId);
+    const recurring = deleted.repeat !== null || deleted.recurrenceId !== null;
+    const gone = this.events.filter(
+      (event) =>
+        event.id === id ||
+        (recurring &&
+          event.calendarId === deleted.calendarId &&
+          this.uids.get(event.id) === this.uids.get(id)),
+    );
+    this.events = this.events.filter((event) => !gone.includes(event));
+    const entries = gone.map((event) => this.entry(event.id, event, undefined));
+    return { unit: this.record(entries), value: null };
+  }
+
+  /**
+   * Cancels one Occurrence; an Exception is deleted. The cancelled ones
+   * aren't part of the fake's Change Journal.
+   */
+  async deleteOccurrence(id: EventId, recurrenceId: string) {
+    this.calls.push('deleteOccurrence');
+    const event = this.findEvent(id);
+    this.writable(event.calendarId);
+    if (event.recurrenceId !== null) {
+      this.events = this.events.filter((other) => other.id !== id);
+      return { unit: this.record([this.entry(id, event, undefined)]), value: null };
+    }
+    this.cancelled.set(id, [...(this.cancelled.get(id) ?? []), recurrenceId]);
+    this.emit({ kind: 'occurrencesChanged', calendarIds: [event.calendarId] });
+    return { unit: null, value: null };
   }
 
   async pickImportFile(title: string, filter: string) {
@@ -531,6 +589,17 @@ function overlaps(when: When, from: Temporal.PlainDate, to: Temporal.PlainDate):
     Temporal.PlainDateTime.compare(start, to.toPlainDateTime()) < 0 &&
     Temporal.PlainDateTime.compare(end, from.toPlainDateTime()) > 0
   );
+}
+
+/** `when` moved by `by`, its dates and times in wall-clock time. */
+function shifted(when: When, by: Temporal.DurationLike): When {
+  if (when.kind === 'allDay') {
+    const date = (text: string) => Temporal.PlainDate.from(text).add(by).toString();
+    return { kind: 'allDay', start: date(when.start), end: date(when.end) };
+  }
+  const time = (text: string) =>
+    Temporal.PlainDateTime.from(text).add(by).toString({ smallestUnit: 'second' });
+  return { kind: 'timed', start: time(when.start), end: time(when.end) };
 }
 
 /** Like the core, a time the user changes is no longer a pinned one. */

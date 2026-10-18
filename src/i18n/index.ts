@@ -31,6 +31,8 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   calendarReadOnly: 'error.calendarReadOnly',
   eventNotFound: 'error.eventNotFound',
   endBeforeStart: 'error.endBeforeStart',
+  invalidRepeat: 'error.invalidRepeat',
+  occurrenceNotFound: 'error.occurrenceNotFound',
   unreadableEventTime: 'error.unreadableEventTime',
   emptyCalendarName: 'error.emptyCalendarName',
   invalidColour: 'error.invalidColour',

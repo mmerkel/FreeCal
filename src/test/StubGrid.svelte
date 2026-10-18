@@ -27,12 +27,14 @@
 </script>
 
 <ul aria-label="Grid">
-  {#each props.occurrences as occurrence (occurrence.eventId)}
+  {#each props.occurrences as occurrence (`${occurrence.eventId}/${occurrence.recurrenceId}`)}
     <li>
       <button
         type="button"
-        aria-current={occurrence.eventId === props.selectedEventId}
-        onclick={() => props.onopenevent?.(occurrence.eventId)}
+        aria-current={occurrence.eventId === props.selectedEventId &&
+          (props.selectedRecurrenceId === undefined ||
+            occurrence.recurrenceId === props.selectedRecurrenceId)}
+        onclick={() => props.onopenevent?.(occurrence.eventId, occurrence.recurrenceId)}
       >
         {occurrence.title}
       </button>

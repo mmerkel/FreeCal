@@ -71,14 +71,26 @@ export interface CoreApi {
    * changed nothing.
    */
   createEvent(draft: EventDraft): Promise<Changed<Event>>;
-  /** Changes an Event, possibly moving it to another writable Calendar. */
+  /**
+   * Changes an Event, possibly moving it to another writable Calendar. A
+   * repeat rule left as the Event's `repeat` keeps its stored rule.
+   */
   editEvent(id: EventId, draft: EventDraft): Promise<Changed<Event>>;
   /**
    * Moves an Event to another time, as a drag or a resize in the grid does,
    * and leaves everything else as it is.
    */
   rescheduleEvent(id: EventId, when: When): Promise<Changed<Event>>;
+  /**
+   * Deletes an Event; for a Recurring Event or one of its Exceptions, the
+   * whole Recurring Event.
+   */
   deleteEvent(id: EventId): Promise<Changed<null>>;
+  /**
+   * Deletes one Occurrence of a Recurring Event, given by its `eventId` and
+   * `recurrenceId`, and leaves the rest of the Recurring Event in place.
+   */
+  deleteOccurrence(id: EventId, recurrenceId: string): Promise<Changed<null>>;
   /**
    * Asks the user for an `.ics` or `.zip` file to import through the system's
    * file dialog, with the dialog's `title` and the name of its file `filter`,

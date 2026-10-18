@@ -151,6 +151,7 @@ const MIGRATIONS: &[Migration] = &[
     CREATE INDEX journal_entry_event ON journal_entry (event_id, uid);
     ",
     ),
+    Migration::Code(recurring_events),
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether
@@ -241,6 +242,26 @@ fn event_times_as_wall_time(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
+/// Ticket 07: Recurring Events. A Recurring Event keeps its rule and its
+/// cancelled Occurrences; a changed Occurrence, an Exception, is an Event of
+/// its own with the UID of its Recurring Event and the recurrence ID of the
+/// Occurrence it changed. The Change Journal's entries hold them too, and its
+/// hashes, which now cover them, are made again.
+fn recurring_events(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "
+        ALTER TABLE event ADD COLUMN rrule TEXT;
+        ALTER TABLE event ADD COLUMN exdates TEXT NOT NULL DEFAULT '';
+        ALTER TABLE event ADD COLUMN recurrence_id TEXT;
+        ALTER TABLE journal_entry ADD COLUMN rrule TEXT;
+        ALTER TABLE journal_entry ADD COLUMN exdates TEXT;
+        ALTER TABLE journal_entry ADD COLUMN recurrence_id TEXT;
+        UPDATE journal_entry SET exdates = '' WHERE calendar_id IS NOT NULL;
+        ",
+    )?;
+    crate::journal::rehash(tx, 1)
+}
+
 /// The time zone rules FreeCal was built with, which the derived UTC columns
 /// are computed with.
 const TIME_ZONE_RULES: &str = chrono_tz::IANA_TZDB_VERSION;
@@ -256,11 +277,11 @@ fn recompute_instants(tx: &Transaction) -> Result<()> {
         return Ok(());
     }
     let events = readable(
-        tx.prepare("SELECT id, all_day, start_at, end_at, start_zone, end_zone FROM event")?
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, stored_when(row, 1)?)))?,
+        tx.prepare(&format!("SELECT id, {EVENT_FIELDS} FROM event"))?
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, event_fields(row, 1)?)))?,
     )?;
-    for (id, when) in events {
-        if let Ok((start, end)) = when.instants() {
+    for (id, fields) in events {
+        if let Ok((start, end)) = fields.instants() {
             tx.execute(
                 "UPDATE event SET start_utc = ?2, end_utc = ?3 WHERE id = ?1",
                 params![id, start, end],
@@ -296,7 +317,7 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
 pub(crate) const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
-     description, description_html, zone_pinned";
+     description, description_html, zone_pinned, rrule, exdates, recurrence_id";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
 pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
@@ -307,6 +328,9 @@ pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFie
         description: row.get(first + 7)?,
         description_html: row.get(first + 8)?,
         zone_pinned: row.get(first + 9)?,
+        rule: row.get(first + 10)?,
+        exdates: row.get(first + 11)?,
+        recurrence_id: row.get(first + 12)?,
     })
 }
 
@@ -340,6 +364,21 @@ pub struct EventFields {
     /// Whether the Event arrived with a floating time that was pinned to its
     /// Event Time Zone (ADR 0007).
     pub zone_pinned: bool,
+    /// A Recurring Event's repeat rule, an RFC 5545 `RRULE` value.
+    pub rule: Option<String>,
+    /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
+    /// separated by commas.
+    pub exdates: String,
+    /// For an Exception, the recurrence ID of the Occurrence it changed.
+    pub recurrence_id: Option<String>,
+}
+
+impl EventFields {
+    /// The derived start and end as Unix seconds, for a Recurring Event
+    /// those of all its Occurrences together.
+    pub fn instants(&self) -> Result<(i64, i64)> {
+        crate::recurrence::instants(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -348,12 +387,12 @@ pub struct StoredEvent {
     pub fields: EventFields,
 }
 
-/// What the grid needs of an Event in a date range.
+/// An Event in a date range.
 pub struct RangeEvent {
     pub id: EventId,
     pub calendar_id: CalendarId,
-    pub title: String,
-    pub when: StoredWhen,
+    pub uid: String,
+    pub fields: EventFields,
     pub start_utc: i64,
 }
 
@@ -497,7 +536,7 @@ impl Store {
     }
 
     /// The Event of a Calendar with the UID `uid`, the first if the Local
-    /// Store has several.
+    /// Store has several, and not an Exception.
     pub fn find_event_by_uid(
         &self,
         calendar_id: CalendarId,
@@ -508,12 +547,41 @@ impl Store {
             .query_row(
                 &format!(
                     "SELECT id, {EVENT_FIELDS} FROM event WHERE calendar_id = ?1 AND uid = ?2 \
-                     ORDER BY id LIMIT 1"
+                     AND recurrence_id IS NULL ORDER BY id LIMIT 1"
                 ),
                 params![calendar_id.0, uid],
                 |row| Ok((EventId(row.get(0)?), event_fields(row, 1)?)),
             )
             .optional()?)
+    }
+
+    /// The Exceptions of a Calendar with the UID `uid`, in the order they
+    /// were added.
+    pub fn exceptions(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Vec<(EventId, EventFields)>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, {EVENT_FIELDS} FROM event WHERE calendar_id = ?1 AND uid = ?2 \
+             AND recurrence_id IS NOT NULL ORDER BY id"
+        ))?;
+        let exceptions = stmt
+            .query_map(params![calendar_id.0, uid], |row| {
+                Ok((EventId(row.get(0)?), event_fields(row, 1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(exceptions)
+    }
+
+    /// The UID of the Event `id`.
+    pub fn event_uid(&self, id: EventId) -> Result<String> {
+        self.conn
+            .query_row("SELECT uid FROM event WHERE id = ?1", [id.0], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .ok_or(CoreError::EventNotFound(id))
     }
 
     /// The UIDs of a Calendar's Events.
@@ -526,19 +594,25 @@ impl Store {
     }
 
     /// The Events of shown Calendars that overlap `range`, found by their
-    /// derived UTC instants alone. An Event of no length counts when it
-    /// starts inside the range.
+    /// derived UTC instants alone, which for a Recurring Event span all its
+    /// Occurrences. An Event of no length counts when it starts inside the
+    /// range (see [`StoredRange::overlaps`]).
     pub fn shown_events_in(&self, range: &StoredRange) -> Result<Vec<RangeEvent>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT event.id, event.calendar_id, event.title, event.all_day, event.start_at, \
-             event.end_at, event.start_zone, event.end_zone, event.start_utc \
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT event.id, event.calendar_id, event.uid, event.start_utc, \
+             {} \
              FROM event JOIN calendar ON calendar.id = event.calendar_id \
              WHERE calendar.shown AND CASE event.all_day \
                WHEN 1 THEN event.start_utc < ?2 AND event.end_utc > ?1 \
                ELSE event.start_utc < ?4 AND (event.end_utc > ?3 \
                  OR (event.end_utc = event.start_utc AND event.start_utc >= ?3)) \
              END",
-        )?;
+            EVENT_FIELDS
+                .split(", ")
+                .map(|column| format!("event.{}", column.trim()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
         let events = stmt
             .query_map(
                 params![
@@ -551,9 +625,9 @@ impl Store {
                     Ok(RangeEvent {
                         id: EventId(row.get(0)?),
                         calendar_id: CalendarId(row.get(1)?),
-                        title: row.get(2)?,
-                        when: stored_when(row, 3)?,
-                        start_utc: row.get(8)?,
+                        uid: row.get(2)?,
+                        start_utc: row.get(3)?,
+                        fields: event_fields(row, 4)?,
                     })
                 },
             )?

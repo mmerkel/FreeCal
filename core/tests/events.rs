@@ -40,6 +40,7 @@ fn a_created_event_can_be_read_back_and_is_signalled() {
             when: timed("2026-10-05T09:00:00", "2026-10-05T10:30:00"),
             location: "Main Street 1".to_owned(),
             description: "Bring the card".to_owned(),
+            repeat: None,
         })
         .unwrap()
         .value;
@@ -196,6 +197,7 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
                 when: all_day("2026-10-06", "2026-10-08"),
                 location: "Café".to_owned(),
                 description: "With Sam".to_owned(),
+                repeat: None,
             },
         )
         .unwrap()
@@ -251,6 +253,7 @@ fn rescheduling_changes_only_the_time_and_is_signalled() {
             when: timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
             location: "Main Street 1".to_owned(),
             description: "Bring the card".to_owned(),
+            repeat: None,
         })
         .unwrap()
         .value;
@@ -679,6 +682,7 @@ mod hostile {
             when: timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
             location: field("location"),
             description: field("description"),
+            repeat: None,
         })
         .unwrap()
         .value

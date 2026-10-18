@@ -11,6 +11,7 @@ chrono-tz = "0.10"
 iana-time-zone = "0.1"
 icalendar = { version = "0.17", default-features = false, features = ["parser"] }
 iso8601 = { version = "0.6", default-features = false }
+rrule = "0.14"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

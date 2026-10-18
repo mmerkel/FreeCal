@@ -4,7 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{CalendarId, CoreError, ImportedWhen, Result, StructuredText};
+use crate::{CalendarId, CoreError, ImportedWhen, Repeat, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -69,6 +69,9 @@ pub struct EventDraft {
     /// The plain-text description. When it equals the plain-text form of an
     /// Event's description, the original is kept byte for byte.
     pub description: String,
+    /// The repeat rule, none for an Event that doesn't repeat. When it
+    /// equals an Event's `repeat`, its stored rule is kept as it is.
+    pub repeat: Option<Repeat>,
 }
 
 /// An Event with everything its details and editor show.
@@ -85,18 +88,33 @@ pub struct Event {
     /// The zone FreeCal gave the Event when it arrived with a time of day but
     /// no time zone (ADR 0007), which its details mention.
     pub pinned_zone: Option<String>,
+    /// A Recurring Event's repeat rule as the editor shows it; none for an
+    /// Event that doesn't repeat, and for a rule the editor can't show, such
+    /// as an hourly one.
+    pub repeat: Option<Repeat>,
+    /// Whether the repeat rule has more than `repeat` shows, such as the
+    /// weekdays of a weekly rule. Those are kept while the frequency stays.
+    pub custom_repeat: bool,
+    /// For an Exception, the recurrence ID of the Occurrence of its Recurring
+    /// Event that it changed; none for every other Event.
+    pub recurrence_id: Option<String>,
 }
 
 /// One dated appearance of an Event in the grid. A single Event has exactly
-/// one; Recurring Events get one per date (ticket 07).
+/// one; Recurring Events get one per date they fall on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Occurrence {
+    /// The Event it belongs to: its Recurring Event, or the Exception that
+    /// changed it.
     pub event_id: EventId,
     pub calendar_id: CalendarId,
     pub title: String,
     pub when: When,
+    /// Which Occurrence of a Recurring Event this is: its original start, as
+    /// text that only the core reads. None for a single Event.
+    pub recurrence_id: Option<String>,
 }
 
 impl Occurrence {
@@ -104,12 +122,13 @@ impl Occurrence {
     /// date they start on in the Display Time Zone and then by when they
     /// happen, which differs from their wall time in the repeated hour.
     pub(crate) fn ordered(mut occurrences: Vec<(i64, Occurrence)>) -> Vec<Occurrence> {
-        occurrences.sort_by_key(|(start_utc, occurrence)| {
-            (
-                occurrence.when.start_date(),
-                *start_utc,
-                occurrence.event_id.0,
-            )
+        occurrences.sort_by(|(a_utc, a), (b_utc, b)| {
+            (a.when.start_date(), a_utc, a.event_id.0, &a.recurrence_id).cmp(&(
+                b.when.start_date(),
+                b_utc,
+                b.event_id.0,
+                &b.recurrence_id,
+            ))
         });
         occurrences
             .into_iter()
@@ -326,15 +345,27 @@ impl StoredRange {
             to_instant: midnight(to),
         }
     }
+
+    /// Whether an Event with the derived `instants` overlaps the range, as
+    /// the Local Store's range query has it: an Event of no length counts
+    /// when it starts inside the range.
+    pub fn overlaps(&self, all_day: bool, (start, end): (i64, i64)) -> bool {
+        if all_day {
+            start < self.to_day_seconds && end > self.from_day_seconds
+        } else {
+            start < self.to_instant
+                && (end > self.from_instant || (end == start && start >= self.from_instant))
+        }
+    }
 }
 
-const WALL_TIME: &str = "%Y-%m-%dT%H:%M:%S";
+pub(crate) const WALL_TIME: &str = "%Y-%m-%dT%H:%M:%S";
 
-fn wall_text(local: NaiveDateTime) -> String {
+pub(crate) fn wall_text(local: NaiveDateTime) -> String {
     local.format(WALL_TIME).to_string()
 }
 
-fn date_seconds(date: NaiveDate) -> i64 {
+pub(crate) fn date_seconds(date: NaiveDate) -> i64 {
     date.and_time(NaiveTime::MIN).and_utc().timestamp()
 }
 

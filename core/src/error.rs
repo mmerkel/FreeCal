@@ -20,6 +20,12 @@ pub enum CoreError {
     EventNotFound(EventId),
     #[error("an Event can't end before it starts")]
     EndBeforeStart,
+    #[error(
+        "a repeat rule needs an interval and a count of at least 1, and can't end before it starts"
+    )]
+    InvalidRepeat,
+    #[error("Event {0:?} has no such Occurrence")]
+    OccurrenceNotFound(EventId),
     #[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
     UnreadableEventTime(String),
     #[error("a Calendar needs a name")]
@@ -64,6 +70,8 @@ impl CoreError {
             CoreError::CalendarReadOnly(_) => ErrorCode::CalendarReadOnly,
             CoreError::EventNotFound(_) => ErrorCode::EventNotFound,
             CoreError::EndBeforeStart => ErrorCode::EndBeforeStart,
+            CoreError::InvalidRepeat => ErrorCode::InvalidRepeat,
+            CoreError::OccurrenceNotFound(_) => ErrorCode::OccurrenceNotFound,
             CoreError::UnreadableEventTime(_) => ErrorCode::UnreadableEventTime,
             CoreError::EmptyCalendarName => ErrorCode::EmptyCalendarName,
             CoreError::InvalidColour(_) => ErrorCode::InvalidColour,
@@ -104,6 +112,8 @@ pub enum ErrorCode {
     CalendarReadOnly,
     EventNotFound,
     EndBeforeStart,
+    InvalidRepeat,
+    OccurrenceNotFound,
     UnreadableEventTime,
     EmptyCalendarName,
     InvalidColour,
@@ -162,6 +172,8 @@ impl ErrorCode {
             ErrorCode::CalendarReadOnly,
             ErrorCode::EventNotFound,
             ErrorCode::EndBeforeStart,
+            ErrorCode::InvalidRepeat,
+            ErrorCode::OccurrenceNotFound,
             ErrorCode::UnreadableEventTime,
             ErrorCode::EmptyCalendarName,
             ErrorCode::InvalidColour,

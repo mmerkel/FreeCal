@@ -47,7 +47,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -57,7 +57,23 @@ export type Event = { id: EventId, calendarId: CalendarId, title: string, when: 
  * The zone FreeCal gave the Event when it arrived with a time of day but
  * no time zone (ADR 0007), which its details mention.
  */
-pinnedZone: string | null, };
+pinnedZone: string | null,
+/**
+ * A Recurring Event's repeat rule as the editor shows it; none for an
+ * Event that doesn't repeat, and for a rule the editor can't show, such
+ * as an hourly one.
+ */
+repeat: Repeat | null,
+/**
+ * Whether the repeat rule has more than `repeat` shows, such as the
+ * weekdays of a weekly rule. Those are kept while the frequency stays.
+ */
+customRepeat: boolean,
+/**
+ * For an Exception, the recurrence ID of the Occurrence of its Recurring
+ * Event that it changed; none for every other Event.
+ */
+recurrenceId: string | null, };
 
 /**
  * What the user gives an Event when creating or editing it.
@@ -67,7 +83,12 @@ export type EventDraft = { calendarId: CalendarId, title: string, when: When, lo
  * The plain-text description. When it equals the plain-text form of an
  * Event's description, the original is kept byte for byte.
  */
-description: string, };
+description: string,
+/**
+ * The repeat rule, none for an Event that doesn't repeat. When it
+ * equals an Event's `repeat`, its stored rule is kept as it is.
+ */
+repeat: Repeat | null, };
 
 /**
  * Branded in TypeScript, so that it can't be mixed up with other IDs.
@@ -79,6 +100,8 @@ export type EventId = number & { readonly __brand: "EventId" };
  * chosen once per import.
  */
 export type ExistingEvents = "update" | "skip" | "copy";
+
+export type Frequency = "daily" | "weekly" | "monthly" | "yearly";
 
 /**
  * What running an import did.
@@ -100,9 +123,19 @@ export type ImportSummary = { calendarId: CalendarId, newEvents: number, existin
 
 /**
  * One dated appearance of an Event in the grid. A single Event has exactly
- * one; Recurring Events get one per date (ticket 07).
+ * one; Recurring Events get one per date they fall on.
  */
-export type Occurrence = { eventId: EventId, calendarId: CalendarId, title: string, when: When, };
+export type Occurrence = {
+/**
+ * The Event it belongs to: its Recurring Event, or the Exception that
+ * changed it.
+ */
+eventId: EventId, calendarId: CalendarId, title: string, when: When,
+/**
+ * Which Occurrence of a Recurring Event this is: its original start, as
+ * text that only the core reads. None for a single Event.
+ */
+recurrenceId: string | null, };
 
 /**
  * One piece of a paragraph.
@@ -118,6 +151,20 @@ export type PinnedZone = { zone: string, events: number, };
  * A kind of calendar service FreeCal can talk to.
  */
 export type Provider = "local";
+
+/**
+ * A repeat rule as the editor sets it.
+ */
+export type Repeat = { frequency: Frequency,
+/**
+ * Every how many days, weeks, months or years; at least 1.
+ */
+interval: number, end: RepeatEnd, };
+
+/**
+ * When a Recurring Event stops.
+ */
+export type RepeatEnd = { "kind": "never" } | { "kind": "until", date: string, } | { "kind": "count", count: number, };
 
 /**
  * The settings of the Settings dialog, as the Local Store keeps them.

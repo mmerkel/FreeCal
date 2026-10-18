@@ -5,9 +5,10 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { Calendar, EventDraft } from '../core/types';
-  import { errorText, t } from '../i18n';
+  import type { Calendar, EventDraft, Frequency, Repeat, RepeatEnd } from '../core/types';
+  import { errorText, t, tCount } from '../i18n';
   import Dialog from './Dialog.svelte';
+  import { intervalUnits } from './repeat';
   import { endsBeforeStart, fieldsOf, whenOf } from './when';
 
   interface Props {
@@ -16,12 +17,24 @@
     initial: EventDraft;
     /** The Calendars the Event can go into: only writable ones. */
     calendars: Calendar[];
+    /** Whether the Event's repeat rule has more than the editor shows. */
+    customRepeat?: boolean;
+    /** Whether the Event can repeat; an Exception can't. */
+    repeatable?: boolean;
     /** Saves the draft. A rejection is shown in the editor, which stays open. */
     onsave: (draft: EventDraft) => Promise<void>;
     oncancel: () => void;
   }
 
-  let { mode, initial, calendars, onsave, oncancel }: Props = $props();
+  let {
+    mode,
+    initial,
+    calendars,
+    customRepeat = false,
+    repeatable = true,
+    onsave,
+    oncancel,
+  }: Props = $props();
 
   const id = $props.id();
   const start = untrack(() => initial);
@@ -33,22 +46,62 @@
   let failure = $state<string>();
   let saving = $state(false);
 
+  // The repeat's fields keep their values while it is switched off, as the
+  // times do while all-day is on.
+  const frequencies: Frequency[] = ['daily', 'weekly', 'monthly', 'yearly'];
+  const repeatedAt = untrack(() => times.startDate);
+  let frequency = $state<Frequency | 'none'>(start.repeat?.frequency ?? 'none');
+  let interval = $state<number | null>(start.repeat?.interval ?? 1);
+  let endKind = $state<RepeatEnd['kind']>(start.repeat?.end.kind ?? 'never');
+  let untilDate = $state(
+    start.repeat?.end.kind === 'until'
+      ? start.repeat.end.date
+      : Temporal.PlainDate.from(repeatedAt).add({ months: 1 }).toString(),
+  );
+  let count = $state<number | null>(
+    start.repeat?.end.kind === 'count' ? start.repeat.end.count : 10,
+  );
+
   const when = $derived(whenOf(times));
+  const repeat = $derived(repeatOf());
   const problem = $derived(
     when === undefined
       ? t('event.incomplete')
       : endsBeforeStart(when)
         ? t('event.endBeforeStart')
-        : undefined,
+        : repeat === undefined
+          ? t('repeat.invalid')
+          : undefined,
   );
+
+  /** The repeat the fields describe; `undefined` while it has no Occurrence. */
+  function repeatOf(): Repeat | null | undefined {
+    if (!repeatable || frequency === 'none') return null;
+    const atLeastOne = (value: number | null, most: number) =>
+      Number.isInteger(value) && value! >= 1 && value! <= most;
+    if (!atLeastOne(interval, 999)) return undefined;
+    let end: RepeatEnd = { kind: 'never' };
+    if (endKind === 'count') {
+      if (!atLeastOne(count, 9999)) return undefined;
+      end = { kind: 'count', count: count! };
+    } else if (endKind === 'until') {
+      try {
+        if (Temporal.PlainDate.compare(untilDate, times.startDate) < 0) return undefined;
+      } catch {
+        return undefined;
+      }
+      end = { kind: 'until', date: untilDate };
+    }
+    return { frequency, interval: interval!, end };
+  }
 
   async function save(submitted: SubmitEvent) {
     submitted.preventDefault();
-    if (!when || problem || saving) return;
+    if (!when || repeat === undefined || problem || saving) return;
     saving = true;
     failure = undefined;
     try {
-      await onsave({ calendarId, title, when, location, description });
+      await onsave({ calendarId, title, when, location, description, repeat });
     } catch (error) {
       failure = t('event.saveFailed', { error: errorText(error) });
     } finally {
@@ -108,6 +161,61 @@
       {/if}
     </div>
 
+    {#if repeatable}
+      <label class="field">
+        <span class="field-label">{t('event.repeat')}</span>
+        <select class="input" bind:value={frequency}>
+          <option value="none">{t('repeat.none')}</option>
+          {#each frequencies as choice (choice)}
+            <option value={choice}>{t(`repeat.${choice}`)}</option>
+          {/each}
+        </select>
+      </label>
+      {#if frequency !== 'none'}
+        <div class="repeat">
+          <span class="field-label">{t('repeat.every')}</span>
+          <input
+            class="input"
+            type="number"
+            min="1"
+            max="999"
+            aria-label={t('repeat.interval')}
+            bind:value={interval}
+          />
+          <span>{tCount(intervalUnits[frequency], interval ?? 1)}</span>
+          <span class="field-label">{t('repeat.ends')}</span>
+          <select class="input" aria-label={t('repeat.ends')} bind:value={endKind}>
+            <option value="never">{t('repeat.endNever')}</option>
+            <option value="until">{t('repeat.endUntil')}</option>
+            <option value="count">{t('repeat.endCount')}</option>
+          </select>
+          {#if endKind === 'until'}
+            <input
+              class="input"
+              type="date"
+              aria-label={t('repeat.untilDate')}
+              bind:value={untilDate}
+            />
+          {:else if endKind === 'count'}
+            <span class="count">
+              <input
+                class="input"
+                type="number"
+                min="1"
+                max="9999"
+                aria-label={t('repeat.count')}
+                bind:value={count}
+              />
+              {tCount('repeat.times', count ?? 1)}
+            </span>
+          {/if}
+        </div>
+      {/if}
+      {#if customRepeat}
+        <p class="note">{t(start.repeat ? 'repeat.custom' : 'repeat.customOnly')}</p>
+      {/if}
+    {/if}
+
     <label class="field">
       <span class="field-label">{t('event.calendar')}</span>
       <select class="input" bind:value={calendarId}>
@@ -163,6 +271,24 @@
     grid-template-columns: auto 1fr auto;
     align-items: center;
     gap: var(--space-4);
+  }
+
+  .repeat {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .repeat .count {
+    display: flex;
+    grid-column: span 2;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .note {
+    margin: 0;
   }
 
   /* An all-day Event has no time inputs; its dates take the whole row. */
