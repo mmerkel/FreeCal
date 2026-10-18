@@ -26,3 +26,10 @@ Known limits:
 - [ ] a "this and following" split whose first part has only cancelled Occurrences left keeps that empty first part
 - [ ] "All events" drops Exceptions beyond the 50,000th Occurrence
 - [ ] no warning yet for moving an Occurrence across Accounts (comes with server Accounts)
+
+## Ticket 80: first sync of a CalDAV Calendar
+
+Review risks left as they are:
+
+- [ ] a Calendar removed during its first sync stops it only once a later page writes an Event; a page of only unreadable objects keeps fetching
+- [ ] server objects pass from the CalDAV client to the iCalendar reading as plain `(name, text)` pairs (`import::read_server_events`), not a named type
