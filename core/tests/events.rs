@@ -41,7 +41,8 @@ fn a_created_event_can_be_read_back_and_is_signalled() {
             location: "Main Street 1".to_owned(),
             description: "Bring the card".to_owned(),
         })
-        .unwrap();
+        .unwrap()
+        .value;
 
     assert_eq!(core.event(created.id).unwrap(), created);
     assert_eq!(created.calendar_id, home.id);
@@ -162,7 +163,8 @@ fn a_time_the_clocks_skip_is_read_as_an_hour_later() {
             "Gap",
             timed("2026-03-29T02:30:00", "2026-03-29T04:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
 
     assert_eq!(
         created.when,
@@ -181,7 +183,8 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
             "Lunch",
             timed("2026-10-05T12:00:00", "2026-10-05T13:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     let signals_before = harness.signals.received().len();
 
     let edited = core
@@ -195,7 +198,8 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
                 description: "With Sam".to_owned(),
             },
         )
-        .unwrap();
+        .unwrap()
+        .value;
     drop(core);
     let relaunch = harness.open();
 
@@ -217,12 +221,16 @@ fn moving_an_event_to_another_calendar_signals_both() {
     let home = calendar(&core, "Home");
     let work = calendar(&core, "Work");
     let day = all_day("2026-10-05", "2026-10-06");
-    let created = core.create_event(draft(home.id, "Review", day)).unwrap();
+    let created = core
+        .create_event(draft(home.id, "Review", day))
+        .unwrap()
+        .value;
     let signals_before = harness.signals.received().len();
 
     let moved = core
         .edit_event(created.id, draft(work.id, "Review", day))
-        .unwrap();
+        .unwrap()
+        .value;
 
     assert_eq!(moved.calendar_id, work.id);
     assert_eq!(
@@ -244,7 +252,8 @@ fn rescheduling_changes_only_the_time_and_is_signalled() {
             location: "Main Street 1".to_owned(),
             description: "Bring the card".to_owned(),
         })
-        .unwrap();
+        .unwrap()
+        .value;
     let signals_before = harness.signals.received().len();
 
     let moved = core
@@ -252,7 +261,8 @@ fn rescheduling_changes_only_the_time_and_is_signalled() {
             created.id,
             timed("2026-10-06T14:00:00", "2026-10-06T15:30:00"),
         )
-        .unwrap();
+        .unwrap()
+        .value;
     drop(core);
     let relaunch = harness.open();
 
@@ -292,17 +302,20 @@ fn rescheduling_can_make_a_timed_event_all_day_and_back() {
             "Lunch",
             timed("2026-10-05T12:00:00", "2026-10-05T13:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
 
     let all_day_now = core
         .reschedule_event(created.id, all_day("2026-10-07", "2026-10-08"))
-        .unwrap();
+        .unwrap()
+        .value;
     let timed_again = core
         .reschedule_event(
             created.id,
             timed("2026-10-08T08:00:00", "2026-10-08T09:00:00"),
         )
-        .unwrap();
+        .unwrap()
+        .value;
 
     assert_eq!(all_day_now.when, all_day("2026-10-07", "2026-10-08"));
     assert_eq!(
@@ -318,8 +331,14 @@ fn rescheduling_is_refused_for_read_only_events_and_backwards_times() {
     let home = calendar(&core, "Home");
     let work = calendar(&core, "Work");
     let day = all_day("2026-10-05", "2026-10-06");
-    let in_home = core.create_event(draft(home.id, "Mine", day)).unwrap();
-    let in_work = core.create_event(draft(work.id, "Theirs", day)).unwrap();
+    let in_home = core
+        .create_event(draft(home.id, "Mine", day))
+        .unwrap()
+        .value;
+    let in_work = core
+        .create_event(draft(work.id, "Theirs", day))
+        .unwrap()
+        .value;
     harness.arrange_local_store(&format!(
         "UPDATE calendar SET read_only = 1 WHERE id = {}",
         work.id.0
@@ -350,7 +369,10 @@ fn deleting_an_event_removes_it_and_is_signalled() {
     let core = harness.open();
     let home = calendar(&core, "Home");
     let day = all_day("2026-10-05", "2026-10-06");
-    let doomed = core.create_event(draft(home.id, "Doomed", day)).unwrap();
+    let doomed = core
+        .create_event(draft(home.id, "Doomed", day))
+        .unwrap()
+        .value;
     core.create_event(draft(home.id, "Kept", day)).unwrap();
     let signals_before = harness.signals.received().len();
 
@@ -374,7 +396,8 @@ fn deleting_a_calendar_deletes_its_events() {
     let home = calendar(&core, "Home");
     let created = core
         .create_event(draft(home.id, "Gone", all_day("2026-10-05", "2026-10-06")))
-        .unwrap();
+        .unwrap()
+        .value;
 
     core.delete_calendar(home.id).unwrap();
 
@@ -411,8 +434,14 @@ fn events_of_read_only_calendars_cannot_be_changed() {
     let home = calendar(&core, "Home");
     let work = calendar(&core, "Work");
     let day = all_day("2026-10-05", "2026-10-06");
-    let in_home = core.create_event(draft(home.id, "Mine", day)).unwrap();
-    let in_work = core.create_event(draft(work.id, "Theirs", day)).unwrap();
+    let in_home = core
+        .create_event(draft(home.id, "Mine", day))
+        .unwrap()
+        .value;
+    let in_work = core
+        .create_event(draft(work.id, "Theirs", day))
+        .unwrap()
+        .value;
     harness.arrange_local_store(&format!(
         "UPDATE calendar SET read_only = 1 WHERE id = {}",
         work.id.0
@@ -433,7 +462,7 @@ fn events_of_read_only_calendars_cannot_be_changed() {
             .map(|_| ()),
         core.edit_event(in_work.id, draft(home.id, "Theirs", day))
             .map(|_| ()),
-        core.delete_event(in_work.id),
+        core.delete_event(in_work.id).map(|_| ()),
     ];
 
     for result in refused {
@@ -452,7 +481,10 @@ fn changing_a_missing_event_or_calendar_is_refused_without_a_signal() {
     let core = harness.open();
     let home = calendar(&core, "Home");
     let day = all_day("2026-10-05", "2026-10-06");
-    let created = core.create_event(draft(home.id, "Here", day)).unwrap();
+    let created = core
+        .create_event(draft(home.id, "Here", day))
+        .unwrap()
+        .value;
     let signals_before = harness.signals.received().len();
     let missing = EventId(999);
 
@@ -486,7 +518,8 @@ fn an_untouched_time_keeps_the_time_zone_it_was_made_in() {
             "Call",
             timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     harness.clock.set_time_zone("America/New_York");
     let shown_in_new_york = core.event(created.id).unwrap().when;
 
@@ -516,7 +549,10 @@ fn an_untouched_description_keeps_its_original_bytes() {
     let core = harness.open();
     let home = calendar(&core, "Home");
     let day = all_day("2026-10-05", "2026-10-06");
-    let created = core.create_event(draft(home.id, "Talk", day)).unwrap();
+    let created = core
+        .create_event(draft(home.id, "Talk", day))
+        .unwrap()
+        .value;
     arrange_html_description(
         &harness,
         created.id,
@@ -550,7 +586,10 @@ fn an_edited_description_is_written_back_as_plain_text() {
     let core = harness.open();
     let home = calendar(&core, "Home");
     let day = all_day("2026-10-05", "2026-10-06");
-    let created = core.create_event(draft(home.id, "Talk", day)).unwrap();
+    let created = core
+        .create_event(draft(home.id, "Talk", day))
+        .unwrap()
+        .value;
     arrange_html_description(&harness, created.id, "<b>Slides</b>");
 
     let mut edited = draft(home.id, "Talk", day);
@@ -573,7 +612,7 @@ fn links_in_the_location_become_link_pieces() {
     let mut zoom = draft(home.id, "Call", all_day("2026-10-05", "2026-10-06"));
     zoom.location = "Zoom: https://zoom.us/j/123?pwd=x, or javascript:alert(1)".to_owned();
 
-    let created = core.create_event(zoom.clone()).unwrap();
+    let created = core.create_event(zoom.clone()).unwrap().value;
 
     assert_eq!(
         created.location.paragraphs,
@@ -604,7 +643,8 @@ fn an_unreadable_stored_time_is_an_error_not_a_crash() {
             "Broken",
             timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     harness.arrange_local_store(&format!(
         "UPDATE event SET end_at = '2026-10-05T99:00' WHERE id = {}",
         created.id.0
@@ -641,6 +681,7 @@ mod hostile {
             description: field("description"),
         })
         .unwrap()
+        .value
         .id
     }
 
@@ -717,7 +758,8 @@ fn rescheduling_keeps_the_event_time_zone_and_an_html_description() {
             "Call",
             timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     arrange_html_description(&harness, created.id, "<b>Agenda</b>");
     let before = core.event(created.id).unwrap().description;
     harness.clock.set_time_zone("America/New_York");

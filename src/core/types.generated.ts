@@ -30,6 +30,12 @@ readOnly: boolean, };
 export type CalendarId = number & { readonly __brand: "CalendarId" };
 
 /**
+ * What a change to Events returns: its value, and the unit that undoes it,
+ * none when it changed nothing.
+ */
+export type Changed<T> = { unit: UnitId | null, value: T, };
+
+/**
  * A Calendar's colour, always `#rrggbb` in lower case, so that it can only
  * ever be a colour wherever it is used.
  */
@@ -41,7 +47,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "importNotFound" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -75,18 +81,13 @@ export type EventId = number & { readonly __brand: "EventId" };
 export type ExistingEvents = "update" | "skip" | "copy";
 
 /**
- * An import that was run, as the Change Journal records it.
- */
-export type ImportId = number & { readonly __brand: "ImportId" };
-
-/**
  * What running an import did.
  */
 export type ImportOutcome = {
 /**
- * What undoes it.
+ * What undoes it; none when it changed nothing.
  */
-id: ImportId,
+unit: UnitId | null,
 /**
  * How many Events it added, copies included.
  */
@@ -159,6 +160,11 @@ paragraphs: Array<Array<Piece>>,
  * edit.
  */
 text: string, };
+
+/**
+ * A Change Journal unit: what undoes a change, or changes made together.
+ */
+export type UnitId = number & { readonly __brand: "UnitId" };
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

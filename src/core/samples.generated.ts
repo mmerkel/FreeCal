@@ -213,15 +213,99 @@ export const samples = {
     "skip",
     "copy"
   ],
-  ImportId: [
+  UnitId: [
     4
   ],
   ImportOutcome: [
     {
-      "id": 4,
+      "unit": 4,
       "imported": 40,
       "updated": 2,
       "skipped": 0
+    }
+  ],
+  Changed: [
+    {
+      "unit": 4,
+      "value": {
+        "id": 3,
+        "calendarId": 2,
+        "title": "Dentist",
+        "when": {
+          "kind": "timed",
+          "start": "2026-10-05T09:30:00",
+          "end": "2026-10-05T10:00:00"
+        },
+        "location": {
+          "paragraphs": [
+            [
+              {
+                "kind": "text",
+                "text": "Main Street 1"
+              }
+            ]
+          ],
+          "text": "Main Street 1"
+        },
+        "description": {
+          "paragraphs": [
+            [
+              {
+                "kind": "text",
+                "text": "Agenda: "
+              },
+              {
+                "kind": "link",
+                "text": "notes",
+                "url": "https://example.org/notes"
+              }
+            ]
+          ],
+          "text": "Agenda: notes (https://example.org/notes)"
+        },
+        "pinnedZone": "Europe/Berlin"
+      }
+    },
+    {
+      "unit": null,
+      "value": {
+        "id": 3,
+        "calendarId": 2,
+        "title": "Dentist",
+        "when": {
+          "kind": "timed",
+          "start": "2026-10-05T09:30:00",
+          "end": "2026-10-05T10:00:00"
+        },
+        "location": {
+          "paragraphs": [
+            [
+              {
+                "kind": "text",
+                "text": "Main Street 1"
+              }
+            ]
+          ],
+          "text": "Main Street 1"
+        },
+        "description": {
+          "paragraphs": [
+            [
+              {
+                "kind": "text",
+                "text": "Agenda: "
+              },
+              {
+                "kind": "link",
+                "text": "notes",
+                "url": "https://example.org/notes"
+              }
+            ]
+          ],
+          "text": "Agenda: notes (https://example.org/notes)"
+        },
+        "pinnedZone": "Europe/Berlin"
+      }
     }
   ],
   ErrorCode: [
@@ -284,7 +368,13 @@ export const samples = {
       "file": "takeout.zip/Calendar/Work.ics"
     },
     {
-      "code": "importNotFound"
+      "code": "unitNotFound"
+    },
+    {
+      "code": "changedSinceUnit"
+    },
+    {
+      "code": "alreadyUndone"
     },
     {
       "code": "noFileToImport"
@@ -324,7 +414,8 @@ type Samples = {
   ImportSummary: Unbranded<T.ImportSummary>[];
   PinnedZone: Unbranded<T.PinnedZone>[];
   ExistingEvents: Unbranded<T.ExistingEvents>[];
-  ImportId: Unbranded<T.ImportId>[];
+  UnitId: Unbranded<T.UnitId>[];
   ImportOutcome: Unbranded<T.ImportOutcome>[];
+  Changed: Unbranded<T.Changed<T.Event>>[];
   ErrorCode: Unbranded<T.ErrorCode>[];
 };

@@ -9,12 +9,12 @@
     EventDraft,
     EventId,
     ExistingEvents,
-    ImportId,
     Occurrence,
     Settings,
     SettingsUpdate,
     SidebarState,
     Signal,
+    UnitId,
     View,
     When,
   } from './core/types';
@@ -415,6 +415,7 @@
     working = t('working.importing', { file });
     try {
       const outcome = await core.runImport(calendarId, existing);
+      const { unit } = outcome;
       close();
       toast = {
         message: t('import.done', {
@@ -423,9 +424,8 @@
           updated: String(outcome.updated),
           skipped: String(outcome.skipped),
         }),
-        // An import that changed nothing has nothing to undo.
-        undo:
-          outcome.imported + outcome.updated > 0 ? () => undoImport(file, outcome.id) : undefined,
+        // An import that changed nothing has no unit to undo.
+        undo: unit === null ? undefined : () => undoImport(file, unit),
       };
     } catch (error) {
       importFailure = t('import.failed', { error: errorText(error) });
@@ -434,11 +434,11 @@
     }
   }
 
-  async function undoImport(file: string, id: ImportId) {
+  async function undoImport(file: string, id: UnitId) {
     toast = undefined;
     working = t('working.undoingImport', { file });
     try {
-      await core.undoImport(id);
+      await core.undoUnit(id);
       toast = { message: t('import.undone', { file }) };
     } catch (error) {
       // Undo can succeed later, such as once the Calendar is writable again.

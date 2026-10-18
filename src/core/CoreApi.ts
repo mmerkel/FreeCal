@@ -3,12 +3,12 @@ import type {
   AccountId,
   Calendar,
   CalendarId,
+  Changed,
   Event,
   ErrorCode,
   EventDraft,
   EventId,
   ExistingEvents,
-  ImportId,
   ImportOutcome,
   ImportSummary,
   Occurrence,
@@ -16,6 +16,7 @@ import type {
   SettingsUpdate,
   SidebarState,
   Signal,
+  UnitId,
   View,
   When,
 } from './types';
@@ -64,16 +65,20 @@ export interface CoreApi {
   listOccurrences(from: Temporal.PlainDate, to: Temporal.PlainDate): Promise<Occurrence[]>;
   /** An Event with everything its details and editor show. */
   event(id: EventId): Promise<Event>;
-  /** Creates an Event in a writable Calendar. */
-  createEvent(draft: EventDraft): Promise<Event>;
+  /**
+   * Creates an Event in a writable Calendar. Each change to Events comes
+   * back with its Change Journal unit, which undoes it, or `null` when it
+   * changed nothing.
+   */
+  createEvent(draft: EventDraft): Promise<Changed<Event>>;
   /** Changes an Event, possibly moving it to another writable Calendar. */
-  editEvent(id: EventId, draft: EventDraft): Promise<Event>;
+  editEvent(id: EventId, draft: EventDraft): Promise<Changed<Event>>;
   /**
    * Moves an Event to another time, as a drag or a resize in the grid does,
    * and leaves everything else as it is.
    */
-  rescheduleEvent(id: EventId, when: When): Promise<Event>;
-  deleteEvent(id: EventId): Promise<void>;
+  rescheduleEvent(id: EventId, when: When): Promise<Changed<Event>>;
+  deleteEvent(id: EventId): Promise<Changed<null>>;
   /**
    * Asks the user for an `.ics` or `.zip` file to import through the system's
    * file dialog, with the dialog's `title` and the name of its file `filter`,
@@ -91,8 +96,12 @@ export interface CoreApi {
   runImport(calendarId: CalendarId, existing: ExistingEvents): Promise<ImportOutcome>;
   /** Lets go of the picked file without importing it. */
   discardImport(): Promise<void>;
-  /** Undoes a whole import in one step; an import is undone once. */
-  undoImport(id: ImportId): Promise<void>;
+  /**
+   * Undoes a Change Journal unit whole, refused while an Event it changed
+   * was changed since. A unit is undone once; the undo is a unit itself,
+   * which redoes it.
+   */
+  undoUnit(id: UnitId): Promise<Changed<null>>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
   /** FreeCal's version, such as `0.1.0`. */

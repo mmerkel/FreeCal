@@ -9,7 +9,6 @@ import type {
   EventDraft,
   EventId,
   ExistingEvents,
-  ImportId,
   ImportOutcome,
   PinnedZone,
   Settings,
@@ -17,11 +16,12 @@ import type {
   SidebarState,
   Signal,
   StructuredText,
+  UnitId,
   View,
   When,
 } from '../core/types';
 import { DEFAULT_SETTINGS } from '../lib/settings';
-import { accountId, calendarId, eventId, importId } from './ids';
+import { accountId, calendarId, eventId, unitId } from './ids';
 
 /** A file a test lets the user pick to import. */
 export interface FakeImportFile {
@@ -32,18 +32,25 @@ export interface FakeImportFile {
   pinned?: PinnedZone[];
 }
 
-/** What undoes an import: the Events it added, and the previous versions of those it updated. */
-interface ImportUnit {
-  calendarId: CalendarId;
-  added: EventId[];
-  previous: { event: Event; uid: string }[];
+/** One Event's change in a Change Journal unit: its versions before and after, none when it was created or deleted. */
+interface Entry {
+  id: EventId;
+  uid: string;
+  before?: Event;
+  after?: Event;
+}
+
+/** A Change Journal unit: changes made together, which are undone together. */
+interface Unit {
+  entries: Entry[];
+  undone: boolean;
 }
 
 /**
  * A fake core interface for component tests. Like the real core, it sends
- * "Calendars changed" after every change to a Calendar and "Occurrences
- * changed" after every change to an Event. Tests can also emit Signals
- * themselves.
+ * "Calendars changed" after every change to a Calendar, and records every
+ * change to Events as a Change Journal unit and sends "Occurrences changed"
+ * for it. Tests can also emit Signals themselves.
  */
 export class FakeCore implements CoreApi {
   accounts: Account[] = [{ id: accountId(1), provider: 'local' }];
@@ -82,8 +89,8 @@ export class FakeCore implements CoreApi {
   fileDialogs: { title: string; filter: string }[] = [];
   /** Each Event's UID. */
   uids = new Map<EventId, string>();
-  private imports = new Map<ImportId, ImportUnit>();
-  private nextImportId = 1;
+  private units = new Map<UnitId, Unit>();
+  private nextUnitId = 1;
   private subscribers = new Set<(signal: Signal) => void>();
   private nextCalendarId = 1;
   private nextEventId = 1;
@@ -229,7 +236,14 @@ export class FakeCore implements CoreApi {
     this.calls.push('deleteCalendar');
     this.calendar(id);
     this.calendars = this.calendars.filter((calendar) => calendar.id !== id);
-    this.events = this.events.filter((event) => event.calendarId !== id);
+    // Like the real core, its Events leave the Change Journal with it.
+    const gone = new Set(this.events.filter((event) => event.calendarId === id).map((e) => e.id));
+    this.events = this.events.filter((event) => !gone.has(event.id));
+    for (const [unit, { entries }] of this.units) {
+      const kept = entries.filter((entry) => !gone.has(entry.id));
+      if (kept.length === 0) this.units.delete(unit);
+      else this.units.get(unit)!.entries = kept;
+    }
     this.emit({ kind: 'calendarsChanged' });
   }
 
@@ -267,15 +281,15 @@ export class FakeCore implements CoreApi {
     this.calls.push('createEvent');
     this.writable(draft.calendarId);
     const created = this.addEvent({ ...draft, description: draft.description });
-    this.emit({ kind: 'occurrencesChanged', calendarIds: [draft.calendarId] });
-    return structuredClone(created);
+    const unit = this.record([this.entry(created.id, undefined, created)]);
+    return { unit, value: structuredClone(created) };
   }
 
   async editEvent(id: EventId, draft: EventDraft) {
     this.calls.push('editEvent');
     const event = this.findEvent(id);
-    const before = event.calendarId;
-    this.writable(before);
+    const before = structuredClone(event);
+    this.writable(before.calendarId);
     this.writable(draft.calendarId);
     Object.assign(event, {
       ...draft,
@@ -286,29 +300,27 @@ export class FakeCore implements CoreApi {
           : plainText(draft.description),
       pinnedZone: keptPinnedZone(event, draft.when),
     });
-    this.emit({
-      kind: 'occurrencesChanged',
-      calendarIds: before === draft.calendarId ? [before] : [before, draft.calendarId],
-    });
-    return structuredClone(event);
+    const unit = this.record([this.entry(id, before, event)]);
+    return { unit, value: structuredClone(event) };
   }
 
   async rescheduleEvent(id: EventId, when: When) {
     this.calls.push('rescheduleEvent');
     const event = this.findEvent(id);
+    const before = structuredClone(event);
     this.writable(event.calendarId);
     event.pinnedZone = keptPinnedZone(event, when);
     event.when = { ...when };
-    this.emit({ kind: 'occurrencesChanged', calendarIds: [event.calendarId] });
-    return structuredClone(event);
+    const unit = this.record([this.entry(id, before, event)]);
+    return { unit, value: structuredClone(event) };
   }
 
   async deleteEvent(id: EventId) {
     this.calls.push('deleteEvent');
-    const { calendarId } = this.findEvent(id);
-    this.writable(calendarId);
+    const before = this.findEvent(id);
+    this.writable(before.calendarId);
     this.events = this.events.filter((event) => event.id !== id);
-    this.emit({ kind: 'occurrencesChanged', calendarIds: [calendarId] });
+    return { unit: this.record([this.entry(id, before, undefined)]), value: null };
   }
 
   async pickImportFile(title: string, filter: string) {
@@ -339,33 +351,27 @@ export class FakeCore implements CoreApi {
     this.calls.push('runImport');
     const file = this.picked();
     this.writable(calendarId);
-    const unit: ImportUnit = { calendarId, added: [], previous: [] };
-    const outcome: ImportOutcome = {
-      id: importId(this.nextImportId++),
-      imported: 0,
-      updated: 0,
-      skipped: 0,
-    };
+    const entries: Entry[] = [];
+    const outcome: ImportOutcome = { unit: null, imported: 0, updated: 0, skipped: 0 };
     for (const imported of file.events) {
       const found = this.eventWithUid(calendarId, imported.uid);
       if (found && existing === 'skip') {
         outcome.skipped++;
       } else if (found && existing === 'update') {
-        unit.previous.push({ event: structuredClone(found), uid: imported.uid });
+        const before = structuredClone(found);
         Object.assign(found, { title: imported.title, when: { ...imported.when } });
+        entries.push(this.entry(found.id, before, found));
         outcome.updated++;
       } else {
         const uid = found ? `${imported.uid}-copy` : imported.uid;
         const { title, when } = imported;
-        unit.added.push(this.addEvent({ calendarId, title, when: { ...when }, uid }).id);
+        const added = this.addEvent({ calendarId, title, when: { ...when }, uid });
+        entries.push(this.entry(added.id, undefined, added));
         outcome.imported++;
       }
     }
-    this.imports.set(outcome.id, unit);
     this.pickedImport = undefined;
-    if (outcome.imported + outcome.updated > 0) {
-      this.emit({ kind: 'occurrencesChanged', calendarIds: [calendarId] });
-    }
+    outcome.unit = this.record(entries);
     return outcome;
   }
 
@@ -374,19 +380,30 @@ export class FakeCore implements CoreApi {
     this.pickedImport = undefined;
   }
 
-  async undoImport(id: ImportId) {
-    this.calls.push('undoImport');
-    const unit = this.imports.get(id);
-    if (!unit) throw failure('importNotFound');
-    this.writable(unit.calendarId);
-    this.events = this.events.filter((event) => !unit.added.includes(event.id));
-    for (const { event, uid } of unit.previous) {
-      this.events = this.events.filter((kept) => kept.id !== event.id);
-      this.events.push(event);
-      this.uids.set(event.id, uid);
+  /** The simple undo: refused while an Event of the unit changed since. */
+  async undoUnit(id: UnitId) {
+    this.calls.push('undoUnit');
+    const unit = this.units.get(id);
+    if (!unit) throw failure('unitNotFound');
+    if (unit.undone) throw failure('alreadyUndone');
+    const entries = [...unit.entries].reverse();
+    const current = (entry: Entry) =>
+      this.events.find((event) => event.id === entry.id && this.uids.get(event.id) === entry.uid);
+    for (const entry of entries) {
+      if (JSON.stringify(current(entry)) !== JSON.stringify(entry.after)) {
+        throw failure('changedSinceUnit');
+      }
+      for (const version of [entry.before, entry.after]) {
+        if (version) this.writable(version.calendarId);
+      }
     }
-    this.imports.delete(id);
-    this.emit({ kind: 'occurrencesChanged', calendarIds: [unit.calendarId] });
+    for (const entry of entries) {
+      this.events = this.events.filter((event) => event !== current(entry));
+      if (entry.before) this.events.push(structuredClone(entry.before));
+    }
+    unit.undone = true;
+    const undo = entries.map((entry) => ({ ...entry, before: entry.after, after: entry.before }));
+    return { unit: this.record(undo), value: null };
   }
 
   async openLink(url: string) {
@@ -411,6 +428,33 @@ export class FakeCore implements CoreApi {
 
   private started() {
     if (this.startupError) throw this.startupError;
+  }
+
+  private entry(id: EventId, before?: Event, after?: Event): Entry {
+    const uid = this.uids.get(id)!;
+    return { id, uid, before: structuredClone(before), after: structuredClone(after) };
+  }
+
+  /**
+   * Records the changes `entries` as one unit and sends "Occurrences
+   * changed" for their Calendars. A unit that changed nothing isn't kept.
+   */
+  private record(entries: Entry[]): UnitId | null {
+    const changed = entries.filter(
+      (entry) => JSON.stringify(entry.before) !== JSON.stringify(entry.after),
+    );
+    if (changed.length === 0) return null;
+    const id = unitId(this.nextUnitId++);
+    this.units.set(id, { entries: changed, undone: false });
+    const calendarIds = [
+      ...new Set(
+        changed.flatMap((entry) =>
+          [entry.before, entry.after].flatMap((version) => (version ? [version.calendarId] : [])),
+        ),
+      ),
+    ];
+    this.emit({ kind: 'occurrencesChanged', calendarIds });
+    return id;
   }
 
   private picked(): FakeImportFile {

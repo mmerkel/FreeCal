@@ -14,9 +14,10 @@ use serde::Serialize;
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Colour, ErrorCode, Event, EventDraft,
-    EventId, ExistingEvents, ImportId, ImportOutcome, ImportSummary, Occurrence, Piece, PinnedZone,
-    Provider, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, View, When,
+    Account, AccountId, Appearance, Calendar, CalendarId, Changed, Colour, ErrorCode, Event,
+    EventDraft, EventId, ExistingEvents, ImportOutcome, ImportSummary, Occurrence, Piece,
+    PinnedZone, Provider, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId,
+    View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -71,6 +72,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<ImportSummary>();
     types.visit::<ExistingEvents>();
     types.visit::<ImportOutcome>();
+    types.visit::<Changed<Event>>();
     types.visit::<ErrorCode>();
     let names = types.declarations.keys().cloned().collect();
     let declarations: Vec<_> = types.declarations.into_values().collect();
@@ -87,6 +89,13 @@ fn samples<T: TS + Serialize>(values: &[T]) -> (String, String, String) {
         format!("  {name}: {},\n", json.replace('\n', "\n  ")),
         format!("  {name}: Unbranded<T.{name}>[];\n"),
     )
+}
+
+/// Like [`samples`], for a generic type with the argument `argument`.
+fn generic_samples<T: TS + Serialize>(values: &[T], argument: &str) -> (String, String, String) {
+    let (name, value, _) = samples(values);
+    let r#type = format!("  {name}: Unbranded<T.{name}<T.{argument}>>[];\n");
+    (name, value, r#type)
 }
 
 /// The samples file, and the names of the types it has samples of.
@@ -119,6 +128,15 @@ fn samples_file() -> (String, Vec<String>) {
         shown: true,
         read_only: false,
     };
+    let event = Event {
+        id: EventId(3),
+        calendar_id: CalendarId(2),
+        title: "Dentist".to_owned(),
+        when: timed,
+        location: StructuredText::from_plain_text("Main Street 1"),
+        description: description.clone(),
+        pinned_zone: Some("Europe/Berlin".to_owned()),
+    };
     let entries = [
         samples(&[AccountId(1)]),
         samples(&[Provider::Local]),
@@ -138,15 +156,7 @@ fn samples_file() -> (String, Vec<String>) {
             location: "Main Street 1".to_owned(),
             description: description.text.clone(),
         }]),
-        samples(&[Event {
-            id: EventId(3),
-            calendar_id: CalendarId(2),
-            title: "Dentist".to_owned(),
-            when: timed,
-            location: StructuredText::from_plain_text("Main Street 1"),
-            description: description.clone(),
-            pinned_zone: Some("Europe/Berlin".to_owned()),
-        }]),
+        samples(std::slice::from_ref(&event)),
         samples(&[Occurrence {
             event_id: EventId(3),
             calendar_id: CalendarId(2),
@@ -198,13 +208,26 @@ fn samples_file() -> (String, Vec<String>) {
             ExistingEvents::Skip,
             ExistingEvents::Copy,
         ]),
-        samples(&[ImportId(4)]),
+        samples(&[UnitId(4)]),
         samples(&[ImportOutcome {
-            id: ImportId(4),
+            unit: Some(UnitId(4)),
             imported: 40,
             updated: 2,
             skipped: 0,
         }]),
+        generic_samples(
+            &[
+                Changed {
+                    unit: Some(UnitId(4)),
+                    value: event.clone(),
+                },
+                Changed {
+                    unit: None,
+                    value: event,
+                },
+            ],
+            "Event",
+        ),
         samples(&ErrorCode::all()),
     ];
     let mut names = Vec::new();

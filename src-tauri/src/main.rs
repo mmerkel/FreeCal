@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use chrono::NaiveDate;
 use freecal_core::{
-    Account, AccountId, Calendar, CalendarId, Colour, Core, ErrorCode, Event, EventDraft, EventId,
-    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportSummary, Occurrence,
-    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View, When,
+    Account, AccountId, Calendar, CalendarId, Changed, Colour, Core, ErrorCode, Event, EventDraft,
+    EventId, ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence,
+    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When,
     link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -165,22 +165,22 @@ fn event(core: State<Core>, id: EventId) -> CommandResult<Event> {
 }
 
 #[tauri::command]
-fn create_event(core: State<Core>, draft: EventDraft) -> CommandResult<Event> {
+fn create_event(core: State<Core>, draft: EventDraft) -> CommandResult<Changed<Event>> {
     core.create_event(draft).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
-fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResult<Event> {
+fn edit_event(core: State<Core>, id: EventId, draft: EventDraft) -> CommandResult<Changed<Event>> {
     core.edit_event(id, draft).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
-fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult<Event> {
+fn reschedule_event(core: State<Core>, id: EventId, when: When) -> CommandResult<Changed<Event>> {
     core.reschedule_event(id, when).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
-fn delete_event(core: State<Core>, id: EventId) -> CommandResult<()> {
+fn delete_event(core: State<Core>, id: EventId) -> CommandResult<Changed<()>> {
     core.delete_event(id).map_err(ErrorCode::from)
 }
 
@@ -277,8 +277,8 @@ fn discard_import(picked: State<PickedImport>) {
 }
 
 #[tauri::command]
-async fn undo_import(core: State<'_, Core>, id: ImportId) -> CommandResult<()> {
-    core.undo_import(id).map_err(ErrorCode::from)
+async fn undo_unit(core: State<'_, Core>, id: UnitId) -> CommandResult<Changed<()>> {
+    core.undo_unit(id).map_err(ErrorCode::from)
 }
 
 /// Opens a link from a description or location in the system browser. The scheme
@@ -476,7 +476,7 @@ fn main() {
             preview_import,
             run_import,
             discard_import,
-            undo_import,
+            undo_unit,
             open_link,
             version,
             show_window,

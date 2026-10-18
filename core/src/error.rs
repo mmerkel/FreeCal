@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{AccountId, CalendarId, EventId, ImportId};
+use crate::{AccountId, CalendarId, EventId, UnitId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -43,8 +43,12 @@ pub enum CoreError {
     ImportZipWithoutCalendars { file: String },
     #[error("{file:?} is larger than an import may be")]
     ImportTooLarge { file: String },
-    #[error("there is no import {0:?} to undo")]
-    ImportNotFound(ImportId),
+    #[error("there is no Change Journal unit {0:?}")]
+    UnitNotFound(UnitId),
+    #[error("an Event of Change Journal unit {0:?} changed since")]
+    ChangedSinceUnit(UnitId),
+    #[error("Change Journal unit {0:?} is undone already")]
+    AlreadyUndone(UnitId),
 }
 
 impl CoreError {
@@ -76,7 +80,9 @@ impl CoreError {
                 ErrorCode::ImportZipWithoutCalendars { file: file.clone() }
             }
             CoreError::ImportTooLarge { file } => ErrorCode::ImportTooLarge { file: file.clone() },
-            CoreError::ImportNotFound(_) => ErrorCode::ImportNotFound,
+            CoreError::UnitNotFound(_) => ErrorCode::UnitNotFound,
+            CoreError::ChangedSinceUnit(_) => ErrorCode::ChangedSinceUnit,
+            CoreError::AlreadyUndone(_) => ErrorCode::AlreadyUndone,
         }
     }
 }
@@ -124,8 +130,13 @@ pub enum ErrorCode {
     ImportTooLarge {
         file: String,
     },
-    /// An import to undo was undone already, or its Calendar deleted.
-    ImportNotFound,
+    /// A change to undo is no longer in the Change Journal, as when its
+    /// Calendar was deleted.
+    UnitNotFound,
+    /// A change to undo can't be: an Event it changed was changed since.
+    ChangedSinceUnit,
+    /// A change to undo was undone already.
+    AlreadyUndone,
     /// The window asked to preview or run an import before a file was
     /// picked, or after it was run or discarded.
     NoFileToImport,
@@ -161,7 +172,9 @@ impl ErrorCode {
             ErrorCode::ImportNotCalendar { file: file() },
             ErrorCode::ImportZipWithoutCalendars { file: file() },
             ErrorCode::ImportTooLarge { file: file() },
-            ErrorCode::ImportNotFound,
+            ErrorCode::UnitNotFound,
+            ErrorCode::ChangedSinceUnit,
+            ErrorCode::AlreadyUndone,
             ErrorCode::NoFileToImport,
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,

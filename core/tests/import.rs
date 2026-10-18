@@ -141,7 +141,8 @@ fn events_whose_uid_the_calendar_has_count_as_existing() {
                 uid,
                 support::timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
             ))
-            .unwrap();
+            .unwrap()
+            .value;
         harness.arrange_local_store(&format!(
             "UPDATE event SET uid = '{uid}' WHERE id = {}",
             created.id.0

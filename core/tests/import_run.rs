@@ -191,143 +191,24 @@ fn an_import_into_a_read_only_calendar_is_refused_and_stores_nothing() {
 }
 
 #[test]
-fn undoing_an_import_restores_the_calendar_exactly() {
+fn an_import_into_a_read_only_calendar_is_refused_even_when_it_would_skip_every_event() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar_with_kept(&harness, &core);
-    let other = calendar(&core, "Other");
-    core.create_event(support::draft(
-        home.id,
-        "Mine",
-        timed("2026-10-07T09:00:00", "2026-10-07T10:00:00"),
-    ))
-    .unwrap();
-    core.create_event(support::draft(
-        other.id,
-        "Elsewhere",
-        timed("2026-10-07T09:00:00", "2026-10-07T10:00:00"),
-    ))
-    .unwrap();
-    let before = contents(&core);
-    let file = kept_moved_and_new();
-    let previewed = preview(&core, home.id, file.clone());
-    let outcome = core.run_import(&previewed, ExistingEvents::Update).unwrap();
-    assert_ne!(contents(&core), before);
-    harness.signals.clear();
-
-    core.undo_import(outcome.id).unwrap();
-
-    assert_eq!(contents(&core), before);
-    assert_eq!(preview(&core, home.id, file), previewed);
-    assert_eq!(
-        harness.signals.received(),
-        [Signal::OccurrencesChanged {
-            calendar_ids: vec![home.id]
-        }]
-    );
-}
-
-#[test]
-fn an_import_is_undone_once() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let home = calendar(&core, "Home");
-    let outcome = import(&core, home.id, kept_moved_and_new(), ExistingEvents::Skip);
-    core.undo_import(outcome.id).unwrap();
-    harness.signals.clear();
-
-    let again = core.undo_import(outcome.id);
-
-    assert!(matches!(again, Err(CoreError::ImportNotFound(id)) if id == outcome.id));
-    assert_eq!(harness.signals.received(), []);
-}
-
-#[test]
-fn undo_puts_back_an_updated_event_deleted_since_and_spares_events_made_since() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let home = calendar_with_kept(&harness, &core);
-    let other = calendar(&core, "Other");
-    let kept = the_one(&core, "kept");
-    let file = ics(&[
-        event("kept", TUESDAY.0, TUESDAY.1),
-        event("moved", MONDAY.0, MONDAY.1),
-        event("deleted", MONDAY.0, MONDAY.1),
-    ]
-    .concat());
-    let outcome = import(&core, home.id, file, ExistingEvents::Update);
-    let moved = the_one(&core, "moved");
-    let deleted = the_one(&core, "deleted");
-    core.edit_event(moved.id, support::draft(other.id, "moved", moved.when))
-        .unwrap();
-    core.delete_event(kept.id).unwrap();
-    core.delete_event(deleted.id).unwrap();
-    // SQLite gives a new Event the ID of the deleted one.
-    let made_since = core
-        .create_event(support::draft(
-            home.id,
-            "Made since",
-            timed("2026-10-08T09:00:00", "2026-10-08T10:00:00"),
-        ))
-        .unwrap();
-    assert_eq!(made_since.id, deleted.id);
-    harness.signals.clear();
-
-    core.undo_import(outcome.id).unwrap();
-
-    assert_eq!(the_one(&core, "kept"), kept);
-    assert_eq!(titled(&core, "moved"), []);
-    assert_eq!(core.event(made_since.id).unwrap(), made_since);
-    assert_eq!(
-        harness.signals.received(),
-        [Signal::OccurrencesChanged {
-            calendar_ids: vec![home.id, other.id]
-        }]
-    );
-}
-
-#[test]
-fn undoing_an_import_into_a_calendar_now_read_only_is_refused() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let home = calendar(&core, "Home");
-    let outcome = import(&core, home.id, kept_moved_and_new(), ExistingEvents::Skip);
-    let imported = contents(&core);
+    let preview = preview(&core, home.id, ics(&event("kept", TUESDAY.0, TUESDAY.1)));
     harness.arrange_local_store(&format!(
         "UPDATE calendar SET read_only = 1 WHERE id = {}",
         home.id.0
     ));
 
-    let refused = core.undo_import(outcome.id);
+    let refused = core.run_import(&preview, ExistingEvents::Skip);
 
     assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == home.id));
-    assert_eq!(contents(&core), imported);
+    assert_eq!(harness.signals.received(), []);
 }
 
 #[test]
-fn undo_is_refused_while_an_event_it_changes_is_in_a_read_only_calendar() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let home = calendar(&core, "Home");
-    let locked = calendar(&core, "Locked");
-    let outcome = import(&core, home.id, kept_moved_and_new(), ExistingEvents::Skip);
-    let new = the_one(&core, "new");
-    core.edit_event(new.id, support::draft(locked.id, "new", new.when))
-        .unwrap();
-    harness.arrange_local_store(&format!(
-        "UPDATE calendar SET read_only = 1 WHERE id = {}",
-        locked.id.0
-    ));
-    let imported = contents(&core);
-
-    let refused = core.undo_import(outcome.id);
-
-    assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == locked.id));
-    assert_eq!(contents(&core), imported);
-}
-
-#[test]
-fn an_import_that_changes_nothing_sends_no_signal() {
+fn an_import_that_changes_nothing_is_no_unit_and_sends_no_signal() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar_with_kept(&harness, &core);
@@ -340,6 +221,7 @@ fn an_import_that_changes_nothing_sends_no_signal() {
     );
 
     assert_eq!(outcome.skipped, 1);
+    assert_eq!(outcome.unit, None);
     assert_eq!(harness.signals.received(), []);
 }
 

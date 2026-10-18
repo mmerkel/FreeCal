@@ -229,8 +229,8 @@ test('undoing runs under “Working…” too, and a refused undo says why and c
   home.readOnly = true;
   core.calendars[0].readOnly = true;
   let finish!: () => void;
-  const undo = core.undoImport.bind(core);
-  vi.spyOn(core, 'undoImport').mockImplementationOnce(async (id) => {
+  const undo = core.undoUnit.bind(core);
+  vi.spyOn(core, 'undoUnit').mockImplementationOnce(async (id) => {
     await new Promise<void>((resolve) => (finish = resolve));
     return undo(id);
   });
@@ -270,6 +270,21 @@ test('an import that changed nothing offers no Undo', async () => {
 
   const toast = await screen.findByRole('status');
   expect(toast).toHaveTextContent('Imported “\u2068one.ics\u2069”: 0 added, 0 updated, 1 skipped.');
+  expect(within(toast).queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+});
+
+test('an update that leaves the Event as it was offers no Undo either', async () => {
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Standup', when: monday, uid: 'standup' });
+  const user = await showApp(core);
+  const dialog = await openImport(user, core, { name: 'one.ics', events: [workFile.events[0]] });
+
+  await user.click(within(dialog).getByRole('radio', { name: 'Update them' }));
+  await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+  const toast = await screen.findByRole('status');
+  expect(toast).toHaveTextContent('Imported “\u2068one.ics\u2069”: 0 added, 1 updated, 0 skipped.');
   expect(within(toast).queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
 });
 

@@ -124,7 +124,8 @@ fn utc_instants_from_other_time_zone_rules_are_recomputed_on_opening() {
             "Call",
             timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     drop(core);
     harness.arrange_local_store(&format!(
         "UPDATE app_state SET time_zone_rules = '2020a';
@@ -154,7 +155,8 @@ fn a_time_the_clocks_skip_happens_shifted_by_the_gap() {
             "Gap",
             timed("2026-03-29T02:30:00", "2026-03-29T04:00:00"),
         ))
-        .unwrap();
+        .unwrap()
+        .value;
     harness.clock.set_time_zone("UTC");
 
     assert_eq!(
@@ -171,7 +173,7 @@ fn a_time_the_clocks_repeat_is_the_first_one_and_round_trips() {
     // On 25 October 2026, Berlin's clocks go back from 03:00 to 02:00.
     let when = timed("2026-10-25T02:30:00", "2026-10-25T03:30:00");
 
-    let repeated = core.create_event(draft(home, "Twice", when)).unwrap();
+    let repeated = core.create_event(draft(home, "Twice", when)).unwrap().value;
     core.edit_event(repeated.id, draft(home, "Twice, renamed", when))
         .unwrap();
 

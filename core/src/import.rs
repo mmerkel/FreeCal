@@ -1,6 +1,6 @@
 //! Reading `.ics` files, or `.zip` files of them such as a Google Takeout
-//! export, into an import preview, and running a previewed import as one
-//! Change Journal unit, with an entry per Event, that undoes it in one step.
+//! export, into an import preview, and running a previewed import in one
+//! Change Journal unit.
 //!
 //! The files are untrusted (spec: "Untrusted content"): they are parsed by
 //! the `icalendar` and `zip` libraries, a `.zip` is read in memory and never
@@ -22,7 +22,8 @@ use icalendar::{CalendarComponent, CalendarDateTime, Component, DatePerhapsTime,
 use serde::{Deserialize, Serialize};
 
 use crate::event::{StoredWhen, instant};
-use crate::store::{EventFields, JournalEntry, Store, StoredEvent};
+use crate::journal::{Unit, UnitId};
+use crate::store::{EventFields, StoredEvent};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -179,139 +180,85 @@ pub enum ExistingEvents {
     Copy,
 }
 
-/// An import that was run, as the Change Journal records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    test,
-    derive(ts_rs::TS),
-    ts(type = "number & { readonly __brand: \"ImportId\" }")
-)]
-#[serde(transparent)]
-pub struct ImportId(pub i64);
-
 /// What running an import did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ImportOutcome {
-    /// What undoes it.
-    pub id: ImportId,
+    /// What undoes it; none when it changed nothing.
+    pub unit: Option<UnitId>,
     /// How many Events it added, copies included.
     pub imported: usize,
     pub updated: usize,
     pub skipped: usize,
 }
 
-/// Runs the import `preview` in one transaction, recording each Event's
-/// previous version in one Change Journal unit made at `made_at` (Unix
-/// seconds). Whether an Event exists is looked up again rather than taken
-/// from the preview.
+/// Runs the import `preview` in `unit`, which records each Event's previous
+/// version. Whether an Event exists is looked up again rather than taken from
+/// the preview.
 pub(crate) fn run(
-    store: &Store,
+    unit: &mut Unit,
     preview: &ImportPreview,
     existing: ExistingEvents,
-    made_at: i64,
 ) -> Result<ImportOutcome> {
     let calendar_id = preview.calendar_id;
-    store.transaction(|| {
-        let id = store.insert_import(calendar_id, made_at)?;
-        let mut outcome = ImportOutcome {
-            id,
-            imported: 0,
-            updated: 0,
-            skipped: 0,
+    unit.writable(calendar_id)?;
+    let mut outcome = ImportOutcome {
+        unit: None,
+        imported: 0,
+        updated: 0,
+        skipped: 0,
+    };
+    for event in &preview.events {
+        let fields = EventFields {
+            title: event.title.clone(),
+            when: StoredWhen::imported(&event.when),
+            location: event.location.clone(),
+            description: event.description.clone(),
+            description_html: event.description_html,
+            zone_pinned: event.zone_pinned,
         };
-        for event in &preview.events {
-            let fields = EventFields {
-                title: event.title.clone(),
-                when: StoredWhen::imported(&event.when),
-                location: event.location.clone(),
-                description: event.description.clone(),
-                description_html: event.description_html,
-                zone_pinned: event.zone_pinned,
-            };
-            let entry = match (store.find_event_by_uid(calendar_id, &event.uid)?, existing) {
-                (Some(_), ExistingEvents::Skip) => {
-                    outcome.skipped += 1;
-                    continue;
-                }
-                (Some((event_id, previous)), ExistingEvents::Update) => {
-                    outcome.updated += 1;
-                    // One floating end takes the zone of the other (ADR 0007,
-                    // rule 3), so only a version floating at both keeps the
-                    // zone pinned before (rule 2).
-                    let fields = if event.all_floating && previous.zone_pinned {
-                        EventFields {
-                            when: fields.when.in_zones_of(&previous.when),
-                            ..fields
-                        }
-                    } else {
-                        fields
-                    };
-                    store.update_event(
-                        event_id,
-                        &StoredEvent {
-                            calendar_id,
-                            fields,
-                        },
-                    )?;
-                    JournalEntry {
-                        event_id,
-                        uid: event.uid.clone(),
-                        previous: Some(previous),
+        match (unit.find_event_by_uid(calendar_id, &event.uid)?, existing) {
+            (Some(_), ExistingEvents::Skip) => outcome.skipped += 1,
+            (Some((event_id, previous)), ExistingEvents::Update) => {
+                outcome.updated += 1;
+                // One floating end takes the zone of the other (ADR 0007,
+                // rule 3), so only a version floating at both keeps the zone
+                // pinned before (rule 2).
+                let fields = if event.all_floating && previous.zone_pinned {
+                    EventFields {
+                        when: fields.when.in_zones_of(&previous.when),
+                        ..fields
                     }
-                }
-                // A new Event, or a copy of one the Calendar has.
-                (found, _) => {
-                    outcome.imported += 1;
-                    let uid = match found {
-                        None => event.uid.clone(),
-                        Some(_) => uuid::Uuid::new_v4().to_string(),
-                    };
-                    JournalEntry {
-                        event_id: store.insert_event_with_uid(calendar_id, &uid, &fields)?,
-                        uid,
-                        previous: None,
-                    }
-                }
-            };
-            store.insert_journal_entry(id, &entry)?;
-        }
-        Ok(outcome)
-    })
-}
-
-/// Undoes the import `id` in one transaction: the Events it added are
-/// deleted, wherever they are now, and the ones it changed get their previous
-/// version back. Returns the Calendars whose Events changed, the import's
-/// first.
-pub(crate) fn undo(store: &Store, id: ImportId) -> Result<Vec<CalendarId>> {
-    let (calendar_id, entries) = store.find_import(id)?;
-    let mut changed = vec![calendar_id];
-    for entry in &entries {
-        if let Some(now_in) = store.event_calendar(entry.event_id, &entry.uid)?
-            && !changed.contains(&now_in)
-        {
-            changed.push(now_in);
-        }
-    }
-    for &calendar_id in &changed {
-        crate::writable(store, calendar_id)?;
-    }
-    store.transaction(|| {
-        // Latest first, so that an Event changed twice ends at its first
-        // previous version.
-        for entry in entries.iter().rev() {
-            match &entry.previous {
-                None => store.delete_event_with_uid(entry.event_id, &entry.uid)?,
-                Some(previous) => {
-                    store.restore_event(entry.event_id, &entry.uid, calendar_id, previous)?
-                }
+                } else {
+                    fields
+                };
+                unit.replace(
+                    event_id,
+                    &StoredEvent {
+                        calendar_id,
+                        fields,
+                    },
+                )?;
+            }
+            // A new Event, or a copy of one the Calendar has.
+            (found, _) => {
+                outcome.imported += 1;
+                let uid = match found {
+                    None => event.uid.clone(),
+                    Some(_) => uuid::Uuid::new_v4().to_string(),
+                };
+                unit.create(
+                    &uid,
+                    &StoredEvent {
+                        calendar_id,
+                        fields,
+                    },
+                )?;
             }
         }
-        store.delete_import(id)?;
-        Ok(changed)
-    })
+    }
+    Ok(outcome)
 }
 
 /// Previews importing `file` into the Calendar `calendar_id`, which has
@@ -675,6 +622,8 @@ fn looks_like_html(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::{self, Origin};
+    use crate::store::Store;
 
     /// UIDs aren't part of the core interface, so this looks at the Local
     /// Store itself.
@@ -691,8 +640,12 @@ mod tests {
         );
         let preview = preview(&file, calendar_id, &HashSet::new(), Tz::UTC).unwrap();
 
-        run(&store, &preview, ExistingEvents::Copy, 0).unwrap();
-        run(&store, &preview, ExistingEvents::Copy, 0).unwrap();
+        for _ in 0..2 {
+            journal::record(&store, Origin::Import, 0, |unit| {
+                run(unit, &preview, ExistingEvents::Copy)
+            })
+            .unwrap();
+        }
 
         let uids = store.event_uids(calendar_id).unwrap();
         assert_eq!(uids.len(), 2);

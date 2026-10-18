@@ -9,6 +9,7 @@ mod clock;
 mod error;
 mod event;
 mod import;
+mod journal;
 mod settings;
 mod sidebar;
 mod signal;
@@ -30,9 +31,10 @@ pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{Event, EventDraft, EventId, Occurrence, When};
 pub use import::{
-    ExistingEvents, ImportFile, ImportId, ImportOutcome, ImportPreview, ImportSummary,
-    ImportedEvent, ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
+    ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
+    ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
+pub use journal::{Changed, UnitId};
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
@@ -41,6 +43,7 @@ pub use view::View;
 
 use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
+use journal::{Origin, Unit};
 use store::{EventFields, Store, StoredEvent};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -185,8 +188,9 @@ impl Core {
     }
 
     /// Deletes a Local Calendar with all its Events.
+    /// Its changes leave the Change Journal (ADR 0009).
     pub fn delete_calendar(&self, id: CalendarId) -> Result<()> {
-        self.store().delete_calendar(id)?;
+        journal::delete_calendar(&self.store(), id)?;
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
@@ -234,49 +238,36 @@ impl Core {
     }
 
     /// Creates an Event in a writable Calendar.
-    pub fn create_event(&self, draft: EventDraft) -> Result<Event> {
-        let calendar_id = draft.calendar_id;
-        let created = {
-            let store = self.store();
-            writable(&store, calendar_id)?;
-            let fields = EventFields {
+    pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
+        let event = StoredEvent {
+            calendar_id: draft.calendar_id,
+            fields: EventFields {
                 title: draft.title,
                 when: StoredWhen::new(draft.when, self.clock.time_zone())?,
                 location: draft.location,
                 description: draft.description,
                 description_html: false,
                 zone_pinned: false,
-            };
-            let id = store.insert_event(calendar_id, &fields)?;
-            (
-                id,
-                StoredEvent {
-                    calendar_id,
-                    fields,
-                },
-            )
+            },
         };
-        self.signals.send(Signal::OccurrencesChanged {
-            calendar_ids: vec![calendar_id],
-        });
-        self.to_event(created.0, created.1)
+        let created = self.record(Origin::UserAction, |unit| {
+            let id = unit.create(&uuid::Uuid::new_v4().to_string(), &event)?;
+            Ok((id, event))
+        })?;
+        self.changed_event(created)
     }
 
     /// Changes an Event, possibly moving it to another writable Calendar.
     /// A timed Event keeps its Event Time Zones, and what the user left as
     /// it was stays exactly as stored: an unchanged time its wall time and an
     /// unchanged description its original bytes, even if it was HTML.
-    pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Event> {
+    pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let (before, after) = {
-            let store = self.store();
-            let before = store.find_event(id)?;
-            writable(&store, before.calendar_id)?;
-            writable(&store, draft.calendar_id)?;
-
-            let old = &before.fields;
+        let edited = self.record(Origin::UserAction, |unit| {
+            let old = unit.find_event(id)?.fields;
             let when = old.when.edit(draft.when, zone)?;
-            let (description, description_html) = if draft.description == description_of(old).text {
+            let (description, description_html) = if draft.description == description_of(&old).text
+            {
                 (old.description.clone(), old.description_html)
             } else {
                 (draft.description, false)
@@ -292,53 +283,32 @@ impl Core {
                     description_html,
                 },
             };
-            store.update_event(id, &after)?;
-            (before.calendar_id, after)
-        };
-        let mut calendar_ids = vec![before];
-        if after.calendar_id != before {
-            calendar_ids.push(after.calendar_id);
-        }
-        self.signals
-            .send(Signal::OccurrencesChanged { calendar_ids });
-        self.to_event(id, after)
+            unit.replace(id, &after)?;
+            Ok((id, after))
+        })?;
+        self.changed_event(edited)
     }
 
     /// Moves an Event to another time, as a drag or a resize in the grid
     /// does, and leaves everything else as stored. `when` is in the Display
     /// Time Zone; a timed Event keeps its Event Time Zones.
-    pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Event> {
+    pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let after = {
-            let store = self.store();
-            let mut event = store.find_event(id)?;
-            writable(&store, event.calendar_id)?;
+        let rescheduled = self.record(Origin::UserAction, |unit| {
+            let mut event = unit.find_event(id)?;
             let edited = event.fields.when.edit(when, zone)?;
             // A time the user changed is theirs, no longer a pinned one.
             event.fields.zone_pinned &= edited == event.fields.when;
             event.fields.when = edited;
-            store.update_event(id, &event)?;
-            event
-        };
-        self.signals.send(Signal::OccurrencesChanged {
-            calendar_ids: vec![after.calendar_id],
-        });
-        self.to_event(id, after)
+            unit.replace(id, &event)?;
+            Ok((id, event))
+        })?;
+        self.changed_event(rescheduled)
     }
 
     /// Deletes an Event from a writable Calendar.
-    pub fn delete_event(&self, id: EventId) -> Result<()> {
-        let calendar_id = {
-            let store = self.store();
-            let calendar_id = store.find_event(id)?.calendar_id;
-            writable(&store, calendar_id)?;
-            store.delete_event(id)?;
-            calendar_id
-        };
-        self.signals.send(Signal::OccurrencesChanged {
-            calendar_ids: vec![calendar_id],
-        });
-        Ok(())
+    pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
+        self.record(Origin::UserAction, |unit| unit.delete(id))
     }
 
     /// Previews importing `file`, an `.ics` file or a `.zip` of them, into a
@@ -358,34 +328,60 @@ impl Core {
     }
 
     /// Runs a previewed import into a writable Calendar, doing with the
-    /// Events it already has what `existing` says. The import is one Change
-    /// Journal unit, which [`Core::undo_import`] undoes in one step.
+    /// Events it already has what `existing` says, as one Change Journal unit.
     pub fn run_import(
         &self,
         preview: &ImportPreview,
         existing: ExistingEvents,
     ) -> Result<ImportOutcome> {
-        let outcome = {
-            let store = self.store();
-            writable(&store, preview.calendar_id)?;
-            import::run(&store, preview, existing, self.clock.now().timestamp())?
-        };
-        if outcome.imported + outcome.updated > 0 {
-            self.signals.send(Signal::OccurrencesChanged {
-                calendar_ids: vec![preview.calendar_id],
-            });
-        }
-        Ok(outcome)
+        let run = self.record(Origin::Import, |unit| import::run(unit, preview, existing))?;
+        Ok(ImportOutcome {
+            unit: run.unit,
+            ..run.value
+        })
     }
 
-    /// Undoes an import exactly: the Events it added are deleted and the
-    /// ones it updated get their previous version back. An import is undone
-    /// once, and only while every Calendar it changes Events in is writable.
-    pub fn undo_import(&self, id: ImportId) -> Result<()> {
-        let calendar_ids = import::undo(&self.store(), id)?;
-        self.signals
-            .send(Signal::OccurrencesChanged { calendar_ids });
-        Ok(())
+    /// Undoes a Change Journal unit whole: every Event it changed gets its
+    /// previous version back under the same identity. Refused while an Event
+    /// changed since, and for a unit undone already. The undo is a unit
+    /// itself, and undoing it redoes the change.
+    pub fn undo_unit(&self, id: UnitId) -> Result<Changed<()>> {
+        let undone = journal::undo(&self.store(), id, self.clock.now().timestamp())?;
+        Ok(self.signal(undone))
+    }
+
+    /// Runs `change` as one Change Journal unit of `origin` and sends
+    /// "Occurrences changed" for the Calendars it changed Events in.
+    fn record<T>(
+        &self,
+        origin: Origin,
+        change: impl FnOnce(&mut Unit) -> Result<T>,
+    ) -> Result<Changed<T>> {
+        let recorded =
+            journal::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
+        Ok(self.signal(recorded))
+    }
+
+    /// Sends "Occurrences changed" for a recorded unit's Calendars, once the
+    /// Store lock is released.
+    fn signal<T>(&self, recorded: journal::Recorded<T>) -> Changed<T> {
+        if !recorded.calendars.is_empty() {
+            self.signals.send(Signal::OccurrencesChanged {
+                calendar_ids: recorded.calendars,
+            });
+        }
+        Changed {
+            unit: recorded.unit,
+            value: recorded.value,
+        }
+    }
+
+    fn changed_event(&self, changed: Changed<(EventId, StoredEvent)>) -> Result<Changed<Event>> {
+        let (id, stored) = changed.value;
+        self.to_event(id, stored).map(|value| Changed {
+            unit: changed.unit,
+            value,
+        })
     }
 
     fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
@@ -424,15 +420,6 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
         Ok(()) => Ok(lock),
         Err(TryLockError::WouldBlock) => Err(CoreError::LocalStoreInUse),
         Err(TryLockError::Error(error)) => Err(error.into()),
-    }
-}
-
-/// Refuses changes to the Events of a missing or Read-only Calendar.
-pub(crate) fn writable(store: &Store, id: CalendarId) -> Result<()> {
-    if store.find_calendar(id)?.read_only {
-        Err(CoreError::CalendarReadOnly(id))
-    } else {
-        Ok(())
     }
 }
 

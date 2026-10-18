@@ -8,8 +8,8 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehav
 
 use crate::event::{StoredRange, StoredWhen};
 use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, ImportId,
-    Provider, Result, Settings, SidebarState, View,
+    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
+    Result, Settings, SidebarState, View,
 };
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
@@ -112,6 +112,43 @@ const MIGRATIONS: &[Migration] = &[
         zone_pinned INTEGER
     );
     CREATE INDEX journal_entry_import ON journal_entry (import_id);
+    ",
+    ),
+    // Ticket 69: the Change Journal records every change (ADR 0009). An entry
+    // holds the Event's previous version with its Calendar, none when the
+    // change created it, and the hash of its new version, none when the
+    // change deleted it. Neither `event_id` nor `calendar_id` has a foreign
+    // key, because the Event or the Calendar may be deleted since.
+    Migration::Sql(
+        "
+    DROP TABLE journal_entry;
+    DROP TABLE journal_import;
+    CREATE TABLE journal_unit (
+        id INTEGER PRIMARY KEY,
+        origin TEXT NOT NULL,
+        made_at INTEGER NOT NULL
+    );
+    CREATE TABLE journal_entry (
+        id INTEGER PRIMARY KEY,
+        unit_id INTEGER NOT NULL REFERENCES journal_unit (id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL,
+        uid TEXT NOT NULL,
+        hash BLOB,
+        undone INTEGER NOT NULL DEFAULT 0,
+        calendar_id INTEGER,
+        title TEXT,
+        all_day INTEGER,
+        start_at TEXT,
+        end_at TEXT,
+        start_zone TEXT,
+        end_zone TEXT,
+        location TEXT,
+        description TEXT,
+        description_html INTEGER,
+        zone_pinned INTEGER
+    );
+    CREATE INDEX journal_entry_unit ON journal_entry (unit_id);
+    CREATE INDEX journal_entry_event ON journal_entry (event_id, uid);
     ",
     ),
 ];
@@ -258,11 +295,11 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
-const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
+pub(crate) const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
      description, description_html, zone_pinned";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
-fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
+pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
     Ok(EventFields {
         title: row.get(first)?,
         when: stored_when(row, first + 1)?,
@@ -309,17 +346,6 @@ pub struct EventFields {
 pub struct StoredEvent {
     pub calendar_id: CalendarId,
     pub fields: EventFields,
-}
-
-/// One Event an import created or changed, as the Change Journal holds it.
-#[derive(Debug, Clone)]
-pub struct JournalEntry {
-    pub event_id: EventId,
-    /// The Event's UID, which tells it apart from a later Event that got its
-    /// ID after it was deleted.
-    pub uid: String,
-    /// Its version before the import; none when the import created it.
-    pub previous: Option<EventFields>,
 }
 
 /// What the grid needs of an Event in a date range.
@@ -440,14 +466,10 @@ impl Store {
         }
     }
 
-    pub fn delete_calendar(&self, id: CalendarId) -> Result<()> {
-        match self
-            .conn
-            .execute("DELETE FROM calendar WHERE id = ?1", [id.0])?
-        {
-            0 => Err(CoreError::CalendarNotFound(id)),
-            _ => Ok(()),
-        }
+    /// The connection, for the Change Journal module, which alone writes
+    /// Events and the Journal.
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
     }
 
     /// Runs `change` in one transaction: if it fails, nothing it did is kept.
@@ -456,43 +478,6 @@ impl Store {
         let done = change()?;
         tx.commit()?;
         Ok(done)
-    }
-
-    /// Adds an Event with a new UID.
-    pub fn insert_event(&self, calendar_id: CalendarId, fields: &EventFields) -> Result<EventId> {
-        self.insert_event_with_uid(calendar_id, &uuid::Uuid::new_v4().to_string(), fields)
-    }
-
-    pub fn insert_event_with_uid(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-        fields: &EventFields,
-    ) -> Result<EventId> {
-        let (start_utc, end_utc) = fields.when.instants()?;
-        self.conn.execute(
-            "INSERT INTO event (calendar_id, uid, title, all_day, start_at, end_at, start_zone, \
-             end_zone, start_utc, end_utc, location, description, description_html, \
-             zone_pinned) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                calendar_id.0,
-                uid,
-                fields.title,
-                fields.when.all_day,
-                fields.when.start,
-                fields.when.end,
-                fields.when.start_zone,
-                fields.when.end_zone,
-                start_utc,
-                end_utc,
-                fields.location,
-                fields.description,
-                fields.description_html,
-                fields.zone_pinned,
-            ],
-        )?;
-        Ok(EventId(self.conn.last_insert_rowid()))
     }
 
     pub fn find_event(&self, id: EventId) -> Result<StoredEvent> {
@@ -529,196 +514,6 @@ impl Store {
                 |row| Ok((EventId(row.get(0)?), event_fields(row, 1)?)),
             )
             .optional()?)
-    }
-
-    /// The Calendar the Event `id` is in now, if it is still the one with
-    /// the UID `uid`.
-    pub fn event_calendar(&self, id: EventId, uid: &str) -> Result<Option<CalendarId>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT calendar_id FROM event WHERE id = ?1 AND uid = ?2",
-                params![id.0, uid],
-                |row| Ok(CalendarId(row.get(0)?)),
-            )
-            .optional()?)
-    }
-
-    /// Writes an earlier version of an Event back: over the Event `id` if it
-    /// is still the one with the UID `uid`, otherwise as a new Event, under
-    /// `id` while no other Event has it.
-    pub fn restore_event(
-        &self,
-        id: EventId,
-        uid: &str,
-        calendar_id: CalendarId,
-        fields: &EventFields,
-    ) -> Result<()> {
-        // A version FreeCal can't read the time of was stored like that;
-        // it reads as unreadable again rather than stopping the undo.
-        let (start_utc, end_utc) = fields.when.instants().unwrap_or_default();
-        let values = params![
-            id.0,
-            uid,
-            calendar_id.0,
-            fields.title,
-            fields.when.all_day,
-            fields.when.start,
-            fields.when.end,
-            fields.when.start_zone,
-            fields.when.end_zone,
-            start_utc,
-            end_utc,
-            fields.location,
-            fields.description,
-            fields.description_html,
-            fields.zone_pinned,
-        ];
-        let updated = self.conn.execute(
-            "UPDATE event SET calendar_id = ?3, title = ?4, all_day = ?5, start_at = ?6, \
-             end_at = ?7, start_zone = ?8, end_zone = ?9, start_utc = ?10, end_utc = ?11, \
-             location = ?12, description = ?13, description_html = ?14, zone_pinned = ?15 \
-             WHERE id = ?1 AND uid = ?2",
-            values,
-        )?;
-        if updated == 0 {
-            self.conn.execute(
-                "INSERT INTO event (id, uid, calendar_id, title, all_day, start_at, end_at, \
-                 start_zone, end_zone, start_utc, end_utc, location, description, \
-                 description_html, zone_pinned) \
-                 VALUES ((SELECT CASE WHEN EXISTS (SELECT 1 FROM event WHERE id = ?1) \
-                   THEN NULL ELSE ?1 END), \
-                 ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                values,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Deletes the Event `id` if it is still the one with the UID `uid`.
-    pub fn delete_event_with_uid(&self, id: EventId, uid: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM event WHERE id = ?1 AND uid = ?2",
-            params![id.0, uid],
-        )?;
-        Ok(())
-    }
-
-    /// Starts the Change Journal's record of an import into a Calendar, made
-    /// at `made_at` (Unix seconds).
-    pub fn insert_import(&self, calendar_id: CalendarId, made_at: i64) -> Result<ImportId> {
-        self.conn.execute(
-            "INSERT INTO journal_import (calendar_id, made_at) VALUES (?1, ?2)",
-            params![calendar_id.0, made_at],
-        )?;
-        Ok(ImportId(self.conn.last_insert_rowid()))
-    }
-
-    pub fn insert_journal_entry(&self, import: ImportId, entry: &JournalEntry) -> Result<()> {
-        let previous = entry.previous.as_ref();
-        let when = previous.map(|fields| &fields.when);
-        self.conn.execute(
-            &format!(
-                "INSERT INTO journal_entry (import_id, event_id, uid, created, {EVENT_FIELDS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
-            ),
-            params![
-                import.0,
-                entry.event_id.0,
-                entry.uid,
-                previous.is_none(),
-                previous.map(|fields| &fields.title),
-                when.map(|when| when.all_day),
-                when.map(|when| &when.start),
-                when.map(|when| &when.end),
-                when.and_then(|when| when.start_zone.as_ref()),
-                when.and_then(|when| when.end_zone.as_ref()),
-                previous.map(|fields| &fields.location),
-                previous.map(|fields| &fields.description),
-                previous.map(|fields| fields.description_html),
-                previous.map(|fields| fields.zone_pinned),
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// An import's Calendar and its Change Journal entries, in the order
-    /// they were made.
-    pub fn find_import(&self, id: ImportId) -> Result<(CalendarId, Vec<JournalEntry>)> {
-        let calendar_id = self
-            .conn
-            .query_row(
-                "SELECT calendar_id FROM journal_import WHERE id = ?1",
-                [id.0],
-                |row| Ok(CalendarId(row.get(0)?)),
-            )
-            .optional()?
-            .ok_or(CoreError::ImportNotFound(id))?;
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT event_id, uid, created, {EVENT_FIELDS} FROM journal_entry \
-             WHERE import_id = ?1 ORDER BY id"
-        ))?;
-        let entries = stmt
-            .query_map([id.0], |row| {
-                let created: bool = row.get(2)?;
-                Ok(JournalEntry {
-                    event_id: EventId(row.get(0)?),
-                    uid: row.get(1)?,
-                    previous: if created {
-                        None
-                    } else {
-                        Some(event_fields(row, 3)?)
-                    },
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok((calendar_id, entries))
-    }
-
-    pub fn delete_import(&self, id: ImportId) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM journal_import WHERE id = ?1", [id.0])?;
-        Ok(())
-    }
-
-    pub fn update_event(&self, id: EventId, event: &StoredEvent) -> Result<()> {
-        let fields = &event.fields;
-        let (start_utc, end_utc) = fields.when.instants()?;
-        match self.conn.execute(
-            "UPDATE event SET calendar_id = ?2, title = ?3, all_day = ?4, start_at = ?5, \
-             end_at = ?6, start_zone = ?7, end_zone = ?8, start_utc = ?9, end_utc = ?10, \
-             location = ?11, description = ?12, description_html = ?13, zone_pinned = ?14 \
-             WHERE id = ?1",
-            params![
-                id.0,
-                event.calendar_id.0,
-                fields.title,
-                fields.when.all_day,
-                fields.when.start,
-                fields.when.end,
-                fields.when.start_zone,
-                fields.when.end_zone,
-                start_utc,
-                end_utc,
-                fields.location,
-                fields.description,
-                fields.description_html,
-                fields.zone_pinned,
-            ],
-        )? {
-            0 => Err(CoreError::EventNotFound(id)),
-            _ => Ok(()),
-        }
-    }
-
-    pub fn delete_event(&self, id: EventId) -> Result<()> {
-        match self
-            .conn
-            .execute("DELETE FROM event WHERE id = ?1", [id.0])?
-        {
-            0 => Err(CoreError::EventNotFound(id)),
-            _ => Ok(()),
-        }
     }
 
     /// The UIDs of a Calendar's Events.

@@ -1,7 +1,7 @@
 import { emit } from '@tauri-apps/api/event';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, expect, test } from 'vitest';
-import { accountId, calendarId, eventId, importId } from '../test/ids';
+import { accountId, calendarId, eventId, unitId } from '../test/ids';
 import { tauriCore } from './tauriCore';
 
 afterEach(() => clearMocks());
@@ -116,14 +116,14 @@ test('the import commands pass their arguments under the names the shell expects
   await tauriCore.previewImport(calendarId(2));
   await tauriCore.runImport(calendarId(2), 'skip');
   await tauriCore.discardImport();
-  await tauriCore.undoImport(importId(4));
+  await tauriCore.undoUnit(unitId(4));
 
   expect(invoked).toEqual([
     ['pick_import_file', { title: 'Import', filter: 'Calendar files' }],
     ['preview_import', { calendarId: 2 }],
     ['run_import', { calendarId: 2, existing: 'skip' }],
     ['discard_import', {}],
-    ['undo_import', { id: 4 }],
+    ['undo_unit', { id: 4 }],
   ]);
 });
 

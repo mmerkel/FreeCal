@@ -18,6 +18,12 @@ test('an error without a file is translated from its code alone', () => {
   expect(errorText({ code: 'calendarReadOnly' })).toBe('the calendar is read-only');
 });
 
+test('a refused undo says why', () => {
+  expect(errorText({ code: 'changedSinceUnit' })).toBe('events it changed were changed since');
+  expect(errorText({ code: 'alreadyUndone' })).toBe('it was undone already');
+  expect(errorText({ code: 'unitNotFound' })).toBe('the change is no longer in the Change Journal');
+});
+
 test('a count takes its form for one or for any other number', () => {
   expect(tCount('import.newEvents', 1)).toBe('1 new event');
   expect(tCount('import.newEvents', 0)).toBe('0 new events');
