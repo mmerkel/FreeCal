@@ -5,9 +5,9 @@ A timed Event is stored as its wall-clock time plus the IANA time zone it is giv
 Every timed Event has a time zone. FreeCal has no floating times (a wall time without a zone, shown as that time wherever the user is): few calendar apps offer them, and an Event that moves when the user travels needs explaining. A floating time that arrives through import or CalDAV sync is pinned once:
 
 1. To the time zone of the Calendar it arrives in (CalDAV's `calendar-timezone`, RFC 4791), otherwise to the Display Time Zone at that moment.
-2. The pinned zone is kept, also when the Display Time Zone changes and when the server sends a new version of the Event that is still floating.
+2. The pinned zone is kept, also when the Display Time Zone changes and when the server or an import sends a new version of the Event whose start and end are both still floating. If only one end of the new version floats, rule 3 applies instead.
 3. If only one of start and end is floating, it gets the zone of the other.
-4. The original server data keeps its floating time. Only when the user changes the Event's time does FreeCal write the time with an explicit zone; a move to another Calendar or Account writes it with the pinned zone.
+4. The original server data keeps its floating time. Only when the user changes the Event's time does FreeCal write the time with an explicit zone, and from then on the Event no longer counts as pinned, so the note from rule 5 goes away. A move to another Calendar or Account writes it with the pinned zone.
 5. The Event's details and editor say that the original has no time zone, and the import preview says how many Events were pinned to which zone.
 
 ## Considered Options

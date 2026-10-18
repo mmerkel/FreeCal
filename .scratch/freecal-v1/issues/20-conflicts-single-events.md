@@ -14,4 +14,9 @@
 - [ ] The Conflict badge is the only badge on an Event chip
 - [ ] A list of all open Conflicts; resolving one applies the choice and records it in the Change Journal when it writes to the server
 - [ ] The core sends "Problems changed" when a Conflict is raised or resolved
+- [ ] The Conflict shows what each side changed against the common version from the Change Journal ("you changed the time, they changed the title")
+- [ ] Resolving is a Change Journal unit that keeps the losing version, so a wrong choice can be undone
 - [ ] Written test-first against Radicale
+
+## Comments
+- 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
