@@ -13,3 +13,6 @@
 - [ ] Approve applies the paused changes; reject discards them as chosen, and sync continues
 - [ ] Imports confirmed through the preview skip the guard
 - [ ] Written test-first, including the exact threshold boundaries
+
+## Comments
+- 2026-10-18 (from 82): a sync's changes for one Calendar are `remote::Changes` (changed Events, removed object addresses), applied in `sync::apply` as one unit; the guard can count them there before the unit is recorded. A whole listing (no or refused sync token) counts every held object it doesn't list as removed.

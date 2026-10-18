@@ -1,12 +1,13 @@
 //! The Local Store: one SQLite database (ADR 0004).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
 use crate::event::{StoredRange, StoredWhen};
+use crate::remote::SyncPoint;
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
     EventId, Provider, Result, ServerLogin, Settings, SidebarState, View,
@@ -179,6 +180,15 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE journal_entry ADD COLUMN server_href TEXT;
     ALTER TABLE journal_entry ADD COLUMN server_etag TEXT;
     ALTER TABLE journal_entry ADD COLUMN server_data TEXT;
+    ",
+    ),
+    // Ticket 82: how far a server Account's Calendar is synced: whether its
+    // first sync finished, and the sync token (RFC 6578) its server gave
+    // for the last sync, if it gives them.
+    Migration::Sql(
+        "
+    ALTER TABLE calendar ADD COLUMN synced INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE calendar ADD COLUMN sync_token TEXT;
     ",
     ),
 ];
@@ -604,6 +614,72 @@ impl Store {
             .prepare("SELECT url FROM calendar WHERE account_id = ?1 AND url IS NOT NULL")?;
         let urls = readable(stmt.query_map([account_id.0], |row| row.get(0))?)?;
         Ok(urls.into_iter().collect())
+    }
+
+    /// Each Calendar of a server Account with its address on the server and
+    /// how far it is synced: none until its first sync finished.
+    pub fn server_calendars(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<(CalendarId, String, Option<SyncPoint>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, url, synced, sync_token FROM calendar \
+             WHERE account_id = ?1 AND url IS NOT NULL ORDER BY id",
+        )?;
+        readable(stmt.query_map([account_id.0], |row| {
+            let synced: bool = row.get(2)?;
+            Ok((
+                CalendarId(row.get(0)?),
+                row.get(1)?,
+                synced
+                    .then(|| row.get(3).map(|token| SyncPoint { token }))
+                    .transpose()?,
+            ))
+        })?)
+    }
+
+    /// Records that a Calendar's sync finished, with the sync token its
+    /// server gave, if any.
+    pub fn set_synced(&self, id: CalendarId, token: Option<&str>) -> Result<()> {
+        self.update_calendar(
+            "UPDATE calendar SET synced = 1, sync_token = ?2 WHERE id = ?1",
+            id,
+            token,
+        )
+    }
+
+    /// The server objects a Calendar's Events are held in: each one's
+    /// address, as the server gave it, with its ETag.
+    pub fn server_objects(
+        &self,
+        calendar_id: CalendarId,
+    ) -> Result<HashMap<String, Option<String>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT server_href, server_etag FROM event \
+             WHERE calendar_id = ?1 AND server_href IS NOT NULL AND recurrence_id IS NULL",
+        )?;
+        let objects =
+            readable(stmt.query_map([calendar_id.0], |row| Ok((row.get(0)?, row.get(1)?)))?)?;
+        Ok(objects.into_iter().collect())
+    }
+
+    /// The Event of a Calendar held in the server object at `href`, with
+    /// its UID: the first if the Local Store has several, and not an
+    /// Exception.
+    pub fn event_at(
+        &self,
+        calendar_id: CalendarId,
+        href: &str,
+    ) -> Result<Option<(EventId, String)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id, uid FROM event WHERE calendar_id = ?1 AND server_href = ?2 \
+                 AND recurrence_id IS NULL ORDER BY id LIMIT 1",
+                params![calendar_id.0, href],
+                |row| Ok((EventId(row.get(0)?), row.get(1)?)),
+            )
+            .optional()?)
     }
 
     pub fn find_calendar(&self, id: CalendarId) -> Result<Calendar> {

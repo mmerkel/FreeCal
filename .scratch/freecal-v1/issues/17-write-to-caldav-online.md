@@ -21,3 +21,4 @@
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
 - 2026-10-18 (from 81): each server Event's original object is `EventFields.server_data` (href, ETag, iCalendar text as received), kept on the Recurring Event's row only. User edits keep it; a move to another Calendar drops it. An undo restores an older version's ETag and object, so a write after an undo may need the server's current version for If-Match. A server object holding VEVENTs with different UIDs (invalid in CalDAV) gives each Event a copy of the same object; writing them back must not duplicate it.
+- 2026-10-18 (from 82): undoing a sync unit restores the previous version locally but leaves `calendar.sync_token` alone, so the server's newer version isn't fetched again until it changes there. The undo has to reach the server through this ticket, or the next whole listing (without a token) brings the server's version back.

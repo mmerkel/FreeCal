@@ -3,6 +3,7 @@
 //! read with a namespace-aware XML reader, never built or searched as
 //! strings. Everything a server sends is untrusted.
 
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use base64::Engine;
@@ -13,7 +14,7 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::remote::FIRST_SYNC_PAGE;
+use crate::remote::{Changes, FIRST_SYNC_PAGE, SyncPoint};
 use crate::{
     AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, OriginalServerData, Result,
     import,
@@ -96,6 +97,12 @@ const CALENDAR_TIMEZONE: Property = Property {
 const GETETAG: Property = Property {
     namespace: DAV,
     name: "getetag",
+};
+
+/// A collection's sync token (RFC 6578), which names its state.
+const SYNC_TOKEN: Property = Property {
+    namespace: DAV,
+    name: "sync-token",
 };
 
 /// An Event's iCalendar object, as the server holds it (RFC 4791).
@@ -205,44 +212,179 @@ impl Client {
     /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
     /// then fetched with `calendar-multiget` (RFC 4791). Floating times are
     /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`.
+    /// Returns the Calendar's sync token as the listing gave it.
     pub fn all_events(
         &self,
         calendar: &str,
         display: Tz,
         page: &mut dyn FnMut(Vec<ImportedEvent>) -> Result<()>,
-    ) -> Result<()> {
-        // A stored address is untrusted too.
-        let calendar = follow_href(&self.url, calendar).ok_or(CoreError::InvalidServerUrl)?;
-        let (answer, calendar) =
-            self.propfind(&calendar, Depth::One, &[RESOURCETYPE, CALENDAR_TIMEZONE])?;
-        let zone = answer
-            .property(CALENDAR_TIMEZONE)
-            .and_then(|zone| import::calendar_zone(&zone.text))
-            .unwrap_or(display);
-        let members: Vec<String> = answer
-            .children(DAV, "response")
-            .filter_map(|response| member(&calendar, response))
-            .collect();
+    ) -> Result<SyncPoint> {
+        let listing = self.listing(&stored_url(&self.url, calendar)?, display)?;
+        let members: Vec<String> = listing.members.into_iter().map(|(path, _)| path).collect();
         for hrefs in members.chunks(FIRST_SYNC_PAGE) {
-            let (answer, _) = self.send(
-                b"REPORT",
-                &calendar,
-                Depth::One,
-                calendar_multiget_body(hrefs),
-            )?;
-            let objects: Vec<OriginalServerData> = answer
-                .children(DAV, "response")
-                .filter_map(|response| {
-                    Some(OriginalServerData {
-                        href: response.child(DAV, "href")?.text.clone(),
-                        etag: response.found(GETETAG).map(|etag| etag.text.clone()),
-                        data: response.found(CALENDAR_DATA)?.text.clone(),
-                    })
-                })
-                .collect();
-            page(import::read_server_events(&objects, zone))?;
+            let zone = listing.zone.unwrap_or(display);
+            page(self.multiget(&listing.calendar, hrefs, zone)?)?;
         }
-        Ok(())
+        Ok(SyncPoint {
+            token: listing.token,
+        })
+    }
+
+    /// What changed in the Calendar at `calendar` since `token`, asked with
+    /// `sync-collection` (RFC 6578), or else found by listing the whole
+    /// Calendar with ETags and comparing with `known`: the objects FreeCal
+    /// holds, by their address as the server gave it, with their ETags.
+    /// Objects whose ETag FreeCal holds are left out; the others are
+    /// fetched with `calendar-multiget`.
+    pub fn changes(
+        &self,
+        calendar: &str,
+        token: Option<&str>,
+        known: &HashMap<String, Option<String>>,
+        display: Tz,
+    ) -> Result<Changes> {
+        let calendar = stored_url(&self.url, calendar)?;
+        let since = match token {
+            // A server that refuses the token, as when it expired, or the
+            // report, is asked for the whole Calendar instead.
+            Some(token) => match self.sync_collection(&calendar, token) {
+                Err(CoreError::ServerRefused { .. }) => None,
+                listed => Some(listed?),
+            },
+            None => None,
+        };
+        let (listing, removed) = match since {
+            Some((listing, removed)) => (listing, Some(removed)),
+            None => (self.listing(&calendar, display)?, None),
+        };
+        // What FreeCal holds, by the path `member` gives each object.
+        let held: HashMap<String, (&String, &Option<String>)> = known
+            .iter()
+            .filter_map(|(href, etag)| {
+                let path = follow_href(&listing.calendar, href)?.path().to_owned();
+                Some((path, (href, etag)))
+            })
+            .collect();
+        let removed: Vec<String> = match removed {
+            Some(removed) => removed
+                .iter()
+                .filter_map(|path| held.get(path).map(|(href, _)| (*href).clone()))
+                .collect(),
+            // In a whole listing, an object it doesn't list is gone.
+            None => {
+                let listed: HashSet<&String> =
+                    listing.members.iter().map(|(path, _)| path).collect();
+                held.iter()
+                    .filter(|(path, _)| !listed.contains(path))
+                    .map(|(_, (href, _))| (*href).clone())
+                    .collect()
+            }
+        };
+        let fetch: Vec<String> = listing
+            .members
+            .into_iter()
+            .filter(|(path, etag)| {
+                etag.is_none() || held.get(path).is_none_or(|(_, held)| *held != etag)
+            })
+            .map(|(path, _)| path)
+            .collect();
+        let zone = match listing.zone {
+            _ if fetch.is_empty() => display,
+            Some(zone) => zone,
+            None => {
+                let (answer, _) =
+                    self.propfind(&listing.calendar, Depth::Zero, &[CALENDAR_TIMEZONE])?;
+                calendar_zone(&answer, display)
+            }
+        };
+        let mut changed = Vec::new();
+        for hrefs in fetch.chunks(FIRST_SYNC_PAGE) {
+            changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
+        }
+        Ok(Changes {
+            changed,
+            removed,
+            state: SyncPoint {
+                token: listing.token,
+            },
+        })
+    }
+
+    /// Lists the whole Calendar at `calendar`: its members with their
+    /// ETags, its sync token and its time zone, `display` if it has none.
+    fn listing(&self, calendar: &Url, display: Tz) -> Result<Listing> {
+        let (answer, calendar) = self.propfind(
+            calendar,
+            Depth::One,
+            &[RESOURCETYPE, GETETAG, CALENDAR_TIMEZONE, SYNC_TOKEN],
+        )?;
+        let members = answer
+            .children(DAV, "response")
+            .filter_map(|response| {
+                let etag = etag(response);
+                Some((member(&calendar, response)?, etag))
+            })
+            .collect();
+        Ok(Listing {
+            members,
+            token: answer.property(SYNC_TOKEN).map(token_text),
+            zone: Some(calendar_zone(&answer, display)),
+            calendar,
+        })
+    }
+
+    /// Asks the Calendar at `calendar` what changed since `token` with
+    /// `sync-collection` (RFC 6578): a listing of the members new or
+    /// changed, without the Calendar's time zone, and the paths of those
+    /// removed.
+    fn sync_collection(&self, calendar: &Url, token: &str) -> Result<(Listing, Vec<String>)> {
+        let (answer, calendar) = self.send(
+            b"REPORT",
+            calendar,
+            Depth::Zero,
+            sync_collection_body(token),
+        )?;
+        let mut members = Vec::new();
+        let mut removed = Vec::new();
+        for response in answer.children(DAV, "response") {
+            let Some(path) = member(&calendar, response) else {
+                continue;
+            };
+            match response.child(DAV, "status") {
+                Some(status) if status_code(status) == Some("404") => removed.push(path),
+                _ => members.push((path, etag(response))),
+            }
+        }
+        let listing = Listing {
+            members,
+            token: answer.child(DAV, "sync-token").map(token_text),
+            zone: None,
+            calendar,
+        };
+        Ok((listing, removed))
+    }
+
+    /// The Events of the objects at `hrefs` in the Calendar at `calendar`,
+    /// fetched with `calendar-multiget` (RFC 4791), each with its object as
+    /// its original server data. Floating times are pinned to `zone`.
+    fn multiget(&self, calendar: &Url, hrefs: &[String], zone: Tz) -> Result<Vec<ImportedEvent>> {
+        let (answer, _) = self.send(
+            b"REPORT",
+            calendar,
+            Depth::One,
+            calendar_multiget_body(hrefs),
+        )?;
+        let objects: Vec<OriginalServerData> = answer
+            .children(DAV, "response")
+            .filter_map(|response| {
+                Some(OriginalServerData {
+                    href: response.child(DAV, "href")?.text.clone(),
+                    etag: etag(response),
+                    data: response.found(CALENDAR_DATA)?.text.clone(),
+                })
+            })
+            .collect();
+        Ok(import::read_server_events(&objects, zone))
     }
 
     /// The URL of the principal of the user who is logged in. Asking for it
@@ -338,6 +480,46 @@ impl Client {
             return read_multistatus(response).map(|answer| (answer, url));
         }
     }
+}
+
+/// A Calendar's members as a server listed them.
+struct Listing {
+    /// The Calendar's URL, as it answered.
+    calendar: Url,
+    /// Each member's path, as [`member`] gives it, with its ETag.
+    members: Vec<(String, Option<String>)>,
+    token: Option<String>,
+    /// The time zone for its floating times; none when not asked for.
+    zone: Option<Tz>,
+}
+
+/// A Calendar's address as FreeCal stores it, which is untrusted too.
+fn stored_url(server: &Url, calendar: &str) -> Result<Url> {
+    follow_href(server, calendar).ok_or(CoreError::InvalidServerUrl)
+}
+
+/// The time zone of a Calendar whose `calendar-timezone` a `multistatus`
+/// may give, otherwise `display`.
+fn calendar_zone(answer: &Element, display: Tz) -> Tz {
+    answer
+        .property(CALENDAR_TIMEZONE)
+        .and_then(|zone| import::calendar_zone(&zone.text))
+        .unwrap_or(display)
+}
+
+/// The ETag a `response` gives, if any.
+fn etag(response: &Element) -> Option<String> {
+    response.found(GETETAG).map(|etag| etag.text.clone())
+}
+
+/// A `sync-token` element's token.
+fn token_text(token: &Element) -> String {
+    token.text.trim().to_owned()
+}
+
+/// The code of a WebDAV `status`, such as `404` in `HTTP/1.1 404 Not Found`.
+fn status_code(status: &Element) -> Option<&str> {
+    status.text.split_whitespace().nth(1)
 }
 
 /// Reads an answer to a `PROPFIND`: its `multistatus`, or why there is none.
@@ -558,6 +740,34 @@ fn calendar_multiget_body(hrefs: &[String]) -> Vec<u8> {
     body
 }
 
+/// A `sync-collection` request body (RFC 6578) asking for the ETags of the
+/// members changed since `token`.
+fn sync_collection_body(token: &str) -> Vec<u8> {
+    let mut writer = Writer::new(Vec::new());
+    writer
+        .create_element("D:sync-collection")
+        .with_attribute(("xmlns:D", DAV))
+        .write_inner_content(|writer| {
+            writer
+                .create_element("D:sync-token")
+                .write_text_content(BytesText::new(token))?;
+            writer
+                .create_element("D:sync-level")
+                .write_text_content(BytesText::new("1"))?;
+            writer
+                .create_element("D:prop")
+                .write_inner_content(|writer| {
+                    writer.create_element("D:getetag").write_empty()?;
+                    Ok(())
+                })?;
+            Ok(())
+        })
+        .expect("writing to memory doesn't fail");
+    let mut body = br#"<?xml version="1.0" encoding="utf-8"?>"#.to_vec();
+    body.extend(writer.into_inner());
+    body
+}
+
 /// An XML element as read from an answer, with its namespace resolved.
 #[derive(Debug, Default, PartialEq)]
 struct Element {
@@ -610,7 +820,7 @@ impl Element {
             .filter(|propstat| {
                 propstat
                     .child(DAV, "status")
-                    .is_some_and(|status| status.text.split_whitespace().nth(1) == Some("200"))
+                    .is_some_and(|status| status_code(status) == Some("200"))
             })
             .filter_map(|propstat| propstat.child(DAV, "prop"))
             .find_map(|prop| prop.child(property.namespace, property.name))
@@ -877,6 +1087,21 @@ mod tests {
             .map(|href| href.text.as_str())
             .collect();
         assert_eq!(named, hrefs);
+    }
+
+    #[test]
+    fn a_sync_collection_body_names_the_token_as_text() {
+        let token = "http://x.org/sync/<1>&2";
+
+        let body = String::from_utf8(sync_collection_body(token)).unwrap();
+
+        let root = parse(&body).unwrap();
+        assert!(root.is(DAV, "sync-collection"));
+        assert_eq!(root.child(DAV, "sync-token").unwrap().text, token);
+        assert_eq!(root.child(DAV, "sync-level").unwrap().text, "1");
+        let prop = root.child(DAV, "prop").unwrap();
+        assert_eq!(prop.children.len(), 1);
+        assert!(prop.children[0].is(DAV, "getetag"));
     }
 
     #[test]

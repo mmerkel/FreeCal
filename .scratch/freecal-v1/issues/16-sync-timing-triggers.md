@@ -12,3 +12,6 @@
 - [ ] Syncs on window focus, on wake from sleep and after local edits
 - [ ] Sync now: per Account or for all; a window control, a Google-style shortcut and a tray menu item
 - [ ] The NetworkMonitor portal is watched: when the network returns, a sync runs right away; with no network at all, polls are skipped and every server Account is marked Offline without trying (tested with a controllable fake network status)
+
+## Comments
+- 2026-10-18 (from 82): the on-demand sync is `Core::sync_account(AccountId)`, which blocks until each Calendar is synced; it leaves out a Calendar on its first sync.

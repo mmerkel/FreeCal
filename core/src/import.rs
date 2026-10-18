@@ -27,7 +27,7 @@ use crate::event::{StoredWhen, instant, wall_text};
 use crate::journal::{Unit, UnitId};
 use crate::recurrence;
 use crate::store::{EventFields, OriginalServerData, StoredEvent};
-use crate::{CalendarId, CoreError, Result, StructuredText};
+use crate::{CalendarId, CoreError, EventId, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
 /// The most a file to import may hold, and the most the `.ics` files in a
@@ -183,6 +183,38 @@ impl ImportedEvent {
         Ok(())
     }
 
+    /// Makes the Event `id` of the Calendar `calendar_id`, which has
+    /// `previous`, this version, under its UID. Exceptions are matched by
+    /// the Occurrence they changed: those it has replace them or are added,
+    /// and the Calendar's others of its UID are deleted.
+    pub(crate) fn update_in(
+        &self,
+        unit: &mut Unit,
+        calendar_id: CalendarId,
+        id: EventId,
+        previous: &EventFields,
+    ) -> Result<()> {
+        let new = |fields| StoredEvent {
+            calendar_id,
+            fields,
+        };
+        unit.replace(id, &new(self.fields_over(previous)))?;
+        let mut left = unit.exceptions(calendar_id, &self.uid)?;
+        for exception in &self.exceptions {
+            let same = left
+                .iter()
+                .position(|(_, fields)| fields.recurrence_id == exception.recurrence_id);
+            match same.map(|index| left.remove(index)) {
+                Some((id, previous)) => unit.replace(id, &new(exception.fields_over(&previous)))?,
+                None => _ = unit.create(&self.uid, &new(exception.fields()))?,
+            }
+        }
+        for (id, _) in left {
+            unit.delete(id)?;
+        }
+        Ok(())
+    }
+
     fn fields(&self) -> EventFields {
         EventFields {
             title: self.title.clone(),
@@ -274,31 +306,11 @@ pub(crate) fn run(
         skipped: 0,
     };
     for event in &preview.events {
-        let new = |fields| StoredEvent {
-            calendar_id,
-            fields,
-        };
         match (unit.find_event_by_uid(calendar_id, &event.uid)?, existing) {
             (Some(_), ExistingEvents::Skip) => outcome.skipped += 1,
             (Some((event_id, previous)), ExistingEvents::Update) => {
                 outcome.updated += 1;
-                unit.replace(event_id, &new(event.fields_over(&previous)))?;
-                // Exceptions are matched by the Occurrence they changed.
-                let mut left = unit.exceptions(calendar_id, &event.uid)?;
-                for exception in &event.exceptions {
-                    let same = left
-                        .iter()
-                        .position(|(_, fields)| fields.recurrence_id == exception.recurrence_id);
-                    match same.map(|index| left.remove(index)) {
-                        Some((id, previous)) => {
-                            unit.replace(id, &new(exception.fields_over(&previous)))?
-                        }
-                        None => _ = unit.create(&event.uid, &new(exception.fields()))?,
-                    }
-                }
-                for (id, _) in left {
-                    unit.delete(id)?;
-                }
+                event.update_in(unit, calendar_id, event_id, &previous)?;
             }
             // A new Event, or a copy of one the Calendar has.
             (found, _) => {

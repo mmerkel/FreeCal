@@ -20,6 +20,7 @@ mod sidebar;
 mod signal;
 mod store;
 mod structured_text;
+mod sync;
 #[cfg(test)]
 mod typescript;
 mod view;
@@ -55,7 +56,7 @@ pub use view::View;
 use calendar::calendar_name;
 use event::{StoredRange, StoredWhen};
 use journal::{Origin, Unit};
-use remote::Remote;
+use remote::{Remote, SyncPoint};
 use store::{EventFields, Store, StoredEvent};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -257,21 +258,104 @@ impl Core {
     /// Pulls every Event of the Calendar `id` at `url` on the server, page by
     /// page, as a first sync. A Calendar removed meanwhile ends it.
     fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
-        let pulled = remote.all_events(url, self.clock.time_zone(), &mut |events| {
-            self.record(Origin::FirstSync, |unit| {
-                for event in &events {
-                    // A server may list an Event twice.
-                    if unit.find_event_by_uid(id, &event.uid)?.is_none() {
-                        event.create_in(unit, id, &event.uid)?;
+        let pulled = remote
+            .all_events(url, self.clock.time_zone(), &mut |events| {
+                self.record(Origin::FirstSync, |unit| {
+                    for event in &events {
+                        // A server may list an Event twice.
+                        if unit.find_event_by_uid(id, &event.uid)?.is_none() {
+                            event.create_in(unit, id, &event.uid)?;
+                        }
                     }
-                }
-                Ok(())
+                    Ok(())
+                })
+                .map(drop)
             })
-            .map(drop)
-        });
+            .and_then(|state| self.store().set_synced(id, state.token.as_deref()));
         match pulled {
             Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(()),
             pulled => pulled,
+        }
+    }
+
+    /// Syncs a server Account on demand: each of its Calendars gets what
+    /// changed on its server since its last sync, fetching only that where
+    /// the server can tell (see [`Remote::changes`]). Each Calendar's sync
+    /// is one Change Journal unit of origin sync, in Read-only Calendars
+    /// too, and sends one "Occurrences changed" once committed; a sync that
+    /// changes nothing records no unit. A Calendar whose first sync didn't
+    /// finish gets the rest of it, as part of the baseline, while the
+    /// Calendar says so as [`Core::add_calendars`] does. A Calendar on its
+    /// first sync now, or removed meanwhile, is left out.
+    ///
+    /// Should a Calendar's sync fail, the others still sync, and the first
+    /// error is returned. Returns each Calendar synced, with its unit. None
+    /// for the Local Account.
+    pub fn sync_account(&self, id: AccountId) -> Result<Vec<Changed<CalendarId>>> {
+        let Some(remote) = self.remote(id)? else {
+            return Ok(Vec::new());
+        };
+        let calendars = self.store().server_calendars(id)?;
+        let mut synced = Vec::new();
+        let mut failed = None;
+        for (calendar_id, url, state) in calendars {
+            match self.sync_calendar(remote.as_ref(), calendar_id, &url, state) {
+                Ok(changed) => synced.extend(changed),
+                Err(error) => _ = failed.get_or_insert(error),
+            }
+        }
+        failed.map_or(Ok(synced), Err)
+    }
+
+    /// Syncs the Calendar `id` at `url` on the server from `state`, a first
+    /// sync's rest without one. Returns the Calendar with its unit, none
+    /// when it is left out.
+    fn sync_calendar(
+        &self,
+        remote: &dyn Remote,
+        id: CalendarId,
+        url: &str,
+        state: Option<SyncPoint>,
+    ) -> Result<Option<Changed<CalendarId>>> {
+        let first = state.is_none();
+        {
+            let _store = self.store();
+            let mut first_syncs = self.first_syncs.lock().unwrap();
+            if first_syncs.contains(&id) {
+                return Ok(None);
+            }
+            if first {
+                first_syncs.insert(id);
+            }
+        }
+        if first {
+            self.signals.send(Signal::CalendarsChanged);
+        }
+        let synced = (|| {
+            let known = self.store().server_objects(id)?;
+            let token = state.and_then(|state| state.token);
+            let changes = remote.changes(url, token.as_deref(), &known, self.clock.time_zone())?;
+            let origin = if first {
+                Origin::FirstSync
+            } else {
+                Origin::Sync
+            };
+            self.record(origin, |unit| sync::apply(unit, id, &changes))
+        })();
+        if first {
+            {
+                let _store = self.store();
+                self.first_syncs.lock().unwrap().remove(&id);
+            }
+            self.signals.send(Signal::CalendarsChanged);
+        }
+        match synced {
+            Ok(changed) => Ok(Some(Changed {
+                unit: changed.unit,
+                value: id,
+            })),
+            Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(None),
+            Err(error) => Err(error),
         }
     }
 

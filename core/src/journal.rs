@@ -30,8 +30,7 @@ pub struct Changed<T> {
 }
 
 /// Where a unit's changes came from, which decides where they may write.
-/// Incremental sync, Snapshot restore and Conflict resolution come with
-/// their tickets.
+/// Snapshot restore and Conflict resolution come with their tickets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
     UserAction,
@@ -40,6 +39,8 @@ pub(crate) enum Origin {
     /// A Calendar's first sync, the baseline: it writes like any origin but
     /// records nothing (ADR 0009), so its unit is never stored.
     FirstSync,
+    /// An incremental sync of one Calendar, what its server changed.
+    Sync,
 }
 
 impl Origin {
@@ -49,6 +50,7 @@ impl Origin {
             Origin::UserAction => Some("user"),
             Origin::Import => Some("import"),
             Origin::Undo => Some("undo"),
+            Origin::Sync => Some("sync"),
             Origin::FirstSync => None,
         }
     }
@@ -204,6 +206,22 @@ impl Unit<'_> {
         self.store.event_uid(id)
     }
 
+    /// The Event held in the server object at `href` in a Calendar, with
+    /// its UID; not an Exception.
+    pub fn event_at(
+        &self,
+        calendar_id: CalendarId,
+        href: &str,
+    ) -> Result<Option<(EventId, String)>> {
+        self.store.event_at(calendar_id, href)
+    }
+
+    /// Records, with the unit's changes, that a sync of a Calendar
+    /// finished with the sync token `token`.
+    pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
+        self.store.set_synced(calendar_id, token)
+    }
+
     /// Whether the Event `id` is still there.
     pub fn exists(&self, id: EventId) -> Result<bool> {
         Ok(self.store.connection().query_row(
@@ -236,14 +254,14 @@ impl Unit<'_> {
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
-    /// `event` with the original server data (ADR 0004) it gets: a first
-    /// sync's from the server, an undo's from the Change Journal, both as
-    /// given. Every other origin keeps that of the `previous` version, as
-    /// only a server gives it, and drops it with a move to another Calendar,
-    /// whose server holds the Event elsewhere, if at all.
+    /// `event` with the original server data (ADR 0004) it gets: a sync's
+    /// from the server, an undo's from the Change Journal, both as given.
+    /// Every other origin keeps that of the `previous` version, as only a
+    /// server gives it, and drops it with a move to another Calendar, whose
+    /// server holds the Event elsewhere, if at all.
     fn with_server_data(&self, previous: Option<&StoredEvent>, event: &StoredEvent) -> StoredEvent {
         let server = match self.origin {
-            Origin::FirstSync | Origin::Undo => return event.clone(),
+            Origin::FirstSync | Origin::Sync | Origin::Undo => return event.clone(),
             Origin::UserAction | Origin::Import => previous
                 .filter(|previous| previous.calendar_id == event.calendar_id)
                 .and_then(|previous| previous.fields.server_data.clone()),
@@ -295,8 +313,7 @@ impl Unit<'_> {
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
-    /// every origin but a first sync, which loads what the server has.
-    /// Incremental syncs will write there too (ticket 82).
+    /// every origin but a sync, which loads what the server has.
     /// Every write checks this itself; a change that targets a Calendar, such
     /// as an import, checks it first, so that it is refused even when it
     /// would write nothing.
@@ -803,15 +820,18 @@ mod tests {
             [hash_as(2, "dentist", &event)],
         )
         .unwrap();
+        // Back to before ticket 81's migration, undoing ticket 82's after it.
         conn.execute_batch(&format!(
-            "ALTER TABLE event DROP COLUMN server_href;
+            "ALTER TABLE calendar DROP COLUMN synced;
+             ALTER TABLE calendar DROP COLUMN sync_token;
+             ALTER TABLE event DROP COLUMN server_href;
              ALTER TABLE event DROP COLUMN server_etag;
              ALTER TABLE event DROP COLUMN server_data;
              ALTER TABLE journal_entry DROP COLUMN server_href;
              ALTER TABLE journal_entry DROP COLUMN server_etag;
              ALTER TABLE journal_entry DROP COLUMN server_data;
              PRAGMA user_version = {};",
-            version - 1
+            version - 2
         ))
         .unwrap();
         drop(store);

@@ -164,11 +164,15 @@ impl Radicale {
     }
 
     /// Puts an Event, an iCalendar object, into a Calendar of `user` on the
-    /// server, as another app would, under the name `name`.
+    /// server, as another app would, under the name `name`, replacing any
+    /// it holds there.
     pub fn put_event(&self, user: &User, calendar_url: &str, name: &str, ics: Vec<u8>) {
         let url = format!("{calendar_url}{name}.ics");
         let status = self.request(user, "PUT", &url, "text/calendar; charset=utf-8", ics);
-        assert_eq!(status, 201, "put an Event on Radicale");
+        assert!(
+            matches!(status, 201 | 204),
+            "put an Event on Radicale: {status}"
+        );
     }
 
     /// The ETag and the iCalendar object of the Event `name` in a Calendar
@@ -179,6 +183,14 @@ impl Radicale {
         assert_eq!(response.status(), 200, "get an Event from Radicale");
         let etag = response.headers()["ETag"].to_str().unwrap().to_owned();
         (etag, response.body_mut().read_to_string().unwrap())
+    }
+
+    /// Deletes the Event `name` from a Calendar of `user` on the server, as
+    /// another app would.
+    pub fn delete_event(&self, user: &User, calendar_url: &str, name: &str) {
+        let url = format!("{calendar_url}{name}.ics");
+        let status = self.request(user, "DELETE", &url, XML, Vec::new());
+        assert_eq!(status, 200, "delete an Event on Radicale");
     }
 
     /// Deletes a Calendar of `user` on the server.
