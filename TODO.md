@@ -1,8 +1,28 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
+- [ ] repeat rules edit in the frontend: partially hide and only show all of it when the user actually wants to change it (somewhat like Google calendar)
 - [ ] font - which one is currently used; what are the rights; what about constant-width, so that times align more often?
 - [ ] paler tone for past events
-- [ ] ask-matt overall review of code structure; recommended refactoring - e.g. abstractions for simplifications
-- [ ] test keyboard navigation
-- [ ] test aria part
-    
+- [ ] test keyboard navigation - for human
+- [ ] test aria part - for human - how do I do this?
+- [ ] change in today can change the view of the calendar grid, which interferes with any ongoing drag-and-drop operation; what was the solution we had for that?  Should there not be a more general solution, related to any calendar change?  Or not, it could be interesting to drag an event to the next month, by pressing n during a drag-and-drop operation.  This is possible already, actually.  But we should abort any drag-and-drop on any other change of the calendar grid!
+- [ ] frontend bug: there is a weird vertical line appearing on the "week" button when changing from the month to the week view using "w" on the keyboard.
+- [ ] restore window size (and status - minimized/maximized etc) on app restart - what is the best solution?  doing it from the app side or let the window manager do it?
+- [ ] 
+
+## Ticket 08: recurrence scopes
+
+Choices to review:
+
+- [ ] the recurrence scope is asked after Save (as in Google Calendar), not before editing; "This event" isn't offered when the repeat rule was changed
+- [ ] the editor for an Occurrence starts from that Occurrence's date, not the Recurring Event's first date
+- [ ] an Exception shows its Recurring Event's repeat rule, so the whole Recurring Event can be changed from an Exception
+- [ ] "This event" moved to another Calendar becomes an Event of its own, no longer part of the Recurring Event
+- [ ] editing a whole Recurring Event takes its Exceptions along to another Calendar; removing its repeat deletes its Exceptions
+
+Known limits:
+
+- [ ] hour and minute parts of a repeat rule (`BYHOUR`, `BYMINUTE`) don't move with a time change
+- [ ] a "this and following" split whose first part has only cancelled Occurrences left keeps that empty first part
+- [ ] "All events" drops Exceptions beyond the 50,000th Occurrence
+- [ ] no warning yet for moving an Occurrence across Accounts (comes with server Accounts)
