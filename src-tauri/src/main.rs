@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use chrono::NaiveDate;
 use freecal_core::{
-    Account, AccountId, Calendar, CalendarId, Changed, Colour, Core, ErrorCode, Event, EventDraft,
-    EventId, ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence,
-    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View,
-    When, link_allowed,
+    Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
+    Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExistingEvents, ImportFile,
+    ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope, Settings, SettingsUpdate,
+    SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -103,6 +103,55 @@ fn list_accounts(core: State<Core>) -> CommandResult<Vec<Account>> {
     core.list_accounts().map_err(ErrorCode::from)
 }
 
+/// Runs a core request that talks to a server or the keyring, which can take
+/// long, on a thread of its own, so that the window and other commands go on
+/// meanwhile.
+async fn off_the_ui_thread<T: Send + 'static>(
+    app: AppHandle,
+    request: impl FnOnce(&Core) -> freecal_core::Result<T> + Send + 'static,
+) -> CommandResult<T> {
+    tauri::async_runtime::spawn_blocking(move || request(&app.state::<Core>()))
+        .await
+        // A panic there is a bug, as it would be in a command of its own.
+        .expect("a core request panicked")
+        .map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+async fn add_caldav_account(app: AppHandle, login: CalDavLogin) -> CommandResult<AddedAccount> {
+    off_the_ui_thread(app, move |core| core.add_caldav_account(&login)).await
+}
+
+#[tauri::command]
+async fn available_calendars(
+    app: AppHandle,
+    account_id: i64,
+) -> CommandResult<Vec<AvailableCalendar>> {
+    off_the_ui_thread(app, move |core| {
+        core.available_calendars(AccountId(account_id))
+    })
+    .await
+}
+
+/// Returns once every added Calendar's first sync has ended, which the
+/// sidebar shows meanwhile.
+#[tauri::command]
+async fn add_calendars(
+    app: AppHandle,
+    account_id: i64,
+    urls: Vec<String>,
+) -> CommandResult<Vec<Calendar>> {
+    off_the_ui_thread(app, move |core| {
+        core.add_calendars(AccountId(account_id), &urls)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_account(app: AppHandle, id: i64) -> CommandResult<()> {
+    off_the_ui_thread(app, move |core| core.remove_account(AccountId(id))).await
+}
+
 #[tauri::command]
 fn list_calendars(core: State<Core>) -> CommandResult<Vec<Calendar>> {
     core.list_calendars().map_err(ErrorCode::from)
@@ -136,6 +185,12 @@ fn recolour_calendar(core: State<Core>, id: i64, colour: String) -> CommandResul
 #[tauri::command]
 fn delete_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
     core.delete_calendar(CalendarId(id))
+        .map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+fn remove_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
+    core.remove_calendar(CalendarId(id))
         .map_err(ErrorCode::from)
 }
 
@@ -494,11 +549,16 @@ fn main() {
             settings,
             update_settings,
             list_accounts,
+            add_caldav_account,
+            available_calendars,
+            add_calendars,
+            remove_account,
             list_calendars,
             create_calendar,
             rename_calendar,
             recolour_calendar,
             delete_calendar,
+            remove_calendar,
             set_calendar_shown,
             show_only_calendar,
             list_occurrences,

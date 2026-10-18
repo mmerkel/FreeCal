@@ -19,12 +19,18 @@ export const tauriCore: CoreApi = {
   settings: () => invoke('settings'),
   updateSettings: (update) => invoke('update_settings', { update }),
   listAccounts: () => invoke('list_accounts'),
+  addCalDavAccount: (url, username, password) =>
+    invoke('add_caldav_account', { login: { url, username, password } }),
+  availableCalendars: (accountId) => invoke('available_calendars', { accountId }),
+  addCalendars: (accountId, urls) => invoke('add_calendars', { accountId, urls }),
+  removeAccount: (id) => invoke('remove_account', { id }),
   listCalendars: () => invoke('list_calendars'),
   createCalendar: (accountId, name, colour) =>
     invoke('create_calendar', { accountId, name, colour }),
   renameCalendar: (id, name) => invoke('rename_calendar', { id, name }),
   recolourCalendar: (id, colour) => invoke('recolour_calendar', { id, colour }),
   deleteCalendar: (id) => invoke('delete_calendar', { id }),
+  removeCalendar: (id) => invoke('remove_calendar', { id }),
   setCalendarShown: (id, shown) => invoke('set_calendar_shown', { id, shown }),
   showOnlyCalendar: (id) => invoke('show_only_calendar', { id }),
   listOccurrences: (from, to) =>

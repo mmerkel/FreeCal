@@ -1,13 +1,18 @@
 <script lang="ts">
+  import CircleMinus from '@lucide/svelte/icons/circle-minus';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import Eye from '@lucide/svelte/icons/eye';
+  import ListChecks from '@lucide/svelte/icons/list-checks';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Plus from '@lucide/svelte/icons/plus';
   import Trash2 from '@lucide/svelte/icons/trash-2';
+  import Unplug from '@lucide/svelte/icons/unplug';
   import type { CoreApi } from '../core/CoreApi';
-  import type { Account, AccountId, Calendar, CalendarId } from '../core/types';
-  import { errorText, t } from '../i18n';
+  import type { Account, AccountId, AvailableCalendar, Calendar, CalendarId } from '../core/types';
+  import { errorText, t, type MessageKey } from '../i18n';
+  import AddAccountDialog from './AddAccountDialog.svelte';
   import Dialog from './Dialog.svelte';
+  import ManageCalendarsDialog from './ManageCalendarsDialog.svelte';
   import Menu from './Menu.svelte';
   import { newCalendarColour, SWATCHES } from './palette';
 
@@ -23,14 +28,25 @@
   type Editing =
     | { kind: 'creating'; accountId: AccountId }
     | { kind: 'renaming'; id: CalendarId }
-    | { kind: 'confirmingDelete'; calendar: Calendar };
+    | { kind: 'confirmingDelete'; calendar: Calendar }
+    | { kind: 'confirmingRemove'; calendar: Calendar }
+    | { kind: 'addingAccount' }
+    /** `found` holds what adding the Account found, when it was just added. */
+    | { kind: 'managing'; account: Account; found?: AvailableCalendar[] }
+    | { kind: 'confirmingRemoveAccount'; account: Account };
 
   let editing = $state<Editing>();
   /** The Calendar whose menu is open. */
   let menuFor = $state<CalendarId>();
+  /** The server Account whose menu is open. */
+  let accountMenuFor = $state<AccountId>();
   /** Each Calendar's ⋮ button, which its menu opens against however it is opened. */
   const moreButtons: Record<CalendarId, HTMLButtonElement> = {};
+  /** Each server Account's ⋮ button. */
+  const accountButtons: Record<AccountId, HTMLButtonElement> = {};
   let failure = $state<string>();
+  /** Why the last save in "Manage calendars…" failed. */
+  let manageFailure = $state<string>();
 
   function accountName(account: Account): string {
     switch (account.provider) {
@@ -45,17 +61,27 @@
     return calendars.filter((calendar) => calendar.accountId === account.id);
   }
 
+  /** Whether a Calendar comes from a server Account, so that it is removed rather than deleted. */
+  function fromServer(calendar: Calendar): boolean {
+    const account = accounts.find((account) => account.id === calendar.accountId);
+    return account !== undefined && account.provider !== 'local';
+  }
+
   /**
-   * Runs a change through the core. The sidebar then shows the result when
-   * "Calendars changed" arrives, never by changing its own copy.
+   * Runs a change through the core, reporting a failure with `report`. The
+   * sidebar then shows the result when "Calendars changed" arrives, never by
+   * changing its own copy.
    */
-  async function change(request: () => Promise<unknown>): Promise<boolean> {
+  async function change(
+    request: () => Promise<unknown>,
+    report: MessageKey = 'sidebar.changeFailed',
+  ): Promise<boolean> {
     failure = undefined;
     try {
       await request();
       return true;
     } catch (error) {
-      failure = t('sidebar.changeFailed', { error: errorText(error) });
+      failure = t(report, { error: errorText(error) });
       return false;
     }
   }
@@ -73,6 +99,38 @@
     if (await change(() => core.deleteCalendar(id))) editing = undefined;
   }
 
+  async function removeFromFreeCal(id: CalendarId) {
+    if (await change(() => core.removeCalendar(id))) editing = undefined;
+  }
+
+  async function removeAccount(id: AccountId) {
+    if (await change(() => core.removeAccount(id))) editing = undefined;
+  }
+
+  function startManaging(account: Account, found?: AvailableCalendar[]) {
+    manageFailure = undefined;
+    editing = { kind: 'managing', account, found };
+  }
+
+  /**
+   * Saves "Manage calendars…": removes the unchecked Calendars, then closes
+   * the dialog while the added ones load for the first time, which the
+   * sidebar shows. A failure to add or load them is reported here too.
+   */
+  async function saveCalendars(account: Account, removed: CalendarId[], added: string[]) {
+    manageFailure = undefined;
+    try {
+      for (const id of removed) await core.removeCalendar(id);
+    } catch (error) {
+      manageFailure = t('manage.removeFailed', { error: errorText(error) });
+      return;
+    }
+    editing = undefined;
+    if (added.length > 0) {
+      change(() => core.addCalendars(account.id, added), 'sidebar.addCalendarsFailed');
+    }
+  }
+
   /** Stops what the user is in the middle of, with its report if it failed. */
   function cancel() {
     editing = undefined;
@@ -81,7 +139,24 @@
 
   function openMenu(calendar: Calendar) {
     editing = undefined;
+    accountMenuFor = undefined;
     menuFor = calendar.id;
+  }
+
+  function openAccountMenu(account: Account) {
+    editing = undefined;
+    menuFor = undefined;
+    accountMenuFor = account.id;
+  }
+
+  /** Closes an Account's menu, unless another menu has opened since. */
+  function closeAccountMenu(id: AccountId) {
+    if (accountMenuFor === id) accountMenuFor = undefined;
+  }
+
+  function chooseForAccount(id: AccountId, action: () => void) {
+    closeAccountMenu(id);
+    action();
   }
 
   /** Closes a Calendar's menu, unless another Calendar's menu has opened since. */
@@ -126,7 +201,7 @@
       save(String(name));
     }}
   >
-    <span class="dot" style:--colour={colour} aria-hidden="true"></span>
+    <span class="calendar-dot" style:--colour={colour} aria-hidden="true"></span>
     <input
       class="input"
       name="name"
@@ -161,12 +236,61 @@
           >
             <Plus size={14} aria-hidden="true" />
           </button>
+        {:else}
+          {@const accountOptions = t('account.optionsNamed', { account: accountName(account) })}
+          <button
+            type="button"
+            class="icon-button"
+            aria-label={accountOptions}
+            title={accountOptions}
+            aria-haspopup="menu"
+            aria-expanded={accountMenuFor === account.id}
+            bind:this={accountButtons[account.id]}
+            onclick={() =>
+              accountMenuFor === account.id
+                ? closeAccountMenu(account.id)
+                : openAccountMenu(account)}
+          >
+            <EllipsisVertical size={14} aria-hidden="true" />
+          </button>
+          {#if accountMenuFor === account.id}
+            <Menu
+              label={accountOptions}
+              anchor={accountButtons[account.id]}
+              onclose={() => closeAccountMenu(account.id)}
+            >
+              <button
+                type="button"
+                class="menu-item"
+                role="menuitem"
+                onclick={() => chooseForAccount(account.id, () => startManaging(account))}
+              >
+                <ListChecks size={14} aria-hidden="true" />
+                {t('account.manageCalendars')}
+              </button>
+              <hr class="menu-separator" />
+              <button
+                type="button"
+                class="menu-item danger"
+                role="menuitem"
+                onclick={() =>
+                  chooseForAccount(
+                    account.id,
+                    () => (editing = { kind: 'confirmingRemoveAccount', account }),
+                  )}
+              >
+                <Unplug size={14} aria-hidden="true" />
+                {t('account.remove')}
+              </button>
+            </Menu>
+          {/if}
         {/if}
       </div>
 
       <ul aria-labelledby={headingId}>
         {#each calendarsOf(account) as calendar (calendar.id)}
           {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
+          {@const loadingId = `sidebar-loading-${calendar.id}`}
           <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
             {#if editing?.kind === 'renaming' && editing.id === calendar.id}
               {@render nameForm(calendar.name, calendar.colour, (name) =>
@@ -181,11 +305,21 @@
                 title={t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
                   name: calendar.name,
                 })}
+                aria-describedby={calendar.firstSync ? loadingId : undefined}
                 {...menuOpeners(calendar)}
                 onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
               >
-                <span class="dot" style:--colour={calendar.colour} aria-hidden="true"></span>
-                <span class="name">{calendar.name}</span>
+                <span class="calendar-dot" style:--colour={calendar.colour} aria-hidden="true"
+                ></span>
+                <span class="label">
+                  <span class="name">{calendar.name}</span>
+                  {#if calendar.firstSync}
+                    <!-- The switch's description, not part of its name. -->
+                    <span class="loading" id={loadingId} aria-hidden="true">
+                      {t('calendar.firstSync')}
+                    </span>
+                  {/if}
+                </span>
               </button>
               <button
                 type="button"
@@ -250,16 +384,29 @@
                   {t('calendar.showOnly')}
                 </button>
                 <hr class="menu-separator" />
-                <button
-                  type="button"
-                  class="menu-item danger"
-                  role="menuitem"
-                  onclick={() =>
-                    choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  {t('calendar.delete')}
-                </button>
+                {#if fromServer(calendar)}
+                  <button
+                    type="button"
+                    class="menu-item danger"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => (editing = { kind: 'confirmingRemove', calendar }))}
+                  >
+                    <CircleMinus size={14} aria-hidden="true" />
+                    {t('calendar.remove')}
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    class="menu-item danger"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    {t('calendar.delete')}
+                  </button>
+                {/if}
               </Menu>
             {/if}
           </li>
@@ -269,31 +416,79 @@
           <li>
             {@render nameForm('', newCalendarColour(calendars), (name) => create(account.id, name))}
           </li>
-        {:else if account.provider === 'local' && calendarsOf(account).length === 0}
-          <li class="hint">{t('sidebar.noCalendars')}</li>
+        {:else if calendarsOf(account).length === 0}
+          <li class="hint">
+            {t(account.provider === 'local' ? 'sidebar.noCalendars' : 'sidebar.noServerCalendars')}
+          </li>
         {/if}
       </ul>
     </section>
   {/each}
+
+  <button
+    type="button"
+    class="button outline add-account"
+    onclick={() => (editing = { kind: 'addingAccount' })}
+  >
+    <Plus size={14} aria-hidden="true" />
+    {t('sidebar.addAccount')}
+  </button>
 </nav>
 
-{#if editing?.kind === 'confirmingDelete'}
-  {@const doomed = editing.calendar}
-  <Dialog
-    role="alertdialog"
-    title={t('calendar.deleteTitle', { name: doomed.name })}
-    onclose={cancel}
-  >
-    <p>{t('calendar.deleteBody')}</p>
+{#snippet confirmation(title: string, body: MessageKey, confirm: MessageKey, onconfirm: () => void)}
+  <Dialog role="alertdialog" {title} onclose={cancel}>
+    <p>{t(body)}</p>
     {#snippet actions()}
       <button type="button" class="button outline" data-initial-focus onclick={cancel}>
         {t('common.cancel')}
       </button>
-      <button type="button" class="button danger" onclick={() => remove(doomed.id)}>
-        {t('calendar.delete')}
-      </button>
+      <button type="button" class="button danger" onclick={onconfirm}>{t(confirm)}</button>
     {/snippet}
   </Dialog>
+{/snippet}
+
+{#if editing?.kind === 'confirmingDelete'}
+  {@const doomed = editing.calendar}
+  {@render confirmation(
+    t('calendar.deleteTitle', { name: doomed.name }),
+    'calendar.deleteBody',
+    'calendar.delete',
+    () => remove(doomed.id),
+  )}
+{:else if editing?.kind === 'confirmingRemove'}
+  {@const doomed = editing.calendar}
+  {@render confirmation(
+    t('calendar.removeTitle', { name: doomed.name }),
+    'calendar.removeBody',
+    'calendar.removeConfirm',
+    () => removeFromFreeCal(doomed.id),
+  )}
+{:else if editing?.kind === 'confirmingRemoveAccount'}
+  {@const doomed = editing.account}
+  {@render confirmation(
+    t('account.removeTitle', { account: accountName(doomed) }),
+    'account.removeBody',
+    'account.removeConfirm',
+    () => removeAccount(doomed.id),
+  )}
+{:else if editing?.kind === 'addingAccount'}
+  <AddAccountDialog
+    {core}
+    onadded={(added) => startManaging(added.account, added.available)}
+    oncancel={cancel}
+  />
+{:else if editing?.kind === 'managing'}
+  {@const managing = editing}
+  <ManageCalendarsDialog
+    {core}
+    account={managing.account}
+    accountName={accountName(managing.account)}
+    calendars={calendarsOf(managing.account)}
+    found={managing.found}
+    failure={manageFailure}
+    onsave={(removed, added) => saveCalendars(managing.account, removed, added)}
+    oncancel={cancel}
+  />
 {/if}
 
 <style>
@@ -392,20 +587,8 @@
     cursor: pointer;
   }
 
-  /* Filled when shown, a ring when hidden. Drawn as radial gradients with a
-     soft edge, which look rounder at this size than a rounded box does. */
-  .dot {
-    flex: none;
-    width: 0.625rem;
-    height: 0.625rem;
-    background: radial-gradient(
-      circle closest-side,
-      var(--colour) calc(100% - 1px),
-      transparent 100%
-    );
-  }
-
-  li.hidden .dot {
+  /* A ring when hidden. */
+  li.hidden .calendar-dot {
     background: radial-gradient(
       circle closest-side,
       transparent calc(100% - 2.5px),
@@ -419,7 +602,19 @@
     color: var(--foreground-faint);
   }
 
-  .name {
+  .label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .loading {
+    color: var(--foreground-muted);
+    font-size: var(--text-xs);
+  }
+
+  .name,
+  .loading {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -470,6 +665,10 @@
 
   .hint {
     color: var(--foreground-muted);
+  }
+
+  .add-account {
+    margin: var(--space-6) var(--space-4) 0;
   }
 
   .failure {

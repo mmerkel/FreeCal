@@ -2,6 +2,7 @@ import type { CoreApi } from '../core/CoreApi';
 import type {
   Account,
   AccountId,
+  AvailableCalendar,
   Calendar,
   CalendarId,
   Event,
@@ -104,10 +105,24 @@ export class FakeCore implements CoreApi {
   cancelled = new Map<EventId, string[]>();
   /** The changes made to Occurrences in a recurrence scope, in order. */
   scopedChanges: ScopedChange[] = [];
+  /**
+   * What the server of the next CalDAV Account added offers, or the failure
+   * adding it gives.
+   */
+  caldavServer: AvailableCalendar[] | ErrorCode = [];
+  /** Every Calendar each server Account's server offers, added or not. */
+  offered = new Map<AccountId, AvailableCalendar[]>();
+  /** Where each server Calendar lives on its server. */
+  calendarUrls = new Map<CalendarId, string>();
+  /** The password the keyring holds for each server Account. */
+  keyring = new Map<AccountId, string>();
+  /** While set, first syncs run until it resolves. */
+  private heldFirstSyncs?: Promise<void>;
   private units = new Map<UnitId, Unit>();
   private nextUnitId = 1;
   private subscribers = new Set<(signal: Signal) => void>();
   private nextCalendarId = 1;
+  private nextAccountId = 2;
   private nextEventId = 1;
 
   /** Adds a Calendar directly, as if it had been created earlier, without a Signal. */
@@ -228,6 +243,95 @@ export class FakeCore implements CoreApi {
     return structuredClone(this.accounts);
   }
 
+  /**
+   * Adds a CalDAV Account directly, as if it had been added earlier, whose
+   * server offers `offered`, without a Signal.
+   */
+  addCalDavAccountNow(username: string, offered: AvailableCalendar[] = []): Account {
+    const added: Account = {
+      id: accountId(this.nextAccountId++),
+      provider: 'caldav',
+      server: { url: 'https://dav.example.org/', username },
+    };
+    this.accounts.push(added);
+    this.offered.set(added.id, structuredClone(offered));
+    this.keyring.set(added.id, 'secret');
+    return added;
+  }
+
+  /**
+   * Adds an offered Calendar of a server Account directly, as if it had been
+   * added earlier, without a Signal.
+   */
+  addServerCalendar(id: AccountId, url: string, fields: Partial<Calendar> = {}): Calendar {
+    const available = this.offered.get(id)!.find((calendar) => calendar.url === url)!;
+    const added = this.addCalendar({
+      accountId: id,
+      name: available.name,
+      colour: available.colour ?? '#808080',
+      ...fields,
+    });
+    this.calendarUrls.set(added.id, url);
+    return added;
+  }
+
+  /** Makes first syncs run until the returned function ends them. */
+  holdFirstSyncs(): () => void {
+    let release!: () => void;
+    this.heldFirstSyncs = new Promise((resolve) => (release = resolve));
+    return () => {
+      this.heldFirstSyncs = undefined;
+      release();
+    };
+  }
+
+  async addCalDavAccount(url: string, username: string, password: string) {
+    this.calls.push('addCalDavAccount');
+    if (!Array.isArray(this.caldavServer)) throw this.caldavServer;
+    const account = this.addCalDavAccountNow(username, this.caldavServer);
+    account.server = { url, username };
+    this.keyring.set(account.id, password);
+    this.emit({ kind: 'calendarsChanged' });
+    return { account: structuredClone(account), available: structuredClone(this.caldavServer) };
+  }
+
+  async availableCalendars(id: AccountId) {
+    this.calls.push('availableCalendars');
+    const added = new Set(this.calendarUrls.values());
+    return structuredClone(this.serverOf(id)?.filter((calendar) => !added.has(calendar.url)) ?? []);
+  }
+
+  async addCalendars(id: AccountId, urls: string[]) {
+    this.calls.push('addCalendars');
+    const taken = new Set(this.calendarUrls.values());
+    const available = urls.map((url) => {
+      const offered = this.serverOf(id)?.find((calendar) => calendar.url === url);
+      if (!offered || taken.has(url)) throw failure('calendarNotAvailable');
+      taken.add(url);
+      return offered;
+    });
+    const added = available.map((calendar) =>
+      this.addServerCalendar(id, calendar.url, { firstSync: true }),
+    );
+    this.emit({ kind: 'calendarsChanged' });
+    await this.heldFirstSyncs;
+    for (const calendar of added) calendar.firstSync = false;
+    this.emit({ kind: 'calendarsChanged' });
+    return structuredClone(added);
+  }
+
+  async removeAccount(id: AccountId) {
+    this.calls.push('removeAccount');
+    if (!this.serverOf(id)) throw failure('localAccountCannotBeRemoved');
+    for (const calendar of this.calendars.filter((calendar) => calendar.accountId === id)) {
+      this.dropCalendar(calendar.id);
+    }
+    this.accounts = this.accounts.filter((account) => account.id !== id);
+    this.offered.delete(id);
+    this.keyring.delete(id);
+    this.emit({ kind: 'calendarsChanged' });
+  }
+
   async listCalendars() {
     this.calls.push('listCalendars');
     this.started();
@@ -253,10 +357,26 @@ export class FakeCore implements CoreApi {
 
   async deleteCalendar(id: CalendarId) {
     this.calls.push('deleteCalendar');
-    this.calendar(id);
+    if (this.calendarUrls.has(this.calendar(id).id)) throw failure('notLocalCalendar');
+    this.dropCalendar(id);
+    this.emit({ kind: 'calendarsChanged' });
+  }
+
+  async removeCalendar(id: CalendarId) {
+    this.calls.push('removeCalendar');
+    if (!this.calendarUrls.has(this.calendar(id).id)) throw failure('notServerCalendar');
+    this.dropCalendar(id);
+    this.emit({ kind: 'calendarsChanged' });
+  }
+
+  /**
+   * Deletes a Calendar's local copy. Like the real core, its Events leave
+   * the Change Journal with it, and so does each Event's history up to its
+   * last version in it.
+   */
+  private dropCalendar(id: CalendarId) {
+    this.calendarUrls.delete(id);
     this.calendars = this.calendars.filter((calendar) => calendar.id !== id);
-    // Like the real core, its Events leave the Change Journal with it, and
-    // so does each Event's history up to its last version in it.
     const gone = new Set(
       this.events.filter((event) => event.calendarId === id).map((event) => event.id),
     );
@@ -275,7 +395,6 @@ export class FakeCore implements CoreApi {
       if (kept.length === 0) this.units.delete(unit);
       else this.units.get(unit)!.entries = kept;
     }
-    this.emit({ kind: 'calendarsChanged' });
   }
 
   async setCalendarShown(id: CalendarId, shown: boolean) {
@@ -633,6 +752,12 @@ export class FakeCore implements CoreApi {
     const found = this.calendars.find((calendar) => calendar.id === id);
     if (!found) throw failure('calendarNotFound');
     return found;
+  }
+
+  /** What a server Account's server offers now; none for the Local Account. */
+  private serverOf(id: AccountId): AvailableCalendar[] | undefined {
+    if (!this.accounts.some((account) => account.id === id)) throw failure('accountNotFound');
+    return this.offered.get(id);
   }
 
   private change(id: CalendarId, fields: Partial<Calendar>) {

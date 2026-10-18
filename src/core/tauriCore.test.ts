@@ -69,6 +69,31 @@ test('the Calendar commands pass their arguments under the names the shell expec
   ]);
 });
 
+test('the Account commands pass their arguments under the names the shell expects', async () => {
+  const invoked: [string, unknown][] = [];
+  mockIPC((command, args) => {
+    invoked.push([command, args]);
+    return undefined;
+  });
+
+  await tauriCore.addCalDavAccount('https://dav.example.org/', 'alice', 'secret');
+  await tauriCore.availableCalendars(accountId(2));
+  await tauriCore.addCalendars(accountId(2), ['https://dav.example.org/alice/work/']);
+  await tauriCore.removeCalendar(calendarId(3));
+  await tauriCore.removeAccount(accountId(2));
+
+  expect(invoked).toEqual([
+    [
+      'add_caldav_account',
+      { login: { url: 'https://dav.example.org/', username: 'alice', password: 'secret' } },
+    ],
+    ['available_calendars', { accountId: 2 }],
+    ['add_calendars', { accountId: 2, urls: ['https://dav.example.org/alice/work/'] }],
+    ['remove_calendar', { id: 3 }],
+    ['remove_account', { id: 2 }],
+  ]);
+});
+
 test('the Event commands pass their arguments under the names the shell expects', async () => {
   const invoked: [string, unknown][] = [];
   mockIPC((command, args) => {

@@ -269,6 +269,37 @@ input[type='radio'] {
   gap: var(--space-3);
 }
 
+/* A group of checkboxes or radios under a small label, in a dialog's form. */
+.choices {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.choices legend {
+  margin-bottom: var(--space-3);
+  padding: 0;
+}
+
+.choices input {
+  margin: 0;
+}
+
+/* A Calendar's colour beside its name, filled. Drawn as a radial gradient
+   with a soft edge, which looks rounder at this size than a rounded box does. */
+.calendar-dot {
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  background: radial-gradient(
+    circle closest-side,
+    var(--colour) calc(100% - 1px),
+    transparent 100%
+  );
+}
+
 /* Menus: a raised card of items, labels and separators (see Menu.svelte).
    A menu is a popover placed by its `position-anchor`: centred under the
    anchor, flipped above it when there is no room below. Where centring

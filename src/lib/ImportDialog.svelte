@@ -97,7 +97,7 @@
     </div>
 
     {#if summary && summary.existingEvents > 0}
-      <fieldset class="existing">
+      <fieldset class="choices">
         <legend class="field-label">{t('import.existing')}</legend>
         {#each choices as choice (choice.value)}
           <label class="check">
@@ -130,22 +130,5 @@
   .preview {
     display: grid;
     gap: var(--space-2);
-  }
-
-  .existing {
-    display: grid;
-    gap: var(--space-3);
-    margin: 0;
-    padding: 0;
-    border: none;
-  }
-
-  .existing legend {
-    margin-bottom: var(--space-3);
-    padding: 0;
-  }
-
-  .existing input {
-    margin: 0;
   }
 </style>

@@ -1,6 +1,8 @@
 import type {
   Account,
   AccountId,
+  AddedAccount,
+  AvailableCalendar,
   Calendar,
   CalendarId,
   Changed,
@@ -48,6 +50,26 @@ export interface CoreApi {
   /** Changes the settings `update` gives and keeps the others; returns them all as they are now. */
   updateSettings(update: SettingsUpdate): Promise<Settings>;
   listAccounts(): Promise<Account[]>;
+  /**
+   * Adds a CalDAV Account once its server at `url` accepts the username and
+   * password, which go into the system keyring. Resolves to it with the
+   * Calendars its server offers; stores nothing when that fails.
+   */
+  addCalDavAccount(url: string, username: string, password: string): Promise<AddedAccount>;
+  /** A server Account's Available Calendars, asked from its server each time. */
+  availableCalendars(accountId: AccountId): Promise<AvailableCalendar[]>;
+  /**
+   * Adds Available Calendars of a server Account, by their `url`, all or
+   * none. Resolves once each one's first sync has pulled its Events; until
+   * then the Calendar's `firstSync` says so. Should a first sync fail, the
+   * Calendars stay added and this rejects.
+   */
+  addCalendars(accountId: AccountId, urls: string[]): Promise<Calendar[]>;
+  /**
+   * Removes a server Account with its Calendars from FreeCal and deletes its
+   * password from the keyring. Nothing changes on the server.
+   */
+  removeAccount(id: AccountId): Promise<void>;
   /** Every Calendar of every Account, in the order they were added. */
   listCalendars(): Promise<Calendar[]>;
   /** Creates a Calendar in the Local Account. `colour` is `#rrggbb`. */
@@ -56,6 +78,11 @@ export interface CoreApi {
   recolourCalendar(id: CalendarId, colour: string): Promise<void>;
   /** Deletes a Local Calendar with all its Events. */
   deleteCalendar(id: CalendarId): Promise<void>;
+  /**
+   * Removes a server Account's Calendar from FreeCal with its local Events.
+   * It stays on the server, where it is an Available Calendar again.
+   */
+  removeCalendar(id: CalendarId): Promise<void>;
   setCalendarShown(id: CalendarId, shown: boolean): Promise<void>;
   /** Shows this Calendar and hides every other Calendar in all Accounts. */
   showOnlyCalendar(id: CalendarId): Promise<void>;
