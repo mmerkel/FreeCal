@@ -2,7 +2,7 @@
 
 **What to build:** The window shows whether FreeCal is syncing and when the last sync finished, through a status indicator showing the overall status. The sidebar shows each server Account's and Calendar's Sync Status (Syncing, Offline, Sync Error) when it isn't Synced, and the number of unsent changes when it isn't zero. Being offline is not an error.
 
-**Blocked by:** 54, 55
+**Blocked by:** 82, 55
 
 **Status:** ready-for-agent
 

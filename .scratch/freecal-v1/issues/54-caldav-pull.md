@@ -4,9 +4,9 @@
 
 **Blocked by:** 78, 69
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
-**Effort:** L
+**Split into:** 80, 81, 82
 
 - [ ] A Provider interface that can take Microsoft Graph and ICS feeds later without changing the sync engine; CalDAV is its first implementation
 - [ ] Adding a Calendar pulls it; a core operation syncs an Account on demand (timing and triggers come in ticket 16)
@@ -25,3 +25,4 @@ Out of scope: showing the first-sync state (ticket 55); read-only rules (ticket 
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
 - 2026-10-18 (from 77): the CalDAV client opens a new connection per request (`max_idle_connections(0)` in `core/src/caldav.rs`), because ureq reused connections that Radicale, an HTTP/1.0 server, had closed. Worth revisiting if pulling many Calendars is slow.
 - 2026-10-18 (from 78): a server Calendar's address is `calendar.url` in the Local Store (`Store::calendar_urls`); only URLs the server offered at the time of adding get there.
+- 2026-10-18: Split into 80 (Provider interface and first sync), 81 (original server data) and 82 (incremental sync of an Account, recorded in the Change Journal), so each part fits one session. Work from those; this file stays for its history. The pinned-zone note mentioned above was added by ticket 58.

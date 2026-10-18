@@ -11,7 +11,7 @@
 - [ ] Browser login with a loopback redirect and PKCE; tokens stored in the keyring
 - [ ] Discovery lists the Account's Calendars as Available Calendars; the user chooses which to add; later-appearing Calendars stay Available Calendars until added through "Manage Calendars…"
 - [ ] Incremental pulls through the Google Calendar REST API (ADR 0002) using sync tokens; a 410 "token expired" triggers a full resync
-- [ ] Each incremental pull of a Calendar is one Change Journal unit, as for CalDAV (ticket 54); the first sync is not recorded, and a full resync after a 410 records only the Events it finds changed, like an incremental sync
+- [ ] Each incremental pull of a Calendar is one Change Journal unit, as for CalDAV (ticket 82); the first sync is not recorded, and a full resync after a 410 records only the Events it finds changed, like an incremental sync
 - [ ] Server permissions decide read-only; before 1.0 newly added Google Calendars default to read-only
 - [ ] Removing the Account removes its Calendars and its tokens from the keyring
 - [ ] Tested against a fake Google HTTP server that mimics the REST API (sync tokens, ETags, 410, permissions), exercising the real Google Provider code
