@@ -242,8 +242,9 @@ impl Core {
         .discover()
     }
 
-    /// Removes a server Account and deletes its secret from the keyring.
-    /// The Local Account stays.
+    /// Removes a server Account with its Calendars, as
+    /// [`Core::remove_calendar`] removes each, and deletes its secret from
+    /// the keyring. The Local Account stays.
     pub fn remove_account(&self, id: AccountId) -> Result<()> {
         let (account, key) = {
             let store = self.store();
@@ -251,7 +252,6 @@ impl Core {
         };
         match account.ok_or(CoreError::AccountNotFound(id))?.provider {
             Provider::Local => return Err(CoreError::LocalAccountCannotBeRemoved),
-            // Its Calendars leave with it once it can have some (ticket 79).
             Provider::CalDav => {}
         }
         // The keyring first: should it fail, the Account stays, and removing
@@ -261,7 +261,7 @@ impl Core {
                 .delete(&key)
                 .map_err(CoreError::KeyringUnavailable)?;
         }
-        self.store().delete_account(id)?;
+        journal::delete_account(&self.store(), id)?;
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }

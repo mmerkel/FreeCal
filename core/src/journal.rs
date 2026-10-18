@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::store::{EVENT_FIELDS, EventFields, Store, StoredEvent, event_fields};
-use crate::{CalendarId, CoreError, EventId, Result};
+use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// A Change Journal unit: what undoes a change, or changes made together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -116,31 +116,51 @@ pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<(
 /// deleted, with that Event's earlier entries, which are undone only through
 /// them; its later entries stay.
 pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
+    store.transaction(|| delete_calendar_within(store, id))
+}
+
+/// Deletes a server Account with its Calendars, each as
+/// [`delete_calendar`] does, all or none.
+pub(crate) fn delete_account(store: &Store, id: AccountId) -> Result<()> {
     store.transaction(|| {
         let conn = store.connection();
-        conn.execute(
-            "DELETE FROM journal_entry WHERE EXISTS (SELECT 1 FROM event \
-             WHERE event.calendar_id = ?1 AND event.id = journal_entry.event_id \
-               AND event.uid = journal_entry.uid)",
-            [id.0],
-        )?;
-        conn.execute(
-            "DELETE FROM journal_entry WHERE id <= (SELECT MAX(back.id) \
-             FROM journal_entry AS back WHERE back.calendar_id = ?1 \
-               AND back.event_id = journal_entry.event_id AND back.uid = journal_entry.uid)",
-            [id.0],
-        )?;
-        conn.execute("DELETE FROM event WHERE calendar_id = ?1", [id.0])?;
-        conn.execute(
-            "DELETE FROM journal_unit WHERE NOT EXISTS \
-             (SELECT 1 FROM journal_entry WHERE unit_id = journal_unit.id)",
-            [],
-        )?;
-        match conn.execute("DELETE FROM calendar WHERE id = ?1", [id.0])? {
-            0 => Err(CoreError::CalendarNotFound(id)),
-            _ => Ok(()),
+        let calendars = conn
+            .prepare("SELECT id FROM calendar WHERE account_id = ?1")?
+            .query_map([id.0], |row| row.get(0).map(CalendarId))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for calendar in calendars {
+            delete_calendar_within(store, calendar)?;
         }
+        conn.execute("DELETE FROM account WHERE id = ?1", [id.0])?;
+        Ok(())
     })
+}
+
+/// [`delete_calendar`] inside a transaction already begun.
+fn delete_calendar_within(store: &Store, id: CalendarId) -> Result<()> {
+    let conn = store.connection();
+    conn.execute(
+        "DELETE FROM journal_entry WHERE EXISTS (SELECT 1 FROM event \
+         WHERE event.calendar_id = ?1 AND event.id = journal_entry.event_id \
+           AND event.uid = journal_entry.uid)",
+        [id.0],
+    )?;
+    conn.execute(
+        "DELETE FROM journal_entry WHERE id <= (SELECT MAX(back.id) \
+         FROM journal_entry AS back WHERE back.calendar_id = ?1 \
+           AND back.event_id = journal_entry.event_id AND back.uid = journal_entry.uid)",
+        [id.0],
+    )?;
+    conn.execute("DELETE FROM event WHERE calendar_id = ?1", [id.0])?;
+    conn.execute(
+        "DELETE FROM journal_unit WHERE NOT EXISTS \
+         (SELECT 1 FROM journal_entry WHERE unit_id = journal_unit.id)",
+        [],
+    )?;
+    match conn.execute("DELETE FROM calendar WHERE id = ?1", [id.0])? {
+        0 => Err(CoreError::CalendarNotFound(id)),
+        _ => Ok(()),
+    }
 }
 
 /// One unit being recorded, inside [`record`]'s transaction. Each write reads

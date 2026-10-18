@@ -482,13 +482,6 @@ impl Store {
             .flatten())
     }
 
-    /// Deletes an Account with its Calendars and their Events.
-    pub fn delete_account(&self, id: AccountId) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM account WHERE id = ?1", [id.0])?;
-        Ok(())
-    }
-
     pub fn find_account(&self, id: AccountId) -> Result<Option<Account>> {
         Ok(self
             .list_accounts()?

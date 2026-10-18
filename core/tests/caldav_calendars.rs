@@ -327,3 +327,93 @@ fn removing_or_deleting_an_unknown_calendar_is_refused() {
         Err(CoreError::CalendarNotFound(id)) if id == unknown
     ));
 }
+
+#[test]
+fn removing_an_account_removes_its_calendars_their_events_and_their_history() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let work = server_calendar(radicale, &user, "Work");
+    let harness = Harness::new();
+    let core = harness.open();
+    let calendars = core.list_calendars().unwrap();
+    let dentist = core
+        .create_event(draft(
+            calendars[0].id,
+            "Dentist",
+            timed("2026-10-05T11:00:00", "2026-10-05T12:00:00"),
+        ))
+        .unwrap();
+    let account = add_account(&core, radicale, &user);
+    let added = core.add_calendars(account, &[work]).unwrap()[0].clone();
+    let created = core
+        .create_event(draft(
+            added.id,
+            "Stand-up",
+            timed("2026-10-05T09:00:00", "2026-10-05T09:15:00"),
+        ))
+        .unwrap();
+    harness.signals.clear();
+
+    core.remove_account(account).unwrap();
+
+    assert_eq!(core.list_calendars().unwrap(), calendars);
+    let titles: Vec<_> = core
+        .occurrences(support::date("2026-10-05"), support::date("2026-10-06"))
+        .unwrap()
+        .into_iter()
+        .map(|occurrence| occurrence.title)
+        .collect();
+    assert_eq!(titles, vec!["Dentist"]);
+    assert!(harness.keyring.secrets().is_empty());
+    assert_eq!(harness.signals.received(), vec![Signal::CalendarsChanged]);
+    let unit = created.unit.unwrap();
+    let refused = core.undo_unit(unit);
+    assert!(matches!(refused, Err(CoreError::UnitNotFound(id)) if id == unit));
+    // The Local Calendar's history stays.
+    core.undo_unit(dentist.unit.unwrap()).unwrap();
+}
+
+#[test]
+fn several_accounts_side_by_side_each_keep_their_own_password_and_calendars() {
+    let radicale = Radicale::shared();
+    let (alice, bob) = (radicale.user(), radicale.user());
+    let alices_work = server_calendar(radicale, &alice, "Work");
+    let bobs_work = server_calendar(radicale, &bob, "Work");
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let alices = add_account(&core, radicale, &alice);
+    let bobs = add_account(&core, radicale, &bob);
+
+    assert_eq!(core.list_accounts().unwrap().len(), 3);
+    let mut secrets = harness.keyring.secrets();
+    secrets.sort();
+    assert_eq!(secrets, vec![alice.password.clone(), bob.password.clone()]);
+    assert_eq!(available_urls(&core, alices), vec![alices_work.clone()]);
+    assert_eq!(available_urls(&core, bobs), vec![bobs_work.clone()]);
+    core.add_calendars(alices, &[alices_work]).unwrap();
+    let bobs_calendar = core.add_calendars(bobs, &[bobs_work]).unwrap()[0].clone();
+    let stand_up = core
+        .create_event(draft(
+            bobs_calendar.id,
+            "Stand-up",
+            timed("2026-10-05T09:00:00", "2026-10-05T09:15:00"),
+        ))
+        .unwrap();
+
+    core.remove_account(alices).unwrap();
+
+    let accounts: Vec<_> = core
+        .list_accounts()
+        .unwrap()
+        .into_iter()
+        .map(|account| account.id)
+        .collect();
+    assert!(accounts.contains(&bobs) && !accounts.contains(&alices));
+    assert_eq!(harness.keyring.secrets(), vec![bob.password.clone()]);
+    assert_eq!(core.list_calendars().unwrap(), vec![bobs_calendar]);
+    assert_eq!(core.event(stand_up.value.id).unwrap(), stand_up.value);
+    core.undo_unit(stand_up.unit.unwrap()).unwrap();
+    // Bob's password still logs in.
+    server_calendar(radicale, &bob, "Home");
+    assert_eq!(available_urls(&core, bobs).len(), 1);
+}
