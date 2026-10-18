@@ -8,7 +8,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 - [ ] change in today can change the view of the calendar grid, which interferes with any ongoing drag-and-drop operation; what was the solution we had for that?  Should there not be a more general solution, related to any calendar change?  Or not, it could be interesting to drag an event to the next month, by pressing n during a drag-and-drop operation.  This is possible already, actually.  But we should abort any drag-and-drop on any other change of the calendar grid!
 - [ ] frontend bug: there is a weird vertical line appearing on the "week" button when changing from the month to the week view using "w" on the keyboard.
 - [ ] restore window size (and status - minimized/maximized etc) on app restart - what is the best solution?  doing it from the app side or let the window manager do it?
-- [ ] 
+- [ ] dialog choosing this and following etc: different button arrangement (all in onw column, maybe) or radio buttons like Google calendar
 
 ## Ticket 08: recurrence scopes
 
