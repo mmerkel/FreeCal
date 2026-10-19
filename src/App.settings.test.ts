@@ -193,6 +193,28 @@ test('About FreeCal shows the version and the licence, and opens the source thro
   expect(within(about).queryByRole('link')).not.toBeInTheDocument();
 });
 
+test('Settings and About close only through their ✕, which About focuses', async () => {
+  const { user } = await showApp();
+
+  await user.keyboard('{Control>},{/Control}');
+  const settings = screen.getByRole('dialog', { name: 'Settings' });
+  const closeSettings = within(settings).getByRole('button', { name: 'Close' });
+  expect(within(settings).getAllByRole('button')).toEqual([closeSettings]);
+  expect(closeSettings.querySelector('svg')).not.toBeNull();
+  await user.click(closeSettings);
+  await user.click(
+    within(await openMainMenu(user)).getByRole('menuitem', { name: 'About FreeCal' }),
+  );
+
+  const about = screen.getByRole('dialog', { name: 'About FreeCal' });
+  const closeAbout = within(about).getByRole('button', { name: 'Close' });
+  expect(closeAbout).toHaveFocus();
+  expect(closeAbout.querySelector('svg')).not.toBeNull();
+  expect(about.querySelector('.actions')).toBeNull();
+  await user.click(closeAbout);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
 test('Quit ends FreeCal', async () => {
   const { core, user } = await showApp();
 

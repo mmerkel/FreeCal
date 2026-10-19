@@ -15,6 +15,6 @@
   let { message }: Props = $props();
 </script>
 
-<Dialog title={t('working.title')} onclose={() => {}}>
+<Dialog title={t('working.title')}>
   <p aria-busy="true">{message}</p>
 </Dialog>

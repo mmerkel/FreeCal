@@ -197,9 +197,63 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
 
   const details = await openOccurrence(user, 'Fixed');
 
-  expect(within(details).queryByRole('button', { name: 'Edit' })).toBeNull();
-  expect(within(details).queryByRole('button', { name: 'Delete' })).toBeNull();
+  expect(
+    within(details)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label')),
+  ).toEqual(['Close']);
   expect(within(details).getByText('Can’t be changed: its calendar is read-only.')).toBeVisible();
+});
+
+test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  await showApp(core);
+
+  const details = await openOccurrence(user, 'Dentist');
+
+  const buttons = within(details).getAllByRole('button');
+  expect(buttons.map((button) => [button.getAttribute('aria-label'), button.title])).toEqual([
+    ['Edit', 'Edit'],
+    ['Delete', 'Delete'],
+    ['Close', 'Close'],
+  ]);
+  expect(buttons.every((button) => button.querySelector('svg'))).toBe(true);
+  expect(within(details).getByRole('button', { name: 'Close' })).toHaveFocus();
+});
+
+test('✕ and a click on the backdrop close the details', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  await showApp(core);
+
+  let details = await openOccurrence(user, 'Dentist');
+  await user.click(within(details).getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+
+  details = await openOccurrence(user, 'Dentist');
+  await user.click(within(details).getByText('Home'));
+  expect(details).toBeInTheDocument();
+  // The backdrop belongs to the dialog element itself; its content doesn't.
+  await user.click(details);
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+test('a click on the editor’s backdrop doesn’t close it', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  core.addCalendar({ name: 'Home' });
+  await showApp(core);
+
+  await selectSlot(monday);
+  const editor = screen.getByRole('dialog', { name: 'New event' });
+  await user.click(editor);
+
+  expect(editor).toBeInTheDocument();
 });
 
 test('an Event of a writable Calendar doesn’t say it is read-only', async () => {
@@ -246,6 +300,7 @@ test('cancelling an edit returns to the unchanged details', async () => {
   await user.click(within(details).getByRole('button', { name: 'Edit' }));
   await user.type(screen.getByRole('textbox', { name: 'Title' }), ' changed');
   await user.keyboard('{Escape}');
+  await user.click(screen.getByRole('button', { name: 'Discard' }));
 
   expect(await screen.findByRole('dialog', { name: 'Lunch' })).toBeInTheDocument();
   expect(core.calls).not.toContain('editEvent');
@@ -261,10 +316,37 @@ test('deleting an Event removes it from the grid', async () => {
   const details = await openOccurrence(user, 'Doomed');
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  expect(ask).toHaveTextContent('“\u2068Doomed\u2069” will be deleted.');
+  expect(within(ask).queryByRole('button', { name: 'Close' })).toBeNull();
+  expect(core.calls).not.toContain('deleteEvent');
+  await user.click(within(ask).getByRole('button', { name: 'Delete' }));
 
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'Doomed' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'Kept' })).toBeInTheDocument();
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+test('Cancel and Escape in the delete question keep the Event', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: 'Kept', when: monday });
+  await showApp(core);
+  const details = await openOccurrence(user, 'Kept');
+
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  await user.keyboard('{Escape}');
+
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.getByRole('dialog', { name: 'Kept' })).toBeInTheDocument();
+  expect(core.calls).not.toContain('deleteEvent');
+  expect(core.events).toHaveLength(1);
 });
 
 test('“Occurrences changed” re-fetches the visible range and keeps the open Event', async () => {
@@ -527,6 +609,21 @@ test('a refused drag names a hostile Event and Calendar as text', async () => {
   expect(document.querySelector('img, script')).toBeNull();
 });
 
+test('the delete question names a hostile Event as text', async () => {
+  const user = userEvent.setup();
+  const core = new FakeCore();
+  const home = core.addCalendar({ name: 'Home' });
+  core.addEvent({ calendarId: home.id, title: hostile.title, when: monday });
+  await showApp(core);
+  const details = await openOccurrence(user, hostile.title.replace(/\r\n/g, ' '));
+
+  await user.click(within(details).getByRole('button', { name: 'Delete' }));
+
+  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  expect(ask.querySelector('.body p')!.textContent).toBe(hostile.expected.deleteQuestion);
+  expect(document.querySelector('img, script')).toBeNull();
+});
+
 const weeklyThreeTimes: Repeat = {
   frequency: 'weekly',
   interval: 1,
@@ -574,8 +671,9 @@ test('deleting an Occurrence asks, and “This event” deletes only that one', 
   const details = await screen.findByRole('dialog', { name: 'Yoga' });
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  expect(details).toHaveTextContent('Delete only this event, or all events it repeats with?');
-  await user.click(within(details).getByRole('button', { name: 'This event' }));
+  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  expect(ask).toHaveTextContent('Delete only this event, or all events it repeats with?');
+  await user.click(within(ask).getByRole('button', { name: 'This event' }));
 
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2));
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -593,10 +691,12 @@ test('“All events” deletes the whole Recurring Event, and Cancel keeps it', 
   const details = await screen.findByRole('dialog', { name: 'Yoga' });
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  await user.click(within(details).getByRole('button', { name: 'Cancel' }));
-  expect(within(details).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  await user.click(within(details).getByRole('button', { name: 'All events' }));
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', { name: 'All events' }),
+  );
 
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(0));
   expect(core.events).toEqual([]);
@@ -790,8 +890,9 @@ test('an Exception edits without a repeat, and Delete still asks', async () => {
   const details = await openOccurrence(user, 'Moved');
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  expect(within(details).getByRole('button', { name: 'This event' })).toBeInTheDocument();
-  await user.click(within(details).getByRole('button', { name: 'Cancel' }));
+  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  expect(within(ask).getByRole('button', { name: 'This event' })).toBeInTheDocument();
+  await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
   await user.click(within(details).getByRole('button', { name: 'Edit' }));
 
   expect(screen.queryByRole('combobox', { name: 'Repeat' })).toBeNull();

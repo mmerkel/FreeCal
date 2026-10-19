@@ -1,6 +1,6 @@
 <!--
   The Settings dialog. Every change takes effect and is saved at once, so it
-  has only a Close button. Its sections come in the order Date & time,
+  has no buttons but the ✕. Its sections come in the order Date & time,
   Appearance, Background; a section with no settings yet isn't shown.
 -->
 <script lang="ts">
@@ -50,11 +50,6 @@
   {#if failure}
     <p class="failure" role="alert">{failure}</p>
   {/if}
-  {#snippet actions()}
-    <button type="button" class="button outline" onclick={onclose}>
-      {t('common.close')}
-    </button>
-  {/snippet}
 </Dialog>
 
 <style>

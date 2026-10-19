@@ -35,11 +35,6 @@
   {#if failure}
     <p class="failure" role="alert">{failure}</p>
   {/if}
-  {#snippet actions()}
-    <button type="button" class="button solid" data-initial-focus onclick={onclose}>
-      {t('common.close')}
-    </button>
-  {/snippet}
 </Dialog>
 
 <style>

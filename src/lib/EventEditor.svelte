@@ -2,6 +2,8 @@
   Creates or edits an Event in a modal dialog. The draft is the editor's own:
   it starts from `initial` and nothing from outside changes it afterwards,
   so a re-fetch while the editor is open never overwrites what the user typed.
+  Closing it (✕, Cancel, Escape) asks "Discard changes?" once the draft
+  differs from how it started.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -62,6 +64,30 @@
     start.repeat?.end.kind === 'count' ? start.repeat.end.count : 10,
   );
 
+  /** Every field the user can change, serialized, to tell whether the draft changed. */
+  function snapshot() {
+    return JSON.stringify({
+      title,
+      calendarId,
+      location,
+      description,
+      times,
+      frequency,
+      interval,
+      endKind,
+      untilDate,
+      count,
+    });
+  }
+  const started = untrack(snapshot);
+  /** Whether closing is asking "Discard changes?". */
+  let discarding = $state(false);
+
+  function close() {
+    if (snapshot() === started) oncancel();
+    else discarding = true;
+  }
+
   const when = $derived(whenOf(times));
   const repeat = $derived(repeatOf());
   const problem = $derived(
@@ -110,7 +136,7 @@
   }
 </script>
 
-<Dialog title={t(mode === 'create' ? 'event.newTitle' : 'event.editTitle')} onclose={oncancel}>
+<Dialog title={t(mode === 'create' ? 'event.newTitle' : 'event.editTitle')} onclose={close}>
   <form id="{id}-form" class="form" onsubmit={save}>
     <input
       class="input title"
@@ -243,8 +269,27 @@
     {/if}
   </form>
 
+  {#if discarding}
+    <Dialog role="alertdialog" title={t('event.discardTitle')} onclose={() => (discarding = false)}>
+      <p>{t('event.discardBody')}</p>
+      {#snippet actions()}
+        <button
+          type="button"
+          class="button outline"
+          data-initial-focus
+          onclick={() => (discarding = false)}
+        >
+          {t('event.keepEditing')}
+        </button>
+        <button type="button" class="button danger" onclick={oncancel}>
+          {t('event.discard')}
+        </button>
+      {/snippet}
+    </Dialog>
+  {/if}
+
   {#snippet actions()}
-    <button type="button" class="button outline" onclick={oncancel}>{t('common.cancel')}</button>
+    <button type="button" class="button outline" onclick={close}>{t('common.cancel')}</button>
     <button
       type="submit"
       class="button solid"

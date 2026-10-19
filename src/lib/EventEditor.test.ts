@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
@@ -124,14 +124,66 @@ test('a refused save is reported and the editor stays open with the draft', asyn
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Mine');
 });
 
-test('Cancel and Escape cancel', async () => {
+test('✕, Cancel and Escape cancel an unchanged draft straight away', async () => {
   const user = userEvent.setup();
   const { oncancel } = show();
 
+  await user.click(screen.getByRole('button', { name: 'Close' }));
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
   await user.keyboard('{Escape}');
 
-  expect(oncancel).toHaveBeenCalledTimes(2);
+  expect(oncancel).toHaveBeenCalledTimes(3);
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+});
+
+test('closing a changed draft asks first, and Keep editing keeps it', async () => {
+  const user = userEvent.setup();
+  const { oncancel } = show();
+  await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Dentist');
+
+  for (const close of [
+    () => user.click(screen.getByRole('button', { name: 'Close' })),
+    () => user.click(screen.getByRole('button', { name: 'Cancel' })),
+    () => user.keyboard('{Escape}'),
+  ]) {
+    await close();
+    const ask = screen.getByRole('alertdialog', { name: 'Discard changes?' });
+    expect(within(ask).queryByRole('button', { name: 'Close' })).toBeNull();
+    expect(within(ask).getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    await user.click(within(ask).getByRole('button', { name: 'Keep editing' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  }
+  // Escape in the question answers it like Keep editing.
+  await user.keyboard('{Escape}');
+  await user.keyboard('{Escape}');
+
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(oncancel).not.toHaveBeenCalled();
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Dentist');
+});
+
+test('Discard closes a changed draft', async () => {
+  const user = userEvent.setup();
+  const { oncancel, onsave } = show();
+  await user.click(screen.getByRole('checkbox', { name: 'All day' }));
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  await user.click(screen.getByRole('button', { name: 'Discard' }));
+
+  expect(oncancel).toHaveBeenCalledTimes(1);
+  expect(onsave).not.toHaveBeenCalled();
+});
+
+test('a draft changed back to how it started closes without asking', async () => {
+  const user = userEvent.setup();
+  const { oncancel } = show();
+  await user.type(screen.getByRole('textbox', { name: 'Title' }), 'x{Backspace}');
+  await user.click(screen.getByRole('checkbox', { name: 'All day' }));
+  await user.click(screen.getByRole('checkbox', { name: 'All day' }));
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+  expect(oncancel).toHaveBeenCalledTimes(1);
 });
 
 test('a new draft from outside doesn’t replace what the user typed', async () => {

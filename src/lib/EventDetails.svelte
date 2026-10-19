@@ -1,16 +1,19 @@
 <!--
   An Event's details: its title, time, repeat, location, description and
-  Calendar, with Edit and Delete for Events of writable Calendars; the others
-  say they are read-only and why. Deleting an Occurrence of a Recurring Event
-  asks whether to delete it alone or all.
+  Calendar, with Edit and Delete icons for Events of writable Calendars; the
+  others say they are read-only and why. Delete asks first, and for an
+  Occurrence of a Recurring Event whether to delete it alone or all. A click
+  on the backdrop closes the details.
 -->
 <script lang="ts">
   import Calendar from '@lucide/svelte/icons/calendar';
   import Clock from '@lucide/svelte/icons/clock';
   import Lock from '@lucide/svelte/icons/lock';
   import MapPin from '@lucide/svelte/icons/map-pin';
+  import Pencil from '@lucide/svelte/icons/pencil';
   import Repeat from '@lucide/svelte/icons/repeat';
   import Text from '@lucide/svelte/icons/text';
+  import Trash from '@lucide/svelte/icons/trash-2';
   import type { Calendar as CalendarType, Event, When } from '../core/types';
   import { t } from '../i18n';
   import Dialog from './Dialog.svelte';
@@ -48,21 +51,46 @@
   }: Props = $props();
 
   const writable = $derived(calendar !== undefined && !calendar.readOnly);
+  const title = $derived(event.title || t('event.untitled'));
   const repeat = $derived(describeRepeat(event.repeat, event.customRepeat));
-  /** Whether Delete asks first: for an Event that repeats or is an Exception. */
+  /** Whether Delete asks which Occurrences to delete: for an Event that repeats or is an Exception. */
   const recurring = $derived(
     repeat !== undefined || event.recurrenceId !== null || ondeleteoccurrence !== undefined,
   );
-  /** Whether Delete asks which Occurrences to delete. */
+  /** Whether Delete is asking for confirmation. */
   let asking = $state(false);
 
-  function startDeleting() {
-    if (recurring) asking = true;
-    else ondelete();
+  /** Closes the question, then deletes as answered. */
+  function answer(deleting: () => void) {
+    asking = false;
+    deleting();
   }
 </script>
 
-<Dialog title={event.title || t('event.untitled')} {onclose}>
+<Dialog {title} {onclose} backdropCloses>
+  {#snippet tools()}
+    {#if writable}
+      <button
+        type="button"
+        class="icon-button"
+        aria-label={t('event.edit')}
+        title={t('event.edit')}
+        onclick={onedit}
+      >
+        <Pencil size={16} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label={t('event.delete')}
+        title={t('event.delete')}
+        onclick={() => (asking = true)}
+      >
+        <Trash size={16} aria-hidden="true" />
+      </button>
+    {/if}
+  {/snippet}
+
   <dl class="details">
     <div class="row">
       <dt><Clock size={14} aria-label={t('event.starts')} /></dt>
@@ -107,43 +135,45 @@
       {/if}
     {/if}
   </dl>
-  {#if asking}
-    <p class="question">{t('event.deleteWhich')}</p>
-  {/if}
   {#if failure}
     <p class="failure" role="alert">{failure}</p>
   {/if}
 
-  {#snippet actions()}
-    {#if asking}
-      <button
-        type="button"
-        class="button outline"
-        onclick={() => (asking = false)}
-        {@attach (button) => button.focus()}
-      >
-        {t('common.cancel')}
-      </button>
-      <button type="button" class="button danger" onclick={ondelete}>
-        {t('event.deleteAll')}
-      </button>
-      {#if ondeleteoccurrence}
-        <button type="button" class="button danger" onclick={ondeleteoccurrence}>
-          {t('event.deleteThis')}
-        </button>
+  {#if asking}
+    <Dialog role="alertdialog" title={t('event.deleteTitle')} onclose={() => (asking = false)}>
+      {#if recurring}
+        <p>{t('event.deleteRecurring', { title })}</p>
+        <p>{t('event.deleteWhich')}</p>
+      {:else}
+        <p>{t('event.deleteBody', { title })}</p>
       {/if}
-    {:else}
-      {#if writable}
-        <button type="button" class="button outline danger-text" onclick={startDeleting}>
-          {t('event.delete')}
+      {#snippet actions()}
+        <button
+          type="button"
+          class="button outline"
+          data-initial-focus
+          onclick={() => (asking = false)}
+        >
+          {t('common.cancel')}
         </button>
-        <button type="button" class="button outline" onclick={onedit}>{t('event.edit')}</button>
-      {/if}
-      <button type="button" class="button solid" data-initial-focus onclick={onclose}>
-        {t('event.close')}
-      </button>
-    {/if}
-  {/snippet}
+        {#if recurring}
+          <button type="button" class="button danger" onclick={() => answer(ondelete)}>
+            {t('event.deleteAll')}
+          </button>
+          {#if ondeleteoccurrence}
+            {@const deleteOccurrence = ondeleteoccurrence}
+            <button type="button" class="button danger" onclick={() => answer(deleteOccurrence)}>
+              {t('event.deleteThis')}
+            </button>
+          {/if}
+        {:else}
+          <button type="button" class="button danger" onclick={() => answer(ondelete)}>
+            {t('event.delete')}
+          </button>
+        {/if}
+      {/snippet}
+    </Dialog>
+  {/if}
 </Dialog>
 
 <style>
@@ -196,17 +226,12 @@
     background: var(--colour);
   }
 
-  .failure,
-  .question {
-    margin: var(--space-6) 0 0;
-  }
-
   .failure {
+    margin: var(--space-6) 0 0;
     color: var(--danger);
   }
 
-  .danger-text {
-    margin-inline-end: auto;
-    color: var(--danger);
+  p + p {
+    margin-top: var(--space-4);
   }
 </style>
