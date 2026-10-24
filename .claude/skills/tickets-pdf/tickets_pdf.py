@@ -1,14 +1,21 @@
 import glob, re, subprocess, html, sys, os, shutil
 from datetime import date
 
-# Usage: tickets_pdf.py [feature-dir] [out.pdf]
-FEATURE = sys.argv[1] if len(sys.argv) > 1 else ".scratch/freecal-v1"
-OUT = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else "tickets.pdf")
+# Usage: tickets_pdf.py [--check] [feature-dir] [out.pdf]
+# --check only checks the tickets' header lines and writes nothing.
+CHECK = "--check" in sys.argv[1:]
+ARGS = [a for a in sys.argv[1:] if a != "--check"]
+FEATURE = ARGS[0] if len(ARGS) > 0 else ".scratch/freecal-v1"
+OUT = os.path.abspath(ARGS[1] if len(ARGS) > 1 else "tickets.pdf")
 ISSUES = os.path.join(FEATURE, "issues")
 FEATURE_NAME = os.path.basename(os.path.normpath(FEATURE))
 
 DAYS = {"S": 0.5, "M": 1.5, "L": 4, "XL": 7.5, "-": 0}
 
+# The labels of docs/agents/triage-labels.md, and done.
+STATUSES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix", "done"}
+
+errors = []
 tickets = {}
 for f in sorted(glob.glob(os.path.join(ISSUES, "*.md"))):
     t = open(f).read()
@@ -19,6 +26,12 @@ for f in sorted(glob.glob(os.path.join(ISSUES, "*.md"))):
     sp = re.search(r"\*\*Split into:\*\*\s*(.*)", t)
     e = re.search(r"\*\*Effort:\*\*\s*(XL|S|M|L)\b", t)
     blocked = re.findall(r"\b\d{2}\b", b.group(1)) if b else []
+    if not b:
+        errors.append(f"{f}: no **Blocked by:** line")
+    elif not re.fullmatch(r"none|\d{2}(, \d{2})*", b.group(1).strip()):
+        errors.append(f"{f}: **Blocked by:** must be `none` or two-digit ticket numbers like `08, 69`")
+    if not s or s.group(1) not in STATUSES:
+        errors.append(f"{f}: **Status:** must be one of {', '.join(sorted(STATUSES))}")
     split = re.findall(r"\d{2}", sp.group(1)) if sp else []
     tickets[num] = dict(
         num=num, title=title, blocked=blocked, status=s.group(1) if s else "?",
@@ -26,8 +39,26 @@ for f in sorted(glob.glob(os.path.join(ISSUES, "*.md"))):
     )
 
 missing = [t["file"] for t in tickets.values() if t["effort"] == "-" and not t["split"] and t["status"] != "wontfix"]
-if missing:
-    sys.exit("No **Effort:** line in:\n" + "\n".join(missing))
+errors += [f"{f}: no **Effort:** line" for f in missing]
+for t in tickets.values():
+    for n in t["blocked"] + t["split"]:
+        if n not in tickets:
+            errors.append(f"{t['file']}: ticket {n} doesn't exist")
+
+def cycle(n, path=()):
+    if n in path:
+        return path[path.index(n):] + (n,)
+    for d in tickets[n]["blocked"] + tickets[n]["split"]:
+        if d in tickets and (found := cycle(d, path + (n,))):
+            return found
+    return None
+
+if not errors and (found := next(filter(None, map(cycle, tickets)), None)):
+    errors.append("Tickets block each other in a cycle: " + " → ".join(found))
+if errors:
+    sys.exit("\n".join(errors))
+if CHECK:
+    sys.exit(0)
 
 # A blocker that was split stands for all of its parts.
 def resolve(n):

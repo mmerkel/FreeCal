@@ -2,7 +2,7 @@
 
 **What to build:** FreeCal launches as a Tauri desktop app (Rust core, Tauri shell, Svelte 5 frontend, per ADR 0001). On first launch the Local Account exists, the sidebar shows it, and an empty month view opens on today. Everything the frontend does goes through the core application interface. This ticket also sets up the test seams and the conventions every later ticket relies on.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:** none
 
 **Status:** done
 

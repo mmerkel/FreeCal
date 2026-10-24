@@ -1,4 +1,8 @@
 npx lint-staged
+# Tickets' Status, Effort and Blocked by lines, for every feature with a staged ticket.
+for feature in $(git diff --cached --name-only | sed -n 's#^\(\.scratch/[^/]*\)/issues/[^/]*\.md$#\1#p' | sort -u); do
+  python3 .claude/skills/tickets-pdf/tickets_pdf.py --check "$feature" || exit 1
+done
 # The checks below need code; a commit of only docs or tickets skips them.
 git diff --cached --name-only | grep -qE '\.(rs|ts|js|svelte|css|json|html|toml|lock)$' || exit 0
 
