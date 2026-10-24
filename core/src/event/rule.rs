@@ -10,6 +10,11 @@
 //! A rule is stored text, untrusted like every stored field: one FreeCal
 //! can't read gives no further Occurrences, so its Event shows as its first
 //! Occurrence only.
+//!
+//! A leaf of the Event module: outside it, only [`span`] and [`imported`]
+//! are for use. The other functions open to the crate are so only while
+//! `scope.rs` and the single-Event paths in `lib.rs` still use them, until
+//! ticket 84 moves those into the module.
 
 use std::str::FromStr;
 
@@ -18,8 +23,9 @@ use chrono_tz::Tz;
 use rrule::{RRule, RRuleSet, Unvalidated};
 use serde::{Deserialize, Serialize};
 
-use crate::event::{StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text};
-use crate::store::EventFields;
+use super::when::{
+    EventFields, StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text,
+};
 use crate::{CoreError, Result};
 
 /// A repeat rule as the editor sets it.
@@ -156,10 +162,25 @@ pub(crate) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -
     Ok(text)
 }
 
-/// A rule from a file, as FreeCal stores it: as given, but with an `UNTIL`
-/// in the form RFC 5545 asks for the Event at `when`; one without a zone is
-/// read in the Event Time Zone. None when FreeCal can't expand it.
-pub(crate) fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
+/// A rule from a file with the recurrence IDs of its `EXDATE`s, as FreeCal
+/// stores them: the rule as given, but with an `UNTIL` in the form RFC 5545
+/// asks for the Event at `when`, where one without a zone is read in the
+/// Event Time Zone; the recurrence IDs sorted, each once. None when FreeCal
+/// can't expand the rule.
+pub(crate) fn imported(
+    text: &str,
+    exdates: impl IntoIterator<Item = String>,
+    when: &StoredWhen,
+) -> Option<(String, String)> {
+    let rule = imported_rule(text, when)?;
+    let exdates = exdates
+        .into_iter()
+        .fold(String::new(), |exdates, id| with_exdate(&exdates, &id));
+    Some((rule, exdates))
+}
+
+/// The rule of [`imported`].
+fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
     let rule = Rule::parse(text)?;
     let mut stored = rule.without(&[]);
     if let Some(until) = rule.until_wall(when) {
@@ -176,10 +197,11 @@ pub(crate) fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
     Some(stored)
 }
 
-/// The derived start and end of an Event as Unix seconds (see
-/// [`StoredWhen::instants`]): for a Recurring Event, the start of its first
-/// Occurrence and the end of its last, `i64::MAX` when it never ends.
-pub(crate) fn instants(fields: &EventFields) -> Result<(i64, i64)> {
+/// The span of an Event's Occurrences: its derived start and end as Unix
+/// seconds (see [`StoredWhen::instants`]), for a Recurring Event the start of
+/// its first Occurrence and the end of its last, `i64::MAX` when it never
+/// ends.
+pub(crate) fn span(fields: &EventFields) -> Result<(i64, i64)> {
     let first = fields.when.instants()?;
     let Some(starts) = OccurrenceStarts::of(fields) else {
         return Ok(first);
@@ -197,7 +219,7 @@ pub(crate) fn instants(fields: &EventFields) -> Result<(i64, i64)> {
     Ok((first.0, end))
 }
 
-/// The most Occurrences [`instants`] counts to find the last one, and
+/// The most Occurrences [`span`] counts to find the last one, and
 /// [`occurrences_in`] walks to find those in a range; a rule with more
 /// counts as never ending.
 const MAX_COUNTED: usize = 50_000;
@@ -207,7 +229,7 @@ const MAX_COUNTED: usize = 50_000;
 /// starts. Without those cancelled in its `exdates` and those in
 /// `exceptions`, the recurrence IDs of its changed Occurrences, which are
 /// Events of their own. None for an Event that doesn't repeat.
-pub(crate) fn occurrences_in(
+pub(super) fn occurrences_in(
     fields: &EventFields,
     exceptions: &[String],
     range: &StoredRange,

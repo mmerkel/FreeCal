@@ -4,9 +4,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
+use rusqlite::{
+    Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params, params_from_iter,
+};
 
-use crate::event::{StoredRange, StoredWhen};
+use crate::event::{EventFields, OriginalServerData, StoredRange, StoredWhen, rule};
 use crate::remote::SyncPoint;
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
@@ -332,7 +334,7 @@ fn recompute_instants(tx: &Transaction) -> Result<()> {
             .query_map([], |row| Ok((row.get::<_, i64>(0)?, event_fields(row, 1)?)))?,
     )?;
     for (id, fields) in events {
-        if let Ok((start, end)) = fields.instants() {
+        if let Ok((start, end)) = rule::span(&fields) {
             tx.execute(
                 "UPDATE event SET start_utc = ?2, end_utc = ?3 WHERE id = ?1",
                 params![id, start, end],
@@ -414,54 +416,6 @@ pub struct Store {
     conn: Connection,
 }
 
-/// An Event's fields as the Local Store holds them.
-#[derive(Debug, Clone)]
-pub struct EventFields {
-    pub title: String,
-    pub when: StoredWhen,
-    pub location: String,
-    /// The description exactly as it was received or written.
-    pub description: String,
-    /// Whether `description` is HTML (from Google or an import) rather than
-    /// plain text.
-    pub description_html: bool,
-    /// Whether the Event arrived with a floating time that was pinned to its
-    /// Event Time Zone (ADR 0007).
-    pub zone_pinned: bool,
-    /// A Recurring Event's repeat rule, an RFC 5545 `RRULE` value.
-    pub rule: Option<String>,
-    /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
-    /// separated by commas.
-    pub exdates: String,
-    /// For an Exception, the recurrence ID of the Occurrence it changed.
-    pub recurrence_id: Option<String>,
-    /// For an Event pulled from a server, what the server sent for it. An
-    /// Exception has none: its Recurring Event's holds it.
-    pub server_data: Option<OriginalServerData>,
-}
-
-/// An Event's original server data (ADR 0004): the object a server holds
-/// it in, as received, so that fields FreeCal doesn't understand survive
-/// writes, and Change Journal entries restore exact versions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OriginalServerData {
-    /// The object's address on the server, as the server gave it.
-    pub href: String,
-    /// The object's ETag, which names its version; none if the server gave
-    /// none.
-    pub etag: Option<String>,
-    /// The object as received, such as a CalDAV iCalendar object.
-    pub data: String,
-}
-
-impl EventFields {
-    /// The derived start and end as Unix seconds, for a Recurring Event
-    /// those of all its Occurrences together.
-    pub fn instants(&self) -> Result<(i64, i64)> {
-        crate::recurrence::instants(self)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StoredEvent {
     pub calendar_id: CalendarId,
@@ -472,9 +426,25 @@ pub struct StoredEvent {
 pub struct RangeEvent {
     pub id: EventId,
     pub calendar_id: CalendarId,
-    pub uid: String,
     pub fields: EventFields,
     pub start_utc: i64,
+}
+
+/// Which Events [`Store::events_with_uid`] gives.
+#[derive(Clone, Copy)]
+pub enum Uid<'a> {
+    /// Those with the Calendar and UID of the Event.
+    Of(EventId),
+    /// Those of the Calendar with the UID.
+    In(CalendarId, &'a str),
+}
+
+/// An Event with its Calendar and UID.
+pub struct UidEvent {
+    pub id: EventId,
+    pub calendar_id: CalendarId,
+    pub uid: String,
+    pub fields: EventFields,
 }
 
 impl Store {
@@ -763,53 +733,33 @@ impl Store {
             .ok_or(CoreError::EventNotFound(id))
     }
 
-    /// The Event of a Calendar with the UID `uid`, the first if the Local
-    /// Store has several, and not an Exception.
-    pub fn find_event_by_uid(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Option<(EventId, EventFields)>> {
-        Ok(self
-            .conn
-            .query_row(
-                &format!(
-                    "SELECT id, {EVENT_FIELDS} FROM event WHERE calendar_id = ?1 AND uid = ?2 \
-                     AND recurrence_id IS NULL ORDER BY id LIMIT 1"
-                ),
-                params![calendar_id.0, uid],
-                |row| Ok((EventId(row.get(0)?), event_fields(row, 1)?)),
-            )
-            .optional()?)
-    }
-
-    /// The Exceptions of a Calendar with the UID `uid`, in the order they
-    /// were added.
-    pub fn exceptions(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Vec<(EventId, EventFields)>> {
+    /// Every Event of a Calendar with a UID, Exceptions too, in the order
+    /// they were added: those of `uid`, or those sharing an Event's.
+    pub fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
+        let (condition, key) = match uid {
+            Uid::Of(id) => (
+                "(calendar_id, uid) = (SELECT calendar_id, uid FROM event WHERE id = ?1)",
+                vec![Value::Integer(id.0)],
+            ),
+            Uid::In(calendar_id, uid) => (
+                "calendar_id = ?1 AND uid = ?2",
+                vec![Value::Integer(calendar_id.0), Value::Text(uid.to_owned())],
+            ),
+        };
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, {EVENT_FIELDS} FROM event WHERE calendar_id = ?1 AND uid = ?2 \
-             AND recurrence_id IS NOT NULL ORDER BY id"
+            "SELECT id, calendar_id, uid, {EVENT_FIELDS} FROM event WHERE {condition} ORDER BY id"
         ))?;
-        let exceptions = stmt
-            .query_map(params![calendar_id.0, uid], |row| {
-                Ok((EventId(row.get(0)?), event_fields(row, 1)?))
+        let events = stmt
+            .query_map(params_from_iter(key), |row| {
+                Ok(UidEvent {
+                    id: EventId(row.get(0)?),
+                    calendar_id: CalendarId(row.get(1)?),
+                    uid: row.get(2)?,
+                    fields: event_fields(row, 3)?,
+                })
             })?
             .collect::<rusqlite::Result<_>>()?;
-        Ok(exceptions)
-    }
-
-    /// The UID of the Event `id`.
-    pub fn event_uid(&self, id: EventId) -> Result<String> {
-        self.conn
-            .query_row("SELECT uid FROM event WHERE id = ?1", [id.0], |row| {
-                row.get(0)
-            })
-            .optional()?
-            .ok_or(CoreError::EventNotFound(id))
+        Ok(events)
     }
 
     /// The UIDs of a Calendar's Events.
@@ -827,7 +777,7 @@ impl Store {
     /// range (see [`StoredRange::overlaps`]).
     pub fn shown_events_in(&self, range: &StoredRange) -> Result<Vec<RangeEvent>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT event.id, event.calendar_id, event.uid, event.start_utc, \
+            "SELECT event.id, event.calendar_id, event.start_utc, \
              {} \
              FROM event JOIN calendar ON calendar.id = event.calendar_id \
              WHERE calendar.shown AND CASE event.all_day \
@@ -853,9 +803,8 @@ impl Store {
                     Ok(RangeEvent {
                         id: EventId(row.get(0)?),
                         calendar_id: CalendarId(row.get(1)?),
-                        uid: row.get(2)?,
-                        start_utc: row.get(3)?,
-                        fields: event_fields(row, 4)?,
+                        start_utc: row.get(2)?,
+                        fields: event_fields(row, 3)?,
                     })
                 },
             )?

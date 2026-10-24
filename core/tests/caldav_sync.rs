@@ -213,6 +213,31 @@ fn a_sync_deletes_an_event_deleted_on_the_server_with_its_exceptions() {
 }
 
 #[test]
+fn a_sync_replaces_a_changed_occurrence_whose_recurrence_id_is_written_differently() {
+    let weekly = |moved: &str| {
+        ics(&format!(
+            "BEGIN:VEVENT\nUID:weekly\nSUMMARY:Weekly\nDTSTART:20261005T080000Z\n\
+             DTEND:20261005T090000Z\nRRULE:FREQ=WEEKLY;COUNT=3\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:weekly\nSUMMARY:{moved}\nRECURRENCE-ID:20261012T080000Z\n\
+             DTSTART:20261012T090000Z\nDTEND:20261012T100000Z\nEND:VEVENT\n"
+        ))
+    };
+    let synced = Synced::with(&[("weekly", weekly("Moved"))]);
+    let id = synced.event("Moved").id;
+    // Another form of the same time, as a stored field may have it.
+    synced.harness.arrange_local_store(&format!(
+        "UPDATE event SET recurrence_id = '2026-10-12T8:0:0' WHERE id = {}",
+        id.0
+    ));
+    synced.put("weekly", weekly("Moved again"));
+
+    synced.sync();
+
+    assert_eq!(synced.titles(), ["Weekly", "Moved again", "Weekly"]);
+    assert_eq!(synced.event("Moved again").id, id);
+}
+
+#[test]
 fn a_sync_that_changes_nothing_records_no_unit_and_sends_nothing() {
     let synced = Synced::with(&[("standup", standup("Standup"))]);
 

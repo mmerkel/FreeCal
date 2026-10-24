@@ -4,7 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{CalendarId, CoreError, ImportedWhen, Repeat, Result, StructuredText};
+use crate::{CoreError, ImportedWhen, Result};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -49,91 +49,11 @@ impl When {
 
     /// The date it starts on, and whether it is timed, for ordering:
     /// all-day Events come first on their date.
-    fn start_date(&self) -> (NaiveDate, bool) {
+    pub(super) fn start_date(&self) -> (NaiveDate, bool) {
         match *self {
             When::AllDay { start, .. } => (start, false),
             When::Timed { start, .. } => (start.date(), true),
         }
-    }
-}
-
-/// What the user gives an Event when creating or editing it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct EventDraft {
-    pub calendar_id: CalendarId,
-    pub title: String,
-    pub when: When,
-    pub location: String,
-    /// The plain-text description. When it equals the plain-text form of an
-    /// Event's description, the original is kept byte for byte.
-    pub description: String,
-    /// The repeat rule, none for an Event that doesn't repeat. When it
-    /// equals an Event's `repeat`, its stored rule is kept as it is.
-    pub repeat: Option<Repeat>,
-}
-
-/// An Event with everything its details and editor show.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct Event {
-    pub id: EventId,
-    pub calendar_id: CalendarId,
-    pub title: String,
-    pub when: When,
-    pub location: StructuredText,
-    pub description: StructuredText,
-    /// The zone FreeCal gave the Event when it arrived with a time of day but
-    /// no time zone (ADR 0007), which its details mention.
-    pub pinned_zone: Option<String>,
-    /// A Recurring Event's repeat rule as the editor shows it, for an
-    /// Exception its Recurring Event's; none for an Event that doesn't
-    /// repeat, and for a rule the editor can't show, such as an hourly one.
-    pub repeat: Option<Repeat>,
-    /// Whether the repeat rule has more than `repeat` shows, such as the
-    /// weekdays of a weekly rule. Those are kept while the frequency stays.
-    pub custom_repeat: bool,
-    /// For an Exception, the recurrence ID of the Occurrence of its Recurring
-    /// Event that it changed; none for every other Event.
-    pub recurrence_id: Option<String>,
-}
-
-/// One dated appearance of an Event in the grid. A single Event has exactly
-/// one; Recurring Events get one per date they fall on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct Occurrence {
-    /// The Event it belongs to: its Recurring Event, or the Exception that
-    /// changed it.
-    pub event_id: EventId,
-    pub calendar_id: CalendarId,
-    pub title: String,
-    pub when: When,
-    /// Which Occurrence of a Recurring Event this is: its original start, as
-    /// text that only the core reads. None for a single Event.
-    pub recurrence_id: Option<String>,
-}
-
-impl Occurrence {
-    /// Orders Occurrences, each given with its derived UTC start, by the
-    /// date they start on in the Display Time Zone and then by when they
-    /// happen, which differs from their wall time in the repeated hour.
-    pub(crate) fn ordered(mut occurrences: Vec<(i64, Occurrence)>) -> Vec<Occurrence> {
-        occurrences.sort_by(|(a_utc, a), (b_utc, b)| {
-            (a.when.start_date(), a_utc, a.event_id.0, &a.recurrence_id).cmp(&(
-                b.when.start_date(),
-                b_utc,
-                b.event_id.0,
-                &b.recurrence_id,
-            ))
-        });
-        occurrences
-            .into_iter()
-            .map(|(_, occurrence)| occurrence)
-            .collect()
     }
 }
 
@@ -322,6 +242,46 @@ impl StoredWhen {
             instant(wall(&self.end)?, end_zone),
         ))
     }
+}
+
+/// An Event's fields as the Local Store holds them.
+#[derive(Debug, Clone)]
+pub(crate) struct EventFields {
+    pub title: String,
+    pub when: StoredWhen,
+    pub location: String,
+    /// The description exactly as it was received or written.
+    pub description: String,
+    /// Whether `description` is HTML (from Google or an import) rather than
+    /// plain text.
+    pub description_html: bool,
+    /// Whether the Event arrived with a floating time that was pinned to its
+    /// Event Time Zone (ADR 0007).
+    pub zone_pinned: bool,
+    /// A Recurring Event's repeat rule, an RFC 5545 `RRULE` value.
+    pub rule: Option<String>,
+    /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
+    /// separated by commas.
+    pub exdates: String,
+    /// For an Exception, the recurrence ID of the Occurrence it changed.
+    pub recurrence_id: Option<String>,
+    /// For an Event pulled from a server, what the server sent for it. An
+    /// Exception has none: its Recurring Event's holds it.
+    pub server_data: Option<OriginalServerData>,
+}
+
+/// An Event's original server data (ADR 0004): the object a server holds
+/// it in, as received, so that fields FreeCal doesn't understand survive
+/// writes, and Change Journal entries restore exact versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginalServerData {
+    /// The object's address on the server, as the server gave it.
+    pub href: String,
+    /// The object's ETag, which names its version; none if the server gave
+    /// none.
+    pub etag: Option<String>,
+    /// The object as received, such as a CalDAV iCalendar object.
+    pub data: String,
 }
 
 /// The bounds of the dates `from` up to `to` (exclusive) in the Display Time

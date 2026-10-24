@@ -12,7 +12,6 @@ mod event;
 mod import;
 mod journal;
 mod keyring;
-mod recurrence;
 mod remote;
 mod scope;
 mod settings;
@@ -36,28 +35,28 @@ pub use account::{Account, AccountId, AddedAccount, CalDavLogin, Provider, Serve
 pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
-pub use event::{Event, EventDraft, EventId, Occurrence, When};
+pub use event::{
+    Event, EventDraft, EventId, Frequency, Occurrence, OriginalServerData, Repeat, RepeatEnd, When,
+};
 pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use journal::{Changed, UnitId};
 pub use keyring::{Keyring, KeyringError};
-pub use recurrence::{Frequency, Repeat, RepeatEnd};
 pub use remote::FIRST_SYNC_PAGE;
 pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
-pub use store::OriginalServerData;
 pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
-use event::{StoredRange, StoredWhen};
+use event::{EventFields, Loaded, Opened, StoredWhen, rule};
 use journal::{Origin, Unit};
 use remote::{Remote, SyncPoint};
-use store::{EventFields, Store, StoredEvent};
+use store::{Store, StoredEvent};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -263,8 +262,8 @@ impl Core {
                 self.record(Origin::FirstSync, |unit| {
                     for event in &events {
                         // A server may list an Event twice.
-                        if unit.find_event_by_uid(id, &event.uid)?.is_none() {
-                            event.create_in(unit, id, &event.uid)?;
+                        if !Loaded::of_uid(unit, id, &event.uid)?.exists() {
+                            event::create(unit, id, &event.uid, event)?;
                         }
                     }
                     Ok(())
@@ -511,51 +510,12 @@ impl Core {
     /// Events are expanded here, in wall time in their Event Time Zone, and
     /// their Exceptions stand in for the Occurrences they changed.
     pub fn occurrences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Occurrence>> {
-        let zone = self.clock.time_zone();
-        let range = StoredRange::new(from, to, zone);
-        let mut occurrences = Vec::new();
-        let store = self.store();
-        for event in store.shown_events_in(&range)? {
-            let expanded = match event.fields.rule {
-                None => None,
-                Some(_) => {
-                    let exceptions: Vec<String> = store
-                        .exceptions(event.calendar_id, &event.uid)?
-                        .into_iter()
-                        .filter_map(|(_, fields)| fields.recurrence_id)
-                        .collect();
-                    recurrence::occurrences_in(&event.fields, &exceptions, &range)?
-                }
-            };
-            let occurrence = |when: &StoredWhen, recurrence_id| -> Result<Occurrence> {
-                Ok(Occurrence {
-                    event_id: event.id,
-                    calendar_id: event.calendar_id,
-                    title: event.fields.title.clone(),
-                    when: when.to_when(zone)?,
-                    recurrence_id,
-                })
-            };
-            match expanded {
-                Some(found) => {
-                    for (recurrence_id, when) in found {
-                        let start_utc = when.instants()?.0;
-                        occurrences.push((start_utc, occurrence(&when, Some(recurrence_id))?));
-                    }
-                }
-                None => occurrences.push((
-                    event.start_utc,
-                    occurrence(&event.fields.when, event.fields.recurrence_id.clone())?,
-                )),
-            }
-        }
-        Ok(Occurrence::ordered(occurrences))
+        event::occurrences(&self.store(), from, to, self.clock.time_zone())
     }
 
     /// An Event with everything its details and editor show.
     pub fn event(&self, id: EventId) -> Result<Event> {
-        let stored = self.store().find_event(id)?;
-        self.to_event(id, stored)
+        Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
     }
 
     /// What the server sent for an Event pulled from it, its original
@@ -571,7 +531,7 @@ impl Core {
         let when = StoredWhen::new(draft.when, self.clock.time_zone())?;
         let rule = draft
             .repeat
-            .map(|repeat| recurrence::rule_text(repeat, None, &when))
+            .map(|repeat| rule::rule_text(repeat, None, &when))
             .transpose()?;
         let event = StoredEvent {
             calendar_id: draft.calendar_id,
@@ -589,8 +549,7 @@ impl Core {
             },
         };
         let created = self.record(Origin::UserAction, |unit| {
-            let id = unit.create(&uuid::Uuid::new_v4().to_string(), &event)?;
-            Ok((id, event))
+            unit.create(&uuid::Uuid::new_v4().to_string(), &event)
         })?;
         self.changed_event(created)
     }
@@ -612,7 +571,7 @@ impl Core {
             let when = old.when.edit(draft.when, zone)?;
             let rule = draft
                 .repeat
-                .map(|repeat| recurrence::rule_text(repeat, None, &when))
+                .map(|repeat| rule::rule_text(repeat, None, &when))
                 .transpose()?;
             let (description, description_html) = if draft.description == description_of(&old).text
             {
@@ -634,7 +593,7 @@ impl Core {
                 },
             };
             unit.replace(id, &after)?;
-            Ok((id, after))
+            Ok(id)
         })?;
         self.changed_event(edited)
     }
@@ -655,7 +614,7 @@ impl Core {
             event.fields.zone_pinned &= edited == event.fields.when;
             event.fields.when = edited;
             unit.replace(id, &event)?;
-            Ok((id, event))
+            Ok(id)
         })?;
         self.changed_event(rescheduled)
     }
@@ -734,25 +693,7 @@ impl Core {
     /// Exceptions.
     pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
         self.record(Origin::UserAction, |unit| {
-            let event = unit.find_event(id)?;
-            let uid = unit.event_uid(id)?;
-            let mut deleted = vec![id];
-            if event.fields.recurrence_id.is_some() {
-                deleted.extend(
-                    unit.find_event_by_uid(event.calendar_id, &uid)?
-                        .map(|(id, _)| id),
-                );
-            }
-            if event.fields.rule.is_some() || event.fields.recurrence_id.is_some() {
-                deleted.extend(
-                    unit.exceptions(event.calendar_id, &uid)?
-                        .into_iter()
-                        .map(|(id, _)| id),
-                );
-            }
-            deleted.sort_unstable_by_key(|id| id.0);
-            deleted.dedup();
-            deleted.into_iter().try_for_each(|id| unit.delete(id))
+            Opened::load(unit, id)?.delete(unit)
         })
     }
 
@@ -762,37 +703,8 @@ impl Core {
     /// Exception, and an Exception that changed it is deleted. The only
     /// Occurrence of a single Event is the Event.
     pub fn delete_occurrence(&self, id: EventId, recurrence_id: &str) -> Result<Changed<()>> {
-        let cancelled =
-            recurrence::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
         self.record(Origin::UserAction, |unit| {
-            let event = unit.find_event(id)?;
-            let calendar_id = event.calendar_id;
-            let uid = unit.event_uid(id)?;
-            let recurring = match &event.fields.recurrence_id {
-                Some(_) => unit.find_event_by_uid(calendar_id, &uid)?,
-                None => Some((id, event.fields)),
-            }
-            .filter(|(_, fields)| fields.rule.is_some());
-            for (exception, fields) in unit.exceptions(calendar_id, &uid)? {
-                let changed = fields.recurrence_id.as_deref();
-                if changed.and_then(recurrence::recurrence_id).as_ref() == Some(&cancelled) {
-                    unit.delete(exception)?;
-                }
-            }
-            match recurring {
-                Some((recurring_id, fields)) => unit.replace(
-                    recurring_id,
-                    &StoredEvent {
-                        calendar_id,
-                        fields: EventFields {
-                            exdates: recurrence::with_exdate(&fields.exdates, &cancelled),
-                            ..fields
-                        },
-                    },
-                ),
-                None if unit.exists(id)? => unit.delete(id),
-                None => Ok(()),
-            }
+            event::cancel_occurrence(unit, id, recurrence_id)
         })
     }
 
@@ -861,46 +773,10 @@ impl Core {
         }
     }
 
-    fn changed_event(&self, changed: Changed<(EventId, StoredEvent)>) -> Result<Changed<Event>> {
-        let (id, stored) = changed.value;
-        self.to_event(id, stored).map(|value| Changed {
+    fn changed_event(&self, changed: Changed<EventId>) -> Result<Changed<Event>> {
+        self.event(changed.value).map(|value| Changed {
             unit: changed.unit,
             value,
-        })
-    }
-
-    fn to_event(&self, id: EventId, stored: StoredEvent) -> Result<Event> {
-        let description = description_of(&stored.fields);
-        // An Exception repeats with its Recurring Event, which the editor
-        // can change from it.
-        let recurring = match stored.fields.recurrence_id {
-            Some(_) => {
-                let store = self.store();
-                let uid = store.event_uid(id)?;
-                store.find_event_by_uid(stored.calendar_id, &uid)?
-            }
-            None => None,
-        };
-        let (repeat, custom_repeat) = recurrence::repeat_of(
-            recurring
-                .as_ref()
-                .map_or(&stored.fields, |(_, fields)| fields),
-        );
-        let fields = stored.fields;
-        Ok(Event {
-            id,
-            calendar_id: stored.calendar_id,
-            title: fields.title,
-            when: fields.when.to_when(self.clock.time_zone())?,
-            location: StructuredText::from_plain_text(&fields.location),
-            description,
-            pinned_zone: fields
-                .zone_pinned
-                .then_some(fields.when.start_zone)
-                .flatten(),
-            repeat,
-            custom_repeat,
-            recurrence_id: fields.recurrence_id,
         })
     }
 

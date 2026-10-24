@@ -23,11 +23,9 @@ use icalendar::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::event::{StoredWhen, instant, wall_text};
+use crate::event::{self, Loaded, OriginalServerData, StoredWhen, instant, rule, wall_text};
 use crate::journal::{Unit, UnitId};
-use crate::recurrence;
-use crate::store::{EventFields, OriginalServerData, StoredEvent};
-use crate::{CalendarId, CoreError, EventId, Result, StructuredText};
+use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
 /// The most a file to import may hold, and the most the `.ics` files in a
@@ -163,87 +161,6 @@ impl ImportedEvent {
     pub fn location(&self) -> StructuredText {
         StructuredText::from_plain_text(&self.location)
     }
-
-    /// Adds it with its Exceptions to the Calendar `calendar_id`, under the
-    /// UID `uid`.
-    pub(crate) fn create_in(
-        &self,
-        unit: &mut Unit,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<()> {
-        let new = |fields| StoredEvent {
-            calendar_id,
-            fields,
-        };
-        unit.create(uid, &new(self.fields()))?;
-        for exception in &self.exceptions {
-            unit.create(uid, &new(exception.fields()))?;
-        }
-        Ok(())
-    }
-
-    /// Makes the Event `id` of the Calendar `calendar_id`, which has
-    /// `previous`, this version, under its UID. Exceptions are matched by
-    /// the Occurrence they changed: those it has replace them or are added,
-    /// and the Calendar's others of its UID are deleted.
-    pub(crate) fn update_in(
-        &self,
-        unit: &mut Unit,
-        calendar_id: CalendarId,
-        id: EventId,
-        previous: &EventFields,
-    ) -> Result<()> {
-        let new = |fields| StoredEvent {
-            calendar_id,
-            fields,
-        };
-        unit.replace(id, &new(self.fields_over(previous)))?;
-        let mut left = unit.exceptions(calendar_id, &self.uid)?;
-        for exception in &self.exceptions {
-            let same = left
-                .iter()
-                .position(|(_, fields)| fields.recurrence_id == exception.recurrence_id);
-            match same.map(|index| left.remove(index)) {
-                Some((id, previous)) => unit.replace(id, &new(exception.fields_over(&previous)))?,
-                None => _ = unit.create(&self.uid, &new(exception.fields()))?,
-            }
-        }
-        for (id, _) in left {
-            unit.delete(id)?;
-        }
-        Ok(())
-    }
-
-    fn fields(&self) -> EventFields {
-        EventFields {
-            title: self.title.clone(),
-            when: StoredWhen::imported(&self.when),
-            location: self.location.clone(),
-            description: self.description.clone(),
-            description_html: self.description_html,
-            zone_pinned: self.zone_pinned,
-            rule: self.rule.clone(),
-            exdates: self.exdates.clone(),
-            recurrence_id: self.recurrence_id.clone(),
-            server_data: self.server_data.clone(),
-        }
-    }
-
-    /// Its fields as the new version of an Event that has `previous`: one
-    /// floating end takes the zone of the other (ADR 0007, rule 3), so only
-    /// a version floating at both keeps the zone pinned before (rule 2).
-    fn fields_over(&self, previous: &EventFields) -> EventFields {
-        let fields = self.fields();
-        if self.all_floating && previous.zone_pinned {
-            EventFields {
-                when: fields.when.in_zones_of(&previous.when),
-                ..fields
-            }
-        } else {
-            fields
-        }
-    }
 }
 
 /// When an imported Event takes place: a timed Event's wall times each with
@@ -306,20 +223,21 @@ pub(crate) fn run(
         skipped: 0,
     };
     for event in &preview.events {
-        match (unit.find_event_by_uid(calendar_id, &event.uid)?, existing) {
-            (Some(_), ExistingEvents::Skip) => outcome.skipped += 1,
-            (Some((event_id, previous)), ExistingEvents::Update) => {
+        let loaded = Loaded::of_uid(unit, calendar_id, &event.uid)?;
+        match (loaded.exists(), existing) {
+            (true, ExistingEvents::Skip) => outcome.skipped += 1,
+            (true, ExistingEvents::Update) => {
                 outcome.updated += 1;
-                event.update_in(unit, calendar_id, event_id, &previous)?;
+                loaded.take(unit, event)?;
             }
-            // A new Event, or a copy of one the Calendar has.
-            (found, _) => {
+            (false, _) => {
                 outcome.imported += 1;
-                let uid = match found {
-                    None => event.uid.clone(),
-                    Some(_) => uuid::Uuid::new_v4().to_string(),
-                };
-                event.create_in(unit, calendar_id, &uid)?;
+                event::create(unit, calendar_id, &event.uid, event)?;
+            }
+            (true, ExistingEvents::Copy) => {
+                outcome.imported += 1;
+                let uid = uuid::Uuid::new_v4().to_string();
+                event::create(unit, calendar_id, &uid, event)?;
             }
         }
     }
@@ -404,7 +322,7 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         if recurring
             .exceptions
             .iter()
-            .all(|known| known.recurrence_id.as_ref() != Some(&id))
+            .all(|known| !event::same_recurrence_id(known.recurrence_id.as_deref(), Some(&id)))
         {
             exception.recurrence_id = Some(id);
             recurring.exceptions.push(exception);
@@ -492,26 +410,23 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
             let (when, zone_pinned, all_floating) = zones.when(start, end, duration, display);
             let description = event.get_description().unwrap_or_default();
             let original = event.get_recurrence_id().map(|time| zones.time(time));
+            let exdates = event
+                .multi_properties()
+                .get("EXDATE")
+                .into_iter()
+                .flatten()
+                .flat_map(single_values)
+                .filter_map(|exdate| DatePerhapsTime::from_property(&exdate))
+                .map(|exdate| recurrence_id_of(&zones.time(exdate), &when));
             // A rule FreeCal can't expand leaves the Event as its first
             // Occurrence.
-            let rule = event
+            let (rule, exdates) = event
                 .property_value("RRULE")
                 .filter(|_| original.is_none())
-                .and_then(|rule| recurrence::imported_rule(rule, &StoredWhen::imported(&when)));
-            let exdates = match rule {
-                None => String::new(),
-                Some(_) => event
-                    .multi_properties()
-                    .get("EXDATE")
-                    .into_iter()
-                    .flatten()
-                    .flat_map(single_values)
-                    .filter_map(|exdate| DatePerhapsTime::from_property(&exdate))
-                    .map(|exdate| recurrence_id_of(&zones.time(exdate), &when))
-                    .fold(String::new(), |exdates, id| {
-                        recurrence::with_exdate(&exdates, &id)
-                    }),
-            };
+                .and_then(|rule| rule::imported(rule, exdates, &StoredWhen::imported(&when)))
+                .map_or((None, String::new()), |(rule, exdates)| {
+                    (Some(rule), exdates)
+                });
             let imported = ImportedEvent {
                 uid: event
                     .get_uid()

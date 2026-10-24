@@ -566,6 +566,32 @@ fn an_import_update_replaces_the_changed_occurrences_and_the_undo_restores_them(
 }
 
 #[test]
+fn an_import_update_replaces_a_changed_occurrence_whose_recurrence_id_is_written_differently() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+    let moved = occurrences(&core, "2026-10-26", "2026-10-27").remove(0);
+    // Another form of the same time, as a stored field may have it.
+    harness.arrange_local_store(&format!(
+        "UPDATE event SET recurrence_id = '2026-10-26T9:0:0' WHERE id = {}",
+        moved.event_id.0
+    ));
+    let again = WEEKLY_FROM_A_FILE.replace("Team (moved)", "Team (moved again)");
+
+    import(&core, home.id, &again, ExistingEvents::Update);
+
+    let now = occurrences(&core, "2026-10-26", "2026-10-27");
+    assert_eq!(
+        now.iter()
+            .map(|occurrence| (occurrence.title.as_str(), occurrence.event_id))
+            .collect::<Vec<_>>(),
+        [("Team (moved again)", moved.event_id)]
+    );
+    assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
+}
+
+#[test]
 fn a_custom_rule_from_a_file_keeps_its_weekdays_while_its_frequency_stays() {
     let harness = Harness::new();
     let core = harness.open();

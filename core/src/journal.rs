@@ -7,7 +7,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::store::{EVENT_FIELDS, EventFields, Store, StoredEvent, event_fields};
+use crate::event::rule;
+use crate::store::{EVENT_FIELDS, Store, StoredEvent, Uid, UidEvent, event_fields};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// A Change Journal unit: what undoes a change, or changes made together.
@@ -186,24 +187,8 @@ impl Unit<'_> {
         self.store.find_event(id)
     }
 
-    pub fn find_event_by_uid(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Option<(EventId, EventFields)>> {
-        self.store.find_event_by_uid(calendar_id, uid)
-    }
-
-    pub fn exceptions(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Vec<(EventId, EventFields)>> {
-        self.store.exceptions(calendar_id, uid)
-    }
-
-    pub fn event_uid(&self, id: EventId) -> Result<String> {
-        self.store.event_uid(id)
+    pub fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
+        self.store.events_with_uid(uid)
     }
 
     /// The Event held in the server object at `href` in a Calendar, with
@@ -222,20 +207,11 @@ impl Unit<'_> {
         self.store.set_synced(calendar_id, token)
     }
 
-    /// Whether the Event `id` is still there.
-    pub fn exists(&self, id: EventId) -> Result<bool> {
-        Ok(self.store.connection().query_row(
-            "SELECT EXISTS (SELECT 1 FROM event WHERE id = ?1)",
-            [id.0],
-            |row| row.get(0),
-        )?)
-    }
-
     /// Adds an Event with the UID `uid`.
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
         self.writable(event.calendar_id)?;
         let event = &self.with_server_data(None, event);
-        let id = write(self.store, None, uid, event, event.fields.instants()?)?;
+        let id = write(self.store, None, uid, event, rule::span(&event.fields)?)?;
         self.entry(id, uid, None, Some(event))?;
         Ok(id)
     }
@@ -250,7 +226,13 @@ impl Unit<'_> {
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
-        write(self.store, Some(id), &uid, event, event.fields.instants()?)?;
+        write(
+            self.store,
+            Some(id),
+            &uid,
+            event,
+            rule::span(&event.fields)?,
+        )?;
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
@@ -295,7 +277,7 @@ impl Unit<'_> {
         )?;
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
-        let instants = event.fields.instants().unwrap_or_default();
+        let instants = rule::span(&event.fields).unwrap_or_default();
         let id = write(self.store, (!taken).then_some(id), uid, event, instants)?;
         self.entry(id, uid, None, Some(event))
     }
@@ -631,8 +613,7 @@ pub(crate) fn rehash(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::StoredWhen;
-    use crate::store::OriginalServerData;
+    use crate::event::{EventFields, OriginalServerData, StoredWhen};
 
     fn dentist() -> StoredEvent {
         StoredEvent {
