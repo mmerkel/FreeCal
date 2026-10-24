@@ -12,9 +12,7 @@
 //! Occurrence only.
 //!
 //! A leaf of the Event module: outside it, only [`span`] and [`imported`]
-//! are for use. The other functions open to the crate are so only while
-//! `scope.rs` and the single-Event paths in `lib.rs` still use them, until
-//! ticket 84 moves those into the module.
+//! are open.
 
 use std::str::FromStr;
 
@@ -94,7 +92,7 @@ const EDITOR_PARTS: &[&str] = &["FREQ", "INTERVAL", "COUNT", "UNTIL"];
 /// How a stored rule reads in the editor: the [`Repeat`] it shows, none for a
 /// rule it can't show at all, such as an hourly one, and whether the rule
 /// has more than the editor shows.
-pub(crate) fn repeat_of(fields: &EventFields) -> (Option<Repeat>, bool) {
+pub(super) fn repeat_of(fields: &EventFields) -> (Option<Repeat>, bool) {
     let Some(rule) = fields.rule.as_deref().and_then(Rule::parse) else {
         return (None, false);
     };
@@ -123,7 +121,7 @@ pub(crate) fn repeat_of(fields: &EventFields) -> (Option<Repeat>, bool) {
 /// frequency stays, so that "every 2 weeks on Sunday and Tuesday" made
 /// weekly stays on Sunday and Tuesday. Rules keep their own `WKST`; new
 /// rules get RFC 5545's default, Monday.
-pub(crate) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -> Result<String> {
+pub(super) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -> Result<String> {
     let start = first_start(when)?;
     let valid = repeat.interval >= 1
         && match repeat.end {
@@ -263,7 +261,7 @@ pub(super) fn occurrences_in(
 /// The time of the Occurrence of a Recurring Event with the recurrence ID
 /// `id`, as its rule gives it; none when the rule gives no such Occurrence
 /// or it is cancelled.
-pub(crate) fn occurrence_at(fields: &EventFields, id: &str) -> Result<Option<StoredWhen>> {
+pub(super) fn occurrence_at(fields: &EventFields, id: &str) -> Result<Option<StoredWhen>> {
     let (Some(starts), Some(wanted)) = (OccurrenceStarts::of(fields), start_of_id(id)) else {
         return Ok(None);
     };
@@ -282,7 +280,7 @@ pub(crate) fn occurrence_at(fields: &EventFields, id: &str) -> Result<Option<Sto
 }
 
 /// Whether FreeCal can read a Recurring Event's rule and expand it.
-pub(crate) fn readable(fields: &EventFields) -> bool {
+pub(super) fn readable(fields: &EventFields) -> bool {
     OccurrenceStarts::of(fields).is_some()
 }
 
@@ -291,7 +289,7 @@ pub(crate) fn readable(fields: &EventFields) -> bool {
 /// later is "Tuesdays and Thursdays", "the 5th" the 6th. A day of the month
 /// moved outside 1 to 31 can't be kept, and the rule repeats from its start
 /// instead. A rule FreeCal can't read stays as it is.
-pub(crate) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> String {
+pub(super) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> String {
     let (Some(rule), Ok(from), Ok(to)) = (Rule::parse(text), first_start(from), first_start(to))
     else {
         return text.to_owned();
@@ -350,14 +348,14 @@ fn month_day_moved(value: &str, days: i64) -> Option<String> {
 
 /// Whether a Recurring Event's rule, which FreeCal can read, gives no
 /// Occurrence at all.
-pub(crate) fn gives_none(fields: &EventFields) -> bool {
+pub(super) fn gives_none(fields: &EventFields) -> bool {
     OccurrenceStarts::of(fields).is_some_and(|starts| starts.into_iter().next().is_none())
 }
 
 /// `when` changed as the change from `from` to `to` changed another time:
 /// its start and its end moved by as much as theirs, in wall time. A change
 /// between all-day and timed puts `to` on `when`'s date instead.
-pub(crate) fn shifted(when: &StoredWhen, from: &StoredWhen, to: &StoredWhen) -> Result<StoredWhen> {
+pub(super) fn shifted(when: &StoredWhen, from: &StoredWhen, to: &StoredWhen) -> Result<StoredWhen> {
     if when.all_day != from.all_day || from.all_day != to.all_day {
         let days = first_start(when)?.date() - first_start(from)?.date();
         return occurrence(to, first_start(to)? + days);
@@ -388,7 +386,7 @@ pub(crate) fn shifted(when: &StoredWhen, from: &StoredWhen, to: &StoredWhen) -> 
 
 /// The recurrence ID `id` of a Recurring Event whose first Occurrence moved
 /// from `from` to `to`, moved by as much; none when `id` isn't one.
-pub(crate) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<String> {
+pub(super) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<String> {
     let start = start_of_id(id)? + (first_start(to).ok()? - first_start(from).ok()?);
     Some(if to.all_day {
         start.date().to_string()
@@ -399,7 +397,7 @@ pub(crate) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<S
 
 /// Whether the recurrence ID `id` names the same Occurrence as `split` or a
 /// later one. One that isn't a recurrence ID is never later.
-pub(crate) fn is_from(id: &str, split: &str) -> bool {
+pub(super) fn is_from(id: &str, split: &str) -> bool {
     match (start_of_id(id), start_of_id(split)) {
         (Some(id), Some(split)) => id >= split,
         _ => false,
@@ -407,7 +405,7 @@ pub(crate) fn is_from(id: &str, split: &str) -> bool {
 }
 
 /// The recurrence IDs in `exdates` that `keep` keeps, changed by `map`.
-pub(crate) fn exdates_where(
+pub(super) fn exdates_where(
     exdates: &str,
     keep: impl Fn(&str) -> bool,
     map: impl Fn(&str) -> Option<String>,
@@ -420,7 +418,7 @@ pub(crate) fn exdates_where(
 
 /// A Recurring Event's rule for its Occurrences from the one with the
 /// recurrence ID `id` on: a `COUNT` less the Occurrences before it.
-pub(crate) fn rule_from(fields: &EventFields, id: &str) -> Option<String> {
+pub(super) fn rule_from(fields: &EventFields, id: &str) -> Option<String> {
     let text = fields.rule.as_deref()?;
     let (Some(rule), Some(start)) = (Rule::parse(text), start_of_id(id)) else {
         return Some(text.to_owned());
@@ -444,7 +442,7 @@ pub(crate) fn rule_from(fields: &EventFields, id: &str) -> Option<String> {
 /// A Recurring Event's rule ended with the last Occurrence before the one
 /// with the recurrence ID `id`; none when FreeCal can't read it or there is
 /// none before.
-pub(crate) fn rule_until(fields: &EventFields, id: &str) -> Option<String> {
+pub(super) fn rule_until(fields: &EventFields, id: &str) -> Option<String> {
     let rule = Rule::parse(fields.rule.as_deref()?)?;
     let start = start_of_id(id)?;
     let last = OccurrenceStarts::of(fields)?
@@ -465,7 +463,7 @@ pub(crate) fn rule_until(fields: &EventFields, id: &str) -> Option<String> {
 
 /// A recurrence ID as the Local Store writes it, from the text the window
 /// gives back; none when it isn't one.
-pub(crate) fn recurrence_id(text: &str) -> Option<String> {
+pub(super) fn recurrence_id(text: &str) -> Option<String> {
     let start = start_of_id(text)?;
     Some(if text.contains('T') {
         wall_text(start)
@@ -475,7 +473,7 @@ pub(crate) fn recurrence_id(text: &str) -> Option<String> {
 }
 
 /// `exdates` with `id` added, sorted and each once.
-pub(crate) fn with_exdate(exdates: &str, id: &str) -> String {
+pub(super) fn with_exdate(exdates: &str, id: &str) -> String {
     let mut ids: Vec<&str> = split_ids(exdates).chain([id]).collect();
     ids.sort_unstable();
     ids.dedup();

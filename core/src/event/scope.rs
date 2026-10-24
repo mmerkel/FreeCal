@@ -1,7 +1,8 @@
 //! Recurrence scopes: a change to one Occurrence of a Recurring Event made
 //! to that Occurrence alone, which makes it an Exception, to it and the
 //! Occurrences after it, which splits the Recurring Event in two, or to all
-//! of them.
+//! of them. An Event that doesn't repeat is changed as one Occurrence alone
+//! would be.
 //!
 //! A change is what differs between the Occurrence as it was and what the
 //! user saved. Applied to the other Occurrences, it changes only the fields
@@ -12,10 +13,10 @@
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::event::{self, EventFields, Loaded, StoredWhen, rule};
+use super::{EventDraft, EventFields, Loaded, Opened, StoredWhen, rule, same_recurrence_id};
 use crate::journal::Unit;
 use crate::store::StoredEvent;
-use crate::{CalendarId, CoreError, EventDraft, EventId, Repeat, Result, StructuredText, When};
+use crate::{CalendarId, CoreError, EventId, Repeat, Result, StructuredText, When};
 
 /// Which Occurrences of a Recurring Event a change to one of them changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,7 +52,7 @@ pub(crate) struct Edited {
 /// Changes the Occurrence of the Event `id` with the recurrence ID
 /// `recurrence_id`, as its [`crate::Occurrence`] has them, in `scope`. Times
 /// in `change` are in the Display Time Zone `zone`.
-pub(crate) fn edit(
+pub(crate) fn edit_occurrence(
     unit: &mut Unit,
     zone: Tz,
     id: EventId,
@@ -61,45 +62,35 @@ pub(crate) fn edit(
 ) -> Result<Edited> {
     let not_found = || CoreError::OccurrenceNotFound(id);
     let rid = rule::recurrence_id(recurrence_id).ok_or_else(not_found)?;
-    let opened = unit.find_event(id)?;
-    let calendar_id = opened.calendar_id;
-    let (uid, event, exceptions) = event::Opened::load(unit, id)?.into_loaded().into_parts();
-    let is_rid = |text: Option<&str>| text.and_then(rule::recurrence_id).as_ref() == Some(&rid);
-    let (recurring, exception) = match opened.fields.recurrence_id.as_deref() {
-        Some(own) if is_rid(Some(own)) => (event, Some((id, opened.fields))),
-        Some(_) => return Err(not_found()),
-        None => {
-            let exception = exceptions
-                .into_iter()
-                .find(|(_, fields)| is_rid(fields.recurrence_id.as_deref()));
-            (Some((id, opened.fields)), exception)
+    let opened = Opened::load(unit, id)?;
+    let exception = if opened.is_exception() {
+        if !same_recurrence_id(opened.fields.recurrence_id.as_deref(), Some(&rid)) {
+            return Err(not_found());
         }
+        Some((opened.id, opened.fields.clone()))
+    } else {
+        opened.loaded.exception_at(&rid).cloned()
     };
-    let Some((recurring_id, fields)) = recurring.filter(|(_, fields)| fields.rule.is_some()) else {
+    let loaded = &opened.loaded;
+    let Some((_, fields)) = loaded.recurring() else {
         // An Exception whose Recurring Event is gone is an Event of its own.
         let (id, fields) = exception.ok_or_else(not_found)?;
-        let opened = Opened {
-            exception: Some(id),
+        let changing = Changing {
+            stored: Some(id),
             fields,
             slot: None,
         };
-        return alone(unit, zone, calendar_id, None, &opened, &rid, change);
+        return alone(unit, zone, loaded, &changing, &rid, change);
     };
-    let recurring = Recurring {
-        id: recurring_id,
-        uid: &uid,
-        calendar_id,
-        fields: &fields,
-    };
-    let slot = rule::occurrence_at(&fields, &rid)?;
-    let opened = match exception {
-        Some((id, fields)) => Opened {
-            exception: Some(id),
+    let slot = rule::occurrence_at(fields, &rid)?;
+    let changing = match exception {
+        Some((id, fields)) => Changing {
+            stored: Some(id),
             fields,
             slot,
         },
-        None => Opened {
-            exception: None,
+        None => Changing {
+            stored: None,
             fields: EventFields {
                 when: slot.clone().ok_or_else(not_found)?,
                 rule: None,
@@ -111,71 +102,73 @@ pub(crate) fn edit(
         },
     };
     match scope {
-        Scope::This => alone(
-            unit,
-            zone,
-            calendar_id,
-            Some(&recurring),
-            &opened,
-            &rid,
-            change,
-        ),
-        Scope::ThisAndFollowing => following(unit, zone, &recurring, &opened, &rid, change),
-        Scope::All => all(unit, zone, &recurring, &opened, &rid, change),
+        Scope::This => alone(unit, zone, loaded, &changing, &rid, change),
+        Scope::ThisAndFollowing => following(unit, zone, loaded, &changing, &rid, change),
+        Scope::All => all(unit, zone, loaded, &changing, &rid, change),
     }
 }
 
-/// Changes an Event of a Recurring Event as a whole: an Exception alone, a
+/// Changes an Event as a whole: a single Event or an Exception alone, a
 /// Recurring Event with all its Occurrences, from its first date.
-pub(crate) fn edit_whole(unit: &mut Unit, zone: Tz, id: EventId, change: Edit) -> Result<Edited> {
-    let event = unit.find_event(id)?;
-    if let Some(own) = event.fields.recurrence_id {
-        return edit(unit, zone, id, &own, Scope::This, change);
+pub(crate) fn edit_event(unit: &mut Unit, zone: Tz, id: EventId, change: Edit) -> Result<Edited> {
+    let opened = Opened::load(unit, id)?;
+    if let Some(own) = &opened.fields.recurrence_id {
+        return edit_occurrence(unit, zone, id, own, Scope::This, change);
     }
-    let (uid, _, _) = event::Opened::load(unit, id)?.into_loaded().into_parts();
-    let recurring = Recurring {
-        id,
-        uid: &uid,
-        calendar_id: event.calendar_id,
-        fields: &event.fields,
-    };
-    let start = event.fields.when.start.clone();
-    let opened = Opened {
-        exception: None,
-        fields: EventFields {
-            rule: None,
-            exdates: String::new(),
-            recurrence_id: Some(start.clone()),
-            ..event.fields.clone()
+    let start = opened.fields.when.start.clone();
+    let changing = match opened.loaded.recurring() {
+        // An Event that doesn't repeat is changed as its start's Occurrence
+        // alone would be.
+        None => {
+            let changing = Changing {
+                stored: Some(id),
+                fields: opened.fields.clone(),
+                slot: None,
+            };
+            return alone(unit, zone, &opened.loaded, &changing, &start, change);
+        }
+        Some(_) => Changing {
+            stored: None,
+            fields: EventFields {
+                rule: None,
+                exdates: String::new(),
+                recurrence_id: Some(start.clone()),
+                ..opened.fields.clone()
+            },
+            slot: None,
         },
-        slot: None,
     };
-    all(unit, zone, &recurring, &opened, &start, change)
+    all(unit, zone, &opened.loaded, &changing, &start, change)
 }
 
-/// A Recurring Event: the one an Occurrence belongs to, as it was, or the
-/// one it became.
-struct Recurring<'a> {
-    id: EventId,
-    uid: &'a str,
-    calendar_id: CalendarId,
-    fields: &'a EventFields,
-}
-
-/// The Occurrence being changed: an Exception, or one the rule gives, as
-/// the fields an Exception for it would start with.
-struct Opened {
-    exception: Option<EventId>,
+/// What is being changed: a stored Event, one that doesn't repeat or an
+/// Exception, or an Occurrence the rule gives, as the fields an Exception
+/// for it would start with.
+struct Changing {
+    stored: Option<EventId>,
     fields: EventFields,
     /// Its time as the rule gives it, where an Exception was before it was
     /// changed; none when the rule doesn't give it.
     slot: Option<StoredWhen>,
 }
 
-impl Recurring<'_> {
-    fn changes(&self, change: Edit, opened: &Opened, zone: Tz) -> Result<Changes> {
-        let repeat = rule::repeat_of(self.fields).0;
-        Changes::of(change, opened, self.calendar_id, repeat, zone)
+/// The Event that the changed Occurrences became, in the Calendar
+/// `calendar_id` under the UID `uid`, with no Exceptions yet.
+fn became(calendar_id: CalendarId, uid: String, id: EventId, fields: EventFields) -> Loaded {
+    Loaded {
+        calendar_id,
+        uid,
+        event: Some((id, fields)),
+        exceptions: Vec::new(),
+    }
+}
+
+/// The changes in a scope, on Events loaded with a Recurring Event, or on
+/// the Recurring Event the changed Occurrences became.
+impl Loaded {
+    fn changes(&self, change: Edit, changing: &Changing, zone: Tz) -> Result<Changes> {
+        let repeat = rule::repeat_of(&self.recurring_event().1).0;
+        Changes::of(change, changing, self.calendar_id, repeat, zone)
     }
 
     /// The Recurring Event that the Occurrences from `first`, the time of
@@ -186,11 +179,12 @@ impl Recurring<'_> {
         first: &StoredWhen,
         rule: Option<String>,
     ) -> Result<EventFields> {
+        let (_, was) = self.recurring_event();
         let mut new = EventFields {
             when: first.clone(),
-            ..self.fields.clone()
+            ..was.clone()
         };
-        changes.follow(&mut new, self.fields);
+        changes.follow(&mut new, was);
         if let Some((from, to)) = &changes.when {
             new.when = rule::shifted(first, from, to)?;
             new.zone_pinned = false;
@@ -202,7 +196,7 @@ impl Recurring<'_> {
             Some(None) => None,
             Some(Some(repeat)) => Some(rule::rule_text(
                 repeat,
-                moved(self.fields.rule.as_deref()).as_deref(),
+                moved(was.rule.as_deref()).as_deref(),
                 &new.when,
             )?),
         };
@@ -215,65 +209,56 @@ impl Recurring<'_> {
     /// Writes the Exceptions whose recurrence IDs `carried` says as the
     /// Exceptions of `new`, the Recurring Event that this one became from
     /// the Occurrence `first` on. Each keeps what it changed on its own and
-    /// follows `changes` in the rest; the one that was changed, `opened`,
+    /// follows `changes` in the rest; the one that was changed, `changing`,
     /// takes them all. One whose Occurrence `new` doesn't have is deleted;
     /// with a rule FreeCal can't read, each is kept. Returns the new ID of
-    /// `opened`, if it is kept.
+    /// `changing`, if it is kept.
     fn carry_exceptions(
         &self,
         unit: &mut Unit,
         carried: impl Fn(&str) -> bool,
         changes: &Changes,
         first: &StoredWhen,
-        new: &Recurring,
-        opened: Option<EventId>,
+        new: &Loaded,
+        changing: Option<EventId>,
     ) -> Result<Option<EventId>> {
+        let (_, was) = self.recurring_event();
+        let (_, now) = new.recurring_event();
         let mut kept = None;
-        let (_, _, exceptions) = Loaded::of_uid(unit, self.calendar_id, self.uid)?.into_parts();
-        for (id, fields) in exceptions {
+        for (id, fields) in &self.exceptions {
             let Some(rid) = fields.recurrence_id.as_deref().filter(|rid| carried(rid)) else {
                 continue;
             };
-            let moved = rule::moved_id(rid, first, &new.fields.when);
+            let moved = rule::moved_id(rid, first, &now.when);
             // The Exception's new place, none when it is gone, and `Some(None)`
             // when it can't be told.
-            let slot = match (&new.fields.rule, &moved) {
-                (Some(_), Some(moved)) if rule::readable(new.fields) => {
-                    rule::occurrence_at(new.fields, moved)?.map(Some)
+            let slot = match (&now.rule, &moved) {
+                (Some(_), Some(moved)) if rule::readable(now) => {
+                    rule::occurrence_at(now, moved)?.map(Some)
                 }
                 (Some(_), Some(_)) => Some(None),
                 _ => None,
             };
             let (Some(moved), Some(slot)) = (moved, slot) else {
-                unit.delete(id)?;
+                unit.delete(*id)?;
                 continue;
             };
-            let mut exception = if Some(id) == opened {
-                changes.applied(&fields)
+            let mut exception = if Some(*id) == changing {
+                changes.applied(fields)
             } else {
                 let mut exception = fields.clone();
-                changes.follow(&mut exception, self.fields);
+                changes.follow(&mut exception, was);
                 // One at its Occurrence's time moves with it.
                 if let Some(slot) = slot
-                    && rule::occurrence_at(self.fields, rid)?.as_ref() == Some(&fields.when)
+                    && rule::occurrence_at(was, rid)?.as_ref() == Some(&fields.when)
                 {
                     exception.when = slot;
                 }
                 exception
             };
             exception.recurrence_id = Some(moved);
-            let event = StoredEvent {
-                calendar_id: new.calendar_id,
-                fields: exception,
-            };
-            let written = if new.uid == self.uid {
-                unit.replace(id, &event)?;
-                id
-            } else {
-                unit.delete(id)?;
-                unit.create(new.uid, &event)?
-            };
-            if Some(id) == opened {
+            let written = self.write_exception(unit, Some(*id), new, exception)?;
+            if Some(*id) == changing {
                 kept = Some(written);
             }
         }
@@ -286,36 +271,35 @@ impl Recurring<'_> {
 fn all(
     unit: &mut Unit,
     zone: Tz,
-    recurring: &Recurring,
-    opened: &Opened,
+    loaded: &Loaded,
+    changing: &Changing,
     rid: &str,
     change: Edit,
 ) -> Result<Edited> {
-    let changes = recurring.changes(change, opened, zone)?;
-    let was = &recurring.fields.when;
-    let mut fields = recurring.changed(&changes, was, recurring.fields.rule.clone())?;
+    let (id, recurring) = loaded.recurring_event();
+    let changes = loaded.changes(change, changing, zone)?;
+    let was = &recurring.when;
+    let mut fields = loaded.changed(&changes, was, recurring.rule.clone())?;
     fields.exdates = match fields.rule {
         Some(_) => rule::exdates_where(
-            &recurring.fields.exdates,
+            &recurring.exdates,
             |_| true,
             |id| rule::moved_id(id, was, &fields.when),
         ),
         None => String::new(),
     };
-    let new = Recurring {
-        calendar_id: changes.calendar_id.unwrap_or(recurring.calendar_id),
-        fields: &fields,
-        ..*recurring
-    };
+    let calendar_id = changes.calendar_id.unwrap_or(loaded.calendar_id);
     unit.replace(
-        new.id,
+        *id,
         &StoredEvent {
-            calendar_id: new.calendar_id,
+            calendar_id,
             fields: fields.clone(),
         },
     )?;
-    let kept = recurring.carry_exceptions(unit, |_| true, &changes, was, &new, opened.exception)?;
-    now_at(unit, &new, kept, rule::moved_id(rid, was, &fields.when))
+    let moved = rule::moved_id(rid, was, &fields.when);
+    let new = became(calendar_id, loaded.uid.clone(), *id, fields);
+    let kept = loaded.carry_exceptions(unit, |_| true, &changes, was, &new, changing.stored)?;
+    now_at(unit, &new, kept, moved)
 }
 
 /// Changes the Occurrence `rid` and every later one: the Recurring Event
@@ -325,42 +309,43 @@ fn all(
 fn following(
     unit: &mut Unit,
     zone: Tz,
-    recurring: &Recurring,
-    opened: &Opened,
+    loaded: &Loaded,
+    changing: &Changing,
     rid: &str,
     change: Edit,
 ) -> Result<Edited> {
-    let not_found = || CoreError::OccurrenceNotFound(recurring.id);
-    let slot = opened.slot.as_ref().ok_or_else(not_found)?;
-    let Some(ended) = rule::rule_until(recurring.fields, rid) else {
-        return all(unit, zone, recurring, opened, rid, change);
+    let (id, recurring) = loaded.recurring_event();
+    let not_found = || CoreError::OccurrenceNotFound(*id);
+    let slot = changing.slot.as_ref().ok_or_else(not_found)?;
+    let Some(ended) = rule::rule_until(recurring, rid) else {
+        return all(unit, zone, loaded, changing, rid, change);
     };
-    let changes = recurring.changes(change, opened, zone)?;
+    let changes = loaded.changes(change, changing, zone)?;
     let carried = |id: &str| rule::is_from(id, rid);
-    let mut fields = recurring.changed(&changes, slot, rule::rule_from(recurring.fields, rid))?;
+    let mut fields = loaded.changed(&changes, slot, rule::rule_from(recurring, rid))?;
     fields.exdates = match fields.rule {
-        Some(_) => rule::exdates_where(&recurring.fields.exdates, carried, |id| {
+        Some(_) => rule::exdates_where(&recurring.exdates, carried, |id| {
             rule::moved_id(id, slot, &fields.when)
         }),
         None => String::new(),
     };
     unit.replace(
-        recurring.id,
+        *id,
         &StoredEvent {
-            calendar_id: recurring.calendar_id,
+            calendar_id: loaded.calendar_id,
             fields: EventFields {
                 rule: Some(ended),
                 exdates: rule::exdates_where(
-                    &recurring.fields.exdates,
+                    &recurring.exdates,
                     |id| !carried(id),
                     |id| Some(id.to_owned()),
                 ),
-                ..recurring.fields.clone()
+                ..recurring.clone()
             },
         },
     )?;
     let uid = uuid::Uuid::new_v4().to_string();
-    let calendar_id = changes.calendar_id.unwrap_or(recurring.calendar_id);
+    let calendar_id = changes.calendar_id.unwrap_or(loaded.calendar_id);
     let id = unit.create(
         &uid,
         &StoredEvent {
@@ -368,31 +353,22 @@ fn following(
             fields: fields.clone(),
         },
     )?;
-    let new = Recurring {
-        id,
-        uid: &uid,
-        calendar_id,
-        fields: &fields,
-    };
-    let kept = recurring.carry_exceptions(unit, carried, &changes, slot, &new, opened.exception)?;
-    now_at(unit, &new, kept, rule::moved_id(rid, slot, &fields.when))
+    let moved = rule::moved_id(rid, slot, &fields.when);
+    let new = became(calendar_id, uid, id, fields);
+    let kept = loaded.carry_exceptions(unit, carried, &changes, slot, &new, changing.stored)?;
+    now_at(unit, &new, kept, moved)
 }
 
 /// The Occurrence that the changed one is now: the Exception `kept`, or the
 /// Occurrence `rid` of `new`, or its first when it has no such Occurrence
 /// any more.
-fn now_at(
-    unit: &Unit,
-    new: &Recurring,
-    kept: Option<EventId>,
-    rid: Option<String>,
-) -> Result<Edited> {
+fn now_at(unit: &Unit, new: &Loaded, kept: Option<EventId>, rid: Option<String>) -> Result<Edited> {
     if let Some(kept) = kept {
         let event = unit.find_event(kept)?;
         let recurrence_id = event.fields.recurrence_id.clone();
         return Ok(edited(kept, event, recurrence_id));
     }
-    let fields = new.fields;
+    let (id, fields) = new.recurring_event();
     let slot = match (&fields.rule, &rid) {
         (Some(_), Some(rid)) => rule::occurrence_at(fields, rid)?,
         _ => None,
@@ -411,7 +387,7 @@ fn now_at(
             ..fields.clone()
         },
     };
-    Ok(edited(new.id, event, recurrence_id))
+    Ok(edited(*id, event, recurrence_id))
 }
 
 /// What the user changed: each field that differs from the Occurrence as it
@@ -431,16 +407,16 @@ struct Changes {
 }
 
 impl Changes {
-    /// What `change` changes about the Occurrence `opened` of the Event in
+    /// What `change` changes about the Occurrence `changing` of the Event in
     /// `calendar_id`, whose Recurring Event repeats by `repeat`.
     fn of(
         change: Edit,
-        opened: &Opened,
+        changing: &Changing,
         calendar_id: CalendarId,
         repeat: Option<Repeat>,
         zone: Tz,
     ) -> Result<Self> {
-        let was = &opened.fields;
+        let was = &changing.fields;
         let description = description_text(was);
         let draft = match change {
             Edit::Draft(draft) => draft,
@@ -454,7 +430,7 @@ impl Changes {
             },
         };
         let when = was.when.edit(draft.when, zone)?;
-        let from = opened.slot.as_ref().unwrap_or(&was.when);
+        let from = changing.slot.as_ref().unwrap_or(&was.when);
         let changed = |was: &String, now: String| (*was != now).then_some(now);
         Ok(Self {
             title: changed(&was.title, draft.title),
@@ -499,9 +475,9 @@ impl Changes {
     }
 
     /// The Occurrence that was changed, as it is now.
-    fn applied(&self, opened: &EventFields) -> EventFields {
-        let mut fields = opened.clone();
-        self.follow(&mut fields, opened);
+    fn applied(&self, changing: &EventFields) -> EventFields {
+        let mut fields = changing.clone();
+        self.follow(&mut fields, changing);
         if let Some((_, when)) = &self.when {
             fields.when = when.clone();
             // A time the user changed is theirs, no longer a pinned one.
@@ -511,32 +487,35 @@ impl Changes {
     }
 }
 
-/// Changes the Occurrence `opened` of an Event in `calendar_id` alone. It
-/// becomes an Exception of `recurring`, its Recurring Event if it has one,
-/// or an Event of its own when it moves to another Calendar, as an Exception
-/// lives in its Recurring Event's Calendar.
+/// Changes `changing` of `loaded` alone: an Event that doesn't repeat,
+/// which becomes a Recurring Event when the user gives it a repeat rule, or
+/// an Occurrence of the Recurring Event if there is one, which becomes an
+/// Exception, or an Event of its own when it moves to another Calendar, as
+/// an Exception lives in its Recurring Event's Calendar.
 fn alone(
     unit: &mut Unit,
     zone: Tz,
-    calendar_id: CalendarId,
-    recurring: Option<&Recurring>,
-    opened: &Opened,
+    loaded: &Loaded,
+    changing: &Changing,
     rid: &str,
     change: Edit,
 ) -> Result<Edited> {
-    let repeat = recurring.and_then(|recurring| rule::repeat_of(recurring.fields).0);
-    let changes = Changes::of(change, opened, calendar_id, repeat, zone)?;
-    if changes.repeat.is_some() {
+    let calendar_id = loaded.calendar_id;
+    let recurring = loaded.recurring();
+    let repeat = recurring.and_then(|(_, fields)| rule::repeat_of(fields).0);
+    let changes = Changes::of(change, changing, calendar_id, repeat, zone)?;
+    let mut fields = changes.applied(&changing.fields);
+    match changes.repeat {
+        None => {}
+        Some(Some(repeat)) if recurring.is_none() && changing.fields.recurrence_id.is_none() => {
+            fields.rule = Some(rule::rule_text(repeat, None, &fields.when)?);
+        }
         // An Exception can't repeat.
-        return Err(CoreError::InvalidRepeat);
+        Some(_) => return Err(CoreError::InvalidRepeat),
     }
-    let fields = changes.applied(&opened.fields);
     match (recurring, changes.calendar_id) {
-        (Some(recurring), Some(target)) => {
-            if let Some(exception) = opened.exception {
-                unit.delete(exception)?;
-            }
-            cancel(unit, recurring, rid)?;
+        (Some(_), Some(target)) => {
+            loaded.cancel(unit, rid)?;
             let event = StoredEvent {
                 calendar_id: target,
                 fields: EventFields {
@@ -547,50 +526,36 @@ fn alone(
             let id = unit.create(&uuid::Uuid::new_v4().to_string(), &event)?;
             Ok(edited(id, event, None))
         }
-        (Some(recurring), None) if changes.is_empty() && opened.exception.is_none() => Ok(edited(
-            recurring.id,
-            StoredEvent {
-                calendar_id,
-                fields: EventFields {
-                    when: opened.fields.when.clone(),
-                    ..recurring.fields.clone()
+        (Some((id, recurring)), None) if changes.is_empty() && changing.stored.is_none() => {
+            Ok(edited(
+                *id,
+                StoredEvent {
+                    calendar_id,
+                    fields: EventFields {
+                        when: changing.fields.when.clone(),
+                        ..recurring.clone()
+                    },
                 },
-            },
-            Some(rid.to_owned()),
-        )),
-        (recurring, target) => {
+                Some(rid.to_owned()),
+            ))
+        }
+        (_, target) => {
             let event = StoredEvent {
                 calendar_id: target.unwrap_or(calendar_id),
                 fields,
             };
-            let id = match (opened.exception, recurring) {
-                (Some(id), _) => {
+            // Only a Recurring Event gives an Occurrence that isn't stored.
+            let id = match changing.stored {
+                Some(id) => {
                     unit.replace(id, &event)?;
                     id
                 }
-                (None, Some(recurring)) => unit.create(recurring.uid, &event)?,
-                (None, None) => {
-                    unreachable!("an Occurrence without a Recurring Event is an Exception")
-                }
+                None => unit.create(&loaded.uid, &event)?,
             };
             let recurrence_id = event.fields.recurrence_id.clone();
             Ok(edited(id, event, recurrence_id))
         }
     }
-}
-
-/// Cancels the Occurrence `rid` of `recurring`.
-fn cancel(unit: &mut Unit, recurring: &Recurring, rid: &str) -> Result<()> {
-    unit.replace(
-        recurring.id,
-        &StoredEvent {
-            calendar_id: recurring.calendar_id,
-            fields: EventFields {
-                exdates: rule::with_exdate(&recurring.fields.exdates, rid),
-                ..recurring.fields.clone()
-            },
-        },
-    )
 }
 
 fn edited(id: EventId, event: StoredEvent, recurrence_id: Option<String>) -> Edited {

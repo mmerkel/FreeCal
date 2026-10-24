@@ -13,7 +13,6 @@ mod import;
 mod journal;
 mod keyring;
 mod remote;
-mod scope;
 mod settings;
 mod sidebar;
 mod signal;
@@ -36,7 +35,8 @@ pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{
-    Event, EventDraft, EventId, Frequency, Occurrence, OriginalServerData, Repeat, RepeatEnd, When,
+    Event, EventDraft, EventId, Frequency, Occurrence, OriginalServerData, Repeat, RepeatEnd,
+    Scope, When,
 };
 pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
@@ -45,7 +45,6 @@ pub use import::{
 pub use journal::{Changed, UnitId};
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
-pub use scope::Scope;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
@@ -53,10 +52,10 @@ pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
-use event::{EventFields, Loaded, Opened, StoredWhen, rule};
+use event::{Edit, Loaded, Opened};
 use journal::{Origin, Unit};
 use remote::{Remote, SyncPoint};
-use store::{Store, StoredEvent};
+use store::Store;
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -528,28 +527,9 @@ impl Core {
     /// Creates an Event in a writable Calendar, a Recurring Event when the
     /// draft has a repeat rule.
     pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
-        let when = StoredWhen::new(draft.when, self.clock.time_zone())?;
-        let rule = draft
-            .repeat
-            .map(|repeat| rule::rule_text(repeat, None, &when))
-            .transpose()?;
-        let event = StoredEvent {
-            calendar_id: draft.calendar_id,
-            fields: EventFields {
-                title: draft.title,
-                when,
-                location: draft.location,
-                description: draft.description,
-                description_html: false,
-                zone_pinned: false,
-                rule,
-                exdates: String::new(),
-                recurrence_id: None,
-                server_data: None,
-            },
-        };
+        let zone = self.clock.time_zone();
         let created = self.record(Origin::UserAction, |unit| {
-            unit.create(&uuid::Uuid::new_v4().to_string(), &event)
+            event::create_event(unit, zone, draft)
         })?;
         self.changed_event(created)
     }
@@ -562,40 +542,7 @@ impl Core {
     /// all its Occurrences, from its first date, and an Exception alone (see
     /// [`Core::edit_occurrence`]).
     pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Changed<Event>> {
-        if self.recurring(id)? {
-            return self.edit_whole(id, scope::Edit::Draft(draft));
-        }
-        let zone = self.clock.time_zone();
-        let edited = self.record(Origin::UserAction, |unit| {
-            let old = unit.find_event(id)?.fields;
-            let when = old.when.edit(draft.when, zone)?;
-            let rule = draft
-                .repeat
-                .map(|repeat| rule::rule_text(repeat, None, &when))
-                .transpose()?;
-            let (description, description_html) = if draft.description == description_of(&old).text
-            {
-                (old.description.clone(), old.description_html)
-            } else {
-                (draft.description, false)
-            };
-            let after = StoredEvent {
-                calendar_id: draft.calendar_id,
-                fields: EventFields {
-                    title: draft.title,
-                    zone_pinned: old.zone_pinned && when == old.when,
-                    when,
-                    location: draft.location,
-                    description,
-                    description_html,
-                    rule,
-                    ..old
-                },
-            };
-            unit.replace(id, &after)?;
-            Ok(id)
-        })?;
-        self.changed_event(edited)
+        self.edit_whole(id, Edit::Draft(draft))
     }
 
     /// Moves an Event to another time, as a drag or a resize in the grid
@@ -603,37 +550,17 @@ impl Core {
     /// Time Zone; a timed Event keeps its Event Time Zones. A Recurring Event
     /// moves with all its Occurrences, and an Exception alone.
     pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Changed<Event>> {
-        if self.recurring(id)? {
-            return self.edit_whole(id, scope::Edit::Reschedule(when));
-        }
-        let zone = self.clock.time_zone();
-        let rescheduled = self.record(Origin::UserAction, |unit| {
-            let mut event = unit.find_event(id)?;
-            let edited = event.fields.when.edit(when, zone)?;
-            // A time the user changed is theirs, no longer a pinned one.
-            event.fields.zone_pinned &= edited == event.fields.when;
-            event.fields.when = edited;
-            unit.replace(id, &event)?;
-            Ok(id)
-        })?;
-        self.changed_event(rescheduled)
+        self.edit_whole(id, Edit::Reschedule(when))
     }
 
-    /// Whether the Event `id` is a Recurring Event or an Exception.
-    fn recurring(&self, id: EventId) -> Result<bool> {
-        let fields = self.store().find_event(id)?.fields;
-        Ok(fields.rule.is_some() || fields.recurrence_id.is_some())
-    }
-
-    fn edit_whole(&self, id: EventId, edit: scope::Edit) -> Result<Changed<Event>> {
+    fn edit_whole(&self, id: EventId, edit: Edit) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
         let edited = self.record(Origin::UserAction, |unit| {
-            scope::edit_whole(unit, zone, id, edit)
+            event::edit_event(unit, zone, id, edit)
         })?;
-        let value = self.event(edited.value.id)?;
-        Ok(Changed {
+        self.changed_event(Changed {
             unit: edited.unit,
-            value,
+            value: edited.value.id,
         })
     }
 
@@ -649,7 +576,7 @@ impl Core {
         scope: Scope,
         draft: EventDraft,
     ) -> Result<Changed<Occurrence>> {
-        self.edit_in_scope(id, recurrence_id, scope, scope::Edit::Draft(draft))
+        self.edit_in_scope(id, recurrence_id, scope, Edit::Draft(draft))
     }
 
     /// Moves one Occurrence of a Recurring Event to another time in `scope`,
@@ -661,7 +588,7 @@ impl Core {
         scope: Scope,
         when: When,
     ) -> Result<Changed<Occurrence>> {
-        self.edit_in_scope(id, recurrence_id, scope, scope::Edit::Reschedule(when))
+        self.edit_in_scope(id, recurrence_id, scope, Edit::Reschedule(when))
     }
 
     fn edit_in_scope(
@@ -669,11 +596,11 @@ impl Core {
         id: EventId,
         recurrence_id: &str,
         scope: Scope,
-        edit: scope::Edit,
+        edit: Edit,
     ) -> Result<Changed<Occurrence>> {
         let zone = self.clock.time_zone();
         let edited = self.record(Origin::UserAction, |unit| {
-            scope::edit(unit, zone, id, recurrence_id, scope, edit)
+            event::edit_occurrence(unit, zone, id, recurrence_id, scope, edit)
         })?;
         let occurrence = edited.value;
         Ok(Changed {
@@ -805,8 +732,4 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
 /// Every Calendar a server offers, added or not; none without a server.
 fn offered_by(remote: Option<&dyn Remote>) -> Result<Vec<AvailableCalendar>> {
     remote.map_or_else(|| Ok(Vec::new()), Remote::discover)
-}
-
-fn description_of(fields: &EventFields) -> StructuredText {
-    StructuredText::from_description(&fields.description, fields.description_html)
 }

@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
@@ -16,7 +16,7 @@
 
 Steps, each with the suite green:
 
-- [ ] Move `EventFields` and `recurrence.rs` as above. `journal.rs` and `store.rs` call the rule leaf for the span, so no module depends back on its caller
+- [x] Move `EventFields` and `recurrence.rs` as above. `journal.rs` and `store.rs` call the rule leaf for the span, so no module depends back on its caller
 - [x] One Store query, every Event of a Calendar with a UID, replaces `find_event_by_uid`, `exceptions` and `event_uid` and their `Unit` pass-throughs (`event_at` stays). The module sorts the rows into the Recurring Event, its Exceptions and orphaned Exceptions (each an Event of its own, as GLOSSARY says), keeping "the first by ID" when a Calendar has several Recurring Events with one UID
 - [x] Loading from an Event (what the window gives: the Recurring Event or one of its Exceptions, plus a recurrence ID) and from a Calendar and UID (what sync and import give). Loading from &Store serves reads; changes write through a `journal::Unit`, never the Store, so ADR 0009's recording and the read-only check stay in `journal.rs`
 - [x] Move into the module: the Occurrences in a range (`Core::occurrences`), deleting a whole Recurring Event (`Core::delete_event`, `sync::delete_with_exceptions`), cancelling one Occurrence (`Core::delete_occurrence`), and the window's `Event` as a projection of the loaded value in the Display Time Zone (`Core::to_event`, with an Exception's repeat from its Recurring Event)
@@ -37,3 +37,4 @@ Out of scope: `scope.rs` and the single-Event create, edit and reschedule paths 
   - Deleting an Exception whose Recurring Event is gone (the UID's first Event that isn't an Exception has no rule) deletes only it, not also that Event and every Exception.
   - Cancelling an Occurrence without a Recurring Event deletes only the Event given, not also Exceptions of its UID with that recurrence ID.
 
+**2026-10-24, ticket 84.** Box 1 is done: only `rule::span` and `rule::imported` are open outside the module, and `into_parts`, `into_loaded` and `is_rid` are gone.

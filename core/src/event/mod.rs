@@ -3,11 +3,14 @@
 //! UID: a Recurring Event comes with its rule and its Exceptions. The
 //! operations that need them all live here, so that only this module pairs
 //! Exceptions with their Occurrences, by recurrence IDs always normalised.
+//! Every change the user makes to an Event goes through it: one that
+//! doesn't repeat is changed as one Occurrence alone would be (`scope.rs`).
 //!
 //! Loading from the Local Store serves reads; changes load from a Change
 //! Journal unit and write through it, never the Store (ADR 0009).
 
 pub(crate) mod rule;
+mod scope;
 mod when;
 
 use chrono::NaiveDate;
@@ -19,6 +22,8 @@ use crate::store::{Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};
+pub use scope::Scope;
+pub(crate) use scope::{Edit, edit_event, edit_occurrence};
 pub(crate) use when::{EventFields, StoredRange, StoredWhen, instant, wall_text};
 pub use when::{EventId, OriginalServerData, When};
 
@@ -183,6 +188,16 @@ impl Loaded {
             .filter(|(_, fields)| fields.rule.is_some())
     }
 
+    /// The Event that isn't an Exception, of Events known to have one: the
+    /// Recurring Event, for the changes only a Recurring Event has, or in a
+    /// scope the Event its changed Occurrences became, which may not repeat
+    /// any more.
+    fn recurring_event(&self) -> &Stored {
+        self.event
+            .as_ref()
+            .expect("Events loaded with the Event that isn't an Exception")
+    }
+
     /// Makes `incoming`, a new version from a file or a server with its
     /// Exceptions, the Events with the UID, adding it if the Calendar has
     /// none. Exceptions are paired by the Occurrence they changed: those
@@ -192,11 +207,13 @@ impl Loaded {
         let Some((id, previous)) = &self.event else {
             return create(unit, self.calendar_id, &self.uid, incoming);
         };
-        let new = |fields| StoredEvent {
-            calendar_id: self.calendar_id,
-            fields,
-        };
-        unit.replace(*id, &new(fields_over(incoming, previous)))?;
+        unit.replace(
+            *id,
+            &StoredEvent {
+                calendar_id: self.calendar_id,
+                fields: fields_over(incoming, previous),
+            },
+        )?;
         let mut left: Vec<_> = self.exceptions.iter().collect();
         for exception in &incoming.exceptions {
             let same = left.iter().position(|(_, fields)| {
@@ -205,12 +222,11 @@ impl Loaded {
                     exception.recurrence_id.as_deref(),
                 )
             });
-            match same.map(|index| left.remove(index)) {
-                Some((id, previous)) => {
-                    unit.replace(*id, &new(fields_over(exception, previous)))?;
-                }
-                None => _ = unit.create(&self.uid, &new(fields(exception)))?,
-            }
+            let (previous, fields) = match same.map(|index| left.remove(index)) {
+                Some((id, previous)) => (Some(*id), fields_over(exception, previous)),
+                None => (None, fields(exception)),
+            };
+            self.write_exception(unit, previous, self, fields)?;
         }
         for (id, _) in left {
             unit.delete(*id)?;
@@ -218,10 +234,60 @@ impl Loaded {
         Ok(())
     }
 
-    /// The UID, the Event and the Exceptions, for `scope.rs` until ticket 84
-    /// moves it into the module.
-    pub fn into_parts(self) -> (String, Option<Stored>, Vec<Stored>) {
-        (self.uid, self.event, self.exceptions)
+    /// Writes `fields` as an Exception of `into`, these Events or those they
+    /// became, in place of `previous`, one of their stored Exceptions, if
+    /// given. Returns its ID.
+    fn write_exception(
+        &self,
+        unit: &mut Unit,
+        previous: Option<EventId>,
+        into: &Loaded,
+        fields: EventFields,
+    ) -> Result<EventId> {
+        let event = StoredEvent {
+            calendar_id: into.calendar_id,
+            fields,
+        };
+        match previous {
+            Some(id) if into.uid == self.uid => {
+                unit.replace(id, &event)?;
+                Ok(id)
+            }
+            Some(id) => {
+                unit.delete(id)?;
+                unit.create(&into.uid, &event)
+            }
+            None => unit.create(&into.uid, &event),
+        }
+    }
+
+    /// The Exception that changed the Occurrence `rid`, if there is one.
+    fn exception_at(&self, rid: &str) -> Option<&Stored> {
+        self.exceptions
+            .iter()
+            .find(|(_, fields)| same_recurrence_id(fields.recurrence_id.as_deref(), Some(rid)))
+    }
+
+    /// Cancels the Occurrence `rid` of the Recurring Event, which it must
+    /// have: the Occurrence becomes a cancelled Exception, and an Exception
+    /// that changed it is deleted.
+    fn cancel(&self, unit: &mut Unit, rid: &str) -> Result<()> {
+        let (id, fields) = self.recurring_event();
+        for (exception, fields) in &self.exceptions {
+            if same_recurrence_id(fields.recurrence_id.as_deref(), Some(rid)) {
+                unit.delete(*exception)?;
+            }
+        }
+        unit.replace(
+            *id,
+            &StoredEvent {
+                calendar_id: self.calendar_id,
+                fields: EventFields {
+                    exdates: rule::with_exdate(&fields.exdates, rid),
+                    ..fields.clone()
+                },
+            },
+        )
     }
 
     /// Deletes the Events with the UID, the Event and every Exception.
@@ -255,11 +321,6 @@ impl Opened {
             fields,
             loaded: Loaded::sorted(calendar_id, uid, events, Some(id)),
         })
-    }
-
-    /// What it was loaded with, for `scope.rs` until ticket 84.
-    pub fn into_loaded(self) -> Loaded {
-        self.loaded
     }
 
     fn is_exception(&self) -> bool {
@@ -324,24 +385,36 @@ impl Opened {
 pub(crate) fn cancel_occurrence(unit: &mut Unit, id: EventId, recurrence_id: &str) -> Result<()> {
     let cancelled = rule::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
     let opened = Opened::load(unit, id)?;
-    let Some((recurring_id, fields)) = opened.loaded.recurring() else {
-        return unit.delete(id);
-    };
-    for (exception, fields) in &opened.loaded.exceptions {
-        if same_recurrence_id(fields.recurrence_id.as_deref(), Some(&cancelled)) {
-            unit.delete(*exception)?;
-        }
+    match opened.loaded.recurring() {
+        Some(_) => opened.loaded.cancel(unit, &cancelled),
+        None => unit.delete(id),
     }
-    unit.replace(
-        *recurring_id,
-        &StoredEvent {
-            calendar_id: opened.loaded.calendar_id,
-            fields: EventFields {
-                exdates: rule::with_exdate(&fields.exdates, &cancelled),
-                ..fields.clone()
-            },
+}
+
+/// Creates an Event from the editor's `draft`, with times in the Display
+/// Time Zone `zone`: a Recurring Event when the draft repeats.
+pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Result<EventId> {
+    let when = StoredWhen::new(draft.when, zone)?;
+    let rule = draft
+        .repeat
+        .map(|repeat| rule::rule_text(repeat, None, &when))
+        .transpose()?;
+    let event = StoredEvent {
+        calendar_id: draft.calendar_id,
+        fields: EventFields {
+            title: draft.title,
+            when,
+            location: draft.location,
+            description: draft.description,
+            description_html: false,
+            zone_pinned: false,
+            rule,
+            exdates: String::new(),
+            recurrence_id: None,
+            server_data: None,
         },
-    )
+    };
+    unit.create(&uuid::Uuid::new_v4().to_string(), &event)
 }
 
 /// The Occurrences of shown Calendars on the dates `from` up to `to`
