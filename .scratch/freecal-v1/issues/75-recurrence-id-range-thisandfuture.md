@@ -2,7 +2,7 @@
 
 **What to build:** An Exception from a file whose `RECURRENCE-ID` has `RANGE=THISANDFUTURE` changes its Occurrence and every later one (RFC 5545, 3.2.13 and 3.8.4.4). Today it changes only its own Occurrence, so every later one shows the old title, place or time.
 
-**Blocked by:** 08
+**Blocked by:** 08, 84
 
 **Status:** ready-for-agent
 
@@ -25,3 +25,4 @@ Out of scope: writing the range on export (ticket 09); the user's own "this and 
 - 2026-10-18: Blocked by 08 so that its scopes are decided once, together with Occurrences a range changed. Low priority: Google Calendar and Apple Calendar reportedly split a Recurring Event for "this and following" instead of writing a range (https://github.com/karora/aCal/issues/59), and until this ticket FreeCal shows a range as a change to its one Occurrence, as many apps do. Before starting, check whether the apps users sync with write ranges at all: make a "this and following" change in Google Calendar, Apple Calendar and Thunderbird and look for `RANGE=` in each export. If none does, shrink this ticket to keeping the range for export and CalDAV only.
 - 2026-10-18: Splitting on import instead was weighed and rejected: it can't work for CalDAV without writing to the server during a pull, and for files a re-import would show the new part twice, because its UID isn't in the file. Cost is no reason to split: each range is one row, and applying the ranges while walking the starts adds little to a walk FreeCal already makes from the first start.
 - 2026-10-18 (from ticket 08): The scopes are in `core/src/scope.rs`. A change is measured from the Occurrence's place as the rule gives it (`Opened::slot`, from `recurrence::occurrence_at`); with ranges, that place is where the range put it, so `occurrence_at` and `carry_exceptions` are where ranges come in.
+- 2026-10-24: Blocked by 84 after an architecture review: the rule and scope changes go into the core's Event module (tickets 83 and 84) rather than the six places that rebuild a Recurring Event today.

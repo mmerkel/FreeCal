@@ -2,7 +2,7 @@
 
 **What to build:** A Recurring Event from a file can have several `RRULE` lines and `EXRULE` lines (RFC 2445 allows both; RFC 5545 deprecates them, but older files and some servers still write them). Its Occurrences are the starts every `RRULE` gives, less those any `EXRULE` gives. Today only the first `RRULE` is read and `EXRULE` is ignored, so Occurrences go missing or show although they were cancelled.
 
-**Blocked by:** none
+**Blocked by:** 84
 
 **Status:** ready-for-agent
 
@@ -20,3 +20,4 @@ Out of scope: writing them on export (ticket 09).
 ## Comments
 
 - 2026-10-18: Found while checking which parts of RFC 5545's recurrence FreeCal reads (after ticket 07). The `rrule` crate's `RRuleSet` takes several `rrule`s, and `exrule`s behind its `exrule` feature.
+- 2026-10-24: Blocked by 84 after an architecture review: the rule and scope changes go into the core's Event module (tickets 83 and 84) rather than the six places that rebuild a Recurring Event today.

@@ -1,10 +1,21 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
-- [ ] implement 37, rest of 56, 15, 16
+- [ ] architecture - recurring events
+  - [ ] afterwards check:
+    - [ ] import.rs calling into new module
+    - [ ] wiring between store and new module - it seems new module neds store through journal, but it is also a dependency for store 
+- [ ] compare context on fresh session
+- [ ] explicitly ask on how to reduce token usage with my current setup
+- [ ] architecture work
+- [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
+  - [ ] also no single owner of events table
+  - [ ] all basses throgh tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
+- [ ] caldav sync: 
+  - [ ] I would like to understand all ids and tokens involved (event ID, UID, etag, sync token, etc), and how the code deals with it
+  - [ ] I would like to understand the different authentication methods, and what was built in and why
+- [ ] implement 15, 16
 - [ ] test add caldav account & calendar by hand
   - [ ] rename accounts (keep account type in parens)
-- [ ] architecture check
-- [ ] caldav sync: I would like to understand all ids and tokens involved (event ID, UID, etag, sync token, etc), and how the code deals with it
 - [ ] repeat rules edit in the frontend (edit event): partially hide and only show all of it when the user actually wants to change it (somewhat like Google calendar)
 - [ ] font - which one is currently used; what are the rights; what about constant-width, so that times align more often?
 - [ ] paler tone for past events

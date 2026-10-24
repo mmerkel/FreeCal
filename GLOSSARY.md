@@ -33,7 +33,7 @@ A single entry in a Calendar.
 _Avoid_: Appointment, entry, item
 
 **Recurring Event**:
-An Event with a repeat rule, taken as a whole.
+An Event with a repeat rule, taken as a whole: its rule, its Occurrences and its Exceptions. An Exception whose Recurring Event is gone is an Event of its own.
 _Avoid_: Series, repeating event, recurrence
 
 **Location**:
