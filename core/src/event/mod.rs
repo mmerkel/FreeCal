@@ -119,14 +119,17 @@ impl Source for Store {
     }
 }
 
-impl Source for Unit<'_> {
-    fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
-        Unit::events_with_uid(self, uid)
-    }
-}
-
 /// A stored Event: its ID and fields.
 type Stored = (EventId, EventFields);
+
+/// A stored Exception: its ID, the recurrence ID of the Occurrence it
+/// changed, normalised, and its fields. A stored recurrence ID that isn't
+/// one gets none, and so pairs with no Occurrence.
+struct Exception {
+    id: EventId,
+    rid: Option<String>,
+    fields: EventFields,
+}
 
 /// The Events of a Calendar with one UID, sorted as GLOSSARY has them: the
 /// Event that isn't an Exception, a Recurring Event when it has a rule, and
@@ -139,7 +142,7 @@ pub(crate) struct Loaded {
     /// the first by ID, should the Calendar have several with the UID.
     event: Option<Stored>,
     /// Every Exception with the UID, in the order they were added.
-    exceptions: Vec<Stored>,
+    exceptions: Vec<Exception>,
 }
 
 impl Loaded {
@@ -148,6 +151,11 @@ impl Loaded {
     pub fn of_uid(source: &impl Source, calendar_id: CalendarId, uid: &str) -> Result<Self> {
         let events = source.events_with_uid(Uid::In(calendar_id, uid))?;
         Ok(Self::sorted(calendar_id, uid.to_owned(), events, None))
+    }
+
+    /// No Events yet, of the Calendar `calendar_id` under a new UID.
+    pub fn new_uid(calendar_id: CalendarId) -> Self {
+        Self::sorted(calendar_id, new_uid(), Vec::new(), None)
     }
 
     /// `events` sorted, with `opened`, if it isn't an Exception, as the
@@ -162,6 +170,17 @@ impl Loaded {
             .into_iter()
             .map(|event| (event.id, event.fields))
             .partition(|(_, fields)| fields.recurrence_id.is_some());
+        let exceptions = exceptions
+            .into_iter()
+            .map(|(id, fields)| Exception {
+                id,
+                rid: fields
+                    .recurrence_id
+                    .as_deref()
+                    .and_then(rule::recurrence_id),
+                fields,
+            })
+            .collect();
         let event = events
             .iter()
             .position(|(id, _)| Some(*id) == opened)
@@ -216,20 +235,22 @@ impl Loaded {
         )?;
         let mut left: Vec<_> = self.exceptions.iter().collect();
         for exception in &incoming.exceptions {
-            let same = left.iter().position(|(_, fields)| {
-                same_recurrence_id(
-                    fields.recurrence_id.as_deref(),
-                    exception.recurrence_id.as_deref(),
-                )
+            let rid = exception
+                .recurrence_id
+                .as_deref()
+                .and_then(rule::recurrence_id);
+            let same = rid.and_then(|rid| {
+                left.iter()
+                    .position(|stored| stored.rid.as_ref() == Some(&rid))
             });
             let (previous, fields) = match same.map(|index| left.remove(index)) {
-                Some((id, previous)) => (Some(*id), fields_over(exception, previous)),
+                Some(stored) => (Some(stored.id), fields_over(exception, &stored.fields)),
                 None => (None, fields(exception)),
             };
             self.write_exception(unit, previous, self, fields)?;
         }
-        for (id, _) in left {
-            unit.delete(*id)?;
+        for stored in left {
+            unit.delete(stored.id)?;
         }
         Ok(())
     }
@@ -261,21 +282,22 @@ impl Loaded {
         }
     }
 
-    /// The Exception that changed the Occurrence `rid`, if there is one.
-    fn exception_at(&self, rid: &str) -> Option<&Stored> {
+    /// The Exception that changed the Occurrence `rid`, normalised, if there
+    /// is one.
+    fn exception_at(&self, rid: &str) -> Option<&Exception> {
         self.exceptions
             .iter()
-            .find(|(_, fields)| same_recurrence_id(fields.recurrence_id.as_deref(), Some(rid)))
+            .find(|exception| exception.rid.as_deref() == Some(rid))
     }
 
-    /// Cancels the Occurrence `rid` of the Recurring Event, which it must
-    /// have: the Occurrence becomes a cancelled Exception, and an Exception
-    /// that changed it is deleted.
+    /// Cancels the Occurrence `rid`, normalised, of the Recurring Event,
+    /// which it must have: the Occurrence becomes a cancelled Exception, and
+    /// an Exception that changed it is deleted.
     fn cancel(&self, unit: &mut Unit, rid: &str) -> Result<()> {
         let (id, fields) = self.recurring_event();
-        for (exception, fields) in &self.exceptions {
-            if same_recurrence_id(fields.recurrence_id.as_deref(), Some(rid)) {
-                unit.delete(*exception)?;
+        for exception in &self.exceptions {
+            if exception.rid.as_deref() == Some(rid) {
+                unit.delete(exception.id)?;
             }
         }
         unit.replace(
@@ -292,8 +314,9 @@ impl Loaded {
 
     /// Deletes the Events with the UID, the Event and every Exception.
     pub fn delete_all(&self, unit: &mut Unit) -> Result<()> {
-        for (id, _) in self.event.iter().chain(&self.exceptions) {
-            unit.delete(*id)?;
+        let exceptions = self.exceptions.iter().map(|exception| exception.id);
+        for id in self.event.iter().map(|(id, _)| *id).chain(exceptions) {
+            unit.delete(id)?;
         }
         Ok(())
     }
@@ -302,9 +325,10 @@ impl Loaded {
 /// An Event as the window gives it, loaded: a single Event, a Recurring
 /// Event or one of its Exceptions.
 pub(crate) struct Opened {
-    id: EventId,
-    fields: EventFields,
     loaded: Loaded,
+    /// Which of `loaded`'s Exceptions it is, by index; none when it is
+    /// their Event.
+    exception: Option<usize>,
 }
 
 impl Opened {
@@ -315,38 +339,63 @@ impl Opened {
             .find(|event| event.id == id)
             .ok_or(CoreError::EventNotFound(id))?;
         let (calendar_id, uid) = (opened.calendar_id, opened.uid.clone());
-        let fields = opened.fields.clone();
-        Ok(Self {
-            id,
-            fields,
-            loaded: Loaded::sorted(calendar_id, uid, events, Some(id)),
-        })
+        let loaded = Loaded::sorted(calendar_id, uid, events, Some(id));
+        let exception = loaded
+            .exceptions
+            .iter()
+            .position(|exception| exception.id == id);
+        Ok(Self { loaded, exception })
+    }
+
+    /// The opened Exception, none when it isn't one.
+    fn exception(&self) -> Option<&Exception> {
+        self.exception.map(|index| &self.loaded.exceptions[index])
     }
 
     fn is_exception(&self) -> bool {
-        self.fields.recurrence_id.is_some()
+        self.exception.is_some()
+    }
+
+    fn id(&self) -> EventId {
+        match self.exception() {
+            Some(exception) => exception.id,
+            None => self.event().0,
+        }
+    }
+
+    fn fields(&self) -> &EventFields {
+        match self.exception() {
+            Some(exception) => &exception.fields,
+            None => &self.event().1,
+        }
+    }
+
+    /// The opened Event, of one that isn't an Exception: `loaded`'s Event,
+    /// as it is loaded with it.
+    fn event(&self) -> &Stored {
+        self.loaded
+            .event
+            .as_ref()
+            .expect("the opened Event loaded as the Event")
     }
 
     /// The Event as the window shows it, in the Display Time Zone `zone`.
     /// An Exception repeats with its Recurring Event, which the editor can
     /// change from it.
     pub fn to_event(&self, zone: Tz) -> Result<Event> {
-        let fields = &self.fields;
+        let fields = self.fields();
         let repeats = match &self.loaded.event {
             Some((_, recurring)) if self.is_exception() => recurring,
             _ => fields,
         };
         let (repeat, custom_repeat) = rule::repeat_of(repeats);
         Ok(Event {
-            id: self.id,
+            id: self.id(),
             calendar_id: self.loaded.calendar_id,
             title: fields.title.clone(),
             when: fields.when.to_when(zone)?,
             location: StructuredText::from_plain_text(&fields.location),
-            description: StructuredText::from_description(
-                &fields.description,
-                fields.description_html,
-            ),
+            description: fields.description(),
             pinned_zone: fields
                 .zone_pinned
                 .then(|| fields.when.start_zone.clone())
@@ -360,19 +409,10 @@ impl Opened {
     /// Deletes the Event, and with a Recurring Event or one of its
     /// Exceptions, the whole Recurring Event with all its Exceptions.
     pub fn delete(&self, unit: &mut Unit) -> Result<()> {
-        let whole = match (self.is_exception(), self.loaded.recurring()) {
-            (true, Some(_)) => true,
-            (true, None) => false,
-            (false, _) => self.fields.rule.is_some(),
-        };
-        let mut deleted = vec![self.id];
-        if whole {
-            deleted.extend(self.loaded.recurring().map(|(id, _)| *id));
-            deleted.extend(self.loaded.exceptions.iter().map(|(id, _)| *id));
+        match self.loaded.recurring() {
+            Some(_) => self.loaded.delete_all(unit),
+            None => unit.delete(self.id()),
         }
-        deleted.sort_unstable_by_key(|id| id.0);
-        deleted.dedup();
-        deleted.into_iter().try_for_each(|id| unit.delete(id))
     }
 }
 
@@ -414,7 +454,7 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
             server_data: None,
         },
     };
-    unit.create(&uuid::Uuid::new_v4().to_string(), &event)
+    unit.create(&new_uid(), &event)
 }
 
 /// The Occurrences of shown Calendars on the dates `from` up to `to`
@@ -433,11 +473,10 @@ pub(crate) fn occurrences(
         let expanded = match event.fields.rule {
             None => None,
             Some(_) => {
-                let changed: Vec<String> = Opened::load(store, event.id)?
-                    .loaded
-                    .exceptions
+                let changed: Vec<String> = store
+                    .events_with_uid(Uid::Of(event.id))?
                     .into_iter()
-                    .filter_map(|(_, fields)| fields.recurrence_id)
+                    .filter_map(|exception| exception.fields.recurrence_id)
                     .collect();
                 rule::occurrences_in(&event.fields, &changed, &range)?
             }
@@ -469,7 +508,7 @@ pub(crate) fn occurrences(
 
 /// Adds `incoming`, a version from a file or a server, with its Exceptions
 /// to the Calendar `calendar_id`, under the UID `uid`.
-pub(crate) fn create(
+fn create(
     unit: &mut Unit,
     calendar_id: CalendarId,
     uid: &str,
@@ -486,11 +525,9 @@ pub(crate) fn create(
     Ok(())
 }
 
-/// Whether two recurrence IDs name the same Occurrence, however each is
-/// written. One that isn't a recurrence ID names none.
-pub(crate) fn same_recurrence_id(a: Option<&str>, b: Option<&str>) -> bool {
-    let normalised = |id: Option<&str>| id.and_then(rule::recurrence_id);
-    normalised(a).is_some() && normalised(a) == normalised(b)
+/// A new UID for an Event.
+pub(crate) fn new_uid() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 /// An incoming version's fields, as the Local Store holds them.

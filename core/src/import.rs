@@ -23,7 +23,7 @@ use icalendar::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::event::{self, Loaded, OriginalServerData, StoredWhen, instant, rule, wall_text};
+use crate::event::{Loaded, OriginalServerData, StoredWhen, instant, new_uid, rule, wall_text};
 use crate::journal::{Unit, UnitId};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
@@ -230,14 +230,15 @@ pub(crate) fn run(
                 outcome.updated += 1;
                 loaded.take(unit, event)?;
             }
-            (false, _) => {
+            (exists, _) => {
                 outcome.imported += 1;
-                event::create(unit, calendar_id, &event.uid, event)?;
-            }
-            (true, ExistingEvents::Copy) => {
-                outcome.imported += 1;
-                let uid = uuid::Uuid::new_v4().to_string();
-                event::create(unit, calendar_id, &uid, event)?;
+                // A copy is added under a UID of its own.
+                let loaded = if exists {
+                    Loaded::new_uid(calendar_id)
+                } else {
+                    loaded
+                };
+                loaded.take(unit, event)?;
             }
         }
     }
@@ -322,7 +323,7 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         if recurring
             .exceptions
             .iter()
-            .all(|known| !event::same_recurrence_id(known.recurrence_id.as_deref(), Some(&id)))
+            .all(|known| known.recurrence_id.as_ref() != Some(&id))
         {
             exception.recurrence_id = Some(id);
             recurring.exceptions.push(exception);
@@ -420,18 +421,16 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                 .map(|exdate| recurrence_id_of(&zones.time(exdate), &when));
             // A rule FreeCal can't expand leaves the Event as its first
             // Occurrence.
-            let (rule, exdates) = event
-                .property_value("RRULE")
-                .filter(|_| original.is_none())
-                .and_then(|rule| rule::imported(rule, exdates, &StoredWhen::imported(&when)))
-                .map_or((None, String::new()), |(rule, exdates)| {
-                    (Some(rule), exdates)
-                });
+            let (rule, exdates) = rule::imported(
+                event.property_value("RRULE").filter(|_| original.is_none()),
+                exdates,
+                &StoredWhen::imported(&when),
+            );
             let imported = ImportedEvent {
                 uid: event
                     .get_uid()
                     .filter(|uid| !uid.is_empty())
-                    .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_owned),
+                    .map_or_else(new_uid, str::to_owned),
                 title: event.get_summary().unwrap_or_default().to_owned(),
                 when,
                 location: event.get_location().unwrap_or_default().to_owned(),

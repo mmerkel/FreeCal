@@ -163,18 +163,17 @@ pub(super) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -
 /// A rule from a file with the recurrence IDs of its `EXDATE`s, as FreeCal
 /// stores them: the rule as given, but with an `UNTIL` in the form RFC 5545
 /// asks for the Event at `when`, where one without a zone is read in the
-/// Event Time Zone; the recurrence IDs sorted, each once. None when FreeCal
-/// can't expand the rule.
+/// Event Time Zone; the recurrence IDs sorted, each once. No rule and no
+/// recurrence IDs when there is no rule or FreeCal can't expand it.
 pub(crate) fn imported(
-    text: &str,
+    text: Option<&str>,
     exdates: impl IntoIterator<Item = String>,
     when: &StoredWhen,
-) -> Option<(String, String)> {
-    let rule = imported_rule(text, when)?;
-    let exdates = exdates
-        .into_iter()
-        .fold(String::new(), |exdates, id| with_exdate(&exdates, &id));
-    Some((rule, exdates))
+) -> (Option<String>, String) {
+    match text.and_then(|text| imported_rule(text, when)) {
+        Some(rule) => (Some(rule), exdates_of(exdates)),
+        None => (None, String::new()),
+    }
 }
 
 /// The rule of [`imported`].
@@ -410,10 +409,16 @@ pub(super) fn exdates_where(
     keep: impl Fn(&str) -> bool,
     map: impl Fn(&str) -> Option<String>,
 ) -> String {
-    split_ids(exdates)
-        .filter(|id| keep(id))
-        .filter_map(map)
-        .fold(String::new(), |kept, id| with_exdate(&kept, &id))
+    exdates_of(split_ids(exdates).filter(|id| keep(id)).filter_map(map))
+}
+
+/// The recurrence IDs `ids` as a Recurring Event's cancelled Occurrences
+/// are stored: sorted, each once.
+fn exdates_of(ids: impl IntoIterator<Item = String>) -> String {
+    let mut ids: Vec<String> = ids.into_iter().collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.join(",")
 }
 
 /// A Recurring Event's rule for its Occurrences from the one with the

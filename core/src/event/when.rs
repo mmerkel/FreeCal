@@ -4,7 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
-use crate::{CoreError, ImportedWhen, Result};
+use crate::{CoreError, ImportedWhen, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -268,6 +268,12 @@ pub(crate) struct EventFields {
     /// For an Event pulled from a server, what the server sent for it. An
     /// Exception has none: its Recurring Event's holds it.
     pub server_data: Option<OriginalServerData>,
+}
+
+impl EventFields {
+    pub fn description(&self) -> StructuredText {
+        StructuredText::from_description(&self.description, self.description_html)
+    }
 }
 
 /// An Event's original server data (ADR 0004): the object a server holds

@@ -1,18 +1,20 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
+- [ ] consistent style for modules (mod.rs in subfolder or not) - which one is recommended?
 - [ ] architecture - recurring events
-  - [ ] more than one exception for a single occurrence possible - maybe fix db to make this impossible; but first check whether this is possible in ical/caldav
+  - [ ] I would like to understand all ids and tokens involved (event ID, UID, recurrence id, etag, sync token, etc), and how the code deals with it
+    - [ ] more than one exception for a single occurrence possible - maybe fix db to make this impossible; but first check whether this is possible in ical/caldav
   - [ ] afterwards check:
     - [ ] import.rs calling into new module
     - [ ] wiring between store and new module - it seems new module neds store through journal, but it is also a dependency for store 
 - [ ] compare context on fresh session
 - [ ] explicitly ask on how to reduce token usage with my current setup
 - [ ] architecture work
-- [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
+  - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
+    - [ ] naming wtih respect to events and recurrence - Loaded, Opened, Edited, Occurrence
   - [ ] also no single owner of events table
-  - [ ] all basses throgh tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
+  - [ ] all passes through tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
 - [ ] caldav sync: 
-  - [ ] I would like to understand all ids and tokens involved (event ID, UID, etag, sync token, etc), and how the code deals with it
   - [ ] I would like to understand the different authentication methods, and what was built in and why
 - [ ] implement 15, 16
 - [ ] test add caldav account & calendar by hand

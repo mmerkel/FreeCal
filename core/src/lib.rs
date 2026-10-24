@@ -261,8 +261,9 @@ impl Core {
                 self.record(Origin::FirstSync, |unit| {
                     for event in &events {
                         // A server may list an Event twice.
-                        if !Loaded::of_uid(unit, id, &event.uid)?.exists() {
-                            event::create(unit, id, &event.uid, event)?;
+                        let loaded = Loaded::of_uid(unit, id, &event.uid)?;
+                        if !loaded.exists() {
+                            loaded.take(unit, event)?;
                         }
                     }
                     Ok(())

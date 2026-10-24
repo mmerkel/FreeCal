@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::event::rule;
+use crate::event::{Source, rule};
 use crate::store::{EVENT_FIELDS, Store, StoredEvent, Uid, UidEvent, event_fields};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
@@ -185,10 +185,6 @@ pub(crate) struct Unit<'a> {
 impl Unit<'_> {
     pub fn find_event(&self, id: EventId) -> Result<StoredEvent> {
         self.store.find_event(id)
-    }
-
-    pub fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
-        self.store.events_with_uid(uid)
     }
 
     /// The Event held in the server object at `href` in a Calendar, with
@@ -373,6 +369,12 @@ impl Unit<'_> {
             ],
         )?;
         Ok(())
+    }
+}
+
+impl Source for Unit<'_> {
+    fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
+        self.store.events_with_uid(uid)
     }
 }
 
