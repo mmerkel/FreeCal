@@ -2,7 +2,7 @@
 
 **What to build:** Undo goes per Event as ADR 0009 describes, on top of ticket 69's Change Journal module: an Event changed since an entry has its later entries undone first, a unit can be undone one Event at a time, Events that can't be undone are skipped with a reason, and the core says whether an undo is benign or dangerous. Spec: US-81, US-82 and US-149; "Change Journal" under Implementation Decisions.
 
-**Blocked by:** 69, 83
+**Blocked by:** 69, 83, 85
 
 **Status:** ready-for-agent
 
@@ -23,3 +23,4 @@ Out of scope: Ctrl+Z, toasts and confirmations (ticket 70); the list and History
 - 2026-10-18: Split from ticket 69 after an architecture review and its grilling: 69 builds the Change Journal module with whole-unit undo, this ticket adds the per-Event rules.
 - 2026-10-18: Dropped the skip for an Event whose previous version's Calendar was deleted: ticket 69 now removes those entries when the Calendar is deleted, so no undo can meet one.
 - 2026-10-24: Blocked by 83 after an architecture review: a user action's unit is undone only whole (ADR 0009, amended), and an import's or sync's per Recurring Event, which ticket 83's module says.
+- 2026-10-24: Blocked by 85: an Event's later entries are found by its ID, which must not be shared with an earlier Exception of the same Recurring Event.

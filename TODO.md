@@ -1,8 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 - [ ] architecture - recurring events
-  - [ ] I would like to understand all ids and tokens involved (event ID, UID, recurrence id, etag, sync token, etc), and how the code deals with it
-    - [ ] more than one exception for a single occurrence possible - maybe fix db to make this impossible; but first check whether this is possible in ical/caldav
+  - [ ] more than one exception for a single occurrence possible - maybe fix db to make this impossible; but first check whether this is possible in ical/caldav
   - [ ] afterwards check:
     - [ ] import.rs calling into new module
     - [ ] wiring between store and new module - it seems new module neds store through journal, but it is also a dependency for store 

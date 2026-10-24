@@ -2,7 +2,7 @@
 
 **What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: US-131 and "Quitting" under Frontend.
 
-**Blocked by:** 13, 16, 17, 33
+**Blocked by:** 13, 16, 17, 33, 87
 
 **Status:** ready-for-agent
 
@@ -18,3 +18,6 @@
 - [ ] If changes are still unsent, a modal dialog says how many, lists the Calendars with the reason for each (Offline, Conflict, waiting for approval, error) and says they'll be sent at the next start, or that they need attention for a Conflict or a paused Calendar. "Cancel" has initial focus; "Quit anyway" quits
 - [ ] Logout and system shutdown never wait for this and never show the dialog; the queue stays in the Local Store
 - [ ] Core tests for the send-before-quit attempt with a controllable clock; component tests against the fake core for the dialog, Cancel and Quit anyway
+
+## Comments
+- 2026-10-24: Start with a grilling on whether ADR 0010's structure is right for recording changes not yet sent: a pending mark on objects, rows without an object (not created yet) and objects without rows (deletes not sent), instead of the "queue" this ticket's wording assumes. Also: order of replay, and what the user sees as "not yet sent".
