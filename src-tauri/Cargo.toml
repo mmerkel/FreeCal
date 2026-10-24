@@ -8,6 +8,9 @@ license.workspace = true
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 freecal-core = { path = "../core" }

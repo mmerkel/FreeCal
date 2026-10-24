@@ -1,6 +1,5 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
-- [ ] consistent style for modules (mod.rs in subfolder or not) - which one is recommended?
 - [ ] architecture - recurring events
   - [ ] I would like to understand all ids and tokens involved (event ID, UID, recurrence id, etag, sync token, etc), and how the code deals with it
     - [ ] more than one exception for a single occurrence possible - maybe fix db to make this impossible; but first check whether this is possible in ical/caldav

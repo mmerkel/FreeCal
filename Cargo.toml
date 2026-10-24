@@ -7,6 +7,11 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+# Modules with submodules live in `foo.rs` next to a `foo/` folder, not in
+# `foo/mod.rs`.
+[workspace.lints.clippy]
+mod_module_files = "warn"
+
 # The import tests deflate and inflate a .zip of over 128 MiB, which takes
 # seconds unoptimised.
 [profile.dev.package.zlib-rs]
