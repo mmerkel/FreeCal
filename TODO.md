@@ -92,6 +92,10 @@ Possible bugs, found by reading the code, not run:
 - [ ] `syncToken` can't be combined with `timeMin`/`timeMax`, `orderBy`, `q`, `iCalUID`, `updatedMin`
 - [ ] unknown, test against a real account: what Google's own app writes when cancelling one Occurrence (`EXDATE` or stub) and for "this and following"; whether the fake Google server (ticket 25) should mimic it
 
+## Ticket 17: writing to CalDAV (from the recurrence lessons)
+
+- [ ] after a successful write, what does the mirror hold: the object FreeCal sent, or the one the server now holds? Servers may store something else than was sent: Radicale 3.8.3 adds a missing `VTIMEZONE` and reorders properties, and still returns a strong `ETag` for the `PUT`, though RFC 4791 §5.3.4 says it "MUST NOT" when the stored object isn't byte-equal. Keeping the sent object with that ETag leaves the mirror different from the server, and no sync shows it, since the ETag says nothing changed. Option: `GET` the object after each `PUT` (one more request per write). Reproduce with `~/Learning/calendar-recurrence/assets/caldav-lab.sh` and `lessons/0007/yoga.ics`, then `curl -i` on the `PUT`
+
 ## Ticket 80: first sync of a CalDAV Calendar
 
 Review risks left as they are:
