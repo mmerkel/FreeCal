@@ -2,7 +2,7 @@
 
 **What to build:** When a local change to a whole Recurring Event collides with a remote change to one of its Occurrences, FreeCal raises one Conflict on the whole Recurring Event, showing both versions, so the user resolves it as one decision.
 
-**Blocked by:** 20
+**Blocked by:** 20, 91
 
 **Status:** ready-for-agent
 
@@ -14,3 +14,4 @@
 
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
+- 2026-10-25 (grilling, ADR 0011): blocked by 91, as ticket 20 is. A Recurring Event's rows are one object on CalDAV, but several on Google; a Conflict there is on the objects whose keys are unsent.

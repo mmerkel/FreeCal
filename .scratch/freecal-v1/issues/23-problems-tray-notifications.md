@@ -14,3 +14,6 @@
 - [ ] An open window shows new Conflicts and Sync Errors as soon as "Problems changed" arrives
 - [ ] Tested with the recording fake tray and notifier
 - [ ] Tray labels escape `_` and notification bodies are escaped: problem lines naming the hostile test Event or a hostile Calendar name show literally (checked with the recording fakes)
+
+## Comments
+- 2026-10-25 (grilling, ADR 0011): an object that holds a UID another object of its Calendar owns is mirrored without rows and isn't shown. List it here as a problem of its Calendar, through ticket 91's ownership function.

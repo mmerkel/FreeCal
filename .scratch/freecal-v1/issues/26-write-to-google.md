@@ -2,7 +2,7 @@
 
 **What to build:** Writable Google Calendars get the same editing, offline replay, Change Journal, Conflict and Mass-Change Guard behaviour as CalDAV. When the Google login expires, the user is asked to log in again and sync resumes. Exports keep Google-only details, so a Google Event can be restored completely.
 
-**Blocked by:** 09, 18, 25, 87
+**Blocked by:** 09, 18, 25, 91
 
 **Status:** ready-for-agent
 
@@ -15,3 +15,4 @@
 
 ## Comments
 - 2026-10-24: Per ADR 0010, each Google event resource, a Recurring Event or an Exception, is a server object of its own, with its JSON as received.
+- 2026-10-25 (grilling, ADR 0011): blocked by 91. A Google row's object is the one holding its Calendar, UID and recurrence ID in `server_object_key`; a new Exception has none until it is created. Fill the keys from Google's JSON (`iCalUID`, `originalStartTime`), with recurrence IDs normalised as the rows hold them.

@@ -2,7 +2,7 @@
 
 **What to build:** The user can switch a CalDAV Calendar from read-only to writable, and mark any Calendar read-only. In a writable CalDAV Calendar, creating, editing, moving and deleting Events (including recurrence scopes) is sent to the server. Every change sent is recorded in the Change Journal. Details FreeCal doesn't show are never lost, and Events with other attendees can't be edited.
 
-**Blocked by:** 08, 15, 56, 69, 87
+**Blocked by:** 08, 15, 56, 69, 91
 
 **Status:** ready-for-agent
 
@@ -25,3 +25,4 @@
 - 2026-10-18 (from 82): undoing a sync unit restores the previous version locally but leaves `calendar.sync_token` alone, so the server's newer version isn't fetched again until it changes there. The undo has to reach the server through this ticket, or the next whole listing (without a token) brings the server's version back.
 - 2026-10-24: Blocked by 87: writes build on server objects that mirror the server (ADR 0010). A write sends a pending object with `If-Match` on the mirror's ETag, and a success updates the mirror.
 - 2026-10-25 (from 86): the comment from 81 is outdated. Rows refer to a `server_object` (`EventFields.object_id`), and an undo leaves the mirror's ETag as the server gave it. User actions, imports and undos set `server_object.pending`. A new Exception made by a user action joins its Recurring Event's object (`Unit::placed`); a new row of a new UID has no object.
+- 2026-10-25 (grilling, ADR 0011): blocked by 91. The comments of 2026-10-24 and from 86 above are outdated: rows have no object ID and `Unit::placed` is gone. A row's object is the one holding its Calendar and UID in `server_object_key`. What to send is `unsent_change`: for each key, rows with an object is a PUT with `If-Match` on the mirror's ETag, rows without one a create, an object without rows a DELETE; CalDAV sends one resource per UID. A success updates the mirror and removes the key. Decide here what an Event shows when its send fails ("Not yet synced: <reason>"); the table has no reason column yet.

@@ -21,3 +21,7 @@ The Change Journal records Event rows only, with the object each refers to, neve
 - A server change arriving while an object is pending is a Conflict, never a silent replacement.
 - Undoing a delete already sent creates the Event again under a new href.
 - Object IDs, like Event IDs, are never reused.
+
+## Amendments
+
+- 2026-10-25, ADR 0011: a Calendar's rows with one UID belong to the one object holding it, found through the objects' keys instead of an object ID on each row, so objects that break RFC 4791 are no longer kept with rows of their own. The Change Journal no longer records any object, and what FreeCal has to send is a list of unsent changes instead of a pending mark on objects.

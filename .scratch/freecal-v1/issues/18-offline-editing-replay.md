@@ -2,7 +2,7 @@
 
 **What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: US-131 and "Quitting" under Frontend.
 
-**Blocked by:** 13, 16, 17, 33, 87
+**Blocked by:** 13, 16, 17, 33, 91
 
 **Status:** ready-for-agent
 
@@ -21,3 +21,4 @@
 
 ## Comments
 - 2026-10-24: Start with a grilling on whether ADR 0010's structure is right for recording changes not yet sent: a pending mark on objects, rows without an object (not created yet) and objects without rows (deletes not sent), instead of the "queue" this ticket's wording assumes. Also: order of replay, and what the user sees as "not yet sent".
+- 2026-10-25 (grilling, ADR 0011): blocked by 91. The structure asked about above is decided: unsent changes are keys in `unsent_change` (Calendar, UID, recurrence ID, since), not a pending mark on objects; the three cases are read off rows and objects per key. Order of replay and what the user sees remain for this ticket's grilling.

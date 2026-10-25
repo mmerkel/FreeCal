@@ -68,6 +68,10 @@ _Avoid_: Database, cache, local copy
 The state of an Event when a change made in FreeCal and a newer change on the server can't both be kept, so the user has to choose.
 _Avoid_: Collision, sync error
 
+**Unsent Change**:
+A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.
+_Avoid_: Pending change, queued change, outbox entry
+
 **Sync Error**:
 A problem that stops an Account or Calendar from syncing and isn't about a specific Event's content, such as an expired login, a server refusing a request, or a Calendar paused by the Mass-Change Guard. Being offline is not a Sync Error.
 _Avoid_: Sync failure, error state
