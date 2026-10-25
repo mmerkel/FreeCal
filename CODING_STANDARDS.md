@@ -22,6 +22,11 @@ Every stored field is untrusted, whatever its origin (spec: "Untrusted content" 
 - Links open in the system browser through the shell (`openLink`), never in the window.
 - A field that gains a new way of being shown, such as links or markup pieces, gets a matching payload and `expected` entry in `fixtures/hostile-event.json`.
 
+## Local Store
+
+- SQL lives only in `core/src/store/schema.rs` (the schema and its migrations) and `core/src/store/sql.rs` (every query and write).
+- In `sql.rs`, every statement that writes a table the Change Journal guards (`event`, `server_object`, `journal_unit`, `journal_entry`) is in a function that takes a `&Journaled` (ADR 0011).
+
 ## Dependencies
 
 - Every npm dependency is GPLv3-compatible (ADR 0003). `cargo deny check licenses` checks the Rust ones.

@@ -5,8 +5,9 @@
 //! A unit writes the server objects too (ADR 0010), which the Journal doesn't
 //! record: each Event's version holds only the object it refers to.
 //!
-//! This file holds what the Journal decides and no SQL: it writes through
-//! [`rows`](super::rows) and reads through `store`'s own methods.
+//! This file holds what the Journal decides and no SQL: it reads and writes
+//! through [`sql`](super::sql), whose writes to the tables it guards take a
+//! [`Journaled`], which only this file can make.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,6 +15,33 @@ use sha2::{Digest, Sha256};
 use super::{Store, StoredEvent, Uid, UidEvent};
 use crate::event::{ObjectId, ServerObject, Source, rule};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
+
+/// Leave to write the tables the Change Journal guards. Its field is private
+/// to this file, so that nothing else can make one.
+pub(super) struct Journaled(());
+
+/// The [`Journaled`] this file's writes pass.
+const JOURNALED: &Journaled = &Journaled(());
+
+/// The time zone rules FreeCal was built with, which the derived UTC columns
+/// are computed with.
+const TIME_ZONE_RULES: &str = chrono_tz::IANA_TZDB_VERSION;
+
+/// Recomputes every Event's derived UTC instants when the Local Store's were
+/// computed with other time zone rules than this build's, while it opens. The
+/// Journal doesn't record them, so this writes outside any unit. A row whose
+/// time can't be read keeps what it had.
+pub(super) fn recompute_instants(store: &Store) -> Result<()> {
+    if store.time_zone_rules()? == TIME_ZONE_RULES {
+        return Ok(());
+    }
+    for (id, fields) in store.all_event_fields()? {
+        if let Ok(instants) = rule::span(&fields) {
+            store.write_instants(JOURNALED, id, instants)?;
+        }
+    }
+    store.set_time_zone_rules(TIME_ZONE_RULES)
+}
 
 /// A Change Journal unit: what undoes a change, or changes made together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -123,7 +151,7 @@ pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<(
                 Some(previous) => unit.put_back(entry.event_id, &entry.uid, previous)?,
             }
         }
-        store.mark_undone(id)
+        store.mark_undone(JOURNALED, id)
     })
 }
 
@@ -143,14 +171,14 @@ pub(crate) fn delete_account(store: &Store, id: AccountId) -> Result<()> {
         for calendar in store.account_calendars(id)? {
             delete_calendar_within(store, calendar)?;
         }
-        store.delete_account_row(id)
+        store.delete_account_row(JOURNALED, id)
     })
 }
 
 /// [`delete_calendar`] inside a transaction already begun.
 fn delete_calendar_within(store: &Store, id: CalendarId) -> Result<()> {
-    store.delete_calendar_events(id)?;
-    store.delete_calendar_row(id)
+    store.delete_calendar_events(JOURNALED, id)?;
+    store.delete_calendar_row(JOURNALED, id)
 }
 
 /// One unit being recorded, inside [`record`]'s transaction. Each write reads
@@ -193,7 +221,8 @@ impl Unit<'_> {
     ) -> Result<ObjectId> {
         debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
-        self.store.write_object(calendar_id, object, over)
+        self.store
+            .write_object(JOURNALED, calendar_id, object, over)
     }
 
     /// Records that FreeCal couldn't read what the server holds now at
@@ -201,7 +230,7 @@ impl Unit<'_> {
     /// could, and their rows stay as they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
         debug_assert!(self.origin.is_sync());
-        self.store.mark_unreadable(calendar_id, href)
+        self.store.mark_unreadable(JOURNALED, calendar_id, href)
     }
 
     /// Removes the server object `id` from the mirror, and its rows with it,
@@ -211,7 +240,7 @@ impl Unit<'_> {
         for event in self.events_in_object(id)? {
             self.delete(event.id)?;
         }
-        self.store.delete_object(id)
+        self.store.delete_object(JOURNALED, id)
     }
 
     /// Records, with the unit's changes, that a sync of a Calendar
@@ -226,7 +255,7 @@ impl Unit<'_> {
         let event = &self.placed(None, uid, event)?;
         let id = self
             .store
-            .write_event(None, uid, event, rule::span(&event.fields)?)?;
+            .write_event(JOURNALED, None, uid, event, rule::span(&event.fields)?)?;
         self.entry(id, uid, None, Some(event))?;
         Ok(id)
     }
@@ -242,7 +271,7 @@ impl Unit<'_> {
             return Ok(());
         }
         self.store
-            .write_event(Some(id), &uid, event, rule::span(&event.fields)?)?;
+            .write_event(JOURNALED, Some(id), &uid, event, rule::span(&event.fields)?)?;
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
@@ -282,7 +311,7 @@ impl Unit<'_> {
     pub fn delete(&mut self, id: EventId) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
-        self.store.delete_event(id)?;
+        self.store.delete_event(JOURNALED, id)?;
         self.entry(id, &uid, Some(&previous), None)
     }
 
@@ -298,7 +327,8 @@ impl Unit<'_> {
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
-        self.store.write_event(Some(id), uid, event, instants)?;
+        self.store
+            .write_event(JOURNALED, Some(id), uid, event, instants)?;
         self.entry(id, uid, None, Some(event))
     }
 
@@ -342,7 +372,7 @@ impl Unit<'_> {
                 && !self.origin.is_sync()
                 && !self.pending.contains(&object)
             {
-                self.store.mark_pending(object)?;
+                self.store.mark_pending(JOURNALED, object)?;
                 self.pending.push(object);
             }
         }
@@ -353,10 +383,16 @@ impl Unit<'_> {
             Some(unit) => unit,
             None => *self
                 .id
-                .insert(self.store.insert_unit(origin, self.made_at)?),
+                .insert(self.store.insert_unit(JOURNALED, origin, self.made_at)?),
         };
-        self.store
-            .insert_entry(unit, id, uid, previous, new.map(|event| hash(uid, event)))
+        self.store.insert_entry(
+            JOURNALED,
+            unit,
+            id,
+            uid,
+            previous,
+            new.map(|event| hash(uid, event)),
+        )
     }
 }
 
