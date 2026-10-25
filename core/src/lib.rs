@@ -10,7 +10,6 @@ mod clock;
 mod error;
 mod event;
 mod import;
-mod journal;
 mod keyring;
 mod remote;
 mod settings;
@@ -42,20 +41,19 @@ pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
-pub use journal::{Changed, UnitId};
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
+pub use store::{Changed, UnitId};
 pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
 use event::{Edit, Opened};
-use journal::{Origin, Unit};
 use remote::{Remote, SyncPoint};
-use store::Store;
+use store::{Origin, Store, Unit};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -395,7 +393,7 @@ impl Core {
                 .delete(&key)
                 .map_err(CoreError::KeyringUnavailable)?;
         }
-        journal::delete_account(&self.store(), id)?;
+        store::delete_account(&self.store(), id)?;
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
@@ -478,7 +476,7 @@ impl Core {
                 (Provider::Local, true) => return Err(CoreError::NotServerCalendar(id)),
                 (Provider::CalDav, false) => return Err(CoreError::NotLocalCalendar(id)),
             }
-            journal::delete_calendar(&store, id)?;
+            store::delete_calendar(&store, id)?;
         }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
@@ -690,7 +688,7 @@ impl Core {
     /// changed since, and for a unit undone already. The undo is a unit
     /// itself, and undoing it redoes the change.
     pub fn undo_unit(&self, id: UnitId) -> Result<Changed<()>> {
-        let undone = journal::undo(&self.store(), id, self.clock.now().timestamp())?;
+        let undone = store::undo(&self.store(), id, self.clock.now().timestamp())?;
         Ok(self.signal(undone))
     }
 
@@ -701,14 +699,13 @@ impl Core {
         origin: Origin,
         change: impl FnOnce(&mut Unit) -> Result<T>,
     ) -> Result<Changed<T>> {
-        let recorded =
-            journal::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
+        let recorded = store::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
         Ok(self.signal(recorded))
     }
 
     /// Sends "Occurrences changed" for a recorded unit's Calendars, once the
     /// Store lock is released.
-    fn signal<T>(&self, recorded: journal::Recorded<T>) -> Changed<T> {
+    fn signal<T>(&self, recorded: store::Recorded<T>) -> Changed<T> {
         if !recorded.calendars.is_empty() {
             self.signals.send(Signal::OccurrencesChanged {
                 calendar_ids: recorded.calendars,

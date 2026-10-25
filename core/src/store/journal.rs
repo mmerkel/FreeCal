@@ -4,13 +4,15 @@
 //! the Journal. Changes made together, such as an import, are one unit.
 //! A unit writes the server objects too (ADR 0010), which the Journal doesn't
 //! record: each Event's version holds only the object it refers to.
+//!
+//! This file holds what the Journal decides and no SQL: it writes through
+//! [`rows`](super::rows) and reads through `store`'s own methods.
 
-use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::{Store, StoredEvent, Uid, UidEvent};
 use crate::event::{ObjectId, ServerObject, Source, rule};
-use crate::store::{EVENT_FIELDS, ICALENDAR, Store, StoredEvent, Uid, UidEvent, event_fields};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// A Change Journal unit: what undoes a change, or changes made together.
@@ -106,13 +108,13 @@ pub(crate) fn record<T>(
 /// changed since, and for a unit undone already.
 pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<()>> {
     record(store, Origin::Undo, made_at, |unit| {
-        let entries = entries(store, id)?;
+        let entries = store.entries(id)?;
         if entries.iter().any(|entry| entry.undone) {
             return Err(CoreError::AlreadyUndone(id));
         }
         // Latest first, so that each entry finds the version it made.
         for entry in entries.iter().rev() {
-            let current = current(store, entry.event_id, &entry.uid)?;
+            let current = store.current_event(entry.event_id, &entry.uid)?;
             if current.map(|event| hash(&entry.uid, &event)) != entry.hash {
                 return Err(CoreError::ChangedSinceUnit(id));
             }
@@ -121,11 +123,7 @@ pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<(
                 Some(previous) => unit.put_back(entry.event_id, &entry.uid, previous)?,
             }
         }
-        store.connection().execute(
-            "UPDATE journal_entry SET undone = 1 WHERE unit_id = ?1",
-            [id.0],
-        )?;
-        Ok(())
+        store.mark_undone(id)
     })
 }
 
@@ -142,44 +140,17 @@ pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
 /// [`delete_calendar`] does, all or none.
 pub(crate) fn delete_account(store: &Store, id: AccountId) -> Result<()> {
     store.transaction(|| {
-        let conn = store.connection();
-        let calendars = conn
-            .prepare("SELECT id FROM calendar WHERE account_id = ?1")?
-            .query_map([id.0], |row| row.get(0).map(CalendarId))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for calendar in calendars {
+        for calendar in store.account_calendars(id)? {
             delete_calendar_within(store, calendar)?;
         }
-        conn.execute("DELETE FROM account WHERE id = ?1", [id.0])?;
-        Ok(())
+        store.delete_account_row(id)
     })
 }
 
 /// [`delete_calendar`] inside a transaction already begun.
 fn delete_calendar_within(store: &Store, id: CalendarId) -> Result<()> {
-    let conn = store.connection();
-    conn.execute(
-        "DELETE FROM journal_entry WHERE EXISTS (SELECT 1 FROM event \
-         WHERE event.calendar_id = ?1 AND event.id = journal_entry.event_id \
-           AND event.uid = journal_entry.uid)",
-        [id.0],
-    )?;
-    conn.execute(
-        "DELETE FROM journal_entry WHERE id <= (SELECT MAX(back.id) \
-         FROM journal_entry AS back WHERE back.calendar_id = ?1 \
-           AND back.event_id = journal_entry.event_id AND back.uid = journal_entry.uid)",
-        [id.0],
-    )?;
-    conn.execute("DELETE FROM event WHERE calendar_id = ?1", [id.0])?;
-    conn.execute(
-        "DELETE FROM journal_unit WHERE NOT EXISTS \
-         (SELECT 1 FROM journal_entry WHERE unit_id = journal_unit.id)",
-        [],
-    )?;
-    match conn.execute("DELETE FROM calendar WHERE id = ?1", [id.0])? {
-        0 => Err(CoreError::CalendarNotFound(id)),
-        _ => Ok(()),
-    }
+    store.delete_calendar_events(id)?;
+    store.delete_calendar_row(id)
 }
 
 /// One unit being recorded, inside [`record`]'s transaction. Each write reads
@@ -222,31 +193,7 @@ impl Unit<'_> {
     ) -> Result<ObjectId> {
         debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
-        let conn = self.store.connection();
-        match over {
-            Some(id) => {
-                conn.execute(
-                    "UPDATE server_object SET href = ?2, etag = ?3, data = ?4, format = ?5, \
-                     unreadable = 0 WHERE id = ?1",
-                    params![id.0, object.href, object.etag, object.data, ICALENDAR],
-                )?;
-                Ok(id)
-            }
-            None => {
-                conn.execute(
-                    "INSERT INTO server_object (calendar_id, href, etag, data, format) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        calendar_id.0,
-                        object.href,
-                        object.etag,
-                        object.data,
-                        ICALENDAR
-                    ],
-                )?;
-                Ok(ObjectId(conn.last_insert_rowid()))
-            }
-        }
+        self.store.write_object(calendar_id, object, over)
     }
 
     /// Records that FreeCal couldn't read what the server holds now at
@@ -254,11 +201,7 @@ impl Unit<'_> {
     /// could, and their rows stay as they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
         debug_assert!(self.origin.is_sync());
-        self.store.connection().execute(
-            "UPDATE server_object SET unreadable = 1 WHERE calendar_id = ?1 AND href = ?2",
-            params![calendar_id.0, href],
-        )?;
-        Ok(())
+        self.store.mark_unreadable(calendar_id, href)
     }
 
     /// Removes the server object `id` from the mirror, and its rows with it,
@@ -268,10 +211,7 @@ impl Unit<'_> {
         for event in self.events_in_object(id)? {
             self.delete(event.id)?;
         }
-        self.store
-            .connection()
-            .execute("DELETE FROM server_object WHERE id = ?1", [id.0])?;
-        Ok(())
+        self.store.delete_object(id)
     }
 
     /// Records, with the unit's changes, that a sync of a Calendar
@@ -284,7 +224,9 @@ impl Unit<'_> {
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
         self.writable(event.calendar_id)?;
         let event = &self.placed(None, uid, event)?;
-        let id = write(self.store, None, uid, event, rule::span(&event.fields)?)?;
+        let id = self
+            .store
+            .write_event(None, uid, event, rule::span(&event.fields)?)?;
         self.entry(id, uid, None, Some(event))?;
         Ok(id)
     }
@@ -299,13 +241,8 @@ impl Unit<'_> {
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
-        write(
-            self.store,
-            Some(id),
-            &uid,
-            event,
-            rule::span(&event.fields)?,
-        )?;
+        self.store
+            .write_event(Some(id), &uid, event, rule::span(&event.fields)?)?;
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
@@ -323,17 +260,10 @@ impl Unit<'_> {
         uid: &str,
         event: &StoredEvent,
     ) -> Result<StoredEvent> {
-        let conn = self.store.connection();
         let object = match self.origin {
             Origin::FirstSync | Origin::Sync => return Ok(event.clone()),
             Origin::Undo => match event.fields.object_id {
-                Some(object) => conn
-                    .query_row(
-                        "SELECT id FROM server_object WHERE id = ?1 AND calendar_id = ?2",
-                        params![object.0, event.calendar_id.0],
-                        |row| row.get(0).map(ObjectId),
-                    )
-                    .optional()?,
+                Some(object) => self.store.object_in(object, event.calendar_id)?,
                 None => None,
             },
             Origin::UserAction | Origin::Import => match previous {
@@ -341,14 +271,7 @@ impl Unit<'_> {
                     .fields
                     .object_id
                     .filter(|_| previous.calendar_id == event.calendar_id),
-                None => conn
-                    .query_row(
-                        "SELECT object_id FROM event WHERE calendar_id = ?1 AND uid = ?2 \
-                         AND object_id IS NOT NULL ORDER BY id LIMIT 1",
-                        params![event.calendar_id.0, uid],
-                        |row| row.get(0).map(ObjectId),
-                    )
-                    .optional()?,
+                None => self.store.object_of_uid(event.calendar_id, uid)?,
             },
         };
         let mut event = event.clone();
@@ -359,9 +282,7 @@ impl Unit<'_> {
     pub fn delete(&mut self, id: EventId) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
-        self.store
-            .connection()
-            .execute("DELETE FROM event WHERE id = ?1", [id.0])?;
+        self.store.delete_event(id)?;
         self.entry(id, &uid, Some(&previous), None)
     }
 
@@ -369,7 +290,7 @@ impl Unit<'_> {
     /// while it is the one with the UID `uid`, otherwise as a new Event. No
     /// other Event has that ID, as IDs are never given out again (ticket 85).
     fn put_back(&mut self, id: EventId, uid: &str, event: &StoredEvent) -> Result<()> {
-        if current(self.store, id, uid)?.is_some() {
+        if self.store.current_event(id, uid)?.is_some() {
             return self.replace(id, event);
         }
         self.writable(event.calendar_id)?;
@@ -377,19 +298,13 @@ impl Unit<'_> {
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
-        write(self.store, Some(id), uid, event, instants)?;
+        self.store.write_event(Some(id), uid, event, instants)?;
         self.entry(id, uid, None, Some(event))
     }
 
     fn previous(&self, id: EventId) -> Result<(String, StoredEvent)> {
         self.store
-            .connection()
-            .query_row(
-                &format!("SELECT uid, calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1"),
-                [id.0],
-                |row| Ok((row.get(0)?, stored_event(row, 1)?)),
-            )
-            .optional()?
+            .event_and_uid(id)?
             .ok_or(CoreError::EventNotFound(id))
     }
 
@@ -419,7 +334,6 @@ impl Unit<'_> {
         previous: Option<&StoredEvent>,
         new: Option<&StoredEvent>,
     ) -> Result<()> {
-        let conn = self.store.connection();
         for event in previous.into_iter().chain(new) {
             if !self.calendars.contains(&event.calendar_id) {
                 self.calendars.push(event.calendar_id);
@@ -428,10 +342,7 @@ impl Unit<'_> {
                 && !self.origin.is_sync()
                 && !self.pending.contains(&object)
             {
-                conn.execute(
-                    "UPDATE server_object SET pending = 1 WHERE id = ?1",
-                    [object.0],
-                )?;
+                self.store.mark_pending(object)?;
                 self.pending.push(object);
             }
         }
@@ -440,46 +351,12 @@ impl Unit<'_> {
         };
         let unit = match self.id {
             Some(unit) => unit,
-            None => {
-                conn.execute(
-                    "INSERT INTO journal_unit (origin, made_at) VALUES (?1, ?2)",
-                    params![origin, self.made_at],
-                )?;
-                *self.id.insert(UnitId(conn.last_insert_rowid()))
-            }
+            None => *self
+                .id
+                .insert(self.store.insert_unit(origin, self.made_at)?),
         };
-        let fields = previous.map(|event| &event.fields);
-        let when = fields.map(|fields| &fields.when);
-        conn.execute(
-            &format!(
-                "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, \
-                 {EVENT_FIELDS}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                   ?16, ?17, ?18, ?19)"
-            ),
-            params![
-                unit.0,
-                id.0,
-                uid,
-                new.map(|event| hash(uid, event)),
-                previous.map(|event| event.calendar_id.0),
-                fields.map(|fields| &fields.title),
-                when.map(|when| when.all_day),
-                when.map(|when| &when.start),
-                when.map(|when| &when.end),
-                when.and_then(|when| when.start_zone.as_ref()),
-                when.and_then(|when| when.end_zone.as_ref()),
-                fields.map(|fields| &fields.location),
-                fields.map(|fields| &fields.description),
-                fields.map(|fields| fields.description_html),
-                fields.map(|fields| fields.zone_pinned),
-                fields.and_then(|fields| fields.rule.as_ref()),
-                fields.map(|fields| &fields.exdates),
-                fields.and_then(|fields| fields.recurrence_id.as_ref()),
-                fields.and_then(|fields| fields.object_id.map(|object| object.0)),
-            ],
-        )?;
-        Ok(())
+        self.store
+            .insert_entry(unit, id, uid, previous, new.map(|event| hash(uid, event)))
     }
 }
 
@@ -489,118 +366,17 @@ impl Source for Unit<'_> {
     }
 }
 
-/// The one way an Event row is written: as a new Event when `id` is none,
-/// otherwise over the Event `id` or as a new one with that ID.
-fn write(
-    store: &Store,
-    id: Option<EventId>,
-    uid: &str,
-    event: &StoredEvent,
-    (start_utc, end_utc): (i64, i64),
-) -> Result<EventId> {
-    let fields = &event.fields;
-    let conn = store.connection();
-    conn.execute(
-        "INSERT INTO event (id, uid, calendar_id, title, all_day, start_at, end_at, \
-         start_zone, end_zone, start_utc, end_utc, location, description, \
-         description_html, zone_pinned, rrule, exdates, recurrence_id, object_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, \
-           ?19) \
-         ON CONFLICT (id) DO UPDATE SET uid = excluded.uid, \
-           calendar_id = excluded.calendar_id, title = excluded.title, \
-           all_day = excluded.all_day, start_at = excluded.start_at, \
-           end_at = excluded.end_at, start_zone = excluded.start_zone, \
-           end_zone = excluded.end_zone, start_utc = excluded.start_utc, \
-           end_utc = excluded.end_utc, location = excluded.location, \
-           description = excluded.description, \
-           description_html = excluded.description_html, \
-           zone_pinned = excluded.zone_pinned, rrule = excluded.rrule, \
-           exdates = excluded.exdates, recurrence_id = excluded.recurrence_id, \
-           object_id = excluded.object_id",
-        params![
-            id.map(|id| id.0),
-            uid,
-            event.calendar_id.0,
-            fields.title,
-            fields.when.all_day,
-            fields.when.start,
-            fields.when.end,
-            fields.when.start_zone,
-            fields.when.end_zone,
-            start_utc,
-            end_utc,
-            fields.location,
-            fields.description,
-            fields.description_html,
-            fields.zone_pinned,
-            fields.rule,
-            fields.exdates,
-            fields.recurrence_id,
-            fields.object_id.map(|object| object.0),
-        ],
-    )?;
-    Ok(id.unwrap_or(EventId(conn.last_insert_rowid())))
-}
-
-/// The Event `id` as it is now, if it is still the one with the UID `uid`.
-fn current(store: &Store, id: EventId, uid: &str) -> Result<Option<StoredEvent>> {
-    Ok(store
-        .connection()
-        .query_row(
-            &format!("SELECT calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1 AND uid = ?2"),
-            params![id.0, uid],
-            |row| stored_event(row, 0),
-        )
-        .optional()?)
-}
-
 /// One Event's change in a unit, as the Change Journal holds it.
-struct Entry {
-    event_id: EventId,
+pub(super) struct Entry {
+    pub event_id: EventId,
     /// The Event's UID, which its hashes cover.
-    uid: String,
+    pub uid: String,
     /// Its version before the change; none when the change created it.
-    previous: Option<StoredEvent>,
+    pub previous: Option<StoredEvent>,
     /// The hash of its version after the change; none when the change
     /// deleted it.
-    hash: Option<Vec<u8>>,
-    undone: bool,
-}
-
-/// The entries of the unit `id`, in the order they were made.
-fn entries(store: &Store, id: UnitId) -> Result<Vec<Entry>> {
-    let mut stmt = store.connection().prepare(&format!(
-        "SELECT event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} FROM journal_entry \
-         WHERE unit_id = ?1 ORDER BY id"
-    ))?;
-    let entries: Vec<Entry> = stmt
-        .query_map([id.0], |row| {
-            let created = row.get::<_, Option<i64>>(4)?.is_none();
-            Ok(Entry {
-                event_id: EventId(row.get(0)?),
-                uid: row.get(1)?,
-                hash: row.get(2)?,
-                undone: row.get(3)?,
-                previous: if created {
-                    None
-                } else {
-                    Some(stored_event(row, 4)?)
-                },
-            })
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    if entries.is_empty() {
-        return Err(CoreError::UnitNotFound(id));
-    }
-    Ok(entries)
-}
-
-/// Reads `calendar_id` and [`EVENT_FIELDS`] starting at column `first`.
-fn stored_event(row: &Row, first: usize) -> rusqlite::Result<StoredEvent> {
-    Ok(StoredEvent {
-        calendar_id: CalendarId(row.get(first)?),
-        fields: event_fields(row, first + 1)?,
-    })
+    pub hash: Option<Vec<u8>>,
+    pub undone: bool,
 }
 
 /// The version of [`hash`]'s format, its first byte.

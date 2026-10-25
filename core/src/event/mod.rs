@@ -21,8 +21,7 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use crate::import::rejoined_id;
-use crate::journal::Unit;
-use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent, Unit};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};

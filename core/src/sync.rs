@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use crate::event::{self, Loaded, ObjectEvent, ObjectId};
-use crate::journal::Unit;
 use crate::remote::{Changes, Fetched};
+use crate::store::Unit;
 use crate::{CalendarId, ImportedEvent, ImportedWhen, Result};
 
 /// Applies `changes` to the Calendar `calendar_id` in `unit`, and records

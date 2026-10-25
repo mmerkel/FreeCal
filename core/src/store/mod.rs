@@ -1,4 +1,18 @@
 //! The Local Store: one SQLite database (ADR 0004).
+//!
+//! Journaling is one of its invariants (ADR 0011): code outside this module
+//! changes an Event only through a [`Unit`] of the Change Journal. This file
+//! opens the Local Store, holds its schema and every read, and writes what
+//! the Journal doesn't guard: Accounts, Calendars, settings and sync state.
+//! [`journal`] holds the Change Journal, and [`rows`] the SQL that writes
+//! Event rows, server objects and the Journal's tables, which nothing
+//! outside this module can call.
+
+mod journal;
+mod rows;
+
+pub use journal::{Changed, UnitId};
+pub(crate) use journal::{Origin, Recorded, Unit, delete_account, delete_calendar, record, undo};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -177,7 +191,7 @@ fn add_starting_calendars(tx: &Transaction) -> Result<()> {
 
 /// How a server object's data is written: iCalendar, as CalDAV holds it.
 /// Google's will be its JSON as received (ADR 0010).
-pub(crate) const ICALENDAR: &str = "icalendar";
+const ICALENDAR: &str = "icalendar";
 
 /// The time zone rules FreeCal was built with, which the derived UTC columns
 /// are computed with.
@@ -199,10 +213,7 @@ fn recompute_instants(tx: &Transaction) -> Result<()> {
     )?;
     for (id, fields) in events {
         if let Ok((start, end)) = rule::span(&fields) {
-            tx.execute(
-                "UPDATE event SET start_utc = ?2, end_utc = ?3 WHERE id = ?1",
-                params![id, start, end],
-            )?;
+            rows::write_instants(tx, EventId(id), (start, end))?;
         }
     }
     tx.execute(
@@ -233,11 +244,11 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
-pub(crate) const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
+const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
      description, description_html, zone_pinned, rrule, exdates, recurrence_id, object_id";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
-pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
+fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
     Ok(EventFields {
         title: row.get(first)?,
         when: stored_when(row, first + 1)?,
@@ -249,6 +260,14 @@ pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFie
         exdates: row.get(first + 11)?,
         recurrence_id: row.get(first + 12)?,
         object_id: row.get::<_, Option<i64>>(first + 13)?.map(ObjectId),
+    })
+}
+
+/// Reads `calendar_id` and [`EVENT_FIELDS`] starting at column `first`.
+fn stored_event(row: &Row, first: usize) -> rusqlite::Result<StoredEvent> {
+    Ok(StoredEvent {
+        calendar_id: CalendarId(row.get(first)?),
+        fields: event_fields(row, first + 1)?,
     })
 }
 
@@ -594,9 +613,9 @@ impl Store {
         }
     }
 
-    /// The connection, for the Change Journal module, which alone writes
-    /// Events and the Journal.
-    pub(crate) fn connection(&self) -> &Connection {
+    /// The connection, for tests that set rows up or look at them directly.
+    #[cfg(test)]
+    fn connection(&self) -> &Connection {
         &self.conn
     }
 
@@ -741,6 +760,118 @@ impl Store {
             "UPDATE app_state SET appearance = ?1",
             [appearance.as_str()],
         )?;
+        Ok(())
+    }
+
+    /// The Event `id` with its UID.
+    fn event_and_uid(&self, id: EventId) -> Result<Option<(String, StoredEvent)>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT uid, calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1"),
+                [id.0],
+                |row| Ok((row.get(0)?, stored_event(row, 1)?)),
+            )
+            .optional()?)
+    }
+
+    /// The Event `id` as it is now, if it is still the one with the UID
+    /// `uid`.
+    fn current_event(&self, id: EventId, uid: &str) -> Result<Option<StoredEvent>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1 AND uid = ?2"
+                ),
+                params![id.0, uid],
+                |row| stored_event(row, 0),
+            )
+            .optional()?)
+    }
+
+    /// The server object `id`, if it exists in the Calendar `calendar_id`.
+    fn object_in(&self, id: ObjectId, calendar_id: CalendarId) -> Result<Option<ObjectId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM server_object WHERE id = ?1 AND calendar_id = ?2",
+                params![id.0, calendar_id.0],
+                |row| row.get(0).map(ObjectId),
+            )
+            .optional()?)
+    }
+
+    /// The server object of the first of a Calendar's rows with the UID
+    /// `uid` that has one.
+    fn object_of_uid(&self, calendar_id: CalendarId, uid: &str) -> Result<Option<ObjectId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT object_id FROM event WHERE calendar_id = ?1 AND uid = ?2 \
+                 AND object_id IS NOT NULL ORDER BY id LIMIT 1",
+                params![calendar_id.0, uid],
+                |row| row.get(0).map(ObjectId),
+            )
+            .optional()?)
+    }
+
+    /// The Change Journal's entries of the unit `id`, in the order they were
+    /// made.
+    fn entries(&self, id: UnitId) -> Result<Vec<journal::Entry>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} FROM journal_entry \
+             WHERE unit_id = ?1 ORDER BY id"
+        ))?;
+        let entries: Vec<journal::Entry> = stmt
+            .query_map([id.0], |row| {
+                let created = row.get::<_, Option<i64>>(4)?.is_none();
+                Ok(journal::Entry {
+                    event_id: EventId(row.get(0)?),
+                    uid: row.get(1)?,
+                    hash: row.get(2)?,
+                    undone: row.get(3)?,
+                    previous: if created {
+                        None
+                    } else {
+                        Some(stored_event(row, 4)?)
+                    },
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        if entries.is_empty() {
+            return Err(CoreError::UnitNotFound(id));
+        }
+        Ok(entries)
+    }
+
+    /// The Calendars of an Account.
+    fn account_calendars(&self, id: AccountId) -> Result<Vec<CalendarId>> {
+        let calendars = self
+            .conn
+            .prepare("SELECT id FROM calendar WHERE account_id = ?1")?
+            .query_map([id.0], |row| row.get(0).map(CalendarId))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(calendars)
+    }
+
+    /// Deletes the Calendar row `id`, once the Journal has deleted its
+    /// Events. Its server objects go with it, by the schema's cascade.
+    fn delete_calendar_row(&self, id: CalendarId) -> Result<()> {
+        match self
+            .conn
+            .execute("DELETE FROM calendar WHERE id = ?1", [id.0])?
+        {
+            0 => Err(CoreError::CalendarNotFound(id)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Deletes the Account row `id`, once the Journal has deleted its
+    /// Calendars.
+    fn delete_account_row(&self, id: AccountId) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM account WHERE id = ?1", [id.0])?;
         Ok(())
     }
 
