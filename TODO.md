@@ -1,18 +1,21 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
+- [ ] implement 91
+- [ ] simplify from work by tickets 90 on
+- [ ] all database invariants within and across tables are secured by changes through single transactions? 
 - [ ] architecture work
     - [ ] wouldn't things be easier if we force things into a simpler structure in the db?  e.g. each exception should correspond to an occurrence. if not, then ask the user what to do with it (ask once, it's also a setting), but we won't do two exceptions for an occurrence - this only adds mess to the code, while it's almost never needed.
     - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
     - [ ] two exceptions for one occurrence: why not show them both?
   - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
     - [ ] naming with respect to events and recurrence - Loaded, Opened, Edited, Occurrence
-  - [ ] also no single owner of events table (journal, store)
   - [ ] all passes through tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
 - [ ] have a file, e.g. in docs/, where all decisions made are listed, e.g. a doc that can later be converted to a detailed reference for a user, or for developers; e.g. what to do when DTSTART does not fulfill the RRULE 
 - [ ] caldav sync: 
   - [ ] I would like to understand the different authentication methods, and what was built in and why
 - [ ] implement 15, 16
+- [ ] journal::recompute_instants is weird - check again once the time zone stuff has been implemented
 - [ ] test add caldav account & calendar by hand
   - [ ] rename accounts (keep account type in parens)
 - [ ] ical: include STATUS field?
