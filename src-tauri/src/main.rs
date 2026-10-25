@@ -12,9 +12,10 @@ use std::time::Duration;
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
-    Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExistingEvents, ImportFile,
-    ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope, Settings, SettingsUpdate,
-    SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When, link_allowed,
+    Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents,
+    ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope, Settings,
+    SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When,
+    link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -241,9 +242,10 @@ fn edit_occurrence(
     id: EventId,
     recurrence_id: String,
     scope: Scope,
+    exceptions_too: bool,
     draft: EventDraft,
 ) -> CommandResult<Changed<Occurrence>> {
-    core.edit_occurrence(id, &recurrence_id, scope, draft)
+    core.edit_occurrence(id, &recurrence_id, scope, exceptions_too, draft)
         .map_err(ErrorCode::from)
 }
 
@@ -253,9 +255,20 @@ fn reschedule_occurrence(
     id: EventId,
     recurrence_id: String,
     scope: Scope,
+    exceptions_too: bool,
     when: When,
 ) -> CommandResult<Changed<Occurrence>> {
-    core.reschedule_occurrence(id, &recurrence_id, scope, when)
+    core.reschedule_occurrence(id, &recurrence_id, scope, exceptions_too, when)
+        .map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+fn exception_counts(
+    core: State<Core>,
+    id: EventId,
+    recurrence_id: String,
+) -> CommandResult<ExceptionCounts> {
+    core.exception_counts(id, &recurrence_id)
         .map_err(ErrorCode::from)
 }
 
@@ -568,6 +581,7 @@ fn main() {
             reschedule_event,
             edit_occurrence,
             reschedule_occurrence,
+            exception_counts,
             delete_event,
             delete_occurrence,
             pick_import_file,

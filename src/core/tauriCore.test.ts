@@ -117,8 +117,15 @@ test('the Event commands pass their arguments under the names the shell expects'
   await tauriCore.createEvent(draft);
   await tauriCore.editEvent(eventId(7), draft);
   await tauriCore.rescheduleEvent(eventId(7), draft.when);
-  await tauriCore.editOccurrence(eventId(7), '2026-10-12T09:00:00', 'all', draft);
-  await tauriCore.rescheduleOccurrence(eventId(7), '2026-10-12T09:00:00', 'this', draft.when);
+  await tauriCore.editOccurrence(eventId(7), '2026-10-12T09:00:00', 'all', true, draft);
+  await tauriCore.rescheduleOccurrence(
+    eventId(7),
+    '2026-10-12T09:00:00',
+    'this',
+    false,
+    draft.when,
+  );
+  await tauriCore.exceptionCounts(eventId(7), '2026-10-12T09:00:00');
   await tauriCore.deleteEvent(eventId(7));
   await tauriCore.deleteOccurrence(eventId(7), '2026-10-12T09:00:00');
   await tauriCore.openLink('https://example.com');
@@ -129,11 +136,21 @@ test('the Event commands pass their arguments under the names the shell expects'
     ['create_event', { draft }],
     ['edit_event', { id: 7, draft }],
     ['reschedule_event', { id: 7, when: draft.when }],
-    ['edit_occurrence', { id: 7, recurrenceId: '2026-10-12T09:00:00', scope: 'all', draft }],
+    [
+      'edit_occurrence',
+      { id: 7, recurrenceId: '2026-10-12T09:00:00', scope: 'all', exceptionsToo: true, draft },
+    ],
     [
       'reschedule_occurrence',
-      { id: 7, recurrenceId: '2026-10-12T09:00:00', scope: 'this', when: draft.when },
+      {
+        id: 7,
+        recurrenceId: '2026-10-12T09:00:00',
+        scope: 'this',
+        exceptionsToo: false,
+        when: draft.when,
+      },
     ],
+    ['exception_counts', { id: 7, recurrenceId: '2026-10-12T09:00:00' }],
     ['delete_event', { id: 7 }],
     ['delete_occurrence', { id: 7, recurrenceId: '2026-10-12T09:00:00' }],
     ['open_link', { url: 'https://example.com' }],

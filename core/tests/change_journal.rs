@@ -374,6 +374,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
             yoga.id,
             first.recurrence_id.as_deref().unwrap(),
             Scope::This,
+            false,
             timed("2026-10-05T08:00:00", "2026-10-05T09:00:00"),
         )
         .unwrap()
@@ -390,6 +391,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
             yoga.id,
             second.recurrence_id.as_deref().unwrap(),
             Scope::This,
+            false,
             timed("2026-10-12T08:00:00", "2026-10-12T09:00:00"),
         )
         .unwrap()

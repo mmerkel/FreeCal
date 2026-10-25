@@ -35,7 +35,8 @@ pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{
-    Event, EventDraft, EventId, Frequency, Occurrence, Repeat, RepeatEnd, Scope, ServerObject, When,
+    Event, EventDraft, EventId, ExceptionCounts, Frequency, Occurrence, Repeat, RepeatEnd, Scope,
+    ServerObject, When,
 };
 pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
@@ -565,15 +566,19 @@ impl Core {
     /// the recurrence ID its [`Occurrence`] has, in `scope`: alone, as an
     /// Exception; with every later one, as a Recurring Event of their own;
     /// or with all of them. What the user changed is what differs from the
-    /// Occurrence as it was. Returns the Occurrence as it is now.
+    /// Occurrence as it was. Exceptions in the scope keep what they changed
+    /// on their own, unless `exceptions_too` asks for them to take the
+    /// change as well (see [`Core::exception_counts`]). Returns the
+    /// Occurrence as it is now.
     pub fn edit_occurrence(
         &self,
         id: EventId,
         recurrence_id: &str,
         scope: Scope,
+        exceptions_too: bool,
         draft: EventDraft,
     ) -> Result<Changed<Occurrence>> {
-        self.edit_in_scope(id, recurrence_id, scope, Edit::Draft(draft))
+        self.edit_in_scope(id, recurrence_id, scope, exceptions_too, Edit::Draft(draft))
     }
 
     /// Moves one Occurrence of a Recurring Event to another time in `scope`,
@@ -583,9 +588,26 @@ impl Core {
         id: EventId,
         recurrence_id: &str,
         scope: Scope,
+        exceptions_too: bool,
         when: When,
     ) -> Result<Changed<Occurrence>> {
-        self.edit_in_scope(id, recurrence_id, scope, Edit::Reschedule(when))
+        self.edit_in_scope(
+            id,
+            recurrence_id,
+            scope,
+            exceptions_too,
+            Edit::Reschedule(when),
+        )
+    }
+
+    /// How many Exceptions with values of their own a change to one
+    /// Occurrence of a Recurring Event, given as for
+    /// [`Core::edit_occurrence`], reaches in "this and following events" and
+    /// in "all events", besides the Occurrence itself: those whose title,
+    /// location, description or time differs from what the Recurring Event
+    /// gives them.
+    pub fn exception_counts(&self, id: EventId, recurrence_id: &str) -> Result<ExceptionCounts> {
+        event::exception_counts(&*self.store(), id, recurrence_id)
     }
 
     fn edit_in_scope(
@@ -593,11 +615,12 @@ impl Core {
         id: EventId,
         recurrence_id: &str,
         scope: Scope,
+        exceptions_too: bool,
         edit: Edit,
     ) -> Result<Changed<Occurrence>> {
         let zone = self.clock.time_zone();
         let edited = self.record(Origin::UserAction, |unit| {
-            event::edit_occurrence(unit, zone, id, recurrence_id, scope, edit)
+            event::edit_occurrence(unit, zone, id, recurrence_id, scope, exceptions_too, edit)
         })?;
         let occurrence = edited.value;
         Ok(Changed {

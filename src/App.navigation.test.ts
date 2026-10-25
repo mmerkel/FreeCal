@@ -231,7 +231,7 @@ test('a “Date changed” while the question for a drop is open waits for the a
   expect(stubGrid.props!.held).toBe(true);
   expect(shown()).toMatchObject({ date: '2026-10-03', today: '2026-10-04' });
 
-  screen.getByRole('button', { name: 'Cancel' }).click();
+  (await screen.findByRole('button', { name: 'Cancel' })).click();
   await expect(dropped).rejects.toBeDefined();
   await tick();
 

@@ -19,3 +19,4 @@
 ## Comments
 
 - 2026-10-13: Split from ticket 06, which noted: if ticket 57 or 54 is done first and has added the mark for pinned zones, the details and editor show "The original has no time zone. FreeCal shows it in <zone>." for such Events (ADR 0007, rule 5); otherwise whichever of them comes first adds the note.
+- 2026-10-25 (from 89): Add ticket 89's last test here: changing a Recurring Event's Event Time Zone with "all events" moves its Exceptions' recurrence IDs and its cancelled Occurrences with it, so none becomes an Event of its own (`core/tests/recurrence_scopes.rs`). Then tick 89's box and close it.

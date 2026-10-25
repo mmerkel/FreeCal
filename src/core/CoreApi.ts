@@ -10,6 +10,7 @@ import type {
   ErrorCode,
   EventDraft,
   EventId,
+  ExceptionCounts,
   ExistingEvents,
   ImportOutcome,
   ImportSummary,
@@ -114,12 +115,15 @@ export interface CoreApi {
    * Changes one Occurrence of a Recurring Event, given by its `eventId` and
    * `recurrenceId`, in `scope`: alone, with every later one, or with all of
    * them. What the user changed is what differs from the Occurrence as it
-   * was. Resolves to the Occurrence as it is now.
+   * was. Exceptions in the scope keep what they changed on their own, unless
+   * `exceptionsToo` asks for them to take the change as well. Resolves to the
+   * Occurrence as it is now.
    */
   editOccurrence(
     id: EventId,
     recurrenceId: string,
     scope: Scope,
+    exceptionsToo: boolean,
     draft: EventDraft,
   ): Promise<Changed<Occurrence>>;
   /** Moves one Occurrence of a Recurring Event to another time in `scope`, as a drag or a resize does. */
@@ -127,8 +131,16 @@ export interface CoreApi {
     id: EventId,
     recurrenceId: string,
     scope: Scope,
+    exceptionsToo: boolean,
     when: When,
   ): Promise<Changed<Occurrence>>;
+  /**
+   * How many Exceptions with values of their own a change to one Occurrence,
+   * given as for `editOccurrence`, reaches in each scope besides the
+   * Occurrence itself: those whose title, location, description or time
+   * differs from what the Recurring Event gives them.
+   */
+  exceptionCounts(id: EventId, recurrenceId: string): Promise<ExceptionCounts>;
   /**
    * Deletes an Event; for a Recurring Event or one of its Exceptions, the
    * whole Recurring Event.

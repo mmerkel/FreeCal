@@ -23,8 +23,8 @@ use crate::store::{Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};
-pub use scope::Scope;
-pub(crate) use scope::{Edit, edit_event, edit_occurrence};
+pub(crate) use scope::{Edit, edit_event, edit_occurrence, exception_counts};
+pub use scope::{ExceptionCounts, Scope};
 pub(crate) use when::{EventFields, ObjectId, StoredRange, StoredWhen, instant, wall_text};
 pub use when::{EventId, ServerObject, When};
 

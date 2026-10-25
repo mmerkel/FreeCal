@@ -4,8 +4,8 @@
 mod support;
 
 use freecal_core::{
-    CalendarId, Core, CoreError, EventDraft, EventId, ExistingEvents, Frequency, ImportFile,
-    Occurrence, Repeat, RepeatEnd, Scope, When,
+    CalendarId, Core, CoreError, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
+    ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
 };
 use support::{Harness, all_day, calendar, draft, ics, timed};
 
@@ -72,6 +72,7 @@ fn moving_this_event_changes_only_that_occurrence() {
             id,
             rid(&second),
             Scope::This,
+            false,
             timed("2026-10-13T08:00:00", "2026-10-13T09:00:00"),
         )
         .unwrap();
@@ -131,6 +132,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
             id,
             rid(&second),
             Scope::This,
+            false,
             EventDraft {
                 title: "Yoga outside".into(),
                 location: "Park".into(),
@@ -145,6 +147,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
             renamed.event_id,
             rid(&renamed),
             Scope::This,
+            false,
             EventDraft {
                 when: timed("2026-10-12T17:00:00", "2026-10-12T18:00:00"),
                 ..draft_of(&core, &renamed)
@@ -194,6 +197,7 @@ fn this_event_in_another_calendar_leaves_the_recurring_event() {
             id,
             rid(&second),
             Scope::This,
+            false,
             EventDraft {
                 calendar_id: work.id,
                 ..draft_of(&core, &second)
@@ -224,6 +228,7 @@ fn this_event_cant_change_the_repeat_rule() {
         id,
         rid(&second),
         Scope::This,
+        false,
         EventDraft {
             repeat: None,
             ..draft_of(&core, &second)
@@ -245,7 +250,7 @@ fn a_recurrence_id_the_recurring_event_doesnt_have_is_refused() {
     for scope in [Scope::This, Scope::ThisAndFollowing, Scope::All] {
         for recurrence_id in ["2026-10-13T18:00:00", "2026-10-26T18:00:00", "<b>"] {
             assert!(matches!(
-                core.reschedule_occurrence(id, recurrence_id, scope, when),
+                core.reschedule_occurrence(id, recurrence_id, scope, false, when),
                 Err(CoreError::OccurrenceNotFound(_))
             ));
         }
@@ -261,6 +266,7 @@ fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> EventId {
         id,
         rid(&second),
         Scope::This,
+        false,
         EventDraft {
             title: "Yoga outside".into(),
             ..draft_of(core, &second)
@@ -272,6 +278,7 @@ fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> EventId {
         id,
         rid(&third),
         Scope::This,
+        false,
         timed("2026-10-19T20:00:00", "2026-10-19T21:00:00"),
     )
     .unwrap();
@@ -294,6 +301,7 @@ fn moving_all_events_moves_every_occurrence_by_as_much_and_keeps_the_exceptions(
             id,
             rid(&first),
             Scope::All,
+            false,
             timed("2026-10-06T17:00:00", "2026-10-06T18:00:00"),
         )
         .unwrap();
@@ -336,6 +344,7 @@ fn editing_all_events_from_an_exception_changes_only_what_was_changed() {
             outside.event_id,
             rid(&outside),
             Scope::All,
+            false,
             EventDraft {
                 location: "Gym".into(),
                 // 30 minutes longer.
@@ -387,6 +396,7 @@ fn all_events_into_another_calendar_takes_the_exceptions_along() {
         third.event_id,
         rid(&third),
         Scope::All,
+        false,
         EventDraft {
             calendar_id: work.id,
             ..draft_of(&core, &third)
@@ -413,6 +423,7 @@ fn a_new_repeat_rule_for_all_events_keeps_the_exceptions_on_dates_it_still_has()
         id,
         rid(&first),
         Scope::All,
+        false,
         EventDraft {
             repeat: Some(Repeat {
                 interval: 2,
@@ -459,6 +470,7 @@ fn all_events_without_a_repeat_rule_is_the_first_event_alone() {
             third.event_id,
             rid(&third),
             Scope::All,
+            false,
             EventDraft {
                 repeat: None,
                 ..draft_of(&core, &third)
@@ -491,6 +503,7 @@ fn moving_this_and_following_events_splits_the_recurring_event() {
             second.event_id,
             rid(&second),
             Scope::ThisAndFollowing,
+            false,
             timed("2026-10-13T17:00:00", "2026-10-13T18:00:00"),
         )
         .unwrap();
@@ -546,6 +559,7 @@ fn editing_this_and_following_events_changes_only_those() {
         third.event_id,
         rid(&third),
         Scope::ThisAndFollowing,
+        false,
         EventDraft {
             title: "Pilates".into(),
             calendar_id: work.id,
@@ -584,6 +598,7 @@ fn this_and_following_from_the_first_occurrence_changes_all_events() {
             id,
             rid(&first),
             Scope::ThisAndFollowing,
+            false,
             timed("2026-10-05T17:00:00", "2026-10-05T18:00:00"),
         )
         .unwrap()
@@ -677,6 +692,7 @@ fn an_all_day_recurring_event_splits_with_its_cancelled_days() {
         id,
         rid(&third),
         Scope::ThisAndFollowing,
+        false,
         all_day("2026-10-09", "2026-10-10"),
     )
     .unwrap();
@@ -717,6 +733,7 @@ fn moving_all_events_to_another_weekday_moves_the_weekdays_of_the_rule() {
         wednesday.event_id,
         rid(&wednesday),
         Scope::This,
+        false,
         EventDraft {
             title: "Yoga outside".into(),
             ..draft_of(&core, &wednesday)
@@ -733,6 +750,7 @@ fn moving_all_events_to_another_weekday_moves_the_weekdays_of_the_rule() {
         first.event_id,
         rid(&first),
         Scope::All,
+        false,
         timed("2026-10-06T18:00:00", "2026-10-06T19:00:00"),
     )
     .unwrap();
@@ -767,6 +785,7 @@ fn a_rule_freecal_cant_read_keeps_its_exceptions_through_an_edit() {
         id,
         rid(&second),
         Scope::This,
+        false,
         timed("2026-10-12T20:00:00", "2026-10-12T21:00:00"),
     )
     .unwrap();
@@ -820,6 +839,7 @@ fn all_events_at_a_time_set_from_a_moved_exception_are_at_that_time() {
             moved.event_id,
             rid(&moved),
             Scope::All,
+            false,
             timed("2026-10-19T19:00:00", "2026-10-19T20:00:00"),
         )
         .unwrap()
@@ -843,4 +863,339 @@ fn all_events_at_a_time_set_from_a_moved_exception_are_at_that_time() {
         ]
     );
     assert_eq!(edited, on(&core, "2026-10-19"));
+}
+
+#[test]
+fn exception_counts_are_the_exceptions_with_values_of_their_own_in_each_scope() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = yoga_with_exceptions(&core, home.id);
+    let first = on(&core, "2026-10-05");
+    let outside = on(&core, "2026-10-12");
+    let moved = on(&core, "2026-10-19");
+
+    // The renamed one and the moved one; the cancelled one has no values.
+    assert_eq!(
+        core.exception_counts(id, rid(&first)).unwrap(),
+        ExceptionCounts {
+            this_and_following: 2,
+            all: 2
+        }
+    );
+    // The Exception being changed takes the change anyway.
+    assert_eq!(
+        core.exception_counts(outside.event_id, rid(&outside))
+            .unwrap(),
+        ExceptionCounts {
+            this_and_following: 1,
+            all: 1
+        }
+    );
+    assert_eq!(
+        core.exception_counts(moved.event_id, rid(&moved)).unwrap(),
+        ExceptionCounts {
+            this_and_following: 0,
+            all: 1
+        }
+    );
+}
+
+#[test]
+fn an_exception_with_the_values_of_its_recurring_event_isnt_counted() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    // The second Occurrence as it was, and the third with a description.
+    import(
+        &core,
+        home.id,
+        "BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\n\
+         DTSTART;TZID=Europe/Berlin:20261005T180000\nDTEND;TZID=Europe/Berlin:20261005T190000\n\
+         RRULE:FREQ=WEEKLY;COUNT=3\nEND:VEVENT\n\
+         BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\nRECURRENCE-ID;TZID=Europe/Berlin:20261012T180000\n\
+         DTSTART;TZID=Europe/Berlin:20261012T180000\nDTEND;TZID=Europe/Berlin:20261012T190000\n\
+         END:VEVENT\n\
+         BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\nDESCRIPTION:Bring a mat\n\
+         RECURRENCE-ID;TZID=Europe/Berlin:20261019T180000\n\
+         DTSTART;TZID=Europe/Berlin:20261019T180000\nDTEND;TZID=Europe/Berlin:20261019T190000\n\
+         END:VEVENT\n",
+    );
+    let first = on(&core, "2026-10-05");
+
+    assert_eq!(
+        core.exception_counts(first.event_id, rid(&first)).unwrap(),
+        ExceptionCounts {
+            this_and_following: 1,
+            all: 1
+        }
+    );
+}
+
+#[test]
+fn exceptions_too_for_all_events_take_the_change_and_shift_by_as_much() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = yoga_with_exceptions(&core, home.id);
+    let first = on(&core, "2026-10-05");
+
+    // Renamed, an hour later, and 30 minutes longer.
+    let edited = core
+        .edit_occurrence(
+            id,
+            rid(&first),
+            Scope::All,
+            true,
+            EventDraft {
+                title: "Pilates".into(),
+                when: timed("2026-10-05T19:00:00", "2026-10-05T20:30:00"),
+                ..draft_of(&core, &first)
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        shown(&core),
+        [
+            (
+                "Pilates".into(),
+                timed("2026-10-05T19:00:00", "2026-10-05T20:30:00")
+            ),
+            (
+                "Pilates".into(),
+                timed("2026-10-12T19:00:00", "2026-10-12T20:30:00")
+            ),
+            (
+                "Pilates".into(),
+                timed("2026-10-19T21:00:00", "2026-10-19T22:30:00")
+            ),
+        ]
+    );
+
+    core.undo_unit(edited.unit.unwrap()).unwrap();
+    let titles: Vec<_> = shown(&core).into_iter().map(|(title, _)| title).collect();
+    assert_eq!(titles, ["Yoga", "Yoga outside", "Yoga"]);
+    assert_eq!(
+        on(&core, "2026-10-19").when,
+        timed("2026-10-19T20:00:00", "2026-10-19T21:00:00")
+    );
+}
+
+#[test]
+fn exceptions_too_for_this_and_following_changes_only_those_from_it_on() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    yoga_with_exceptions(&core, home.id);
+    // One before the change, with a location of its own.
+    let first = on(&core, "2026-10-05");
+    core.edit_occurrence(
+        first.event_id,
+        rid(&first),
+        Scope::This,
+        false,
+        EventDraft {
+            location: "Park".into(),
+            ..draft_of(&core, &first)
+        },
+    )
+    .unwrap();
+    let outside = on(&core, "2026-10-12");
+
+    // From the renamed one on: another location, an hour earlier.
+    core.edit_occurrence(
+        outside.event_id,
+        rid(&outside),
+        Scope::ThisAndFollowing,
+        true,
+        EventDraft {
+            location: "Gym".into(),
+            when: timed("2026-10-12T17:00:00", "2026-10-12T18:00:00"),
+            ..draft_of(&core, &outside)
+        },
+    )
+    .unwrap();
+
+    let shown: Vec<_> = occurrences(&core, "2026-10-01", "2026-12-01")
+        .into_iter()
+        .map(|occurrence| {
+            let location = core.event(occurrence.event_id).unwrap().location.text;
+            (occurrence.title, occurrence.when, location)
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (
+                "Yoga".into(),
+                timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
+                "Park".into()
+            ),
+            (
+                "Yoga outside".into(),
+                timed("2026-10-12T17:00:00", "2026-10-12T18:00:00"),
+                "Gym".into()
+            ),
+            (
+                "Yoga".into(),
+                timed("2026-10-19T19:00:00", "2026-10-19T20:00:00"),
+                "Gym".into()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn exceptions_too_unchecked_leaves_their_own_values() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    yoga_with_exceptions(&core, home.id);
+    let outside = on(&core, "2026-10-12");
+
+    core.edit_occurrence(
+        outside.event_id,
+        rid(&outside),
+        Scope::ThisAndFollowing,
+        false,
+        EventDraft {
+            title: "Pilates".into(),
+            when: timed("2026-10-12T17:00:00", "2026-10-12T18:00:00"),
+            ..draft_of(&core, &outside)
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        shown(&core),
+        [
+            (
+                "Yoga".into(),
+                timed("2026-10-05T18:00:00", "2026-10-05T19:00:00")
+            ),
+            (
+                "Pilates".into(),
+                timed("2026-10-12T17:00:00", "2026-10-12T18:00:00")
+            ),
+            // The title it shared follows; the time it was moved to stays.
+            (
+                "Pilates".into(),
+                timed("2026-10-19T20:00:00", "2026-10-19T21:00:00")
+            ),
+        ]
+    );
+}
+
+#[test]
+fn an_all_day_recurring_event_made_timed_takes_its_exceptions_and_cancelled_days_along() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = core
+        .create_event(EventDraft {
+            repeat: Some(Repeat {
+                frequency: Frequency::Daily,
+                interval: 1,
+                end: RepeatEnd::Count { count: 4 },
+            }),
+            ..draft(home.id, "Course", all_day("2026-10-05", "2026-10-06"))
+        })
+        .unwrap()
+        .value
+        .id;
+    let second = on(&core, "2026-10-06");
+    core.edit_occurrence(
+        id,
+        rid(&second),
+        Scope::This,
+        false,
+        EventDraft {
+            title: "Course outside".into(),
+            ..draft_of(&core, &second)
+        },
+    )
+    .unwrap();
+    core.delete_occurrence(id, "2026-10-07").unwrap();
+    let first = on(&core, "2026-10-05");
+
+    // It gains the Event Time Zone: the Display Time Zone.
+    core.edit_occurrence(
+        id,
+        rid(&first),
+        Scope::All,
+        false,
+        EventDraft {
+            when: timed("2026-10-05T09:00:00", "2026-10-05T12:00:00"),
+            ..draft_of(&core, &first)
+        },
+    )
+    .unwrap();
+
+    let shown: Vec<_> = occurrences(&core, "2026-10-01", "2026-12-01")
+        .into_iter()
+        .map(|occurrence| (occurrence.title, occurrence.when, occurrence.recurrence_id))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (
+                "Course".into(),
+                timed("2026-10-05T09:00:00", "2026-10-05T12:00:00"),
+                Some("2026-10-05T09:00:00".into())
+            ),
+            (
+                "Course outside".into(),
+                timed("2026-10-06T09:00:00", "2026-10-06T12:00:00"),
+                Some("2026-10-06T09:00:00".into())
+            ),
+            (
+                "Course".into(),
+                timed("2026-10-08T09:00:00", "2026-10-08T12:00:00"),
+                Some("2026-10-08T09:00:00".into())
+            ),
+        ]
+    );
+}
+
+#[test]
+fn exceptions_too_keep_their_length_where_the_shift_would_end_them_before_they_start() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = yoga(&core, home.id, RepeatEnd::Count { count: 2 });
+    let second = on(&core, "2026-10-12");
+    core.reschedule_occurrence(
+        id,
+        rid(&second),
+        Scope::This,
+        false,
+        timed("2026-10-12T18:30:00", "2026-10-12T18:45:00"),
+    )
+    .unwrap();
+    let first = on(&core, "2026-10-05");
+
+    // 45 minutes shorter: the Exception's end would come before its start.
+    core.reschedule_occurrence(
+        id,
+        rid(&first),
+        Scope::All,
+        true,
+        timed("2026-10-05T18:00:00", "2026-10-05T18:15:00"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        shown(&core),
+        [
+            (
+                "Yoga".into(),
+                timed("2026-10-05T18:00:00", "2026-10-05T18:15:00")
+            ),
+            (
+                "Yoga".into(),
+                timed("2026-10-12T18:30:00", "2026-10-12T18:45:00")
+            ),
+        ]
+    );
 }

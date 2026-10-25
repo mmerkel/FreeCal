@@ -9,6 +9,7 @@ import type {
   ErrorCode,
   EventDraft,
   EventId,
+  ExceptionCounts,
   ExistingEvents,
   ImportOutcome,
   Occurrence,
@@ -54,6 +55,7 @@ export interface ScopedChange {
   id: EventId;
   recurrenceId: string;
   scope: Scope;
+  exceptionsToo: boolean;
   draft?: EventDraft;
   when?: When;
 }
@@ -105,6 +107,8 @@ export class FakeCore implements CoreApi {
   cancelled = new Map<EventId, string[]>();
   /** The changes made to Occurrences in a recurrence scope, in order. */
   scopedChanges: ScopedChange[] = [];
+  /** What `exceptionCounts` gives for every Occurrence. */
+  givenExceptionCounts: ExceptionCounts = { thisAndFollowing: 0, all: 0 };
   /**
    * What the server of the next CalDAV Account added offers, or the failure
    * adding it gives.
@@ -500,15 +504,33 @@ export class FakeCore implements CoreApi {
    * fake doesn't split for "this and following"; the test reads what was
    * asked in `scopedChanges`. Nothing of this is in the fake's Change Journal.
    */
-  async editOccurrence(id: EventId, recurrenceId: string, scope: Scope, draft: EventDraft) {
+  async editOccurrence(
+    id: EventId,
+    recurrenceId: string,
+    scope: Scope,
+    exceptionsToo: boolean,
+    draft: EventDraft,
+  ) {
     this.calls.push('editOccurrence');
-    this.scopedChanges.push({ id, recurrenceId, scope, draft: structuredClone(draft) });
+    this.scopedChanges.push({
+      id,
+      recurrenceId,
+      scope,
+      exceptionsToo,
+      draft: structuredClone(draft),
+    });
     return this.changeOccurrence(id, recurrenceId, scope, draft);
   }
 
-  async rescheduleOccurrence(id: EventId, recurrenceId: string, scope: Scope, when: When) {
+  async rescheduleOccurrence(
+    id: EventId,
+    recurrenceId: string,
+    scope: Scope,
+    exceptionsToo: boolean,
+    when: When,
+  ) {
     this.calls.push('rescheduleOccurrence');
-    this.scopedChanges.push({ id, recurrenceId, scope, when: { ...when } });
+    this.scopedChanges.push({ id, recurrenceId, scope, exceptionsToo, when: { ...when } });
     const event = this.findEvent(id);
     const draft: EventDraft = {
       calendarId: event.calendarId,
@@ -519,6 +541,13 @@ export class FakeCore implements CoreApi {
       repeat: event.repeat,
     };
     return this.changeOccurrence(id, recurrenceId, scope, draft);
+  }
+
+  /** Gives `givenExceptionCounts`; the fake keeps no Exceptions of their own to count. */
+  async exceptionCounts(id: EventId) {
+    this.calls.push('exceptionCounts');
+    this.findEvent(id);
+    return { ...this.givenExceptionCounts };
   }
 
   private changeOccurrence(

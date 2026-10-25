@@ -143,6 +143,15 @@ repeat: Repeat | null, };
 export type EventId = number & { readonly __brand: "EventId" };
 
 /**
+ * How many Exceptions with values of their own a change to an Occurrence
+ * in each scope reaches, besides the one changed: those whose title,
+ * location, description or time differs from what their Recurring Event
+ * gives them. They keep those values unless the user asks for them to take
+ * the change too.
+ */
+export type ExceptionCounts = { thisAndFollowing: number, all: number, };
+
+/**
  * What an import does with the Events its Calendar already has (same UID),
  * chosen once per import.
  */

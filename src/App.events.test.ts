@@ -756,13 +756,15 @@ test('editing an Occurrence starts from its date and asks which events to change
   expect(prompt).toHaveTextContent(
     'Change only this event, this and following events, or all events?',
   );
-  await user.click(within(prompt).getByRole('button', { name: 'This and following events' }));
+  await user.click(within(prompt).getByRole('radio', { name: 'This and following events' }));
+  await user.click(within(prompt).getByRole('button', { name: 'Change' }));
 
   expect(core.scopedChanges).toEqual([
     {
       id: yoga.id,
       recurrenceId: '2026-10-19T09:00:00',
       scope: 'thisAndFollowing',
+      exceptionsToo: false,
       draft: expect.objectContaining({
         title: 'Pilates',
         when: { ...monday, start: '2026-10-19T09:00:00', end: '2026-10-19T10:30:00' },
@@ -780,8 +782,8 @@ test('“This event” changes only that Occurrence, “All events” the whole'
 
   await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
-  await user.click(within(prompt).getByRole('button', { name: 'This event' }));
+  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
+  await user.click(within(prompt).getByRole('button', { name: 'Change' }));
 
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga outside')).toHaveLength(1));
   expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2);
@@ -800,11 +802,9 @@ test('“This event” changes only that Occurrence, “All events” the whole'
   const again = screen.getByRole('dialog', { name: 'Edit event' });
   await user.type(within(again).getByRole('textbox', { name: 'Title' }), ' class');
   await user.click(within(again).getByRole('button', { name: 'Save' }));
-  await user.click(
-    within(screen.getByRole('dialog', { name: 'Change a recurring event' })).getByRole('button', {
-      name: 'All events',
-    }),
-  );
+  const all = await screen.findByRole('dialog', { name: 'Change a recurring event' });
+  await user.click(within(all).getByRole('radio', { name: 'All events' }));
+  await user.click(within(all).getByRole('button', { name: 'Change' }));
 
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga class')).toHaveLength(2));
   expect(core.scopedChanges.map(({ id, scope }) => [id, scope])).toEqual([
@@ -820,9 +820,10 @@ test('cancelling the question keeps the editor open with what was typed', async 
   await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
   await user.click(
-    within(screen.getByRole('dialog', { name: 'Change a recurring event' })).getByRole('button', {
-      name: 'Cancel',
-    }),
+    within(await screen.findByRole('dialog', { name: 'Change a recurring event' })).getByRole(
+      'button',
+      { name: 'Cancel' },
+    ),
   );
 
   expect(screen.queryByRole('dialog', { name: 'Change a recurring event' })).toBeNull();
@@ -836,11 +837,39 @@ test('a changed repeat can’t be for this event alone', async () => {
 
   await user.selectOptions(within(editor).getByRole('combobox', { name: 'Repeat' }), 'Daily');
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
 
   expect(prompt).toHaveTextContent('Change this and following events, or all events?');
-  expect(within(prompt).queryByRole('button', { name: 'This event' })).toBeNull();
-  expect(within(prompt).getByRole('button', { name: 'All events' })).toBeInTheDocument();
+  expect(within(prompt).getByRole('radio', { name: 'This event' })).toBeDisabled();
+  expect(within(prompt).getByRole('radio', { name: 'This and following events' })).toBeChecked();
+});
+
+test('the question offers the Exceptions changed on their own, as the core counts them', async () => {
+  const user = userEvent.setup();
+  const { core, yoga, editor } = await editYoga(user, 1);
+  core.givenExceptionCounts = { thisAndFollowing: 1, all: 2 };
+
+  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
+  await user.click(within(editor).getByRole('button', { name: 'Save' }));
+  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
+  await user.click(within(prompt).getByRole('radio', { name: 'All events' }));
+  await user.click(
+    within(prompt).getByRole('checkbox', {
+      name: 'Also change the 2 events changed on their own',
+    }),
+  );
+  await user.click(within(prompt).getByRole('button', { name: 'Change' }));
+
+  await waitFor(() => expect(core.scopedChanges).toHaveLength(1));
+  expect(core.scopedChanges[0]).toMatchObject({
+    id: yoga.id,
+    recurrenceId: '2026-10-12T09:00:00',
+    scope: 'all',
+    exceptionsToo: true,
+  });
+  expect(
+    core.calls.filter((call) => call.endsWith('Occurrence') || call === 'exceptionCounts'),
+  ).toEqual(['exceptionCounts', 'editOccurrence']);
 });
 
 test('dropping an Occurrence asks which events to move, and Cancel puts it back', async () => {
@@ -856,8 +885,7 @@ test('dropping an Occurrence asks which events to move, and Cancel puts it back'
   const later: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
 
   const cancelled = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
-  await tick();
-  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
   expect(prompt).toHaveTextContent(
     'Move only this event, this and following events, or all events?',
   );
@@ -867,11 +895,16 @@ test('dropping an Occurrence asks which events to move, and Cancel puts it back'
   expect(screen.queryByRole('alert')).toBeNull();
 
   const moved = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
-  await tick();
-  screen.getByRole('button', { name: 'This event' }).click();
+  (await screen.findByRole('button', { name: 'Move' })).click();
   await moved;
   expect(core.scopedChanges).toEqual([
-    { id: yoga.id, recurrenceId: '2026-10-12T09:00:00', scope: 'this', when: later },
+    {
+      id: yoga.id,
+      recurrenceId: '2026-10-12T09:00:00',
+      scope: 'this',
+      exceptionsToo: false,
+      when: later,
+    },
   ]);
   expect(core.calls).not.toContain('rescheduleEvent');
 });

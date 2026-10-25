@@ -15,9 +15,10 @@ use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Account, AccountId, AddedAccount, Appearance, AvailableCalendar, Calendar, CalendarId, Changed,
-    Colour, ErrorCode, Event, EventDraft, EventId, ExistingEvents, Frequency, ImportOutcome,
-    ImportSummary, Occurrence, Piece, PinnedZone, Provider, Repeat, RepeatEnd, Scope, ServerLogin,
-    Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId, View, When,
+    Colour, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
+    ImportOutcome, ImportSummary, Occurrence, Piece, PinnedZone, Provider, Repeat, RepeatEnd,
+    Scope, ServerLogin, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId,
+    View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -66,6 +67,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<Event>();
     types.visit::<EventDraft>();
     types.visit::<Scope>();
+    types.visit::<ExceptionCounts>();
     types.visit::<Signal>();
     types.visit::<View>();
     types.visit::<SidebarState>();
@@ -240,6 +242,10 @@ fn samples_file() -> (String, Vec<String>) {
             RepeatEnd::Count { count: 10 },
         ]),
         samples(&[Scope::This, Scope::ThisAndFollowing, Scope::All]),
+        samples(&[ExceptionCounts {
+            this_and_following: 1,
+            all: 2,
+        }]),
         samples(&[description]),
         samples(&[text, link]),
         samples(&[

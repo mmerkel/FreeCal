@@ -384,6 +384,22 @@ pub(super) fn shifted(when: &StoredWhen, from: &StoredWhen, to: &StoredWhen) -> 
     })
 }
 
+/// `when` changed as [`shifted`] changes it, but where that would end it
+/// before it starts, its start moved by as much and its length kept.
+pub(super) fn shifted_or_moved(
+    when: &StoredWhen,
+    from: &StoredWhen,
+    to: &StoredWhen,
+) -> Result<StoredWhen> {
+    match shifted(when, from, to) {
+        Err(CoreError::EndBeforeStart) => occurrence(
+            when,
+            first_start(when)? + (first_start(to)? - first_start(from)?),
+        ),
+        shifted => shifted,
+    }
+}
+
 /// The recurrence ID `id` of a Recurring Event whose first Occurrence moved
 /// from `from` to `to`, moved by as much; none when `id` isn't one.
 pub(super) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<String> {

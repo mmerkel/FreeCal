@@ -8,9 +8,9 @@
     Event,
     EventDraft,
     EventId,
+    ExceptionCounts,
     ExistingEvents,
     Occurrence,
-    Scope,
     Settings,
     SettingsUpdate,
     SidebarState,
@@ -40,7 +40,7 @@
     type Navigation,
   } from './lib/navigation';
   import { sameRepeat } from './lib/repeat';
-  import ScopeDialog, { type ScopeChange } from './lib/ScopeDialog.svelte';
+  import ScopeDialog, { type ScopeChange, type ScopeChoice } from './lib/ScopeDialog.svelte';
   import { DEFAULT_SETTINGS } from './lib/settings';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
@@ -121,9 +121,13 @@
   let working = $state<string>();
   /**
    * The open question which Occurrences of a Recurring Event a change
-   * changes, over the editor or, for a drop, the grid.
+   * changes, over the editor or, for a drop, the grid. It is asked once the
+   * core has counted the Exceptions it offers to change too.
    */
-  let scopePrompt = $state<{ change: ScopeChange; choose: (scope: Scope | null) => void }>();
+  let scopePrompt = $state<{
+    change: ScopeChange;
+    asked?: { counts: ExceptionCounts; choose: (choice: ScopeChoice | null) => void };
+  }>();
   /** The message at the bottom of the window, with its Undo if it has one. */
   let toast = $state<{ message: string; undo?: () => void }>();
 
@@ -392,20 +396,26 @@
   }
 
   /**
-   * Asks which Occurrences of a Recurring Event a change changes. Resolves
-   * to `null` when the user cancels.
+   * Asks which Occurrences of a Recurring Event a change to its Occurrence
+   * `recurrenceId` changes, and whether its Exceptions with values of their
+   * own change too. Resolves to `null` when the user cancels.
    */
-  function askScope(change: ScopeChange): Promise<Scope | null> {
-    return new Promise((resolve) => {
-      scopePrompt = {
-        change,
-        choose: (scope) => {
-          scopePrompt = undefined;
-          followHeldDateChange();
-          resolve(scope);
-        },
-      };
-    });
+  async function askScope(
+    change: ScopeChange,
+    id: EventId,
+    recurrenceId: string,
+  ): Promise<ScopeChoice | null> {
+    // Open while the counts load too, so that a drop is held from the start.
+    scopePrompt = { change };
+    try {
+      const counts = await core.exceptionCounts(id, recurrenceId);
+      return await new Promise((choose) => {
+        scopePrompt = { change, asked: { counts, choose } };
+      });
+    } finally {
+      scopePrompt = undefined;
+      followHeldDateChange();
+    }
   }
 
   /**
@@ -423,11 +433,14 @@
       openDetails(id, value.recurrenceId);
       return;
     }
-    const scope = await askScope(
+    const choice = await askScope(
       sameRepeat(draft.repeat, editing.draft.repeat) ? 'edit' : 'editRepeat',
+      id,
+      recurrenceId,
     );
-    if (scope === null) return;
-    const { value } = await core.editOccurrence(id, recurrenceId, scope, draft);
+    if (choice === null) return;
+    const { scope, exceptionsToo } = choice;
+    const { value } = await core.editOccurrence(id, recurrenceId, scope, exceptionsToo, draft);
     openDetails(value.eventId, value.recurrenceId);
   }
 
@@ -437,11 +450,18 @@
    * this rejects, as when the user cancels.
    */
   async function reschedule(id: EventId, recurrenceId: string | null, when: When) {
-    const scope = recurrenceId === null ? null : await askScope('move');
-    if (recurrenceId !== null && scope === null) throw new Error('The move was cancelled.');
+    const choice = recurrenceId === null ? null : await askScope('move', id, recurrenceId);
+    if (recurrenceId !== null && choice === null) throw new Error('The move was cancelled.');
     try {
       if (recurrenceId === null) await core.rescheduleEvent(id, when);
-      else await core.rescheduleOccurrence(id, recurrenceId, scope!, when);
+      else
+        await core.rescheduleOccurrence(
+          id,
+          recurrenceId,
+          choice!.scope,
+          choice!.exceptionsToo,
+          when,
+        );
       rescheduleFailure = undefined;
     } catch (error) {
       rescheduleFailure = t('event.rescheduleFailed', { error: errorText(error) });
@@ -773,8 +793,12 @@
     </Dialog>
   {/if}
 
-  {#if scopePrompt}
-    <ScopeDialog change={scopePrompt.change} onchoose={scopePrompt.choose} />
+  {#if scopePrompt?.asked}
+    <ScopeDialog
+      change={scopePrompt.change}
+      counts={scopePrompt.asked.counts}
+      onchoose={scopePrompt.asked.choose}
+    />
   {/if}
 
   {#if toast}

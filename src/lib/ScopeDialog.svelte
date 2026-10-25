@@ -1,65 +1,118 @@
 <!--
   Asks which Occurrences of a Recurring Event a change to one of them
-  changes: this event, this and following events, or all events. It opens
-  over the editor on Save, and over the grid when an Occurrence is dropped.
+  changes: this event, this and following events, or all events, and whether
+  the Exceptions with values of their own in that scope take the change too.
+  It opens over the editor on Save, and over the grid when an Occurrence is
+  dropped.
 -->
 <script module lang="ts">
+  import type { Scope } from '../core/types';
+
   /**
    * The change asked about: an edit, an edit of the repeat rule, which
    * can't be for "this event" alone, or a drag or a resize.
    */
   export type ScopeChange = 'edit' | 'editRepeat' | 'move';
+
+  /** What the user chose: the scope, and whether its Exceptions with values of their own change too. */
+  export interface ScopeChoice {
+    scope: Scope;
+    exceptionsToo: boolean;
+  }
 </script>
 
 <script lang="ts">
-  import type { Scope } from '../core/types';
-  import { t } from '../i18n';
+  import type { ExceptionCounts } from '../core/types';
+  import { t, tCount } from '../i18n';
   import Dialog from './Dialog.svelte';
 
   interface Props {
     change: ScopeChange;
-    /** The user chose a scope, or `null` to cancel. */
-    onchoose: (scope: Scope | null) => void;
+    /** The Exceptions with values of their own each scope reaches. */
+    counts: ExceptionCounts;
+    /** The user chose, or `null` to cancel. */
+    onchoose: (choice: ScopeChoice | null) => void;
   }
 
-  let { change, onchoose }: Props = $props();
+  let { change, counts, onchoose }: Props = $props();
 
+  const id = $props.id();
   const questions = {
     edit: 'scope.editWhich',
     editRepeat: 'scope.editWhichOfAll',
     move: 'scope.moveWhich',
   } as const;
+  const scopes = [
+    { value: 'this', label: 'scope.this' },
+    { value: 'thisAndFollowing', label: 'scope.thisAndFollowing' },
+    { value: 'all', label: 'scope.all' },
+  ] as const;
   const alone = $derived(change !== 'editRepeat');
+  // The dialog is shown anew for each change, so its first value is enough.
+  // svelte-ignore state_referenced_locally
+  const first: Scope = change === 'editRepeat' ? 'thisAndFollowing' : 'this';
+  let scope = $state(first);
+  let exceptionsToo = $state(false);
+  /** The count the checkbox names: the chosen scope's, for "this event" all of them. */
+  const count = $derived(scope === 'thisAndFollowing' ? counts.thisAndFollowing : counts.all);
+  const reaches = $derived(scope !== 'this' && count > 0);
+
+  /**
+   * Enter confirms. Done here, because the confirm button sits outside the
+   * form, in the dialog's actions.
+   */
+  function enterConfirms(key: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (key.key === 'Enter') {
+      key.preventDefault();
+      key.currentTarget.form?.requestSubmit();
+    }
+  }
+
+  function confirm(submitted: SubmitEvent) {
+    submitted.preventDefault();
+    onchoose({ scope, exceptionsToo: reaches && exceptionsToo });
+  }
 </script>
 
 <Dialog title={t('scope.title')} onclose={() => onchoose(null)}>
-  <p class="question">{t(questions[change])}</p>
+  <form id="{id}-form" class="form" onsubmit={confirm}>
+    <fieldset class="choices">
+      <legend>{t(questions[change])}</legend>
+      {#each scopes as choice (choice.value)}
+        <label class="check">
+          <input
+            type="radio"
+            name="{id}-scope"
+            value={choice.value}
+            disabled={choice.value === 'this' && !alone}
+            data-initial-focus={choice.value === first ? '' : undefined}
+            bind:group={scope}
+            onkeydown={enterConfirms}
+          />
+          {t(choice.label)}
+        </label>
+      {/each}
+    </fieldset>
+
+    {#if counts.thisAndFollowing > 0 || counts.all > 0}
+      <label class="check">
+        <input
+          type="checkbox"
+          disabled={!reaches}
+          bind:checked={exceptionsToo}
+          onkeydown={enterConfirms}
+        />
+        {tCount('scope.exceptionsToo', count)}
+      </label>
+    {/if}
+  </form>
 
   {#snippet actions()}
     <button type="button" class="button outline" onclick={() => onchoose(null)}>
       {t('common.cancel')}
     </button>
-    <button type="button" class="button outline" onclick={() => onchoose('all')}>
-      {t('scope.all')}
+    <button type="submit" class="button solid" form="{id}-form">
+      {t(change === 'move' ? 'scope.move' : 'scope.change')}
     </button>
-    <button type="button" class="button outline" onclick={() => onchoose('thisAndFollowing')}>
-      {t('scope.thisAndFollowing')}
-    </button>
-    {#if alone}
-      <button
-        type="button"
-        class="button solid"
-        data-initial-focus
-        onclick={() => onchoose('this')}
-      >
-        {t('scope.this')}
-      </button>
-    {/if}
   {/snippet}
 </Dialog>
-
-<style>
-  .question {
-    margin: 0;
-  }
-</style>

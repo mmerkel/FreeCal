@@ -278,6 +278,12 @@ export const samples = {
     "thisAndFollowing",
     "all"
   ],
+  ExceptionCounts: [
+    {
+      "thisAndFollowing": 1,
+      "all": 2
+    }
+  ],
   StructuredText: [
     {
       "paragraphs": [
@@ -642,6 +648,7 @@ type Samples = {
   Frequency: Unbranded<T.Frequency>[];
   RepeatEnd: Unbranded<T.RepeatEnd>[];
   Scope: Unbranded<T.Scope>[];
+  ExceptionCounts: Unbranded<T.ExceptionCounts>[];
   StructuredText: Unbranded<T.StructuredText>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
