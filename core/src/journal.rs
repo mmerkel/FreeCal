@@ -102,8 +102,8 @@ pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<(
         }
         // Latest first, so that each entry finds the version it made.
         for entry in entries.iter().rev() {
-            let current = current(store, entry.event_id)?;
-            if current.map(|(uid, event)| hash(&uid, &event)) != entry.hash {
+            let current = current(store, entry.event_id, &entry.uid)?;
+            if current.map(|event| hash(&entry.uid, &event)) != entry.hash {
                 return Err(CoreError::ChangedSinceUnit(id));
             }
             match &entry.previous {
@@ -259,10 +259,10 @@ impl Unit<'_> {
     }
 
     /// Writes an earlier version back under its own ID: over the Event `id`
-    /// while it exists, otherwise as a new Event. No other Event has that ID,
-    /// as IDs are never given out again (ticket 85).
+    /// while it is the one with the UID `uid`, otherwise as a new Event. No
+    /// other Event has that ID, as IDs are never given out again (ticket 85).
     fn put_back(&mut self, id: EventId, uid: &str, event: &StoredEvent) -> Result<()> {
-        if current(self.store, id)?.is_some() {
+        if current(self.store, id, uid)?.is_some() {
             return self.replace(id, event);
         }
         self.writable(event.calendar_id)?;
@@ -274,7 +274,15 @@ impl Unit<'_> {
     }
 
     fn previous(&self, id: EventId) -> Result<(String, StoredEvent)> {
-        current(self.store, id)?.ok_or(CoreError::EventNotFound(id))
+        self.store
+            .connection()
+            .query_row(
+                &format!("SELECT uid, calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1"),
+                [id.0],
+                |row| Ok((row.get(0)?, stored_event(row, 1)?)),
+            )
+            .optional()?
+            .ok_or(CoreError::EventNotFound(id))
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
@@ -423,16 +431,14 @@ fn write(
     Ok(id.unwrap_or(EventId(conn.last_insert_rowid())))
 }
 
-/// The Event `id` as it is now, with its UID. An entry made before ticket 85
-/// may name an ID that another Event got since: its UID and hash then differ
-/// from the entry's.
-fn current(store: &Store, id: EventId) -> Result<Option<(String, StoredEvent)>> {
+/// The Event `id` as it is now, if it is still the one with the UID `uid`.
+fn current(store: &Store, id: EventId, uid: &str) -> Result<Option<StoredEvent>> {
     Ok(store
         .connection()
         .query_row(
-            &format!("SELECT uid, calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1"),
-            [id.0],
-            |row| Ok((row.get(0)?, stored_event(row, 1)?)),
+            &format!("SELECT calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1 AND uid = ?2"),
+            params![id.0, uid],
+            |row| stored_event(row, 0),
         )
         .optional()?)
 }

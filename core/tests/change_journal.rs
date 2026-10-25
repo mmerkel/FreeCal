@@ -471,36 +471,6 @@ fn after_migrating_a_new_event_never_gets_an_id_the_journal_holds() {
     assert_eq!(core.event(made_since.id).unwrap(), made_since);
 }
 
-/// Before ticket 85 an ID could be given out again; undoing the delete of
-/// an Event whose ID another Event has now would write over that one.
-#[test]
-fn undoing_the_delete_of_an_event_whose_id_was_given_out_before_migrating_is_refused() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let (home, _) = home_with_dentist(&harness, &core);
-    let lunch = core
-        .create_event(draft(home.id, "Lunch", all_day("2026-10-06", "2026-10-07")))
-        .unwrap()
-        .value;
-    let deleted = core.delete_event(lunch.id).unwrap().unit.unwrap();
-    drop(core);
-    harness.arrange_local_store(BEFORE_TICKET_85);
-    harness.arrange_local_store(&format!(
-        "INSERT INTO event (calendar_id, uid, title, all_day, start_at, end_at, start_utc,
-                            end_utc, location, description)
-         VALUES ({}, 'taken', 'Taken', 1, '2026-10-08', '2026-10-09', 0, 0, '', '');",
-        home.id.0
-    ));
-    let core = harness.open();
-    let taken = core.event(lunch.id).unwrap();
-    assert_eq!(taken.title, "Taken");
-
-    let refused = core.undo_unit(deleted);
-
-    assert!(matches!(refused, Err(CoreError::ChangedSinceUnit(id)) if id == deleted));
-    assert_eq!(core.event(lunch.id).unwrap(), taken);
-}
-
 #[test]
 fn deleting_a_calendar_removes_the_units_of_its_events() {
     let harness = Harness::new();

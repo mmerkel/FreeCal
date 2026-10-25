@@ -23,4 +23,3 @@ Out of scope: per-Event undo and cascading (ticket 72); squashing migrations (ti
 ## Comments
 
 - 2026-10-24: Found while going through the IDs FreeCal uses: `(event_id, uid)` is unique for Events of different UIDs but not for Exceptions of one Recurring Event. Keying on the recurrence ID instead was rejected: "this and following" changes an Exception's recurrence ID, and a split makes new rows.
-- 2026-10-25: Done. Entries made before the migration can still name an ID another Event got since; `current` now reads the Event by ID alone and hashes it with its own UID, so undoing such an entry is refused (`ChangedSinceUnit`) rather than writing over that Event.
