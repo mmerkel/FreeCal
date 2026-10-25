@@ -1,19 +1,15 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] I would like to better understand how occurrences and exceptions work in ical and caldav
-  - [ ] how are they linked in Google calendar?
-  - [ ] Why is it needed that exceptions stay associated to their recurring event?
 - [ ] architecture work
   - [ ] table with events, table with server objects; task of the later is related to sync, but (after tickets 86-89), it will also be used to associate events that belong to the same recurring event.  This does not feel right.
     - [ ] wouldn't things be easier if we force things into a simpler structure in the db?  e.g. each exception should correspond to an occurrence. if not, then ask the user what to do with it (ask once, it's also a setting), but we won't do two exceptions for an occurrence - this only adds mess to the code, while it's almost never needed.
     - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
     - [ ] two exceptions for one occurrence: why not show them both?
   - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
-    - [ ] naming wtih respect to events and recurrence - Loaded, Opened, Edited, Occurrence
+    - [ ] naming with respect to events and recurrence - Loaded, Opened, Edited, Occurrence
   - [ ] also no single owner of events table (journal, store)
   - [ ] all passes through tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
-- [ ] use ical/caldav naming of things - as this will be the main thing this calendar is supposed to interact with - grill-with-docs on each choice; e.g. occurrence -> recurrence instance; where did occurrence come from?; also 'master' and 'resource'; not all ical is good, though, so each term asked individually
 - [ ] have a file, e.g. in docs/, where all decisions made are listed, e.g. a doc that can later be converted to a detailed reference for a user, or for developers; e.g. what to do when DTSTART does not fulfill the RRULE 
 - [ ] caldav sync: 
   - [ ] I would like to understand the different authentication methods, and what was built in and why
@@ -95,6 +91,14 @@ Possible bugs, found by reading the code, not run:
 ## Ticket 17: writing to CalDAV (from the recurrence lessons)
 
 - [ ] after a successful write, what does the mirror hold: the object FreeCal sent, or the one the server now holds? Servers may store something else than was sent: Radicale 3.8.3 adds a missing `VTIMEZONE` and reorders properties, and still returns a strong `ETag` for the `PUT`, though RFC 4791 §5.3.4 says it "MUST NOT" when the stored object isn't byte-equal. Keeping the sent object with that ETag leaves the mirror different from the server, and no sync shows it, since the ETag says nothing changed. Option: `GET` the object after each `PUT` (one more request per write). Reproduce with `~/Learning/calendar-recurrence/assets/caldav-lab.sh` and `lessons/0007/yoga.ics`, then `curl -i` on the `PUT`
+
+## Ticket 30: opening invitations from email (from the recurrence lessons)
+
+- [ ] an iTIP cancellation (`METHOD:CANCEL`, RFC 5546 §3.2.5) may leave out `DTSTART`, and the RFC's own examples do; import then fails the whole file as "not a calendar" (`event.get_start().ok_or_else(not_calendar)?` in `read_events`, `core/src/import/mod.rs`). Found by reading the code, not run; try `~/Learning/calendar-recurrence/lessons/0009/cancel.ics`. Import reads neither `METHOD` nor `STATUS`, so a cancellation that has a `DTSTART` comes in as an ordinary Event (see "ical: include STATUS field?"). Decide: a clear message that FreeCal doesn't handle invitation replies and cancellations, or apply a `CANCEL` to the Event the Calendar already has
+
+## Import: versions of one Exception (from the recurrence lessons)
+
+- [ ] `latest` (`core/src/event/mod.rs`) keeps the highest `SEQUENCE` and, on a tie, the version that comes first; `DTSTAMP` isn't read anywhere in `core/src`. RFC 5546 §2.1.5 breaks ties by the latest `DTSTAMP`. Found by reading the code, not run. Ties into "dedupe all Exceptions by `SEQUENCE` in `assemble`" above
 
 ## Ticket 80: first sync of a CalDAV Calendar
 
