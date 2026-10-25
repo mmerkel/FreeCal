@@ -7,44 +7,11 @@ use freecal_core::{
     CalendarId, Core, CoreError, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
     ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
 };
-use support::{Harness, all_day, calendar, draft, ics, timed};
-
-fn weekly(end: RepeatEnd) -> Repeat {
-    Repeat {
-        frequency: Frequency::Weekly,
-        interval: 1,
-        end,
-    }
-}
-
-/// Yoga on Mondays from 5 October 2026, 18:00 to 19:00 in Berlin.
-fn yoga(core: &Core, calendar_id: CalendarId, end: RepeatEnd) -> EventId {
-    let draft = EventDraft {
-        repeat: Some(weekly(end)),
-        ..draft(
-            calendar_id,
-            "Yoga",
-            timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
-        )
-    };
-    core.create_event(draft).unwrap().value.id
-}
+use support::{Harness, all_day, calendar, draft, ics, on, timed, weekly, yoga};
 
 fn occurrences(core: &Core, from: &str, to: &str) -> Vec<Occurrence> {
     core.occurrences(from.parse().unwrap(), to.parse().unwrap())
         .unwrap()
-}
-
-/// The one Occurrence on `date`.
-fn on(core: &Core, date: &str) -> Occurrence {
-    let next = date
-        .parse::<chrono::NaiveDate>()
-        .unwrap()
-        .succ_opt()
-        .unwrap();
-    let mut found = occurrences(core, date, &next.to_string());
-    assert_eq!(found.len(), 1, "one Occurrence on {date}");
-    found.remove(0)
 }
 
 /// Each Occurrence in October and November as its title and time.

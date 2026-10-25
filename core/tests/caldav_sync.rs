@@ -1,6 +1,8 @@
 mod support;
 
-use freecal_core::{AccountId, CalDavLogin, CalendarId, Changed, Core, Event, Signal};
+use freecal_core::{
+    AccountId, CalDavLogin, CalendarId, Changed, Core, Event, ServerObject, Signal,
+};
 use support::radicale::{NewCalendar, Radicale, User};
 use support::{Harness, date, event, ics, make_writable};
 
@@ -112,14 +114,17 @@ impl Synced {
         ));
     }
 
-    /// The address of the object the Calendar's Event titled `title` is
-    /// in, as FreeCal holds it.
-    fn href(&self, title: &str) -> String {
+    /// The object the Calendar's Event titled `title` is in, as FreeCal
+    /// holds it.
+    fn held(&self, title: &str) -> Option<ServerObject> {
         self.core
             .original_server_data(self.event(title).id)
             .unwrap()
-            .expect("an object")
-            .href
+    }
+
+    /// The address of the object the Event titled `title` is in.
+    fn href(&self, title: &str) -> String {
+        self.held(title).expect("an object").href
     }
 
     /// Syncs the Account, which has only this Calendar, and returns the
@@ -154,10 +159,7 @@ impl Synced {
     }
 
     fn held_etag(&self, title: &str) -> Option<String> {
-        self.core
-            .original_server_data(self.event(title).id)
-            .unwrap()
-            .and_then(|server| server.etag)
+        self.held(title).and_then(|server| server.etag)
     }
 
     fn changed_signals(&self) -> Vec<Signal> {
@@ -378,11 +380,7 @@ mod undo {
 
         assert!(undone.unit.is_some());
         assert_eq!(synced.titles(), ["Standup"]);
-        let held = synced
-            .core
-            .original_server_data(synced.event("Standup").id)
-            .unwrap()
-            .unwrap();
+        let held = synced.held("Standup").unwrap();
         assert_eq!((held.etag, held.data), (Some(served.0), served.1));
     }
 
@@ -777,10 +775,7 @@ mod server_objects {
     #[test]
     fn an_object_freecal_can_no_longer_read_keeps_its_last_readable_version() {
         let synced = Synced::with(&[("standup", standup("Standup"))]);
-        let held = synced
-            .core
-            .original_server_data(synced.event("Standup").id)
-            .unwrap();
+        let held = synced.held("Standup");
         // Radicale takes a UTC time with a zone; FreeCal can't read it.
         synced.put(
             "standup",

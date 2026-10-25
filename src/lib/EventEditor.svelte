@@ -9,7 +9,7 @@
   import { untrack } from 'svelte';
   import type { Calendar, EventDraft, Frequency, Repeat, RepeatEnd } from '../core/types';
   import { errorText, t, tCount } from '../i18n';
-  import Dialog from './Dialog.svelte';
+  import Dialog, { enterSubmits } from './Dialog.svelte';
   import { intervalUnits } from './repeat';
   import { endsBeforeStart, fieldsOf, whenOf } from './when';
 
@@ -144,14 +144,7 @@
       placeholder={t('event.title')}
       bind:value={title}
       data-initial-focus
-      onkeydown={(key) => {
-        // Enter saves. Done here, because the Save button sits outside the
-        // form, in the dialog's actions.
-        if (key.key === 'Enter') {
-          key.preventDefault();
-          key.currentTarget.form?.requestSubmit();
-        }
-      }}
+      onkeydown={enterSubmits}
     />
 
     <label class="check">

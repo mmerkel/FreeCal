@@ -24,7 +24,7 @@
 <script lang="ts">
   import type { ExceptionCounts } from '../core/types';
   import { t, tCount } from '../i18n';
-  import Dialog from './Dialog.svelte';
+  import Dialog, { enterSubmits } from './Dialog.svelte';
 
   interface Props {
     change: ScopeChange;
@@ -47,26 +47,15 @@
     { value: 'thisAndFollowing', label: 'scope.thisAndFollowing' },
     { value: 'all', label: 'scope.all' },
   ] as const;
-  const alone = $derived(change !== 'editRepeat');
   // The dialog is shown anew for each change, so its first value is enough.
   // svelte-ignore state_referenced_locally
-  const first: Scope = change === 'editRepeat' ? 'thisAndFollowing' : 'this';
+  const alone = change !== 'editRepeat';
+  const first: Scope = alone ? 'this' : 'thisAndFollowing';
   let scope = $state(first);
   let exceptionsToo = $state(false);
   /** The count the checkbox names: the chosen scope's, for "this event" all of them. */
   const count = $derived(scope === 'thisAndFollowing' ? counts.thisAndFollowing : counts.all);
   const reaches = $derived(scope !== 'this' && count > 0);
-
-  /**
-   * Enter confirms. Done here, because the confirm button sits outside the
-   * form, in the dialog's actions.
-   */
-  function enterConfirms(key: KeyboardEvent & { currentTarget: HTMLInputElement }) {
-    if (key.key === 'Enter') {
-      key.preventDefault();
-      key.currentTarget.form?.requestSubmit();
-    }
-  }
 
   function confirm(submitted: SubmitEvent) {
     submitted.preventDefault();
@@ -87,20 +76,20 @@
             disabled={choice.value === 'this' && !alone}
             data-initial-focus={choice.value === first ? '' : undefined}
             bind:group={scope}
-            onkeydown={enterConfirms}
+            onkeydown={enterSubmits}
           />
           {t(choice.label)}
         </label>
       {/each}
     </fieldset>
 
-    {#if counts.thisAndFollowing > 0 || counts.all > 0}
+    {#if counts.all > 0}
       <label class="check">
         <input
           type="checkbox"
           disabled={!reaches}
           bind:checked={exceptionsToo}
-          onkeydown={enterConfirms}
+          onkeydown={enterSubmits}
         />
         {tCount('scope.exceptionsToo', count)}
       </label>

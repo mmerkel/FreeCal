@@ -4,10 +4,10 @@
 mod support;
 
 use freecal_core::{
-    Calendar, CalendarId, Core, CoreError, Event, EventDraft, ExistingEvents, Frequency,
-    ImportFile, Occurrence, Repeat, RepeatEnd, Scope, Signal, UnitId,
+    Calendar, CalendarId, Core, CoreError, Event, ExistingEvents, ImportFile, RepeatEnd, Scope,
+    Signal, UnitId,
 };
-use support::{Harness, all_day, calendar, date, draft, event, ics, timed};
+use support::{Harness, all_day, calendar, date, draft, event, ics, on, timed, yoga};
 
 /// Every Event of the shown Calendars, with everything its details show.
 fn contents(core: &Core) -> Vec<Event> {
@@ -340,14 +340,6 @@ mod an_event_changed_since_refuses_the_undo {
     }
 }
 
-/// The one Occurrence of a shown Calendar on `date`.
-fn the_one_on(core: &Core, date: &str) -> Occurrence {
-    let day = self::date(date);
-    let mut found = core.occurrences(day, day.succ_opt().unwrap()).unwrap();
-    assert_eq!(found.len(), 1, "one Occurrence on {date}");
-    found.remove(0)
-}
-
 /// Ticket 85: Exceptions share their Recurring Event's UID, so only an ID
 /// that is never given out again tells a new Exception from a deleted one.
 #[test]
@@ -355,23 +347,11 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar(&core, "Home");
-    let yoga = EventDraft {
-        repeat: Some(Repeat {
-            frequency: Frequency::Weekly,
-            interval: 1,
-            end: RepeatEnd::Count { count: 3 },
-        }),
-        ..draft(
-            home.id,
-            "Yoga",
-            timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
-        )
-    };
-    let yoga = core.create_event(yoga).unwrap().value;
-    let first = the_one_on(&core, "2026-10-05");
+    let yoga = yoga(&core, home.id, RepeatEnd::Count { count: 3 });
+    let first = on(&core, "2026-10-05");
     let moved = core
         .reschedule_occurrence(
-            yoga.id,
+            yoga,
             first.recurrence_id.as_deref().unwrap(),
             Scope::This,
             false,
@@ -385,10 +365,10 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
         .unwrap()
         .unit
         .unwrap();
-    let second = the_one_on(&core, "2026-10-12");
+    let second = on(&core, "2026-10-12");
     let made_since = core
         .reschedule_occurrence(
-            yoga.id,
+            yoga,
             second.recurrence_id.as_deref().unwrap(),
             Scope::This,
             false,
@@ -403,7 +383,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
 
     assert_eq!(core.event(exception.id).unwrap(), exception);
     assert_eq!(core.event(made_since.id).unwrap(), made_since);
-    assert_eq!(the_one_on(&core, "2026-10-05").event_id, exception.id);
+    assert_eq!(on(&core, "2026-10-05").event_id, exception.id);
 }
 
 /// The `event` table as it was before ticket 85, whose IDs SQLite gave out

@@ -58,13 +58,11 @@ impl Origin {
         }
     }
 
-    /// Whether its changes to an object's rows mark the object pending, for
-    /// FreeCal to send: a sync's come from the server.
-    fn marks_pending(self) -> bool {
-        match self {
-            Origin::UserAction | Origin::Import | Origin::Undo => true,
-            Origin::FirstSync | Origin::Sync => false,
-        }
+    /// Whether it is a sync, whose changes come from the server: only a sync
+    /// writes the mirror, and only other origins' changes to an object's
+    /// rows mark the object pending, for FreeCal to send.
+    fn is_sync(self) -> bool {
+        matches!(self, Origin::FirstSync | Origin::Sync)
     }
 }
 
@@ -92,6 +90,7 @@ pub(crate) fn record<T>(
             made_at,
             id: None,
             calendars: Vec::new(),
+            pending: Vec::new(),
         };
         let value = change(&mut unit)?;
         Ok(Recorded {
@@ -191,6 +190,8 @@ pub(crate) struct Unit<'a> {
     made_at: i64,
     id: Option<UnitId>,
     calendars: Vec<CalendarId>,
+    /// The server objects it marked pending.
+    pending: Vec<ObjectId>,
 }
 
 impl Unit<'_> {
@@ -219,7 +220,7 @@ impl Unit<'_> {
         object: &ServerObject,
         over: Option<ObjectId>,
     ) -> Result<ObjectId> {
-        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
+        debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
         let conn = self.store.connection();
         match over {
@@ -252,7 +253,7 @@ impl Unit<'_> {
     /// `href` in a Calendar: the objects there keep the last version it
     /// could, and their rows stay as they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
-        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
+        debug_assert!(self.origin.is_sync());
         self.store.connection().execute(
             "UPDATE server_object SET unreadable = 1 WHERE calendar_id = ?1 AND href = ?2",
             params![calendar_id.0, href],
@@ -263,7 +264,7 @@ impl Unit<'_> {
     /// Removes the server object `id` from the mirror, and its rows with it,
     /// as a sync finds it gone from the server.
     pub fn remove_object(&mut self, id: ObjectId) -> Result<()> {
-        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
+        debug_assert!(self.origin.is_sync());
         for event in self.events_in_object(id)? {
             self.delete(event.id)?;
         }
@@ -424,12 +425,14 @@ impl Unit<'_> {
                 self.calendars.push(event.calendar_id);
             }
             if let Some(object) = event.fields.object_id
-                && self.origin.marks_pending()
+                && !self.origin.is_sync()
+                && !self.pending.contains(&object)
             {
                 conn.execute(
                     "UPDATE server_object SET pending = 1 WHERE id = ?1",
                     [object.0],
                 )?;
+                self.pending.push(object);
             }
         }
         let Some(origin) = self.origin.recorded_as() else {

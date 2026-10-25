@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
-    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, Keyring, KeyringError,
-    Signal, SignalSink, When,
+    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, EventId, Frequency, Keyring,
+    KeyringError, Occurrence, Repeat, RepeatEnd, Signal, SignalSink, When,
 };
 use tempfile::TempDir;
 
@@ -269,6 +269,35 @@ pub fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
         description: String::new(),
         repeat: None,
     }
+}
+
+pub fn weekly(end: RepeatEnd) -> Repeat {
+    Repeat {
+        frequency: Frequency::Weekly,
+        interval: 1,
+        end,
+    }
+}
+
+/// Yoga on Mondays from 5 October 2026, 18:00 to 19:00 in Berlin.
+pub fn yoga(core: &Core, calendar_id: CalendarId, end: RepeatEnd) -> EventId {
+    let draft = EventDraft {
+        repeat: Some(weekly(end)),
+        ..draft(
+            calendar_id,
+            "Yoga",
+            timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
+        )
+    };
+    core.create_event(draft).unwrap().value.id
+}
+
+/// The one Occurrence of a shown Calendar on `date`.
+pub fn on(core: &Core, date: &str) -> Occurrence {
+    let day = self::date(date);
+    let mut found = core.occurrences(day, day.succ_opt().unwrap()).unwrap();
+    assert_eq!(found.len(), 1, "one Occurrence on {date}");
+    found.remove(0)
 }
 
 // Files to import, written as text.

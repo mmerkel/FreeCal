@@ -556,6 +556,7 @@ pub struct StoredEvent {
 pub struct RangeEvent {
     pub id: EventId,
     pub calendar_id: CalendarId,
+    pub uid: String,
     pub fields: EventFields,
     pub start_utc: i64,
 }
@@ -928,7 +929,7 @@ impl Store {
     /// range (see [`StoredRange::overlaps`]).
     pub fn shown_events_in(&self, range: &StoredRange) -> Result<Vec<RangeEvent>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT event.id, event.calendar_id, event.start_utc, \
+            "SELECT event.id, event.calendar_id, event.uid, event.start_utc, \
              {} \
              FROM event JOIN calendar ON calendar.id = event.calendar_id \
              WHERE calendar.shown AND CASE event.all_day \
@@ -954,8 +955,9 @@ impl Store {
                     Ok(RangeEvent {
                         id: EventId(row.get(0)?),
                         calendar_id: CalendarId(row.get(1)?),
-                        start_utc: row.get(2)?,
-                        fields: event_fields(row, 3)?,
+                        uid: row.get(2)?,
+                        start_utc: row.get(3)?,
+                        fields: event_fields(row, 4)?,
                     })
                 },
             )?

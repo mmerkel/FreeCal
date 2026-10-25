@@ -179,6 +179,12 @@ impl ImportedEvent {
             None => rule::id_of_original(original),
         })
     }
+
+    /// For an Exception, its recurrence ID normalised; none for every other
+    /// Event, and for a recurrence ID that isn't one.
+    pub(crate) fn rid(&self) -> Option<String> {
+        self.recurrence_id.as_deref().and_then(rule::recurrence_id)
+    }
 }
 
 /// When an imported Event takes place: a timed Event's wall times each with
@@ -363,13 +369,11 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
             None => without_recurring.push(exception),
         }
     }
-    let alone = latest(without_recurring.iter().map(|exception| {
-        let occurrence = exception
-            .recurrence_id
-            .as_deref()
-            .and_then(rule::recurrence_id);
-        ((exception.uid.as_str(), occurrence), exception)
-    }));
+    let alone = latest(
+        without_recurring
+            .iter()
+            .map(|exception| ((exception.uid.as_str(), exception.rid()), exception)),
+    );
     events.extend(alone.into_iter().map(|(_, exception)| exception.clone()));
     events
 }

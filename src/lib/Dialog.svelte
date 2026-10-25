@@ -7,6 +7,19 @@
   afterwards to where it was before. The body scrolls when the dialog
   doesn't fit the window.
 -->
+<script module lang="ts">
+  /**
+   * Enter in a field submits its form: the confirm button in `actions` sits
+   * outside the form, so Enter wouldn't otherwise.
+   */
+  export function enterSubmits(key: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (key.key === 'Enter') {
+      key.preventDefault();
+      key.currentTarget.form?.requestSubmit();
+    }
+  }
+</script>
+
 <script lang="ts">
   import X from '@lucide/svelte/icons/x';
   import type { Snippet } from 'svelte';

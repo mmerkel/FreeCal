@@ -254,10 +254,14 @@ impl Loaded {
         exceptions_too: bool,
     ) -> Result<Changes> {
         let repeat = rule::repeat_of(&self.recurring_event().1).0;
-        Ok(Changes {
+        Changes::of(
+            change,
+            changing,
+            self.calendar_id,
+            repeat,
+            zone,
             exceptions_too,
-            ..Changes::of(change, changing, self.calendar_id, repeat, zone)?
-        })
+        )
     }
 
     /// The Recurring Event that the Occurrences from `first`, the time of
@@ -299,18 +303,9 @@ impl Loaded {
     /// Recurring Event whose title, location, description or time differs
     /// from what the Recurring Event gives it.
     fn has_values_of_its_own(&self, exception: &Exception) -> Result<bool> {
-        let (Some((_, recurring)), Some(rid)) = (self.recurring(), &exception.rid) else {
-            return Ok(false);
-        };
-        let Some(slot) = rule::occurrence_at(recurring, rid)? else {
-            return Ok(false);
-        };
-        let fields = &exception.fields;
-        Ok(fields.title != recurring.title
-            || fields.location != recurring.location
-            || (&fields.description, fields.description_html)
-                != (&recurring.description, recurring.description_html)
-            || fields.when != slot)
+        Ok(self
+            .slot_of(exception)?
+            .is_some_and(|(recurring, slot)| differs(&exception.fields, recurring, &slot)))
     }
 
     /// Writes the Exceptions whose recurrence IDs `carried` says (given none
@@ -358,13 +353,17 @@ impl Loaded {
             let mut exception = if Some(*id) == changing {
                 changes.applied(fields)
             } else {
+                let at = self.slot_of(exception)?;
                 // Only those counted take it all (see [`ExceptionCounts`]).
-                let takes_all = changes.exceptions_too && self.has_values_of_its_own(exception)?;
+                let takes_all = changes.exceptions_too
+                    && at
+                        .as_ref()
+                        .is_some_and(|(recurring, at)| differs(fields, recurring, at));
                 let mut exception = fields.clone();
                 changes.follow(&mut exception, if takes_all { fields } else { was });
                 // One at its Occurrence's time moves with it.
-                if let (Some(slot), Some(rid)) = (slot, rid)
-                    && rule::occurrence_at(was, rid)?.as_ref() == Some(&fields.when)
+                if let (Some(slot), Some((_, at))) = (slot, &at)
+                    && *at == fields.when
                 {
                     exception.when = slot;
                 } else if takes_all && let Some((from, to)) = &changes.when {
@@ -381,6 +380,17 @@ impl Loaded {
         }
         Ok(kept)
     }
+}
+
+/// Whether an Exception with `fields` differs in its title, location,
+/// description or time from what the Recurring Event `recurring` gives it,
+/// at `slot`.
+fn differs(fields: &EventFields, recurring: &EventFields, slot: &StoredWhen) -> bool {
+    fields.title != recurring.title
+        || fields.location != recurring.location
+        || (&fields.description, fields.description_html)
+            != (&recurring.description, recurring.description_html)
+        || fields.when != *slot
 }
 
 /// Changes every Occurrence: the whole Recurring Event. Its cancelled
@@ -538,6 +548,7 @@ impl Changes {
         calendar_id: CalendarId,
         repeat: Option<Repeat>,
         zone: Tz,
+        exceptions_too: bool,
     ) -> Result<Self> {
         let was = &changing.fields;
         let description = was.description().text;
@@ -562,7 +573,7 @@ impl Changes {
             when: (when != was.when).then(|| (from.clone(), when)),
             calendar_id: (draft.calendar_id != calendar_id).then_some(draft.calendar_id),
             repeat: (draft.repeat != repeat).then_some(draft.repeat),
-            exceptions_too: false,
+            exceptions_too,
         })
     }
 
@@ -627,7 +638,7 @@ fn alone(
     let calendar_id = loaded.calendar_id;
     let recurring = loaded.recurring();
     let repeat = recurring.and_then(|(_, fields)| rule::repeat_of(fields).0);
-    let changes = Changes::of(change, changing, calendar_id, repeat, zone)?;
+    let changes = Changes::of(change, changing, calendar_id, repeat, zone, false)?;
     let mut fields = changes.applied(&changing.fields);
     match changes.repeat {
         None => {}

@@ -3,10 +3,12 @@
 //! Journal unit. Server objects are matched by address, and each changes
 //! only its own rows (ADR 0010).
 
+use std::collections::HashMap;
+
 use crate::event::{self, Loaded, ObjectEvent, ObjectId};
 use crate::journal::Unit;
 use crate::remote::{Changes, Fetched};
-use crate::{CalendarId, ImportedEvent, Result};
+use crate::{CalendarId, ImportedEvent, ImportedWhen, Result};
 
 /// Applies `changes` to the Calendar `calendar_id` in `unit`, and records
 /// its new sync state with them: the changed objects are taken as
@@ -40,12 +42,23 @@ pub(crate) fn take(
     fetched: &[Fetched],
     moved_from: &mut Vec<ObjectId>,
 ) -> Result<()> {
+    // The time of the first Recurring Event in `fetched` with each UID.
+    let mut recurring = HashMap::new();
+    for event in fetched
+        .iter()
+        .filter_map(|one| one.events.as_deref())
+        .flatten()
+    {
+        if event.original.is_none() && event.rule.is_some() {
+            recurring.entry(event.uid.as_str()).or_insert(event.when);
+        }
+    }
     for one in fetched {
         let Some(events) = &one.events else {
             unit.unreadable(calendar_id, &one.object.href)?;
             continue;
         };
-        let events = object_events(unit, calendar_id, events, fetched)?;
+        let events = object_events(unit, calendar_id, events, &recurring)?;
         let object = match unit.objects_at(calendar_id, &one.object.href)?.first() {
             Some(&object) => Some(object),
             None => moved(unit, &events, moved_from)?,
@@ -65,34 +78,24 @@ pub(crate) fn take(
     Ok(())
 }
 
-/// `events`, those of an object fetched with `batch`, as the object holds
-/// them: an Exception with the recurrence ID of the Occurrence it changed
-/// of its Recurring Event, the first in `batch`, otherwise the Calendar's.
-/// One without its Recurring Event is an Event of its own, its recurrence
-/// ID in the zone it was given in (ticket 88).
+/// `events`, those of an object, as the object holds them: an Exception
+/// with the recurrence ID of the Occurrence it changed of its Recurring
+/// Event, the one at `fetched` by UID if the sync fetched it, otherwise the
+/// Calendar's. One without its Recurring Event is an Event of its own, its
+/// recurrence ID in the zone it was given in (ticket 88).
 fn object_events<'a>(
     unit: &Unit,
     calendar_id: CalendarId,
     events: &'a [ImportedEvent],
-    batch: &[Fetched],
+    fetched: &HashMap<&str, ImportedWhen>,
 ) -> Result<Vec<ObjectEvent<'a>>> {
     let mut kept = Vec::new();
     for event in events {
         let rid = match event.original {
             None => None,
             Some(_) => {
-                let fetched = batch
-                    .iter()
-                    .filter_map(|fetched| fetched.events.as_deref())
-                    .flatten()
-                    .find(|recurring| {
-                        recurring.uid == event.uid
-                            && recurring.original.is_none()
-                            && recurring.rule.is_some()
-                    })
-                    .map(|recurring| recurring.when);
-                let recurring = match fetched {
-                    Some(when) => Some(when),
+                let recurring = match fetched.get(event.uid.as_str()) {
+                    Some(&when) => Some(when),
                     None => Loaded::of_uid(unit, calendar_id, &event.uid)?.recurring_when(),
                 };
                 event.recurrence_id_in(recurring.as_ref())

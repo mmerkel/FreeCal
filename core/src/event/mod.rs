@@ -13,13 +13,16 @@ pub(crate) mod rule;
 mod scope;
 mod when;
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use crate::import::rejoined_id;
 use crate::journal::Unit;
-use crate::store::{Store, StoredEvent, Uid, UidEvent};
+use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};
@@ -222,13 +225,12 @@ impl Loaded {
     /// Event.
     /// ADR 0007's rules 2 and 3 apply.
     pub fn take(&self, unit: &mut Unit, incoming: &ImportedEvent) -> Result<()> {
-        let exceptions = latest(incoming.exceptions.iter().map(|exception| {
-            let rid = exception
-                .recurrence_id
-                .as_deref()
-                .and_then(rule::recurrence_id);
-            (rid, exception)
-        }));
+        let exceptions = latest(
+            incoming
+                .exceptions
+                .iter()
+                .map(|exception| (exception.rid(), exception)),
+        );
         match &self.event {
             Some((id, previous)) => unit.replace(
                 *id,
@@ -366,12 +368,17 @@ impl Loaded {
     /// without their Recurring Event, or changing none of its Occurrences,
     /// such as one for a cancelled Occurrence (ticket 88).
     fn of_its_own(&self, exception: &Exception) -> bool {
-        match (self.recurring(), &exception.rid) {
-            (Some((_, fields)), Some(rid)) => {
-                !matches!(rule::occurrence_at(fields, rid), Ok(Some(_)))
-            }
-            _ => true,
-        }
+        !matches!(self.slot_of(exception), Ok(Some(_)))
+    }
+
+    /// The Recurring Event, with the time its rule gives the Occurrence that
+    /// `exception`, one of these Exceptions, changed; none when it is an
+    /// Event of its own ([`Loaded::of_its_own`]).
+    fn slot_of(&self, exception: &Exception) -> Result<Option<(&EventFields, StoredWhen)>> {
+        let (Some((_, recurring)), Some(rid)) = (self.recurring(), &exception.rid) else {
+            return Ok(None);
+        };
+        Ok(rule::occurrence_at(recurring, rid)?.map(|slot| (recurring, slot)))
     }
 
     /// The Exception that changed the Occurrence `rid`, normalised, if there
@@ -576,28 +583,28 @@ pub(crate) fn occurrences(
 ) -> Result<Vec<Occurrence>> {
     let range = StoredRange::new(from, to, zone);
     let mut occurrences = Vec::new();
+    // The Events with each UID, loaded once.
+    let mut loaded = HashMap::new();
     for event in store.shown_events_in(&range)? {
         let mut recurrence_id = event.fields.recurrence_id.clone();
         if let Some(rid) = event.fields.rid() {
-            let with_uid = store.events_with_uid(Uid::Of(event.id))?;
-            if with_uid
-                .iter()
-                .find(|other| other.fields.rid().as_ref() == Some(&rid))
-                .is_some_and(|first| first.id != event.id)
-            {
-                continue;
-            }
-            if Opened::among(with_uid, event.id)?.is_of_its_own() {
-                recurrence_id = None;
+            let with_uid = with_uid_of(&mut loaded, store, &event)?;
+            match with_uid.exception_at(&rid) {
+                Some(first) if first.id == event.id => {
+                    if with_uid.of_its_own(first) {
+                        recurrence_id = None;
+                    }
+                }
+                _ => continue,
             }
         }
         let expanded = match event.fields.rule {
             None => None,
             Some(_) => {
-                let changed: Vec<String> = store
-                    .events_with_uid(Uid::Of(event.id))?
-                    .into_iter()
-                    .filter_map(|exception| exception.fields.recurrence_id)
+                let changed: Vec<String> = with_uid_of(&mut loaded, store, &event)?
+                    .exceptions
+                    .iter()
+                    .filter_map(|exception| exception.fields.recurrence_id.clone())
                     .collect();
                 rule::occurrences_in(&event.fields, &changed, &range)?
             }
@@ -625,6 +632,19 @@ pub(crate) fn occurrences(
         }
     }
     Ok(Occurrence::ordered(occurrences))
+}
+
+/// The Events with the UID of `event`, from `loaded` if they are in it,
+/// otherwise loaded from `store` into it.
+fn with_uid_of<'a>(
+    loaded: &'a mut HashMap<(CalendarId, String), Loaded>,
+    store: &Store,
+    event: &RangeEvent,
+) -> Result<&'a Loaded> {
+    Ok(match loaded.entry((event.calendar_id, event.uid.clone())) {
+        Entry::Occupied(entry) => entry.into_mut(),
+        Entry::Vacant(entry) => entry.insert(Loaded::of_uid(store, event.calendar_id, &event.uid)?),
+    })
 }
 
 /// An Event a server object holds, as [`take_object`] writes it.
