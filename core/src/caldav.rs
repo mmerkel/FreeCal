@@ -14,10 +14,8 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::remote::{Changes, FIRST_SYNC_PAGE, SyncPoint};
-use crate::{
-    AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, Result, ServerObject, import,
-};
+use crate::remote::{Changes, FIRST_SYNC_PAGE, Fetched, Held, SyncPoint};
+use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
 
 const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
@@ -214,7 +212,7 @@ impl Client {
         Ok(calendars)
     }
 
-    /// Every Event of the Calendar at `calendar`, handed to `page`
+    /// Every object of the Calendar at `calendar`, handed to `page`
     /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
     /// then fetched with `calendar-multiget` (RFC 4791). Floating times are
     /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`.
@@ -223,7 +221,7 @@ impl Client {
         &self,
         calendar: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<ImportedEvent>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
     ) -> Result<SyncPoint> {
         let listing = self.listing(&stored_url(&self.url, calendar)?, display)?;
         let members: Vec<String> = listing.members.into_iter().map(|(path, _)| path).collect();
@@ -239,14 +237,14 @@ impl Client {
     /// What changed in the Calendar at `calendar` since `token`, asked with
     /// `sync-collection` (RFC 6578), or else found by listing the whole
     /// Calendar with ETags and comparing with `known`: the objects FreeCal
-    /// holds, by their address as the server gave it, with their ETags.
-    /// Objects whose ETag FreeCal holds are left out; the others are
-    /// fetched with `calendar-multiget`.
+    /// holds, by their address as the server gave it. Objects whose ETag
+    /// FreeCal holds are left out, unless FreeCal couldn't read them; the
+    /// others are fetched with `calendar-multiget`.
     pub fn changes(
         &self,
         calendar: &str,
         token: Option<&str>,
-        known: &HashMap<String, Option<String>>,
+        known: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes> {
         let calendar = stored_url(&self.url, calendar)?;
@@ -264,7 +262,7 @@ impl Client {
             None => (self.listing(&calendar, display)?, None),
         };
         // What FreeCal holds, by the path `member` gives each object.
-        let held: HashMap<String, (&String, &Option<String>)> = known
+        let held: HashMap<String, (&String, &Held)> = known
             .iter()
             .filter_map(|(href, etag)| {
                 let path = follow_href(&listing.calendar, href)?.path().to_owned();
@@ -286,14 +284,26 @@ impl Client {
                     .collect()
             }
         };
-        let fetch: Vec<String> = listing
+        let mut fetch: Vec<String> = listing
             .members
             .into_iter()
             .filter(|(path, etag)| {
-                etag.is_none() || held.get(path).is_none_or(|(_, held)| *held != etag)
+                etag.is_none()
+                    || held
+                        .get(path)
+                        .is_none_or(|(_, held)| held.unreadable || held.etag != *etag)
             })
             .map(|(path, _)| path)
             .collect();
+        // A sync token lists only what changed since.
+        let unchanged: Vec<String> = held
+            .iter()
+            .filter(|(path, (href, held))| {
+                held.unreadable && !fetch.contains(path) && !removed.contains(href)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        fetch.extend(unchanged);
         let zone = match listing.zone {
             _ if fetch.is_empty() => display,
             Some(zone) => zone,
@@ -370,10 +380,10 @@ impl Client {
         Ok((listing, removed))
     }
 
-    /// The Events of the objects at `hrefs` in the Calendar at `calendar`,
-    /// fetched with `calendar-multiget` (RFC 4791), each with its object as
-    /// its original server data. Floating times are pinned to `zone`.
-    fn multiget(&self, calendar: &Url, hrefs: &[String], zone: Tz) -> Result<Vec<ImportedEvent>> {
+    /// The objects at `hrefs` in the Calendar at `calendar`, fetched with
+    /// `calendar-multiget` (RFC 4791), with their Events. Floating times are
+    /// pinned to `zone`.
+    fn multiget(&self, calendar: &Url, hrefs: &[String], zone: Tz) -> Result<Vec<Fetched>> {
         let (answer, _) = self.send(
             b"REPORT",
             calendar,
@@ -390,7 +400,7 @@ impl Client {
                 })
             })
             .collect();
-        Ok(import::read_server_events(&objects, zone))
+        Ok(import::read_server_objects(objects, zone))
     }
 
     /// The URL of the principal of the user who is logged in. Asking for it

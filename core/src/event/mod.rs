@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::journal::Unit;
 use crate::store::{Store, StoredEvent, Uid, UidEvent};
-use crate::{CalendarId, CoreError, ImportedEvent, Result, StructuredText};
+use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};
 pub use scope::Scope;
@@ -174,10 +174,7 @@ impl Loaded {
             .into_iter()
             .map(|(id, fields)| Exception {
                 id,
-                rid: fields
-                    .recurrence_id
-                    .as_deref()
-                    .and_then(rule::recurrence_id),
+                rid: fields.rid(),
                 fields,
             })
             .collect();
@@ -217,34 +214,40 @@ impl Loaded {
             .expect("Events loaded with the Event that isn't an Exception")
     }
 
-    /// Makes `incoming`, a new version from a file or a server with its
-    /// Exceptions, the Events with the UID, adding it if the Calendar has
-    /// none, each in the server object `object` (see [`Unit`] for what it
-    /// gets). Exceptions are paired by the Occurrence they changed: those
-    /// `incoming` has replace them or are added, and the others are
+    /// Makes `incoming`, a new version from a file with its Exceptions, the
+    /// Events with the UID, adding it if the Calendar has none (see [`Unit`]
+    /// for the server object each gets). Exceptions are paired by the
+    /// Occurrence they changed: those `incoming` has replace them or are
+    /// added, the latest of several for one Occurrence, and the others are
     /// deleted. ADR 0007's rules 2 and 3 apply.
-    pub fn take(
-        &self,
-        unit: &mut Unit,
-        incoming: &ImportedEvent,
-        object: Option<ObjectId>,
-    ) -> Result<()> {
+    pub fn take(&self, unit: &mut Unit, incoming: &ImportedEvent) -> Result<()> {
+        let exceptions = latest(incoming.exceptions.iter().map(|exception| {
+            let rid = exception
+                .recurrence_id
+                .as_deref()
+                .and_then(rule::recurrence_id);
+            (rid, exception)
+        }));
         let Some((id, previous)) = &self.event else {
-            return create(unit, self.calendar_id, &self.uid, incoming, object);
+            let new = |fields| StoredEvent {
+                calendar_id: self.calendar_id,
+                fields,
+            };
+            unit.create(&self.uid, &new(fields(incoming, None)))?;
+            for (_, exception) in exceptions {
+                unit.create(&self.uid, &new(fields(exception, None)))?;
+            }
+            return Ok(());
         };
         unit.replace(
             *id,
             &StoredEvent {
                 calendar_id: self.calendar_id,
-                fields: fields_over(incoming, previous, object),
+                fields: fields_over(incoming, previous, None),
             },
         )?;
         let mut left: Vec<_> = self.exceptions.iter().collect();
-        for exception in &incoming.exceptions {
-            let rid = exception
-                .recurrence_id
-                .as_deref()
-                .and_then(rule::recurrence_id);
+        for (rid, exception) in exceptions {
             let same = rid.and_then(|rid| {
                 left.iter()
                     .position(|stored| stored.rid.as_ref() == Some(&rid))
@@ -252,9 +255,9 @@ impl Loaded {
             let (previous, fields) = match same.map(|index| left.remove(index)) {
                 Some(stored) => (
                     Some(stored.id),
-                    fields_over(exception, &stored.fields, object),
+                    fields_over(exception, &stored.fields, None),
                 ),
-                None => (None, fields(exception, object)),
+                None => (None, fields(exception, None)),
             };
             self.write_exception(unit, previous, self, fields)?;
         }
@@ -262,6 +265,13 @@ impl Loaded {
             unit.delete(stored.id)?;
         }
         Ok(())
+    }
+
+    /// The Recurring Event's time, none when the Event doesn't repeat, is
+    /// gone, or its time can't be read.
+    pub fn recurring_when(&self) -> Option<ImportedWhen> {
+        let (_, fields) = self.recurring()?;
+        fields.when.to_imported().ok()
     }
 
     /// Writes `fields` as an Exception of `into`, these Events or those they
@@ -469,7 +479,9 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
 /// The Occurrences of shown Calendars on the dates `from` up to `to`
 /// (exclusive), in the Display Time Zone `zone` and ordered by start.
 /// Recurring Events are expanded here, in wall time in their Event Time
-/// Zone, and their Exceptions stand in for the Occurrences they changed.
+/// Zone, and their Exceptions stand in for the Occurrences they changed:
+/// of several for one Occurrence, as two server objects may hold, the first
+/// by ID.
 pub(crate) fn occurrences(
     store: &Store,
     from: NaiveDate,
@@ -479,6 +491,15 @@ pub(crate) fn occurrences(
     let range = StoredRange::new(from, to, zone);
     let mut occurrences = Vec::new();
     for event in store.shown_events_in(&range)? {
+        if let Some(rid) = event.fields.rid()
+            && store
+                .events_with_uid(Uid::Of(event.id))?
+                .into_iter()
+                .find(|other| other.fields.rid().as_ref() == Some(&rid))
+                .is_some_and(|first| first.id != event.id)
+        {
+            continue;
+        }
         let expanded = match event.fields.rule {
             None => None,
             Some(_) => {
@@ -515,25 +536,82 @@ pub(crate) fn occurrences(
     Ok(Occurrence::ordered(occurrences))
 }
 
-/// Adds `incoming`, a version from a file or a server, with its Exceptions
-/// to the Calendar `calendar_id`, under the UID `uid`, in the server object
-/// `object`.
-fn create(
+/// An Event a server object holds, as [`take_object`] writes it.
+pub(crate) struct ObjectEvent<'a> {
+    pub uid: &'a str,
+    /// For an Exception, the recurrence ID, normalised, of the Occurrence
+    /// of its Recurring Event that it changed.
+    pub rid: Option<String>,
+    pub incoming: &'a ImportedEvent,
+}
+
+/// Makes `events`, the Events the server object `object` of the Calendar
+/// `calendar_id` holds now, the object's rows, and changes no other row
+/// (ADR 0010): each replaces the object's row with its UID and recurrence
+/// ID or is added, and the object's other rows are deleted, whatever their
+/// UIDs. Of several with one UID and recurrence ID, the latest is kept.
+/// ADR 0007's rules 2 and 3 apply.
+pub(crate) fn take_object(
     unit: &mut Unit,
     calendar_id: CalendarId,
-    uid: &str,
-    incoming: &ImportedEvent,
-    object: Option<ObjectId>,
+    object: ObjectId,
+    events: &[ObjectEvent],
 ) -> Result<()> {
-    let new = |fields| StoredEvent {
-        calendar_id,
-        fields,
-    };
-    unit.create(uid, &new(fields(incoming, object)))?;
-    for exception in &incoming.exceptions {
-        unit.create(uid, &new(fields(exception, object)))?;
+    let mut left = unit.events_in_object(object)?;
+    let events = latest(
+        events
+            .iter()
+            .map(|event| ((event.uid, event.rid.as_deref()), event.incoming)),
+    );
+    for ((uid, rid), incoming) in events {
+        // A stored recurrence ID that isn't one pairs with nothing.
+        let same = left.iter().position(|row| {
+            let stored = match &row.fields.recurrence_id {
+                Some(text) => rule::recurrence_id(text).map(Some),
+                None => Some(None),
+            };
+            row.uid == uid
+                && stored
+                    .as_ref()
+                    .is_some_and(|stored| stored.as_deref() == rid)
+        });
+        let event = |fields: EventFields| StoredEvent {
+            calendar_id,
+            fields: EventFields {
+                recurrence_id: rid.map(str::to_owned),
+                ..fields
+            },
+        };
+        match same.map(|index| left.remove(index)) {
+            Some(row) => unit.replace(
+                row.id,
+                &event(fields_over(incoming, &row.fields, Some(object))),
+            )?,
+            None => _ = unit.create(uid, &event(fields(incoming, Some(object))))?,
+        }
+    }
+    for row in left {
+        unit.delete(row.id)?;
     }
     Ok(())
+}
+
+/// Of `versions`, each with the Occurrence it is for, the latest for each
+/// Occurrence: the one with the highest `SEQUENCE`, the first of equals.
+/// iCalendar allows several, revisions told apart by `SEQUENCE`, so this
+/// keeps an Occurrence to one Exception where the schema doesn't.
+fn latest<'a, K: PartialEq>(
+    versions: impl IntoIterator<Item = (K, &'a ImportedEvent)>,
+) -> Vec<(K, &'a ImportedEvent)> {
+    let mut kept: Vec<(K, &ImportedEvent)> = Vec::new();
+    for (key, version) in versions {
+        match kept.iter_mut().find(|(known, _)| *known == key) {
+            Some(known) if version.sequence > known.1.sequence => known.1 = version,
+            Some(_) => {}
+            None => kept.push((key, version)),
+        }
+    }
+    kept
 }
 
 /// A new UID for an Event.

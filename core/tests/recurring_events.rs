@@ -501,6 +501,32 @@ fn an_import_carries_the_rule_the_cancelled_occurrences_and_the_changed_ones() {
     );
 }
 
+/// iCalendar allows several revisions of one Exception, told apart by
+/// `SEQUENCE`.
+#[test]
+fn of_two_exceptions_for_one_occurrence_an_import_keeps_the_highest_sequence() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let revised = format!(
+        "{WEEKLY_FROM_A_FILE}BEGIN:VEVENT\nUID:team\nSUMMARY:Team (moved later)\nSEQUENCE:1\n\
+         RECURRENCE-ID;TZID=Europe/Berlin:20261026T090000\n\
+         DTSTART;TZID=Europe/Berlin:20261026T140000\nDTEND;TZID=Europe/Berlin:20261026T150000\n\
+         END:VEVENT\n"
+    );
+
+    import(&core, home.id, &revised, ExistingEvents::Update);
+
+    let moved = occurrences(&core, "2026-10-26", "2026-10-27");
+    assert_eq!(
+        moved
+            .iter()
+            .map(|occurrence| occurrence.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Team (moved later)"]
+    );
+}
+
 #[test]
 fn deleting_a_changed_occurrence_doesnt_bring_back_the_original() {
     let harness = Harness::new();

@@ -198,6 +198,24 @@ impl Radicale {
         );
     }
 
+    /// Writes an Event, an iCalendar object, straight into Radicale's
+    /// storage as the object `name` of the Calendar at `calendar_url`,
+    /// replacing any it holds there. So it holds what a server that checks
+    /// less would take and Radicale refuses, such as a second object with a
+    /// UID, or an object whose UID changed.
+    pub fn write_event_file(&self, calendar_url: &str, name: &str, ics: Vec<u8>) {
+        let path = calendar_url
+            .strip_prefix(&self.url)
+            .expect("a Calendar on this server");
+        let file = self
+            .dir
+            .path()
+            .join("storage/collection-root")
+            .join(path)
+            .join(format!("{name}.ics"));
+        std::fs::write(file, ics).expect("write into Radicale's storage");
+    }
+
     /// The ETag and the iCalendar object of the Event `name` in a Calendar
     /// of `user`, as the server serves it.
     pub fn get_event(&self, user: &User, calendar_url: &str, name: &str) -> (String, String) {

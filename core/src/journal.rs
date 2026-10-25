@@ -198,38 +198,38 @@ impl Unit<'_> {
         self.store.find_event(id)
     }
 
-    /// The Event held in the server object at `href` in a Calendar, with
-    /// its UID; not an Exception.
-    pub fn event_at(
-        &self,
-        calendar_id: CalendarId,
-        href: &str,
-    ) -> Result<Option<(EventId, String)>> {
-        self.store.event_at(calendar_id, href)
+    /// The server objects of a Calendar at `href`, in the order they were
+    /// added.
+    pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
+        self.store.objects_at(calendar_id, href)
     }
 
-    /// Makes `object` the mirror of what the server holds at its href in a
-    /// Calendar, and returns its ID: the first object there, or a new one.
-    /// Only a sync writes the mirror, as only it knows what the server holds.
-    pub fn mirror(&self, calendar_id: CalendarId, object: &ServerObject) -> Result<ObjectId> {
+    /// The rows of the server object `id`.
+    pub fn events_in_object(&self, id: ObjectId) -> Result<Vec<UidEvent>> {
+        self.store.events_in_object(id)
+    }
+
+    /// Makes `object`, as the server holds it now, the mirror's version of
+    /// the object `over` in a Calendar, address included, or of a new
+    /// object, and returns its ID. Only a sync writes the mirror, as only it
+    /// knows what the server holds.
+    pub fn mirror(
+        &self,
+        calendar_id: CalendarId,
+        object: &ServerObject,
+        over: Option<ObjectId>,
+    ) -> Result<ObjectId> {
         debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
         self.writable(calendar_id)?;
         let conn = self.store.connection();
-        let found = conn
-            .query_row(
-                "SELECT id FROM server_object WHERE calendar_id = ?1 AND href = ?2 \
-                 ORDER BY id LIMIT 1",
-                params![calendar_id.0, object.href],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match found {
+        match over {
             Some(id) => {
                 conn.execute(
-                    "UPDATE server_object SET etag = ?2, data = ?3, format = ?4 WHERE id = ?1",
-                    params![id, object.etag, object.data, ICALENDAR],
+                    "UPDATE server_object SET href = ?2, etag = ?3, data = ?4, format = ?5, \
+                     unreadable = 0 WHERE id = ?1",
+                    params![id.0, object.href, object.etag, object.data, ICALENDAR],
                 )?;
-                Ok(ObjectId(id))
+                Ok(id)
             }
             None => {
                 conn.execute(
@@ -248,13 +248,28 @@ impl Unit<'_> {
         }
     }
 
-    /// Removes the server objects at `href` in a Calendar, as a sync finds
-    /// them gone from the server.
-    pub fn remove_objects(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
+    /// Records that FreeCal couldn't read what the server holds now at
+    /// `href` in a Calendar: the objects there keep the last version it
+    /// could, and their rows stay as they are.
+    pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
+        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
         self.store.connection().execute(
-            "DELETE FROM server_object WHERE calendar_id = ?1 AND href = ?2",
+            "UPDATE server_object SET unreadable = 1 WHERE calendar_id = ?1 AND href = ?2",
             params![calendar_id.0, href],
         )?;
+        Ok(())
+    }
+
+    /// Removes the server object `id` from the mirror, and its rows with it,
+    /// as a sync finds it gone from the server.
+    pub fn remove_object(&mut self, id: ObjectId) -> Result<()> {
+        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
+        for event in self.events_in_object(id)? {
+            self.delete(event.id)?;
+        }
+        self.store
+            .connection()
+            .execute("DELETE FROM server_object WHERE id = ?1", [id.0])?;
         Ok(())
     }
 
@@ -909,7 +924,7 @@ mod tests {
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let calendar_id = store.list_calendars().unwrap()[0].id;
             let (object, id, event) = record(&store, Origin::Sync, 0, |unit| {
-                let object = unit.mirror(calendar_id, &dentist_object())?;
+                let object = unit.mirror(calendar_id, &dentist_object(), None)?;
                 let mut event = dentist();
                 event.calendar_id = calendar_id;
                 event.fields.object_id = Some(object);
@@ -956,7 +971,7 @@ mod tests {
         };
 
         let mirrored = record(&pulled.store, Origin::Sync, 0, |unit| {
-            unit.mirror(pulled.event.calendar_id, &again)
+            unit.mirror(pulled.event.calendar_id, &again, Some(pulled.object))
         })
         .unwrap();
 
@@ -1091,8 +1106,8 @@ mod tests {
     fn opening_a_local_store_from_before_rehashes_its_entries() {
         let directory = tempfile::TempDir::new().unwrap();
         let path = directory.path().join("freecal.sqlite3");
-        // Before ticket 81's migration and those of tickets 82, 56, 85 and 86.
-        let conn = migrated_to(&path, MIGRATION_COUNT - 5);
+        // Before ticket 81's migration and those of tickets 82, 56, 85, 86 and 87.
+        let conn = migrated_to(&path, MIGRATION_COUNT - 6);
         let mut event = dentist();
         event.fields.object_id = None;
         conn.execute_batch(
@@ -1131,7 +1146,7 @@ mod tests {
     fn opening_a_local_store_from_before_server_objects_moves_the_data_into_them() {
         let directory = tempfile::TempDir::new().unwrap();
         let path = directory.path().join("freecal.sqlite3");
-        let conn = migrated_to(&path, MIGRATION_COUNT - 1);
+        let conn = migrated_to(&path, MIGRATION_COUNT - 2);
         let server = dentist_object();
         conn.execute_batch(
             "INSERT INTO calendar (account_id, name, colour) VALUES (1, 'Work', '#3f51b5');",

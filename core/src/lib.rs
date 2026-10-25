@@ -51,7 +51,7 @@ pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
-use event::{Edit, Loaded, Opened};
+use event::{Edit, Opened};
 use journal::{Origin, Unit};
 use remote::{Remote, SyncPoint};
 use store::Store;
@@ -256,17 +256,9 @@ impl Core {
     /// page, as a first sync. A Calendar removed meanwhile ends it.
     fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
         let pulled = remote
-            .all_events(url, self.clock.time_zone(), &mut |events| {
+            .all_events(url, self.clock.time_zone(), &mut |fetched| {
                 self.record(Origin::FirstSync, |unit| {
-                    for event in &events {
-                        let object = sync::mirror(unit, id, event)?;
-                        // A server may list an Event twice.
-                        let loaded = Loaded::of_uid(unit, id, &event.uid)?;
-                        if !loaded.exists() {
-                            loaded.take(unit, event, object)?;
-                        }
-                    }
-                    Ok(())
+                    sync::take(unit, id, &fetched, &mut Vec::new())
                 })
                 .map(drop)
             })

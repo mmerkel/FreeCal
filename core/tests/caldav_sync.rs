@@ -33,6 +33,26 @@ impl Synced {
     }
 
     fn with_calendar(calendar: NewCalendar, events: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(calendar, |radicale, user, url| {
+            for (name, ics) in events {
+                radicale.put_event(user, url, name, ics.clone());
+            }
+        })
+    }
+
+    /// Like [`Synced::with`], with `files` written straight into the
+    /// server's storage (see [`Radicale::write_event_file`]).
+    fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(NewCalendar::default(), |radicale, _, url| {
+            for (name, ics) in files {
+                radicale.write_event_file(url, name, ics.clone());
+            }
+        })
+    }
+
+    /// A new Core with the Calendar `calendar` added once `arrange` put
+    /// what it holds on the server.
+    fn arranged(calendar: NewCalendar, arrange: impl FnOnce(&Radicale, &User, &str)) -> Self {
         let radicale = Radicale::shared();
         let user = radicale.user();
         let url = radicale.create_calendar(
@@ -42,9 +62,7 @@ impl Synced {
                 ..calendar
             },
         );
-        for (name, ics) in events {
-            radicale.put_event(&user, &url, name, ics.clone());
-        }
+        arrange(radicale, &user, &url);
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
         let account = core
@@ -78,6 +96,30 @@ impl Synced {
 
     fn delete(&self, name: &str) {
         self.radicale.delete_event(&self.user, &self.url, name);
+    }
+
+    /// Writes the object `name` straight into the server's storage.
+    fn write(&self, name: &str, ics: Vec<u8>) {
+        self.radicale.write_event_file(&self.url, name, ics);
+    }
+
+    /// Makes the Calendar sync as on a server without sync tokens, listing
+    /// the whole Calendar each time.
+    fn without_sync_tokens(&self) {
+        self.harness.arrange_local_store(&format!(
+            "UPDATE calendar SET sync_token = NULL WHERE id = {}",
+            self.work.0
+        ));
+    }
+
+    /// The address of the object the Calendar's Event titled `title` is
+    /// in, as FreeCal holds it.
+    fn href(&self, title: &str) -> String {
+        self.core
+            .original_server_data(self.event(title).id)
+            .unwrap()
+            .expect("an object")
+            .href
     }
 
     /// Syncs the Account, which has only this Calendar, and returns the
@@ -564,4 +606,215 @@ fn an_event_whose_object_moved_to_another_address_stays_the_same_event() {
         "{}",
         server.href
     );
+}
+
+/// ADR 0010: sync matches server objects by address, and each object
+/// changes only its own rows.
+mod server_objects {
+    use super::*;
+
+    fn weekly(title: &str) -> Vec<u8> {
+        ics(&recurring(title))
+    }
+
+    /// A weekly Recurring Event with three Occurrences, from 5 October.
+    fn recurring(title: &str) -> String {
+        format!(
+            "BEGIN:VEVENT\nUID:weekly\nSUMMARY:{title}\nDTSTART:20261005T080000Z\n\
+             DTEND:20261005T090000Z\nRRULE:FREQ=WEEKLY;COUNT=3\nEND:VEVENT\n"
+        )
+    }
+
+    /// An Exception of `weekly`'s second Occurrence.
+    fn moved(title: &str) -> String {
+        format!(
+            "BEGIN:VEVENT\nUID:weekly\nSUMMARY:{title}\nRECURRENCE-ID:20261012T080000Z\n\
+             DTSTART:20261012T090000Z\nDTEND:20261012T100000Z\nEND:VEVENT\n"
+        )
+    }
+
+    /// As Google keeps a Recurring Event: each Exception is an object of
+    /// its own.
+    fn google_like() -> Synced {
+        Synced::with_files(&[
+            ("weekly", weekly("Weekly")),
+            ("weekly-moved", ics(&moved("Moved"))),
+        ])
+    }
+
+    #[test]
+    fn two_objects_with_one_uid_keep_their_own_rows_on_a_server_without_sync_tokens() {
+        let synced = Synced::with_files(&[
+            ("standup", standup("Standup")),
+            ("standup-copy", standup("Standup copy")),
+        ]);
+        synced.without_sync_tokens();
+        // At one time, so in the order the server listed them.
+        let sorted = || {
+            let mut titles = synced.titles();
+            titles.sort();
+            titles
+        };
+        assert_eq!(sorted(), ["Standup", "Standup copy"]);
+
+        assert_eq!(synced.sync(), None);
+        assert_eq!(synced.sync(), None);
+
+        assert_eq!(sorted(), ["Standup", "Standup copy"]);
+        assert!(synced.href("Standup copy").ends_with("/standup-copy.ics"));
+        synced.put("standup", standup("Standup moved"));
+        assert!(synced.sync().is_some());
+        assert_eq!(sorted(), ["Standup copy", "Standup moved"]);
+    }
+
+    #[test]
+    fn exceptions_that_are_objects_of_their_own_stay_when_only_their_recurring_events_changes() {
+        let synced = google_like();
+        assert_eq!(synced.titles(), ["Weekly", "Moved", "Weekly"]);
+        let id = synced.event("Moved").id;
+        synced.put("weekly", weekly("Weekly renamed"));
+
+        synced.sync();
+
+        assert_eq!(
+            synced.titles(),
+            ["Weekly renamed", "Moved", "Weekly renamed"]
+        );
+        assert_eq!(synced.event("Moved").id, id);
+        assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+    }
+
+    #[test]
+    fn an_exception_that_is_an_object_of_its_own_changes_alone() {
+        let synced = google_like();
+        let id = synced.event("Moved").id;
+        synced.write("weekly-moved", ics(&moved("Moved again")));
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Weekly", "Moved again", "Weekly"]);
+        assert_eq!(synced.event("Moved again").id, id);
+    }
+
+    #[test]
+    fn a_removed_object_takes_only_its_own_rows_with_it() {
+        let synced = Synced::writable(&[]);
+        synced.write("weekly", weekly("Weekly"));
+        synced.write("weekly-moved", ics(&moved("Moved")));
+        synced.sync();
+        synced.delete("weekly-moved");
+
+        let unit = synced.sync().unwrap();
+
+        assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+        synced.core.undo_unit(unit).unwrap();
+        assert_eq!(synced.titles(), ["Weekly", "Moved", "Weekly"]);
+    }
+
+    #[test]
+    fn of_two_exceptions_for_one_occurrence_in_an_object_the_highest_sequence_is_kept() {
+        let with_sequence = |sequence: u32, title: &str| {
+            moved(title).replace("END:VEVENT", &format!("SEQUENCE:{sequence}\nEND:VEVENT"))
+        };
+        let synced = Synced::with_files(&[(
+            "weekly",
+            ics(&format!(
+                "{}{}{}",
+                recurring("Weekly"),
+                with_sequence(1, "Older"),
+                with_sequence(2, "Latest"),
+            )),
+        )]);
+
+        assert_eq!(synced.titles(), ["Weekly", "Latest", "Weekly"]);
+    }
+
+    #[test]
+    fn of_two_objects_with_an_exception_for_one_occurrence_both_keep_it_and_the_first_shows() {
+        let synced = Synced::with_files(&[
+            (
+                "weekly",
+                ics(&format!("{}{}", recurring("Weekly"), moved("Moved"))),
+            ),
+            ("weekly-moved", ics(&moved("Moved elsewhere"))),
+        ]);
+        // The first by ID, which depends on the order the server listed them.
+        let shown = synced.titles()[1].clone();
+        assert_eq!(synced.titles(), ["Weekly", &shown, "Weekly"]);
+        assert_eq!(synced.sync(), None);
+        let (name, other) = if shown == "Moved" {
+            ("weekly", "Moved elsewhere")
+        } else {
+            ("weekly-moved", "Moved")
+        };
+        assert!(synced.href(&shown).ends_with(&format!("/{name}.ics")));
+
+        synced.delete(name);
+        synced.sync();
+
+        assert!(
+            synced.titles().contains(&other.to_owned()),
+            "{:?}",
+            synced.titles()
+        );
+    }
+
+    #[test]
+    fn an_object_whose_uid_changed_changes_only_its_own_rows() {
+        let synced = Synced::with_files(&[
+            ("standup", standup("Standup")),
+            ("standup-copy", standup("Standup copy")),
+        ]);
+        let copy = synced.event("Standup copy").id;
+        synced.write("standup", titled("review", "Review", "20261006"));
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Standup copy", "Review"]);
+        assert_eq!(synced.event("Standup copy").id, copy);
+    }
+
+    #[test]
+    fn an_object_freecal_can_no_longer_read_keeps_its_last_readable_version() {
+        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        let held = synced
+            .core
+            .original_server_data(synced.event("Standup").id)
+            .unwrap();
+        // Radicale takes a UTC time with a zone; FreeCal can't read it.
+        synced.put(
+            "standup",
+            ics("BEGIN:VEVENT\nUID:standup\nSUMMARY:Standup moved\n\
+                 DTSTART;TZID=Europe/Berlin:20261005T070000Z\n\
+                 DTEND;TZID=Europe/Berlin:20261005T073000Z\nEND:VEVENT\n"),
+        );
+
+        assert_eq!(synced.sync(), None);
+
+        assert_eq!(synced.titles(), ["Standup"]);
+        let id = synced.event("Standup").id;
+        assert_eq!(synced.core.original_server_data(id).unwrap(), held);
+        synced.put("standup", standup("Standup moved"));
+        synced.sync();
+        assert_eq!(synced.titles(), ["Standup moved"]);
+        assert_eq!(synced.event("Standup moved").id, id);
+    }
+
+    /// With a sync token, which lists only what changed since.
+    #[test]
+    fn an_object_freecal_couldnt_read_is_fetched_again_on_each_sync_until_it_reads() {
+        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        // As if FreeCal couldn't read the version the server has, and held
+        // an earlier one.
+        synced.harness.arrange_local_store(&format!(
+            "UPDATE server_object SET unreadable = 1 WHERE calendar_id = {0};
+             UPDATE event SET title = 'Earlier' WHERE calendar_id = {0};",
+            synced.work.0
+        ));
+
+        assert!(synced.sync().is_some());
+
+        assert_eq!(synced.titles(), ["Standup"]);
+        assert_eq!(synced.sync(), None, "it read, so it isn't fetched again");
+    }
 }

@@ -214,6 +214,23 @@ impl StoredWhen {
         }
     }
 
+    /// Reads it back as an imported time is given, for pairing an imported
+    /// Exception with a stored Recurring Event.
+    pub fn to_imported(&self) -> Result<ImportedWhen> {
+        if self.all_day {
+            let (start, end) = self.dates()?;
+            return Ok(ImportedWhen::AllDay { start, end });
+        }
+        let (start_zone, end_zone) = self.zones()?;
+        let (start, end) = self.walls()?;
+        Ok(ImportedWhen::Timed {
+            start,
+            start_zone,
+            end,
+            end_zone,
+        })
+    }
+
     fn unreadable(&self) -> CoreError {
         CoreError::UnreadableEventTime(format!("{} – {}", self.start, self.end))
     }
@@ -232,15 +249,17 @@ impl StoredWhen {
         Ok((zone(&self.start_zone)?, zone(&self.end_zone)?))
     }
 
-    fn utc(&self) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
-        let (start_zone, end_zone) = self.zones()?;
+    fn walls(&self) -> Result<(NaiveDateTime, NaiveDateTime)> {
         let wall = |text: &str| {
             NaiveDateTime::parse_from_str(text, WALL_TIME).map_err(|_| self.unreadable())
         };
-        Ok((
-            instant(wall(&self.start)?, start_zone),
-            instant(wall(&self.end)?, end_zone),
-        ))
+        Ok((wall(&self.start)?, wall(&self.end)?))
+    }
+
+    fn utc(&self) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+        let (start_zone, end_zone) = self.zones()?;
+        let (start, end) = self.walls()?;
+        Ok((instant(start, start_zone), instant(end, end_zone)))
     }
 }
 
@@ -273,6 +292,14 @@ pub(crate) struct EventFields {
 impl EventFields {
     pub fn description(&self) -> StructuredText {
         StructuredText::from_description(&self.description, self.description_html)
+    }
+
+    /// For an Exception, its recurrence ID normalised; none for every other
+    /// Event, and for a stored recurrence ID that isn't one.
+    pub fn rid(&self) -> Option<String> {
+        self.recurrence_id
+            .as_deref()
+            .and_then(super::rule::recurrence_id)
     }
 }
 

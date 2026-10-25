@@ -14,3 +14,7 @@
 - [ ] Core tests for each point, from a server and from a file
 
 Out of scope: editing them as Occurrences before their Recurring Event arrives (they edit as single Events).
+
+## Comments
+
+- 2026-10-25 (from 87): `sync::object_events` leaves out an Exception whose Recurring Event is neither in the same batch nor stored. Since 87 this also hits a first sync where an Exception object comes in a page before its Recurring Event's: it isn't mirrored, and with a sync token it isn't fetched again until it changes. A known object whose new version holds only such Exceptions loses its rows and leaves the mirror. Storing them as Events of their own fixes both; normalising against a stored Recurring Event goes through `Loaded::recurring_when` and `ImportedEvent::recurrence_id_in`.

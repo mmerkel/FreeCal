@@ -8,7 +8,10 @@ use std::collections::HashMap;
 
 use chrono_tz::Tz;
 
-use crate::{AvailableCalendar, CalDavLogin, ImportedEvent, Provider, Result, ServerLogin, caldav};
+use crate::{
+    AvailableCalendar, CalDavLogin, ImportedEvent, Provider, Result, ServerLogin, ServerObject,
+    caldav,
+};
 
 /// The most Events a page of a Calendar's first sync holds. Each page is
 /// committed on its own, so that Events appear as they load.
@@ -23,12 +26,31 @@ pub(crate) struct SyncPoint {
     pub token: Option<String>,
 }
 
+/// A server object as a sync fetched it, with the Events FreeCal reads in
+/// it.
+#[derive(Debug, Clone)]
+pub(crate) struct Fetched {
+    pub object: ServerObject,
+    /// Its Events, Exceptions as Events of their own, not yet paired with
+    /// their Recurring Events; none if FreeCal can't read it.
+    pub events: Option<Vec<ImportedEvent>>,
+}
+
+/// A server object FreeCal holds, as a sync asks for what changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Held {
+    /// The ETag of the version FreeCal holds; none if the server gave none.
+    pub etag: Option<String>,
+    /// Whether FreeCal couldn't read the server's version, so that it holds
+    /// an earlier one.
+    pub unreadable: bool,
+}
+
 /// What changed in a Calendar on its server.
 #[derive(Debug, Clone)]
 pub(crate) struct Changes {
-    /// The Events of each server object that is new or changed, read with
-    /// the object as their original server data.
-    pub changed: Vec<ImportedEvent>,
+    /// Each server object that is new or changed.
+    pub changed: Vec<Fetched>,
     /// The addresses of the server objects FreeCal holds that are gone, as
     /// FreeCal holds them.
     pub removed: Vec<String>,
@@ -41,32 +63,31 @@ pub(crate) trait Remote {
     /// The Calendars the Account has on its server that take Events.
     fn discover(&self) -> Result<Vec<AvailableCalendar>>;
 
-    /// Fetches every Event of the Calendar at `url` and hands them to
-    /// `page`, up to [`FIRST_SYNC_PAGE`] at a time, stopping at the first
+    /// Fetches every server object of the Calendar at `url` and hands them
+    /// to `page`, up to [`FIRST_SYNC_PAGE`] at a time, stopping at the first
     /// error, its own or `page`'s. Floating times are pinned to the
     /// Calendar's own time zone if the server gives one, otherwise to
-    /// `display` (ADR 0007). Events FreeCal can't read are left out.
-    /// Returns the Calendar's sync state as of before it was listed, so that
-    /// a change made meanwhile comes with the next sync.
+    /// `display` (ADR 0007). Returns the Calendar's sync state as of before
+    /// it was listed, so that a change made meanwhile comes with the next
+    /// sync.
     fn all_events(
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<ImportedEvent>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
-    /// last held `known` without one: the server objects FreeCal holds,
-    /// each one's address with its ETag. An object whose ETag FreeCal holds
-    /// already isn't fetched again. Floating times are pinned as
-    /// [`Remote::all_events`] pins them, and Events FreeCal can't read are
-    /// left out, so that the Events of an object FreeCal can no longer read
-    /// stay as they were.
+    /// last held `known` without one: the server objects FreeCal holds, by
+    /// address. An object whose ETag FreeCal holds already isn't fetched
+    /// again, unless FreeCal couldn't read it, so that it is fetched on each
+    /// sync until it reads. Floating times are pinned as
+    /// [`Remote::all_events`] pins them.
     fn changes(
         &self,
         url: &str,
         token: Option<&str>,
-        known: &HashMap<String, Option<String>>,
+        known: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes>;
 }
@@ -80,7 +101,7 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<ImportedEvent>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
     ) -> Result<SyncPoint> {
         caldav::Client::all_events(self, url, display, page)
     }
@@ -89,7 +110,7 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         token: Option<&str>,
-        known: &HashMap<String, Option<String>>,
+        known: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes> {
         caldav::Client::changes(self, url, token, known, display)

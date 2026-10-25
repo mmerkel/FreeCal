@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::{Loaded, ServerObject, StoredWhen, instant, new_uid, rule, wall_text};
 use crate::journal::{Unit, UnitId};
+use crate::remote::Fetched;
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -144,13 +145,17 @@ pub struct ImportedEvent {
     /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
     /// separated by commas.
     pub exdates: String,
-    /// For an Exception, the recurrence ID of the Occurrence it changed.
+    /// For an Exception, the recurrence ID of the Occurrence it changed, once
+    /// paired with its Recurring Event.
     pub recurrence_id: Option<String>,
+    /// Its `SEQUENCE`, which tells revisions of one Event apart: of several
+    /// for one Occurrence, the highest is the latest.
+    pub sequence: i64,
     /// A Recurring Event's Exceptions, which share its UID.
     pub exceptions: Vec<ImportedEvent>,
-    /// For an Event from a server, the object the server holds it in, as
-    /// received.
-    pub object: Option<ServerObject>,
+    /// For an Exception, the original start of the Occurrence it changed, as
+    /// the file gives it.
+    pub(crate) original: Option<Time>,
 }
 
 impl ImportedEvent {
@@ -160,6 +165,14 @@ impl ImportedEvent {
 
     pub fn location(&self) -> StructuredText {
         StructuredText::from_plain_text(&self.location)
+    }
+
+    /// For an Exception, the recurrence ID of the Occurrence it changed of a
+    /// Recurring Event at `recurring`, as the Local Store writes it.
+    pub(crate) fn recurrence_id_in(&self, recurring: &ImportedWhen) -> Option<String> {
+        self.original
+            .as_ref()
+            .map(|original| recurrence_id_of(original, recurring))
     }
 }
 
@@ -228,7 +241,7 @@ pub(crate) fn run(
             (true, ExistingEvents::Skip) => outcome.skipped += 1,
             (true, ExistingEvents::Update) => {
                 outcome.updated += 1;
-                loaded.take(unit, event, None)?;
+                loaded.take(unit, event)?;
             }
             (exists, _) => {
                 outcome.imported += 1;
@@ -238,7 +251,7 @@ pub(crate) fn run(
                 } else {
                     loaded
                 };
-                loaded.take(unit, event, None)?;
+                loaded.take(unit, event)?;
             }
         }
     }
@@ -281,22 +294,26 @@ pub(crate) fn preview(
     })
 }
 
-/// The Events of iCalendar objects as a server holds them, read as
-/// [`preview`] reads files, each with the server object it came in. Floating times are pinned to `zone`. An object FreeCal can't read
-/// is left out.
-pub(crate) fn read_server_events(objects: &[ServerObject], zone: Tz) -> Vec<ImportedEvent> {
-    assemble(objects.iter().filter_map(|object| {
-        let mut read = read_events(&object.href, object.data.as_bytes(), zone).ok()?;
-        for event in &mut read.events {
-            event.object = Some(object.clone());
-        }
-        Some(read)
-    }))
+/// iCalendar objects as a server holds them, each with its Events read as
+/// [`preview`] reads files, Exceptions as Events of their own, not yet
+/// paired with their Recurring Events; none for an object FreeCal can't
+/// read. Floating times are pinned to `zone`.
+pub(crate) fn read_server_objects(objects: Vec<ServerObject>, zone: Tz) -> Vec<Fetched> {
+    objects
+        .into_iter()
+        .map(|object| {
+            let events = read_events(&object.href, object.data.as_bytes(), zone)
+                .ok()
+                .map(|read| read.events.into_iter().chain(read.exceptions).collect());
+            Fetched { object, events }
+        })
+        .collect()
 }
 
 /// The Events of `.ics` files read together, in order and each UID once.
-/// An Exception joins its Recurring Event, once per Occurrence; one without
-/// it in the files is left out.
+/// An Exception joins its Recurring Event; one without it in the files is
+/// left out. Several for one Occurrence all join, for [`Loaded`] to keep
+/// the latest.
 fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
     let mut seen = HashMap::new();
     let mut events: Vec<ImportedEvent> = Vec::new();
@@ -310,7 +327,7 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         }
         exceptions.extend(read.exceptions);
     }
-    for (original, mut exception) in exceptions {
+    for mut exception in exceptions {
         let Some(&index) = seen.get(&exception.uid) else {
             continue;
         };
@@ -318,15 +335,8 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         if recurring.rule.is_none() {
             continue;
         }
-        let id = recurrence_id_of(&original, &recurring.when);
-        if recurring
-            .exceptions
-            .iter()
-            .all(|known| known.recurrence_id.as_ref() != Some(&id))
-        {
-            exception.recurrence_id = Some(id);
-            recurring.exceptions.push(exception);
-        }
+        exception.recurrence_id = exception.recurrence_id_in(&recurring.when);
+        recurring.exceptions.push(exception);
     }
     events
 }
@@ -387,7 +397,7 @@ fn calendar_files(file: &ImportFile) -> Result<Vec<(String, Vec<u8>)>> {
 /// Occurrence it changed.
 struct ReadFile {
     events: Vec<ImportedEvent>,
-    exceptions: Vec<(Time, ImportedEvent)>,
+    exceptions: Vec<ImportedEvent>,
 }
 
 /// The Events of the `.ics` file `name`.
@@ -441,12 +451,16 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                 rule,
                 exdates,
                 recurrence_id: None,
+                sequence: event
+                    .property_value("SEQUENCE")
+                    .and_then(|sequence| sequence.trim().parse().ok())
+                    .unwrap_or(0),
                 exceptions: Vec::new(),
-                object: None,
+                original,
             };
-            match original {
+            match imported.original {
                 None => read.events.push(imported),
-                Some(original) => read.exceptions.push((original, imported)),
+                Some(_) => read.exceptions.push(imported),
             }
         }
     }
@@ -536,7 +550,8 @@ fn pinned_zone(event: &ImportedEvent) -> Option<Tz> {
 }
 
 /// A start or end as a file gives it.
-enum Time {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Time {
     Date(NaiveDate),
     /// A wall time in a zone, or floating when FreeCal has no zone for it.
     Wall(NaiveDateTime, Option<Tz>),

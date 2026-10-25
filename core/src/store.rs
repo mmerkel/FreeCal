@@ -9,7 +9,7 @@ use rusqlite::{
 };
 
 use crate::event::{EventFields, ObjectId, ServerObject, StoredRange, StoredWhen, rule};
-use crate::remote::SyncPoint;
+use crate::remote::{Held, SyncPoint};
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
     EventId, Provider, Result, ServerLogin, Settings, SidebarState, View,
@@ -250,6 +250,13 @@ const MIGRATIONS: &[Migration] = &[
     ",
     ),
     Migration::Code(server_objects),
+    // Ticket 87: whether FreeCal couldn't read the server's version of an
+    // object, so that the mirror holds the last version it could.
+    Migration::Sql(
+        "
+    ALTER TABLE server_object ADD COLUMN unreadable INTEGER NOT NULL DEFAULT 0;
+    ",
+    ),
 ];
 
 /// Whether a newly added server Calendar starts marked read-only, so that
@@ -513,6 +520,16 @@ pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFie
     })
 }
 
+/// An Event read as `id, calendar_id, uid,` then [`EVENT_FIELDS`].
+fn uid_event(row: &Row) -> rusqlite::Result<UidEvent> {
+    Ok(UidEvent {
+        id: EventId(row.get(0)?),
+        calendar_id: CalendarId(row.get(1)?),
+        uid: row.get(2)?,
+        fields: event_fields(row, 3)?,
+    })
+}
+
 /// Reads an Event's `all_day, start_at, end_at, start_zone, end_zone`
 /// starting at column `first`.
 fn stored_when(row: &Row, first: usize) -> rusqlite::Result<StoredWhen> {
@@ -746,39 +763,47 @@ impl Store {
         )
     }
 
-    /// The server objects of a Calendar: each one's address, as the server
-    /// gave it, with its ETag.
-    pub fn server_objects(
-        &self,
-        calendar_id: CalendarId,
-    ) -> Result<HashMap<String, Option<String>>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT href, etag FROM server_object WHERE calendar_id = ?1")?;
-        let objects =
-            readable(stmt.query_map([calendar_id.0], |row| Ok((row.get(0)?, row.get(1)?)))?)?;
+    /// The server objects of a Calendar, by their address as the server
+    /// gave it: the first at each, should it have several.
+    pub fn server_objects(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT href, etag, unreadable FROM server_object WHERE calendar_id = ?1 \
+             ORDER BY id DESC",
+        )?;
+        let objects = readable(stmt.query_map([calendar_id.0], |row| {
+            Ok((
+                row.get(0)?,
+                Held {
+                    etag: row.get(1)?,
+                    unreadable: row.get(2)?,
+                },
+            ))
+        })?)?;
         Ok(objects.into_iter().collect())
     }
 
-    /// The Event of a Calendar held in the server object at `href`, with
-    /// its UID: the first if the Local Store has several, and not an
-    /// Exception.
-    pub fn event_at(
-        &self,
-        calendar_id: CalendarId,
-        href: &str,
-    ) -> Result<Option<(EventId, String)>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT event.id, event.uid FROM event \
-                 JOIN server_object ON server_object.id = event.object_id \
-                 WHERE event.calendar_id = ?1 AND server_object.href = ?2 \
-                 AND event.recurrence_id IS NULL ORDER BY event.id LIMIT 1",
-                params![calendar_id.0, href],
-                |row| Ok((EventId(row.get(0)?), row.get(1)?)),
-            )
-            .optional()?)
+    /// The server objects of a Calendar at `href`, in the order they were
+    /// added.
+    pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM server_object WHERE calendar_id = ?1 AND href = ?2 ORDER BY id",
+        )?;
+        let objects = stmt
+            .query_map(params![calendar_id.0, href], |row| row.get(0).map(ObjectId))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(objects)
+    }
+
+    /// The rows of the server object `id`, in the order they were added.
+    pub fn events_in_object(&self, id: ObjectId) -> Result<Vec<UidEvent>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, calendar_id, uid, {EVENT_FIELDS} FROM event WHERE object_id = ?1 \
+             ORDER BY id"
+        ))?;
+        let events = stmt
+            .query_map([id.0], uid_event)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(events)
     }
 
     /// The server object `id` as the server last gave it, none if it is
@@ -883,14 +908,7 @@ impl Store {
             "SELECT id, calendar_id, uid, {EVENT_FIELDS} FROM event WHERE {condition} ORDER BY id"
         ))?;
         let events = stmt
-            .query_map(params_from_iter(key), |row| {
-                Ok(UidEvent {
-                    id: EventId(row.get(0)?),
-                    calendar_id: CalendarId(row.get(1)?),
-                    uid: row.get(2)?,
-                    fields: event_fields(row, 3)?,
-                })
-            })?
+            .query_map(params_from_iter(key), uid_event)?
             .collect::<rusqlite::Result<_>>()?;
         Ok(events)
     }
