@@ -405,7 +405,8 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
 }
 
 /// The `event` table as it was before ticket 85, whose IDs SQLite gave out
-/// again.
+/// again, and the Local Store before ticket 86's server objects, which come
+/// after.
 const BEFORE_TICKET_85: &str = "
     ALTER TABLE event RENAME TO event_85;
     CREATE TABLE event (
@@ -434,8 +435,19 @@ const BEFORE_TICKET_85: &str = "
             THEN start_zone IS NULL AND end_zone IS NULL
             ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
     );
-    INSERT INTO event SELECT * FROM event_85;
+    INSERT INTO event (id, calendar_id, uid, title, all_day, start_at, end_at, start_zone,
+        end_zone, start_utc, end_utc, location, description, description_html, zone_pinned,
+        rrule, exdates, recurrence_id)
+    SELECT id, calendar_id, uid, title, all_day, start_at, end_at, start_zone,
+        end_zone, start_utc, end_utc, location, description, description_html, zone_pinned,
+        rrule, exdates, recurrence_id
+    FROM event_85;
     DROP TABLE event_85;
+    DROP TABLE server_object;
+    ALTER TABLE journal_entry DROP COLUMN object_id;
+    ALTER TABLE journal_entry ADD COLUMN server_href TEXT;
+    ALTER TABLE journal_entry ADD COLUMN server_etag TEXT;
+    ALTER TABLE journal_entry ADD COLUMN server_data TEXT;
     CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
     CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
     PRAGMA user_version = 16;

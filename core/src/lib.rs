@@ -35,8 +35,7 @@ pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{
-    Event, EventDraft, EventId, Frequency, Occurrence, OriginalServerData, Repeat, RepeatEnd,
-    Scope, When,
+    Event, EventDraft, EventId, Frequency, Occurrence, Repeat, RepeatEnd, Scope, ServerObject, When,
 };
 pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
@@ -260,10 +259,11 @@ impl Core {
             .all_events(url, self.clock.time_zone(), &mut |events| {
                 self.record(Origin::FirstSync, |unit| {
                     for event in &events {
+                        let object = sync::mirror(unit, id, event)?;
                         // A server may list an Event twice.
                         let loaded = Loaded::of_uid(unit, id, &event.uid)?;
                         if !loaded.exists() {
-                            loaded.take(unit, event)?;
+                            loaded.take(unit, event, object)?;
                         }
                     }
                     Ok(())
@@ -518,11 +518,15 @@ impl Core {
         Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
     }
 
-    /// What the server sent for an Event pulled from it, its original
-    /// server data (ADR 0004); none for an Event that didn't come from a
-    /// server, and for an Exception, whose Recurring Event holds it.
-    pub fn original_server_data(&self, id: EventId) -> Result<Option<OriginalServerData>> {
-        Ok(self.store().find_event(id)?.fields.server_data)
+    /// The server object an Event refers to (ADR 0010), as the server last
+    /// gave it: for an Exception too, the object holding it. None for an
+    /// Event not on a server yet.
+    pub fn original_server_data(&self, id: EventId) -> Result<Option<ServerObject>> {
+        let store = self.store();
+        match store.find_event(id)?.fields.object_id {
+            Some(object) => store.server_object(object),
+            None => Ok(None),
+        }
     }
 
     /// Creates an Event in a writable Calendar, a Recurring Event when the

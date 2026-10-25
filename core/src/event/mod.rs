@@ -24,8 +24,8 @@ use crate::{CalendarId, CoreError, ImportedEvent, Result, StructuredText};
 pub use rule::{Frequency, Repeat, RepeatEnd};
 pub use scope::Scope;
 pub(crate) use scope::{Edit, edit_event, edit_occurrence};
-pub(crate) use when::{EventFields, StoredRange, StoredWhen, instant, wall_text};
-pub use when::{EventId, OriginalServerData, When};
+pub(crate) use when::{EventFields, ObjectId, StoredRange, StoredWhen, instant, wall_text};
+pub use when::{EventId, ServerObject, When};
 
 /// What the user gives an Event when creating or editing it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,18 +219,24 @@ impl Loaded {
 
     /// Makes `incoming`, a new version from a file or a server with its
     /// Exceptions, the Events with the UID, adding it if the Calendar has
-    /// none. Exceptions are paired by the Occurrence they changed: those
+    /// none, each in the server object `object` (see [`Unit`] for what it
+    /// gets). Exceptions are paired by the Occurrence they changed: those
     /// `incoming` has replace them or are added, and the others are
     /// deleted. ADR 0007's rules 2 and 3 apply.
-    pub fn take(&self, unit: &mut Unit, incoming: &ImportedEvent) -> Result<()> {
+    pub fn take(
+        &self,
+        unit: &mut Unit,
+        incoming: &ImportedEvent,
+        object: Option<ObjectId>,
+    ) -> Result<()> {
         let Some((id, previous)) = &self.event else {
-            return create(unit, self.calendar_id, &self.uid, incoming);
+            return create(unit, self.calendar_id, &self.uid, incoming, object);
         };
         unit.replace(
             *id,
             &StoredEvent {
                 calendar_id: self.calendar_id,
-                fields: fields_over(incoming, previous),
+                fields: fields_over(incoming, previous, object),
             },
         )?;
         let mut left: Vec<_> = self.exceptions.iter().collect();
@@ -244,8 +250,11 @@ impl Loaded {
                     .position(|stored| stored.rid.as_ref() == Some(&rid))
             });
             let (previous, fields) = match same.map(|index| left.remove(index)) {
-                Some(stored) => (Some(stored.id), fields_over(exception, &stored.fields)),
-                None => (None, fields(exception)),
+                Some(stored) => (
+                    Some(stored.id),
+                    fields_over(exception, &stored.fields, object),
+                ),
+                None => (None, fields(exception, object)),
             };
             self.write_exception(unit, previous, self, fields)?;
         }
@@ -451,7 +460,7 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
             rule,
             exdates: String::new(),
             recurrence_id: None,
-            server_data: None,
+            object_id: None,
         },
     };
     unit.create(&new_uid(), &event)
@@ -507,20 +516,22 @@ pub(crate) fn occurrences(
 }
 
 /// Adds `incoming`, a version from a file or a server, with its Exceptions
-/// to the Calendar `calendar_id`, under the UID `uid`.
+/// to the Calendar `calendar_id`, under the UID `uid`, in the server object
+/// `object`.
 fn create(
     unit: &mut Unit,
     calendar_id: CalendarId,
     uid: &str,
     incoming: &ImportedEvent,
+    object: Option<ObjectId>,
 ) -> Result<()> {
     let new = |fields| StoredEvent {
         calendar_id,
         fields,
     };
-    unit.create(uid, &new(fields(incoming)))?;
+    unit.create(uid, &new(fields(incoming, object)))?;
     for exception in &incoming.exceptions {
-        unit.create(uid, &new(fields(exception)))?;
+        unit.create(uid, &new(fields(exception, object)))?;
     }
     Ok(())
 }
@@ -530,8 +541,9 @@ pub(crate) fn new_uid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// An incoming version's fields, as the Local Store holds them.
-fn fields(incoming: &ImportedEvent) -> EventFields {
+/// An incoming version's fields, as the Local Store holds them, in the
+/// server object `object`.
+fn fields(incoming: &ImportedEvent, object: Option<ObjectId>) -> EventFields {
     EventFields {
         title: incoming.title.clone(),
         when: StoredWhen::imported(&incoming.when),
@@ -542,7 +554,7 @@ fn fields(incoming: &ImportedEvent) -> EventFields {
         rule: incoming.rule.clone(),
         exdates: incoming.exdates.clone(),
         recurrence_id: incoming.recurrence_id.clone(),
-        server_data: incoming.server_data.clone(),
+        object_id: object,
     }
 }
 
@@ -550,8 +562,12 @@ fn fields(incoming: &ImportedEvent) -> EventFields {
 /// `previous`: one floating end takes the zone of the other (ADR 0007, rule
 /// 3), so only a version floating at both keeps the zone pinned before
 /// (rule 2).
-fn fields_over(incoming: &ImportedEvent, previous: &EventFields) -> EventFields {
-    let fields = fields(incoming);
+fn fields_over(
+    incoming: &ImportedEvent,
+    previous: &EventFields,
+    object: Option<ObjectId>,
+) -> EventFields {
+    let fields = fields(incoming, object);
     if incoming.all_floating && previous.zone_pinned {
         EventFields {
             when: fields.when.in_zones_of(&previous.when),

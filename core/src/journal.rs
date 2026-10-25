@@ -2,13 +2,15 @@
 //! to an Event goes through a [`Unit`] in [`record`], which keeps the Event's
 //! previous version and a hash of its new one, so that no change can skip
 //! the Journal. Changes made together, such as an import, are one unit.
+//! A unit writes the server objects too (ADR 0010), which the Journal doesn't
+//! record: each Event's version holds only the object it refers to.
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::event::{Source, rule};
-use crate::store::{EVENT_FIELDS, Store, StoredEvent, Uid, UidEvent, event_fields};
+use crate::event::{ObjectId, ServerObject, Source, rule};
+use crate::store::{EVENT_FIELDS, ICALENDAR, Store, StoredEvent, Uid, UidEvent, event_fields};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// A Change Journal unit: what undoes a change, or changes made together.
@@ -53,6 +55,15 @@ impl Origin {
             Origin::Undo => Some("undo"),
             Origin::Sync => Some("sync"),
             Origin::FirstSync => None,
+        }
+    }
+
+    /// Whether its changes to an object's rows mark the object pending, for
+    /// FreeCal to send: a sync's come from the server.
+    fn marks_pending(self) -> bool {
+        match self {
+            Origin::UserAction | Origin::Import | Origin::Undo => true,
+            Origin::FirstSync | Origin::Sync => false,
         }
     }
 }
@@ -197,6 +208,56 @@ impl Unit<'_> {
         self.store.event_at(calendar_id, href)
     }
 
+    /// Makes `object` the mirror of what the server holds at its href in a
+    /// Calendar, and returns its ID: the first object there, or a new one.
+    /// Only a sync writes the mirror, as only it knows what the server holds.
+    pub fn mirror(&self, calendar_id: CalendarId, object: &ServerObject) -> Result<ObjectId> {
+        debug_assert!(matches!(self.origin, Origin::FirstSync | Origin::Sync));
+        self.writable(calendar_id)?;
+        let conn = self.store.connection();
+        let found = conn
+            .query_row(
+                "SELECT id FROM server_object WHERE calendar_id = ?1 AND href = ?2 \
+                 ORDER BY id LIMIT 1",
+                params![calendar_id.0, object.href],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match found {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE server_object SET etag = ?2, data = ?3, format = ?4 WHERE id = ?1",
+                    params![id, object.etag, object.data, ICALENDAR],
+                )?;
+                Ok(ObjectId(id))
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO server_object (calendar_id, href, etag, data, format) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        calendar_id.0,
+                        object.href,
+                        object.etag,
+                        object.data,
+                        ICALENDAR
+                    ],
+                )?;
+                Ok(ObjectId(conn.last_insert_rowid()))
+            }
+        }
+    }
+
+    /// Removes the server objects at `href` in a Calendar, as a sync finds
+    /// them gone from the server.
+    pub fn remove_objects(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
+        self.store.connection().execute(
+            "DELETE FROM server_object WHERE calendar_id = ?1 AND href = ?2",
+            params![calendar_id.0, href],
+        )?;
+        Ok(())
+    }
+
     /// Records, with the unit's changes, that a sync of a Calendar
     /// finished with the sync token `token`.
     pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
@@ -206,7 +267,7 @@ impl Unit<'_> {
     /// Adds an Event with the UID `uid`.
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
         self.writable(event.calendar_id)?;
-        let event = &self.with_server_data(None, event);
+        let event = &self.placed(None, uid, event)?;
         let id = write(self.store, None, uid, event, rule::span(&event.fields)?)?;
         self.entry(id, uid, None, Some(event))?;
         Ok(id)
@@ -218,7 +279,7 @@ impl Unit<'_> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
         self.writable(event.calendar_id)?;
-        let event = &self.with_server_data(Some(&previous), event);
+        let event = &self.placed(Some(&previous), &uid, event)?;
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
@@ -232,21 +293,51 @@ impl Unit<'_> {
         self.entry(id, &uid, Some(&previous), Some(event))
     }
 
-    /// `event` with the original server data (ADR 0004) it gets: a sync's
-    /// from the server, an undo's from the Change Journal, both as given.
-    /// Every other origin keeps that of the `previous` version, as only a
-    /// server gives it, and drops it with a move to another Calendar, whose
-    /// server holds the Event elsewhere, if at all.
-    fn with_server_data(&self, previous: Option<&StoredEvent>, event: &StoredEvent) -> StoredEvent {
-        let server = match self.origin {
-            Origin::FirstSync | Origin::Sync | Origin::Undo => return event.clone(),
-            Origin::UserAction | Origin::Import => previous
-                .filter(|previous| previous.calendar_id == event.calendar_id)
-                .and_then(|previous| previous.fields.server_data.clone()),
+    /// `event`, a version of a row with the UID `uid`, in the server object
+    /// (ADR 0010) it gets: a sync's as given, an undo's while that object
+    /// exists, otherwise none, so that the row counts as not yet on the
+    /// server. A user action or an import keeps the object of the
+    /// `previous` version, none with a move to another Calendar, which
+    /// leaves the object without the row; a new row of theirs joins the
+    /// object of its Calendar's rows with its UID, as a CalDAV object holds
+    /// a Recurring Event with its Exceptions.
+    fn placed(
+        &self,
+        previous: Option<&StoredEvent>,
+        uid: &str,
+        event: &StoredEvent,
+    ) -> Result<StoredEvent> {
+        let conn = self.store.connection();
+        let object = match self.origin {
+            Origin::FirstSync | Origin::Sync => return Ok(event.clone()),
+            Origin::Undo => match event.fields.object_id {
+                Some(object) => conn
+                    .query_row(
+                        "SELECT id FROM server_object WHERE id = ?1 AND calendar_id = ?2",
+                        params![object.0, event.calendar_id.0],
+                        |row| row.get(0).map(ObjectId),
+                    )
+                    .optional()?,
+                None => None,
+            },
+            Origin::UserAction | Origin::Import => match previous {
+                Some(previous) => previous
+                    .fields
+                    .object_id
+                    .filter(|_| previous.calendar_id == event.calendar_id),
+                None => conn
+                    .query_row(
+                        "SELECT object_id FROM event WHERE calendar_id = ?1 AND uid = ?2 \
+                         AND object_id IS NOT NULL ORDER BY id LIMIT 1",
+                        params![event.calendar_id.0, uid],
+                        |row| row.get(0).map(ObjectId),
+                    )
+                    .optional()?,
+            },
         };
         let mut event = event.clone();
-        event.fields.server_data = server;
-        event
+        event.fields.object_id = object;
+        Ok(event)
     }
 
     pub fn delete(&mut self, id: EventId) -> Result<()> {
@@ -266,6 +357,7 @@ impl Unit<'_> {
             return self.replace(id, event);
         }
         self.writable(event.calendar_id)?;
+        let event = &self.placed(None, uid, event)?;
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
@@ -301,8 +393,9 @@ impl Unit<'_> {
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for
-    /// an Event created or deleted, starting the unit with its first entry.
-    /// An origin that isn't recorded only notes the Calendars.
+    /// an Event created or deleted, starting the unit with its first entry,
+    /// and marks the objects of both pending if the origin does. An origin
+    /// that isn't recorded only notes the Calendars.
     fn entry(
         &mut self,
         id: EventId,
@@ -310,15 +403,23 @@ impl Unit<'_> {
         previous: Option<&StoredEvent>,
         new: Option<&StoredEvent>,
     ) -> Result<()> {
+        let conn = self.store.connection();
         for event in previous.into_iter().chain(new) {
             if !self.calendars.contains(&event.calendar_id) {
                 self.calendars.push(event.calendar_id);
+            }
+            if let Some(object) = event.fields.object_id
+                && self.origin.marks_pending()
+            {
+                conn.execute(
+                    "UPDATE server_object SET pending = 1 WHERE id = ?1",
+                    [object.0],
+                )?;
             }
         }
         let Some(origin) = self.origin.recorded_as() else {
             return Ok(());
         };
-        let conn = self.store.connection();
         let unit = match self.id {
             Some(unit) => unit,
             None => {
@@ -331,13 +432,12 @@ impl Unit<'_> {
         };
         let fields = previous.map(|event| &event.fields);
         let when = fields.map(|fields| &fields.when);
-        let server = fields.and_then(|fields| fields.server_data.as_ref());
         conn.execute(
             &format!(
                 "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, \
                  {EVENT_FIELDS}) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                   ?16, ?17, ?18, ?19, ?20, ?21)"
+                   ?16, ?17, ?18, ?19)"
             ),
             params![
                 unit.0,
@@ -358,9 +458,7 @@ impl Unit<'_> {
                 fields.and_then(|fields| fields.rule.as_ref()),
                 fields.map(|fields| &fields.exdates),
                 fields.and_then(|fields| fields.recurrence_id.as_ref()),
-                server.map(|server| &server.href),
-                server.and_then(|server| server.etag.as_ref()),
-                server.map(|server| &server.data),
+                fields.and_then(|fields| fields.object_id.map(|object| object.0)),
             ],
         )?;
         Ok(())
@@ -383,15 +481,13 @@ fn write(
     (start_utc, end_utc): (i64, i64),
 ) -> Result<EventId> {
     let fields = &event.fields;
-    let server = fields.server_data.as_ref();
     let conn = store.connection();
     conn.execute(
         "INSERT INTO event (id, uid, calendar_id, title, all_day, start_at, end_at, \
          start_zone, end_zone, start_utc, end_utc, location, description, \
-         description_html, zone_pinned, rrule, exdates, recurrence_id, server_href, \
-         server_etag, server_data) \
+         description_html, zone_pinned, rrule, exdates, recurrence_id, object_id) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, \
-           ?19, ?20, ?21) \
+           ?19) \
          ON CONFLICT (id) DO UPDATE SET uid = excluded.uid, \
            calendar_id = excluded.calendar_id, title = excluded.title, \
            all_day = excluded.all_day, start_at = excluded.start_at, \
@@ -402,8 +498,7 @@ fn write(
            description_html = excluded.description_html, \
            zone_pinned = excluded.zone_pinned, rrule = excluded.rrule, \
            exdates = excluded.exdates, recurrence_id = excluded.recurrence_id, \
-           server_href = excluded.server_href, server_etag = excluded.server_etag, \
-           server_data = excluded.server_data",
+           object_id = excluded.object_id",
         params![
             id.map(|id| id.0),
             uid,
@@ -423,9 +518,7 @@ fn write(
             fields.rule,
             fields.exdates,
             fields.recurrence_id,
-            server.map(|server| &server.href),
-            server.and_then(|server| server.etag.as_ref()),
-            server.map(|server| &server.data),
+            fields.object_id.map(|object| object.0),
         ],
     )?;
     Ok(id.unwrap_or(EventId(conn.last_insert_rowid())))
@@ -494,8 +587,9 @@ fn stored_event(row: &Row, first: usize) -> rusqlite::Result<StoredEvent> {
 
 /// The version of [`hash`]'s format, its first byte. Format 2 added the
 /// repeat rule, the cancelled Occurrences and the recurrence ID (ticket 07),
-/// format 3 the original server data (ticket 81, ADR 0004).
-const HASH_FORMAT: u8 = 3;
+/// format 3 the original server data (ticket 81, ADR 0004), and format 4
+/// covers the server object the row refers to instead (ticket 86, ADR 0010).
+const HASH_FORMAT: u8 = 4;
 
 /// The SHA-256 hash of an Event's version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
@@ -509,6 +603,13 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
 
 /// [`hash`] in the format `format`, for [`rehash`].
 fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
+    hash_with(format, uid, event, None)
+}
+
+/// [`hash_as`], with `server`, the original server data a row held in
+/// format 3, which only the migration to server objects still reads
+/// ([`rehash_server_data`]).
+fn hash_with(format: u8, uid: &str, event: &StoredEvent, server: Option<&ServerObject>) -> Vec<u8> {
     let fields = &event.fields;
     let when = &fields.when;
     let mut hasher = Sha256::new();
@@ -539,8 +640,8 @@ fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
         item(fields.exdates.as_bytes());
         item(&optional(&fields.recurrence_id));
     }
-    if format >= 3 {
-        match &fields.server_data {
+    if format == 3 {
+        match server {
             None => item(&[0]),
             Some(server) => {
                 item(&[1]);
@@ -548,6 +649,12 @@ fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
                 item(&optional(&server.etag));
                 item(server.data.as_bytes());
             }
+        }
+    }
+    if format >= 4 {
+        match fields.object_id {
+            None => item(&[0]),
+            Some(object) => item(&[&[1], &object.0.to_be_bytes()[..]].concat()),
         }
     }
     hasher.finalize().to_vec()
@@ -558,8 +665,70 @@ fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
 /// version an entry hashes is the previous version the next entry for that
 /// Event holds, or the Event as it is now for its last entry. A hash that
 /// doesn't match that version in any format stays as it is, so that it
-/// still doesn't match.
+/// still doesn't match. Format 3 covered columns that are gone; the
+/// migration that dropped them re-hashed its entries.
 pub(crate) fn rehash(conn: &Connection) -> Result<()> {
+    for hashed in hashed_versions(conn, "", |_, _| Ok(()))? {
+        if let Some((version, ())) = &hashed.version
+            && [1, 2]
+                .into_iter()
+                .any(|format| hash_as(format, &hashed.uid, version) == hashed.stored)
+        {
+            hashed.set(conn, hash(&hashed.uid, version))?;
+        }
+    }
+    Ok(())
+}
+
+/// [`rehash`] for entries in format 3, while the Event rows and entries
+/// still hold the original server data it covered, next to the server
+/// object they refer to now (ticket 86).
+pub(crate) fn rehash_server_data(conn: &Connection) -> Result<()> {
+    let server = |row: &Row, first: usize| -> rusqlite::Result<Option<ServerObject>> {
+        let href: Option<String> = row.get(first)?;
+        let etag = row.get(first + 1)?;
+        let data: Option<String> = row.get(first + 2)?;
+        Ok(href
+            .zip(data)
+            .map(|(href, data)| ServerObject { href, etag, data }))
+    };
+    let columns = ", server_href, server_etag, server_data";
+    for hashed in hashed_versions(conn, columns, server)? {
+        if let Some((version, server)) = &hashed.version
+            && hash_with(3, &hashed.uid, version, server.as_ref()) == hashed.stored
+        {
+            hashed.set(conn, hash(&hashed.uid, version))?;
+        }
+    }
+    Ok(())
+}
+
+/// An entry's hash with the version it hashes, as [`rehash`] finds it.
+struct Hashed<T> {
+    id: i64,
+    uid: String,
+    stored: Vec<u8>,
+    /// The version, with what `extra` columns hold; none if it can't be read.
+    version: Option<(StoredEvent, T)>,
+}
+
+impl<T> Hashed<T> {
+    fn set(&self, conn: &Connection, hash: Vec<u8>) -> Result<()> {
+        conn.execute(
+            "UPDATE journal_entry SET hash = ?2 WHERE id = ?1",
+            params![self.id, hash],
+        )?;
+        Ok(())
+    }
+}
+
+/// Every entry with a hash, with the version it hashes, read from
+/// [`EVENT_FIELDS`] followed by the columns `extra` with `read`.
+fn hashed_versions<T>(
+    conn: &Connection,
+    extra: &str,
+    read: impl Fn(&Row, usize) -> rusqlite::Result<T>,
+) -> Result<Vec<Hashed<T>>> {
     let entries: Vec<(i64, EventId, String, Vec<u8>)> = conn
         .prepare("SELECT id, event_id, uid, hash FROM journal_entry WHERE hash IS NOT NULL")?
         .query_map([], |row| {
@@ -567,17 +736,22 @@ pub(crate) fn rehash(conn: &Connection) -> Result<()> {
         })?
         .filter_map(|entry| entry.ok())
         .collect();
+    let columns = format!("calendar_id, {EVENT_FIELDS}{extra}");
+    let extra_at = 1 + EVENT_FIELDS.split(',').count();
+    let version =
+        |row: &Row| -> rusqlite::Result<_> { Ok((stored_event(row, 0)?, read(row, extra_at)?)) };
+    let mut hashed = Vec::new();
     for (id, event_id, uid, stored) in entries {
         let next = conn
             .query_row(
                 &format!(
-                    "SELECT calendar_id, {EVENT_FIELDS} FROM journal_entry \
+                    "SELECT {columns} FROM journal_entry \
                      WHERE event_id = ?1 AND uid = ?2 AND id > ?3 ORDER BY id LIMIT 1"
                 ),
                 params![event_id.0, uid, id],
                 |row| {
                     let created = row.get::<_, Option<i64>>(0)?.is_none();
-                    Ok((!created).then(|| stored_event(row, 0)).transpose())
+                    Ok((!created).then(|| version(row)).transpose())
                 },
             )
             .optional()?;
@@ -585,31 +759,28 @@ pub(crate) fn rehash(conn: &Connection) -> Result<()> {
             Some(previous) => previous.ok().flatten(),
             None => conn
                 .query_row(
-                    &format!(
-                        "SELECT calendar_id, {EVENT_FIELDS} FROM event WHERE id = ?1 AND uid = ?2"
-                    ),
+                    &format!("SELECT {columns} FROM event WHERE id = ?1 AND uid = ?2"),
                     params![event_id.0, uid],
-                    |row| Ok(stored_event(row, 0).ok()),
+                    |row| Ok(version(row).ok()),
                 )
                 .optional()?
                 .flatten(),
         };
-        if let Some(version) = version
-            && (1..HASH_FORMAT).any(|format| hash_as(format, &uid, &version) == stored)
-        {
-            conn.execute(
-                "UPDATE journal_entry SET hash = ?2 WHERE id = ?1",
-                params![id, hash(&uid, &version)],
-            )?;
-        }
+        hashed.push(Hashed {
+            id,
+            uid,
+            stored,
+            version,
+        });
     }
-    Ok(())
+    Ok(hashed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{EventFields, OriginalServerData, StoredWhen};
+    use crate::event::{EventFields, StoredWhen};
+    use crate::store::{MIGRATION_COUNT, migrated_to};
 
     fn dentist() -> StoredEvent {
         StoredEvent {
@@ -630,12 +801,17 @@ mod tests {
                 rule: Some("FREQ=WEEKLY;INTERVAL=2".to_owned()),
                 exdates: "2026-10-19T09:00:00".to_owned(),
                 recurrence_id: None,
-                server_data: Some(OriginalServerData {
-                    href: "/user/work/dentist.ics".to_owned(),
-                    etag: Some("\"1\"".to_owned()),
-                    data: "BEGIN:VCALENDAR\r\nX-UNKNOWN:kept\r\nEND:VCALENDAR\r\n".to_owned(),
-                }),
+                object_id: Some(ObjectId(7)),
             },
+        }
+    }
+
+    /// The object holding [`dentist`], as a server gives it.
+    fn dentist_object() -> ServerObject {
+        ServerObject {
+            href: "/user/work/dentist.ics".to_owned(),
+            etag: Some("\"1\"".to_owned()),
+            data: "BEGIN:VCALENDAR\r\nX-UNKNOWN:kept\r\nEND:VCALENDAR\r\n".to_owned(),
         }
     }
 
@@ -649,11 +825,12 @@ mod tests {
     fn the_hash_format_is_pinned() {
         assert_eq!(
             hex(hash("dentist", &dentist())),
-            "fe4126d5eb6b65344ab1724f86cd2625dcb74db6beb96dac243d25ae6901ee1c"
+            "504502fffd075c19137680ff6a036cea6c6cea463231a133b67601c826fecd4e"
         );
     }
 
-    /// [`rehash`] recognises entries by their hash in the formats before.
+    /// [`rehash`] and [`rehash_server_data`] recognise entries by their
+    /// hash in the formats before.
     #[test]
     fn the_formats_before_are_pinned_too() {
         assert_eq!(
@@ -664,33 +841,22 @@ mod tests {
             hex(hash_as(2, "dentist", &dentist())),
             "f7e0c2e491d467b8c3f69ffe92aa06fc17219b6f1613034bf2b49ddb1628dc37"
         );
+        assert_eq!(
+            hex(hash_with(3, "dentist", &dentist(), Some(&dentist_object()))),
+            "fe4126d5eb6b65344ab1724f86cd2625dcb74db6beb96dac243d25ae6901ee1c"
+        );
     }
 
-    /// Each part of the original server data counts, and having none
-    /// differs from having one with empty parts.
+    /// The object a row refers to counts, and having none differs from
+    /// having one.
     #[test]
-    fn the_hash_covers_the_original_server_data() {
-        let with = |change: fn(&mut OriginalServerData)| {
+    fn the_hash_covers_the_object() {
+        let with = |object| {
             let mut event = dentist();
-            change(event.fields.server_data.as_mut().unwrap());
+            event.fields.object_id = object;
             hash("dentist", &event)
         };
-        let mut without = dentist();
-        without.fields.server_data = None;
-        let mut empty = dentist();
-        empty.fields.server_data = Some(OriginalServerData {
-            href: String::new(),
-            etag: None,
-            data: String::new(),
-        });
-        let hashes = [
-            hash("dentist", &dentist()),
-            with(|server| server.href.push('x')),
-            with(|server| server.etag = None),
-            with(|server| server.data.push('x')),
-            hash("dentist", &without),
-            hash("dentist", &empty),
-        ];
+        let hashes = [with(Some(ObjectId(7))), with(Some(ObjectId(8))), with(None)];
         let distinct: std::collections::HashSet<_> = hashes.iter().collect();
         assert_eq!(distinct.len(), hashes.len());
     }
@@ -703,6 +869,7 @@ mod tests {
         let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
         let mut event = dentist();
         event.calendar_id = store.list_calendars().unwrap()[0].id;
+        event.fields.object_id = None;
         let conn = store.connection();
         conn.execute(
             "UPDATE calendar SET read_only = 1 WHERE id = ?1",
@@ -726,6 +893,140 @@ mod tests {
         assert_eq!(count("SELECT COUNT(*) FROM journal_entry"), 0);
     }
 
+    /// A Local Store with [`dentist`] pulled by a sync into its first
+    /// Calendar, in its object.
+    struct Pulled {
+        _directory: tempfile::TempDir,
+        store: Store,
+        object: ObjectId,
+        id: EventId,
+        event: StoredEvent,
+    }
+
+    impl Pulled {
+        fn new() -> Self {
+            let directory = tempfile::TempDir::new().unwrap();
+            let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+            let calendar_id = store.list_calendars().unwrap()[0].id;
+            let (object, id, event) = record(&store, Origin::Sync, 0, |unit| {
+                let object = unit.mirror(calendar_id, &dentist_object())?;
+                let mut event = dentist();
+                event.calendar_id = calendar_id;
+                event.fields.object_id = Some(object);
+                Ok((object, unit.create("dentist", &event)?, event))
+            })
+            .unwrap()
+            .value;
+            Self {
+                _directory: directory,
+                store,
+                object,
+                id,
+                event,
+            }
+        }
+
+        fn pending(&self) -> bool {
+            self.store
+                .connection()
+                .query_row(
+                    "SELECT pending FROM server_object WHERE id = ?1",
+                    [self.object.0],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
+        fn renamed(&self, origin: Origin) -> Option<UnitId> {
+            let mut event = self.event.clone();
+            event.fields.title = "Dentist, renamed".to_owned();
+            record(&self.store, origin, 0, |unit| unit.replace(self.id, &event))
+                .unwrap()
+                .unit
+        }
+    }
+
+    #[test]
+    fn a_sync_mirrors_the_object_and_never_marks_it_pending() {
+        let pulled = Pulled::new();
+        pulled.renamed(Origin::Sync);
+        let again = ServerObject {
+            etag: Some("\"2\"".to_owned()),
+            ..dentist_object()
+        };
+
+        let mirrored = record(&pulled.store, Origin::Sync, 0, |unit| {
+            unit.mirror(pulled.event.calendar_id, &again)
+        })
+        .unwrap();
+
+        assert_eq!(mirrored.value, pulled.object);
+        assert_eq!(mirrored.unit, None, "the Journal doesn't record objects");
+        assert_eq!(
+            pulled.store.server_object(pulled.object).unwrap(),
+            Some(again)
+        );
+        assert!(!pulled.pending());
+    }
+
+    #[test]
+    fn a_user_action_an_import_and_an_undo_mark_the_object_pending() {
+        for origin in [Origin::UserAction, Origin::Import] {
+            let pulled = Pulled::new();
+            pulled.renamed(origin);
+            assert!(pulled.pending(), "{origin:?}");
+            assert_eq!(
+                pulled.store.find_event(pulled.id).unwrap().fields.object_id,
+                Some(pulled.object)
+            );
+        }
+        let pulled = Pulled::new();
+        let unit = pulled.renamed(Origin::Sync).unwrap();
+        undo(&pulled.store, unit, 0).unwrap();
+        assert!(pulled.pending());
+    }
+
+    #[test]
+    fn a_move_to_another_calendar_leaves_the_object_without_the_row() {
+        let pulled = Pulled::new();
+        let mut moved = pulled.event.clone();
+        moved.calendar_id = pulled.store.list_calendars().unwrap()[1].id;
+
+        record(&pulled.store, Origin::UserAction, 0, |unit| {
+            unit.replace(pulled.id, &moved)
+        })
+        .unwrap();
+
+        let row = pulled.store.find_event(pulled.id).unwrap();
+        assert_eq!(row.calendar_id, moved.calendar_id);
+        assert_eq!(row.fields.object_id, None);
+        assert!(pulled.pending());
+    }
+
+    /// As a CalDAV object holds a Recurring Event with its Exceptions.
+    #[test]
+    fn a_new_row_joins_the_object_of_its_uid() {
+        let pulled = Pulled::new();
+        let mut exception = pulled.event.clone();
+        exception.fields.rule = None;
+        exception.fields.recurrence_id = Some("2026-10-19T09:00:00".to_owned());
+        exception.fields.object_id = None;
+
+        let (joined, other) = record(&pulled.store, Origin::UserAction, 0, |unit| {
+            Ok((
+                unit.create("dentist", &exception)?,
+                unit.create("other", &exception)?,
+            ))
+        })
+        .unwrap()
+        .value;
+
+        let object = |id| pulled.store.find_event(id).unwrap().fields.object_id;
+        assert_eq!(object(joined), Some(pulled.object));
+        assert_eq!(object(other), None);
+        assert!(pulled.pending());
+    }
+
     /// After a migration that added fields, an entry's hash in a format
     /// before is made again in the current one; any other hash stays.
     #[test]
@@ -735,7 +1036,7 @@ mod tests {
         let mut event = dentist();
         event.calendar_id = store.list_calendars().unwrap()[0].id;
         // A user's Event, which has none.
-        event.fields.server_data = None;
+        event.fields.object_id = None;
         let mut moved = event.clone();
         moved.fields.title = "Dentist, moved".to_owned();
         let created = record(&store, Origin::UserAction, 0, |unit| {
@@ -774,46 +1075,45 @@ mod tests {
         assert_eq!(hashes()[1], hash("dentist", &moved));
     }
 
+    /// Adds a unit of origin sync to a Local Store of an earlier version.
+    fn old_unit(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO journal_unit (origin, made_at) VALUES ('sync', 0)",
+            [],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
     /// Opening a Local Store from before the original server data re-hashes
     /// its entries once the migrations ran.
     #[test]
     fn opening_a_local_store_from_before_rehashes_its_entries() {
         let directory = tempfile::TempDir::new().unwrap();
         let path = directory.path().join("freecal.sqlite3");
-        let store = Store::open(&path).unwrap();
+        // Before ticket 81's migration and those of tickets 82, 56, 85 and 86.
+        let conn = migrated_to(&path, MIGRATION_COUNT - 5);
         let mut event = dentist();
-        event.calendar_id = store.list_calendars().unwrap()[0].id;
-        event.fields.server_data = None;
-        record(&store, Origin::UserAction, 0, |unit| {
-            unit.create("dentist", &event)
-        })
-        .unwrap();
-        let conn = store.connection();
-        let version: i64 = conn
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        conn.execute(
-            "UPDATE journal_entry SET hash = ?1",
-            [hash_as(2, "dentist", &event)],
+        event.fields.object_id = None;
+        conn.execute_batch(
+            "INSERT INTO calendar (account_id, name, colour) VALUES (1, 'Work', '#3f51b5');
+             INSERT INTO event (id, calendar_id, uid, title, all_day, start_at, end_at,
+                 start_zone, end_zone, start_utc, end_utc, location, description,
+                 description_html, rrule, exdates)
+             VALUES (1, 1, 'dentist', 'Dentist', 0, '2026-10-05T09:00:00',
+                 '2026-10-05T10:30:00', 'Europe/Berlin', 'Europe/Berlin', 0, 0,
+                 'Main Street 1', '<b>Bring the card</b>', 1, 'FREQ=WEEKLY;INTERVAL=2',
+                 '2026-10-19T09:00:00');",
         )
         .unwrap();
-        // Back to before ticket 81's migration, undoing those of tickets 82
-        // and 56 after it; ticket 85's rebuilds the table it finds.
-        conn.execute_batch(&format!(
-            "ALTER TABLE calendar DROP COLUMN server_read_only;
-             ALTER TABLE calendar DROP COLUMN synced;
-             ALTER TABLE calendar DROP COLUMN sync_token;
-             ALTER TABLE event DROP COLUMN server_href;
-             ALTER TABLE event DROP COLUMN server_etag;
-             ALTER TABLE event DROP COLUMN server_data;
-             ALTER TABLE journal_entry DROP COLUMN server_href;
-             ALTER TABLE journal_entry DROP COLUMN server_etag;
-             ALTER TABLE journal_entry DROP COLUMN server_data;
-             PRAGMA user_version = {};",
-            version - 4
-        ))
+        event.calendar_id = CalendarId(1);
+        let unit = old_unit(&conn);
+        conn.execute(
+            "INSERT INTO journal_entry (unit_id, event_id, uid, hash) VALUES (?1, 1, 'dentist', ?2)",
+            params![unit, hash_as(2, "dentist", &event)],
+        )
         .unwrap();
-        drop(store);
+        drop(conn);
 
         let store = Store::open(&path).unwrap();
 
@@ -822,5 +1122,78 @@ mod tests {
             .query_row("SELECT hash FROM journal_entry", [], |row| row.get(0))
             .unwrap();
         assert_eq!(stored, hash("dentist", &event));
+    }
+
+    /// Ticket 86: a row's original server data becomes an object, which its
+    /// Exceptions and the entries of its versions refer to, and entries
+    /// whose hashes covered the data still undo.
+    #[test]
+    fn opening_a_local_store_from_before_server_objects_moves_the_data_into_them() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let path = directory.path().join("freecal.sqlite3");
+        let conn = migrated_to(&path, MIGRATION_COUNT - 1);
+        let server = dentist_object();
+        conn.execute_batch(
+            "INSERT INTO calendar (account_id, name, colour) VALUES (1, 'Work', '#3f51b5');",
+        )
+        .unwrap();
+        let insert =
+            |id: i64, title: &str, recurrence_id: Option<&str>, server: Option<&ServerObject>| {
+                conn.execute(
+                    "INSERT INTO event (id, calendar_id, uid, title, all_day, start_at, end_at,
+                     start_zone, end_zone, start_utc, end_utc, location, description,
+                     description_html, rrule, exdates, recurrence_id, server_href, server_etag,
+                     server_data)
+                 VALUES (?1, 1, 'dentist', ?2, 0, '2026-10-05T09:00:00',
+                     '2026-10-05T10:30:00', 'Europe/Berlin', 'Europe/Berlin', 0, 0,
+                     'Main Street 1', '<b>Bring the card</b>', 1, ?3,
+                     '2026-10-19T09:00:00', ?4, ?5, ?6, ?7)",
+                    params![
+                        id,
+                        title,
+                        recurrence_id.is_none().then_some("FREQ=WEEKLY;INTERVAL=2"),
+                        recurrence_id,
+                        server.map(|server| &server.href),
+                        server.and_then(|server| server.etag.as_ref()),
+                        server.map(|server| &server.data),
+                    ],
+                )
+                .unwrap();
+            };
+        insert(1, "Dentist", None, Some(&server));
+        insert(2, "Dentist, later", Some("2026-10-19T09:00:00"), None);
+        // A sync renamed the Recurring Event: its previous version has the
+        // object's address with older data.
+        let mut event = dentist();
+        event.calendar_id = CalendarId(1);
+        event.fields.object_id = None;
+        let unit = old_unit(&conn);
+        conn.execute(
+            "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, title,
+                 all_day, start_at, end_at, start_zone, end_zone, location, description,
+                 description_html, zone_pinned, rrule, exdates, server_href, server_etag,
+                 server_data)
+             SELECT ?1, id, uid, ?2, calendar_id, 'Dentist, before', all_day, start_at,
+                 end_at, start_zone, end_zone, location, description, description_html,
+                 zone_pinned, rrule, exdates, server_href, '\"0\"', 'BEGIN:VCALENDAR'
+             FROM event WHERE id = 1",
+            params![unit, hash_with(3, "dentist", &event, Some(&server))],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = Store::open(&path).unwrap();
+
+        let object = store.find_event(EventId(1)).unwrap().fields.object_id;
+        assert!(object.is_some());
+        assert_eq!(store.server_object(object.unwrap()).unwrap(), Some(server));
+        assert_eq!(
+            store.find_event(EventId(2)).unwrap().fields.object_id,
+            object
+        );
+        undo(&store, UnitId(unit), 0).unwrap();
+        let undone = store.find_event(EventId(1)).unwrap();
+        assert_eq!(undone.fields.title, "Dentist, before");
+        assert_eq!(undone.fields.object_id, object);
     }
 }

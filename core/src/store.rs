@@ -8,7 +8,7 @@ use rusqlite::{
     Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params, params_from_iter,
 };
 
-use crate::event::{EventFields, OriginalServerData, StoredRange, StoredWhen, rule};
+use crate::event::{EventFields, ObjectId, ServerObject, StoredRange, StoredWhen, rule};
 use crate::remote::SyncPoint;
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
@@ -249,6 +249,7 @@ const MIGRATIONS: &[Migration] = &[
     FROM (SELECT id FROM event UNION ALL SELECT event_id FROM journal_entry);
     ",
     ),
+    Migration::Code(server_objects),
 ];
 
 /// Whether a newly added server Calendar starts marked read-only, so that
@@ -279,6 +280,15 @@ fn add_starting_calendars(tx: &Transaction) -> Result<()> {
 enum Migration {
     Sql(&'static str),
     Code(fn(&Transaction) -> Result<()>),
+}
+
+impl Migration {
+    fn run(&self, tx: &Transaction) -> Result<()> {
+        match self {
+            Migration::Sql(sql) => Ok(tx.execute_batch(sql)?),
+            Migration::Code(migrate) => migrate(tx),
+        }
+    }
 }
 
 /// Ticket 35 (ADR 0007): timed Events become wall times with an Event Time
@@ -364,6 +374,72 @@ fn recurring_events(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
+/// How a server object's data is written: iCalendar, as CalDAV holds it.
+/// Google's will be its JSON as received (ADR 0010).
+pub(crate) const ICALENDAR: &str = "icalendar";
+
+/// Ticket 86 (ADR 0010): server objects mirror the server, with their data
+/// as received in its `format`, and `pending` once FreeCal has changes to
+/// send. An Event row refers to its object, which an entry of the Change
+/// Journal records instead of the object; `journal_entry.object_id` has no
+/// foreign key, because the object may be gone since. Each row's original
+/// server data becomes an object, the one a Calendar's first row at its
+/// href held, which that row's Exceptions refer to too, as it holds them;
+/// an entry refers to the object at its version's href, if there is one.
+/// Entries whose hashes covered the data are re-hashed before it goes.
+fn server_objects(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "
+        CREATE TABLE server_object (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+            href TEXT NOT NULL,
+            etag TEXT,
+            data TEXT NOT NULL,
+            format TEXT NOT NULL,
+            pending INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
+        ALTER TABLE event ADD COLUMN object_id INTEGER
+            REFERENCES server_object (id) ON DELETE SET NULL;
+        CREATE INDEX event_object ON event (object_id);
+        ALTER TABLE journal_entry ADD COLUMN object_id INTEGER;
+        -- `ICALENDAR`, written out, as a migration never changes.
+        INSERT INTO server_object (calendar_id, href, etag, data, format)
+        SELECT calendar_id, server_href, server_etag, server_data, 'icalendar' FROM event
+        WHERE id IN (SELECT MIN(id) FROM event
+            WHERE server_href IS NOT NULL AND server_data IS NOT NULL
+            GROUP BY calendar_id, server_href)
+        ORDER BY id;
+        UPDATE event SET object_id = (SELECT id FROM server_object
+            WHERE server_object.calendar_id = event.calendar_id
+              AND server_object.href = event.server_href)
+        WHERE server_href IS NOT NULL AND server_data IS NOT NULL;
+        UPDATE event SET object_id = (SELECT holder.object_id FROM event AS holder
+            WHERE holder.calendar_id = event.calendar_id AND holder.uid = event.uid
+              AND holder.recurrence_id IS NULL AND holder.object_id IS NOT NULL
+            ORDER BY holder.id LIMIT 1)
+        WHERE recurrence_id IS NOT NULL AND object_id IS NULL;
+        UPDATE journal_entry SET object_id = (SELECT id FROM server_object
+            WHERE server_object.calendar_id = journal_entry.calendar_id
+              AND server_object.href = journal_entry.server_href)
+        WHERE server_href IS NOT NULL AND server_data IS NOT NULL;
+        ",
+    )?;
+    crate::journal::rehash_server_data(tx)?;
+    tx.execute_batch(
+        "
+        ALTER TABLE event DROP COLUMN server_href;
+        ALTER TABLE event DROP COLUMN server_etag;
+        ALTER TABLE event DROP COLUMN server_data;
+        ALTER TABLE journal_entry DROP COLUMN server_href;
+        ALTER TABLE journal_entry DROP COLUMN server_etag;
+        ALTER TABLE journal_entry DROP COLUMN server_data;
+        ",
+    )?;
+    Ok(())
+}
+
 /// The time zone rules FreeCal was built with, which the derived UTC columns
 /// are computed with.
 const TIME_ZONE_RULES: &str = chrono_tz::IANA_TZDB_VERSION;
@@ -419,8 +495,7 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
 pub(crate) const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
-     description, description_html, zone_pinned, rrule, exdates, recurrence_id, server_href, \
-     server_etag, server_data";
+     description, description_html, zone_pinned, rrule, exdates, recurrence_id, object_id";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
 pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
@@ -434,19 +509,8 @@ pub(crate) fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFie
         rule: row.get(first + 10)?,
         exdates: row.get(first + 11)?,
         recurrence_id: row.get(first + 12)?,
-        server_data: original_server_data(row, first + 13)?,
+        object_id: row.get::<_, Option<i64>>(first + 13)?.map(ObjectId),
     })
-}
-
-/// Reads an Event's `server_href, server_etag, server_data` starting at
-/// column `first`: none unless it has an address and data.
-fn original_server_data(row: &Row, first: usize) -> rusqlite::Result<Option<OriginalServerData>> {
-    let href: Option<String> = row.get(first)?;
-    let etag = row.get(first + 1)?;
-    let data: Option<String> = row.get(first + 2)?;
-    Ok(href
-        .zip(data)
-        .map(|(href, data)| OriginalServerData { href, etag, data }))
 }
 
 /// Reads an Event's `all_day, start_at, end_at, start_zone, end_zone`
@@ -682,16 +746,15 @@ impl Store {
         )
     }
 
-    /// The server objects a Calendar's Events are held in: each one's
-    /// address, as the server gave it, with its ETag.
+    /// The server objects of a Calendar: each one's address, as the server
+    /// gave it, with its ETag.
     pub fn server_objects(
         &self,
         calendar_id: CalendarId,
     ) -> Result<HashMap<String, Option<String>>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT server_href, server_etag FROM event \
-             WHERE calendar_id = ?1 AND server_href IS NOT NULL AND recurrence_id IS NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT href, etag FROM server_object WHERE calendar_id = ?1")?;
         let objects =
             readable(stmt.query_map([calendar_id.0], |row| Ok((row.get(0)?, row.get(1)?)))?)?;
         Ok(objects.into_iter().collect())
@@ -708,10 +771,31 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT id, uid FROM event WHERE calendar_id = ?1 AND server_href = ?2 \
-                 AND recurrence_id IS NULL ORDER BY id LIMIT 1",
+                "SELECT event.id, event.uid FROM event \
+                 JOIN server_object ON server_object.id = event.object_id \
+                 WHERE event.calendar_id = ?1 AND server_object.href = ?2 \
+                 AND event.recurrence_id IS NULL ORDER BY event.id LIMIT 1",
                 params![calendar_id.0, href],
                 |row| Ok((EventId(row.get(0)?), row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// The server object `id` as the server last gave it, none if it is
+    /// gone.
+    pub fn server_object(&self, id: ObjectId) -> Result<Option<ServerObject>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT href, etag, data FROM server_object WHERE id = ?1",
+                [id.0],
+                |row| {
+                    Ok(ServerObject {
+                        href: row.get(0)?,
+                        etag: row.get(1)?,
+                        data: row.get(2)?,
+                    })
+                },
             )
             .optional()?)
     }
@@ -936,6 +1020,26 @@ fn sidebar_state(shown: Value, width: Value) -> SidebarState {
     }
 }
 
+/// A new Local Store at `path` with only the first `applied` migrations,
+/// for tests of the migrations after.
+#[cfg(test)]
+pub(crate) fn migrated_to(path: &Path, applied: usize) -> Connection {
+    let mut conn = Connection::open(path).unwrap();
+    conn.pragma_update(None, "foreign_keys", true).unwrap();
+    let tx = conn.transaction().unwrap();
+    for migration in &MIGRATIONS[..applied] {
+        migration.run(&tx).unwrap();
+    }
+    tx.pragma_update(None, "user_version", applied as i64)
+        .unwrap();
+    tx.commit().unwrap();
+    conn
+}
+
+/// How many migrations there are.
+#[cfg(test)]
+pub(crate) const MIGRATION_COUNT: usize = MIGRATIONS.len();
+
 fn migrate(conn: &mut Connection) -> Result<()> {
     // IMMEDIATE takes the write lock before `user_version` is read, so two
     // FreeCal processes opening a fresh Local Store at once can't both see
@@ -950,10 +1054,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         });
     }
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
-        match migration {
-            Migration::Sql(sql) => tx.execute_batch(sql)?,
-            Migration::Code(migrate) => migrate(&tx)?,
-        }
+        migration.run(&tx)?;
         tx.pragma_update(None, "user_version", index as i64 + 1)?;
     }
     if applied == 0 {

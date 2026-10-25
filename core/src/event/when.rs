@@ -265,9 +265,9 @@ pub(crate) struct EventFields {
     pub exdates: String,
     /// For an Exception, the recurrence ID of the Occurrence it changed.
     pub recurrence_id: Option<String>,
-    /// For an Event pulled from a server, what the server sent for it. An
-    /// Exception has none: its Recurring Event's holds it.
-    pub server_data: Option<OriginalServerData>,
+    /// The server object the row came from or will be written to; none for
+    /// a row not on a server yet.
+    pub object_id: Option<ObjectId>,
 }
 
 impl EventFields {
@@ -276,11 +276,20 @@ impl EventFields {
     }
 }
 
-/// An Event's original server data (ADR 0004): the object a server holds
-/// it in, as received, so that fields FreeCal doesn't understand survive
-/// writes, and Change Journal entries restore exact versions.
+/// A server object's row in the Local Store, which names it for good: IDs
+/// are never given out again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectId(pub i64);
+
+/// A server object (ADR 0010): the unit a server stores and FreeCal writes
+/// back, one CalDAV resource at its href, or one Google event resource. Its
+/// row mirrors the server's last known state of it (address, version tag,
+/// data as received), and only a sync or a successful write to the server
+/// changes it. Event rows refer to the object they came from or will be
+/// written to. A read-only feed has no server objects, because FreeCal never
+/// writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OriginalServerData {
+pub struct ServerObject {
     /// The object's address on the server, as the server gave it.
     pub href: String,
     /// The object's ETag, which names its version; none if the server gave

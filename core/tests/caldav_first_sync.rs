@@ -125,7 +125,7 @@ fn a_recurring_event_comes_with_its_exceptions() {
         .unwrap();
 
     assert_eq!(titles(&core, added[0].id), ["Weekly", "Moved", "Weekly"]);
-    // The Recurring Event holds the object, which holds its Exceptions too.
+    // The Recurring Event and its Exception refer to the object holding them.
     let occurrences = core
         .occurrences(date("2026-10-01"), date("2026-11-01"))
         .unwrap();
@@ -135,8 +135,8 @@ fn a_recurring_event_comes_with_its_exceptions() {
             .unwrap()
             .map(|server| server.data)
     };
-    assert_eq!(held(0), Some(served));
-    assert_eq!(held(1), None);
+    assert_eq!(held(0), Some(served.clone()));
+    assert_eq!(held(1), Some(served));
 }
 
 /// A pulled Event, in a Calendar of a new Core, and the Core's Local

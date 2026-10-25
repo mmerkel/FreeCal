@@ -23,7 +23,7 @@ use icalendar::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::event::{Loaded, OriginalServerData, StoredWhen, instant, new_uid, rule, wall_text};
+use crate::event::{Loaded, ServerObject, StoredWhen, instant, new_uid, rule, wall_text};
 use crate::journal::{Unit, UnitId};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
@@ -148,9 +148,9 @@ pub struct ImportedEvent {
     pub recurrence_id: Option<String>,
     /// A Recurring Event's Exceptions, which share its UID.
     pub exceptions: Vec<ImportedEvent>,
-    /// For an Event from a server, the object the server holds it in; an
-    /// Exception has none, as its Recurring Event's holds it.
-    pub server_data: Option<OriginalServerData>,
+    /// For an Event from a server, the object the server holds it in, as
+    /// received.
+    pub object: Option<ServerObject>,
 }
 
 impl ImportedEvent {
@@ -228,7 +228,7 @@ pub(crate) fn run(
             (true, ExistingEvents::Skip) => outcome.skipped += 1,
             (true, ExistingEvents::Update) => {
                 outcome.updated += 1;
-                loaded.take(unit, event)?;
+                loaded.take(unit, event, None)?;
             }
             (exists, _) => {
                 outcome.imported += 1;
@@ -238,7 +238,7 @@ pub(crate) fn run(
                 } else {
                     loaded
                 };
-                loaded.take(unit, event)?;
+                loaded.take(unit, event, None)?;
             }
         }
     }
@@ -282,14 +282,13 @@ pub(crate) fn preview(
 }
 
 /// The Events of iCalendar objects as a server holds them, read as
-/// [`preview`] reads files, each with the object as its original server
-/// data. Floating times are pinned to `zone`. An object FreeCal can't read
+/// [`preview`] reads files, each with the server object it came in. Floating times are pinned to `zone`. An object FreeCal can't read
 /// is left out.
-pub(crate) fn read_server_events(objects: &[OriginalServerData], zone: Tz) -> Vec<ImportedEvent> {
+pub(crate) fn read_server_events(objects: &[ServerObject], zone: Tz) -> Vec<ImportedEvent> {
     assemble(objects.iter().filter_map(|object| {
         let mut read = read_events(&object.href, object.data.as_bytes(), zone).ok()?;
         for event in &mut read.events {
-            event.server_data = Some(object.clone());
+            event.object = Some(object.clone());
         }
         Some(read)
     }))
@@ -443,7 +442,7 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                 exdates,
                 recurrence_id: None,
                 exceptions: Vec::new(),
-                server_data: None,
+                object: None,
             };
             match original {
                 None => read.events.push(imported),

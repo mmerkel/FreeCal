@@ -16,3 +16,7 @@
 - [ ] Core tests: two objects with one UID on a server without sync tokens no longer take each other's rows on every sync (each sync recorded no unit); a Google-like Recurring Event whose Exceptions are objects of their own keeps them when only its object changes; two components with one recurrence ID in an object; an object whose UID changes; an unreadable object
 
 Out of scope: Exceptions without their Recurring Event (ticket 88); a server change arriving while an object is pending (ticket 20).
+
+## Comments
+
+- 2026-10-25 (from 86): `Unit::remove_objects` deletes the objects at an href after `sync::apply` deleted the UID group `Store::event_at` finds. Rows of the object it doesn't find, such as Exceptions without their Recurring Event, lose their `object_id` through `ON DELETE SET NULL`, outside the Change Journal. "A removed object takes its rows with it" should delete them through the unit first. The first sync mirrors every object it lists, also a second one with a UID already loaded, which stays without rows.

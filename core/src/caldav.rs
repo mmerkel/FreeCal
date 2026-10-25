@@ -16,8 +16,7 @@ use url::Url;
 
 use crate::remote::{Changes, FIRST_SYNC_PAGE, SyncPoint};
 use crate::{
-    AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, OriginalServerData, Result,
-    import,
+    AvailableCalendar, CalDavLogin, Colour, CoreError, ImportedEvent, Result, ServerObject, import,
 };
 
 const DAV: &str = "DAV:";
@@ -381,10 +380,10 @@ impl Client {
             Depth::One,
             calendar_multiget_body(hrefs),
         )?;
-        let objects: Vec<OriginalServerData> = answer
+        let objects: Vec<ServerObject> = answer
             .children(DAV, "response")
             .filter_map(|response| {
-                Some(OriginalServerData {
+                Some(ServerObject {
                     href: response.child(DAV, "href")?.text.clone(),
                     etag: etag(response),
                     data: response.found(CALENDAR_DATA)?.text.clone(),

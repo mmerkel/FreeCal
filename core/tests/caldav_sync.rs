@@ -322,19 +322,68 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
 mod undo {
     use super::*;
 
+    /// ADR 0010: the next write is conditional on what the server has now.
     #[test]
-    fn restores_the_previous_version_with_its_server_data() {
+    fn restores_the_previous_version_and_leaves_the_object_as_the_server_has_it() {
         let synced = Synced::writable(&[("standup", standup("Standup"))]);
-        let pulled = synced.held_etag("Standup");
         synced.put("standup", standup("Standup moved"));
         let unit = synced.sync().unwrap();
+        let served = synced
+            .radicale
+            .get_event(&synced.user, &synced.url, "standup");
 
         let undone = synced.core.undo_unit(unit).unwrap();
 
         assert!(undone.unit.is_some());
         assert_eq!(synced.titles(), ["Standup"]);
-        assert!(pulled.is_some());
-        assert_eq!(synced.held_etag("Standup"), pulled);
+        let held = synced
+            .core
+            .original_server_data(synced.event("Standup").id)
+            .unwrap()
+            .unwrap();
+        assert_eq!((held.etag, held.data), (Some(served.0), served.1));
+    }
+
+    #[test]
+    fn of_a_unit_is_not_blocked_by_a_later_sync_that_changed_only_the_object() {
+        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        synced.put("standup", standup("Standup moved"));
+        let unit = synced.sync().unwrap();
+        // A property FreeCal doesn't read: a new ETag and data, the same Event.
+        synced.put(
+            "standup",
+            ics(
+                "BEGIN:VEVENT\nUID:standup\nSUMMARY:Standup moved\nDTSTART:20261005T070000Z\n\
+                 DTEND:20261005T073000Z\nX-UNKNOWN:new\nEND:VEVENT\n",
+            ),
+        );
+
+        assert_eq!(synced.sync(), None);
+        assert_eq!(
+            synced.held_etag("Standup moved"),
+            Some(synced.etag("standup"))
+        );
+        synced.core.undo_unit(unit).unwrap();
+
+        assert_eq!(synced.titles(), ["Standup"]);
+    }
+
+    /// As a delete already sent would be: the Event counts as not yet on
+    /// the server.
+    #[test]
+    fn of_a_delete_brings_back_an_event_without_the_object_the_server_removed_since() {
+        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        let deleted = synced
+            .core
+            .delete_event(synced.event("Standup").id)
+            .unwrap();
+        synced.delete("standup");
+        synced.sync();
+
+        synced.core.undo_unit(deleted.unit.unwrap()).unwrap();
+
+        let id = synced.event("Standup").id;
+        assert_eq!(synced.core.original_server_data(id).unwrap(), None);
     }
 
     #[test]
@@ -428,7 +477,8 @@ fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
     // As a first sync that stopped before the review.
     synced.harness.arrange_local_store(&format!(
         "UPDATE calendar SET synced = 0, sync_token = NULL WHERE id = {0};
-         DELETE FROM event WHERE calendar_id = {0} AND uid = 'review';",
+         DELETE FROM event WHERE calendar_id = {0} AND uid = 'review';
+         DELETE FROM server_object WHERE calendar_id = {0} AND href LIKE '%/review.ics';",
         synced.work.0
     ));
     assert_eq!(synced.titles(), ["Standup"]);
