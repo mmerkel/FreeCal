@@ -9,17 +9,18 @@ Spec: "Change Journal" under Implementation Decisions; ADR 0009.
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** S
 
-- [ ] `event.id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, in a migration that rebuilds the `event` table with its rows, IDs and indexes, and starts the sequence above the highest ID the Change Journal names, so that no ID an entry holds is given out again
-- [ ] Undo still puts an Event back under its own ID (`Unit::put_back`); with no ID taken by another Event, its branch for a taken ID goes, and `Entry.uid`'s comment no longer says the UID tells Events apart
-- [ ] Core test: an Exception created, then deleted, then another Occurrence changed; the new Exception has another ID, and undoing the delete puts the first one back
-- [ ] Core test: after the migration, a new Event never gets an ID that a Change Journal entry holds, also when the Event with the highest ID was deleted before migrating
+- [x] `event.id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, in a migration that rebuilds the `event` table with its rows, IDs and indexes, and starts the sequence above the highest ID the Change Journal names, so that no ID an entry holds is given out again
+- [x] Undo still puts an Event back under its own ID (`Unit::put_back`); with no ID taken by another Event, its branch for a taken ID goes, and `Entry.uid`'s comment no longer says the UID tells Events apart
+- [x] Core test: an Exception created, then deleted, then another Occurrence changed; the new Exception has another ID, and undoing the delete puts the first one back
+- [x] Core test: after the migration, a new Event never gets an ID that a Change Journal entry holds, also when the Event with the highest ID was deleted before migrating
 
 Out of scope: per-Event undo and cascading (ticket 72); squashing migrations (ticket 63, which takes this schema into its baseline).
 
 ## Comments
 
 - 2026-10-24: Found while going through the IDs FreeCal uses: `(event_id, uid)` is unique for Events of different UIDs but not for Exceptions of one Recurring Event. Keying on the recurrence ID instead was rejected: "this and following" changes an Exception's recurrence ID, and a split makes new rows.
+- 2026-10-25: Done. Entries made before the migration can still name an ID another Event got since; `current` now reads the Event by ID alone and hashes it with its own UID, so undoing such an entry is refused (`ChangedSinceUnit`) rather than writing over that Event.

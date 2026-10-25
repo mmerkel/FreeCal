@@ -4,7 +4,8 @@
 mod support;
 
 use freecal_core::{
-    Calendar, CalendarId, Core, CoreError, Event, ExistingEvents, ImportFile, Signal, UnitId,
+    Calendar, CalendarId, Core, CoreError, Event, EventDraft, ExistingEvents, Frequency,
+    ImportFile, Occurrence, Repeat, RepeatEnd, Scope, Signal, UnitId,
 };
 use support::{Harness, all_day, calendar, date, draft, event, ics, timed};
 
@@ -339,13 +340,121 @@ mod an_event_changed_since_refuses_the_undo {
     }
 }
 
+/// The one Occurrence of a shown Calendar on `date`.
+fn the_one_on(core: &Core, date: &str) -> Occurrence {
+    let day = self::date(date);
+    let mut found = core.occurrences(day, day.succ_opt().unwrap()).unwrap();
+    assert_eq!(found.len(), 1, "one Occurrence on {date}");
+    found.remove(0)
+}
+
+/// Ticket 85: Exceptions share their Recurring Event's UID, so only an ID
+/// that is never given out again tells a new Exception from a deleted one.
 #[test]
-fn a_deleted_event_comes_back_beside_one_that_got_its_id_since() {
+fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let home = calendar(&core, "Home");
+    let yoga = EventDraft {
+        repeat: Some(Repeat {
+            frequency: Frequency::Weekly,
+            interval: 1,
+            end: RepeatEnd::Count { count: 3 },
+        }),
+        ..draft(
+            home.id,
+            "Yoga",
+            timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
+        )
+    };
+    let yoga = core.create_event(yoga).unwrap().value;
+    let first = the_one_on(&core, "2026-10-05");
+    let moved = core
+        .reschedule_occurrence(
+            yoga.id,
+            first.recurrence_id.as_deref().unwrap(),
+            Scope::This,
+            timed("2026-10-05T08:00:00", "2026-10-05T09:00:00"),
+        )
+        .unwrap()
+        .value;
+    let exception = core.event(moved.event_id).unwrap();
+    let deleted = core
+        .delete_occurrence(moved.event_id, moved.recurrence_id.as_deref().unwrap())
+        .unwrap()
+        .unit
+        .unwrap();
+    let second = the_one_on(&core, "2026-10-12");
+    let made_since = core
+        .reschedule_occurrence(
+            yoga.id,
+            second.recurrence_id.as_deref().unwrap(),
+            Scope::This,
+            timed("2026-10-12T08:00:00", "2026-10-12T09:00:00"),
+        )
+        .unwrap()
+        .value;
+    assert_ne!(made_since.event_id, exception.id);
+    let made_since = core.event(made_since.event_id).unwrap();
+
+    core.undo_unit(deleted).unwrap();
+
+    assert_eq!(core.event(exception.id).unwrap(), exception);
+    assert_eq!(core.event(made_since.id).unwrap(), made_since);
+    assert_eq!(the_one_on(&core, "2026-10-05").event_id, exception.id);
+}
+
+/// The `event` table as it was before ticket 85, whose IDs SQLite gave out
+/// again.
+const BEFORE_TICKET_85: &str = "
+    ALTER TABLE event RENAME TO event_85;
+    CREATE TABLE event (
+        id INTEGER PRIMARY KEY,
+        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        uid TEXT NOT NULL,
+        title TEXT NOT NULL,
+        all_day INTEGER NOT NULL,
+        start_at TEXT NOT NULL,
+        end_at TEXT NOT NULL,
+        start_zone TEXT,
+        end_zone TEXT,
+        start_utc INTEGER NOT NULL,
+        end_utc INTEGER NOT NULL,
+        location TEXT NOT NULL,
+        description TEXT NOT NULL,
+        description_html INTEGER NOT NULL DEFAULT 0,
+        zone_pinned INTEGER NOT NULL DEFAULT 0,
+        rrule TEXT,
+        exdates TEXT NOT NULL DEFAULT '',
+        recurrence_id TEXT,
+        server_href TEXT,
+        server_etag TEXT,
+        server_data TEXT,
+        CHECK (CASE WHEN all_day
+            THEN start_zone IS NULL AND end_zone IS NULL
+            ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
+    );
+    INSERT INTO event SELECT * FROM event_85;
+    DROP TABLE event_85;
+    CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
+    CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
+    PRAGMA user_version = 16;
+";
+
+#[test]
+fn after_migrating_a_new_event_never_gets_an_id_the_journal_holds() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let (home, dentist) = home_with_dentist(&harness, &core);
-    let deleted = core.delete_event(dentist.id).unwrap().unit.unwrap();
-    // SQLite gives a new Event the ID of the deleted one.
+    let lunch = core
+        .create_event(draft(home.id, "Lunch", all_day("2026-10-06", "2026-10-07")))
+        .unwrap()
+        .value;
+    let deleted = core.delete_event(lunch.id).unwrap().unit.unwrap();
+    drop(core);
+    harness.arrange_local_store(BEFORE_TICKET_85);
+    let core = harness.open();
+
     let made_since = core
         .create_event(draft(
             home.id,
@@ -354,19 +463,42 @@ fn a_deleted_event_comes_back_beside_one_that_got_its_id_since() {
         ))
         .unwrap()
         .value;
-    assert_eq!(made_since.id, dentist.id);
 
+    assert!(made_since.id.0 > lunch.id.0);
     core.undo_unit(deleted).unwrap();
-
+    assert_eq!(core.event(lunch.id).unwrap(), lunch);
+    assert_eq!(the_one(&core, "Dentist"), dentist);
     assert_eq!(core.event(made_since.id).unwrap(), made_since);
-    let back = the_one(&core, "Dentist");
-    assert_eq!(
-        back,
-        Event {
-            id: back.id,
-            ..dentist
-        }
-    );
+}
+
+/// Before ticket 85 an ID could be given out again; undoing the delete of
+/// an Event whose ID another Event has now would write over that one.
+#[test]
+fn undoing_the_delete_of_an_event_whose_id_was_given_out_before_migrating_is_refused() {
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let (home, _) = home_with_dentist(&harness, &core);
+    let lunch = core
+        .create_event(draft(home.id, "Lunch", all_day("2026-10-06", "2026-10-07")))
+        .unwrap()
+        .value;
+    let deleted = core.delete_event(lunch.id).unwrap().unit.unwrap();
+    drop(core);
+    harness.arrange_local_store(BEFORE_TICKET_85);
+    harness.arrange_local_store(&format!(
+        "INSERT INTO event (calendar_id, uid, title, all_day, start_at, end_at, start_utc,
+                            end_utc, location, description)
+         VALUES ({}, 'taken', 'Taken', 1, '2026-10-08', '2026-10-09', 0, 0, '', '');",
+        home.id.0
+    ));
+    let core = harness.open();
+    let taken = core.event(lunch.id).unwrap();
+    assert_eq!(taken.title, "Taken");
+
+    let refused = core.undo_unit(deleted);
+
+    assert!(matches!(refused, Err(CoreError::ChangedSinceUnit(id)) if id == deleted));
+    assert_eq!(core.event(lunch.id).unwrap(), taken);
 }
 
 #[test]

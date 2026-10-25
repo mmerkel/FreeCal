@@ -200,6 +200,55 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE calendar ADD COLUMN server_read_only INTEGER NOT NULL DEFAULT 0;
     ",
     ),
+    // Ticket 85: an Event's ID names it for good. Without AUTOINCREMENT,
+    // SQLite gave a new Event the ID of a deleted one that had the highest,
+    // and the Change Journal took the two for one Event. The sequence starts
+    // above every ID an Event or an entry holds.
+    Migration::Sql(
+        "
+    CREATE TABLE event_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        uid TEXT NOT NULL,
+        title TEXT NOT NULL,
+        all_day INTEGER NOT NULL,
+        start_at TEXT NOT NULL,
+        end_at TEXT NOT NULL,
+        start_zone TEXT,
+        end_zone TEXT,
+        start_utc INTEGER NOT NULL,
+        end_utc INTEGER NOT NULL,
+        location TEXT NOT NULL,
+        description TEXT NOT NULL,
+        description_html INTEGER NOT NULL DEFAULT 0,
+        zone_pinned INTEGER NOT NULL DEFAULT 0,
+        rrule TEXT,
+        exdates TEXT NOT NULL DEFAULT '',
+        recurrence_id TEXT,
+        server_href TEXT,
+        server_etag TEXT,
+        server_data TEXT,
+        CHECK (CASE WHEN all_day
+            THEN start_zone IS NULL AND end_zone IS NULL
+            ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
+    );
+    INSERT INTO event_new (id, calendar_id, uid, title, all_day, start_at, end_at,
+        start_zone, end_zone, start_utc, end_utc, location, description, description_html,
+        zone_pinned, rrule, exdates, recurrence_id, server_href, server_etag, server_data)
+    SELECT id, calendar_id, uid, title, all_day, start_at, end_at,
+        start_zone, end_zone, start_utc, end_utc, location, description, description_html,
+        zone_pinned, rrule, exdates, recurrence_id, server_href, server_etag, server_data
+    FROM event;
+    DROP TABLE event;
+    ALTER TABLE event_new RENAME TO event;
+    CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
+    CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
+    DELETE FROM sqlite_sequence WHERE name = 'event';
+    INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'event', COALESCE(MAX(id), 0)
+    FROM (SELECT id FROM event UNION ALL SELECT event_id FROM journal_entry);
+    ",
+    ),
 ];
 
 /// Whether a newly added server Calendar starts marked read-only, so that
