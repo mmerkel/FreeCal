@@ -24,6 +24,7 @@ Review risks left as they are:
 
 - [ ] architecture work
   - [ ] table with events, table with server objects; task of the later is related to sync, but (after tickets 86-89), it will also be used to associate events that belong to the same recurring event.  This does not feel right.
+    - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
   - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
     - [ ] naming wtih respect to events and recurrence - Loaded, Opened, Edited, Occurrence
   - [ ] also no single owner of events table (journal, store)
