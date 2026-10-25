@@ -2,7 +2,6 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] architecture work
-  - [ ] table with events, table with server objects; task of the later is related to sync, but (after tickets 86-89), it will also be used to associate events that belong to the same recurring event.  This does not feel right.
     - [ ] wouldn't things be easier if we force things into a simpler structure in the db?  e.g. each exception should correspond to an occurrence. if not, then ask the user what to do with it (ask once, it's also a setting), but we won't do two exceptions for an occurrence - this only adds mess to the code, while it's almost never needed.
     - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
     - [ ] two exceptions for one occurrence: why not show them both?
