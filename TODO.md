@@ -1,5 +1,8 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
+- [ ] simplify past tickets
+- [ ] discuss remainder of tickets below
+
 ## Ticket 08: recurrence scopes
 
 Choices to review:
@@ -17,14 +20,37 @@ Known limits:
 Review risks left as they are:
 
 - [ ] a Calendar removed during its first sync stops it only once a later page writes an Event; a page of only unreadable objects keeps fetching
-- [ ] server objects pass from the CalDAV client to the iCalendar reading as plain `(name, text)` pairs (`import::read_server_events`), not a named type
 
+## Simplify tickets 85-89
+
+Possible bug, for `/code-review`:
+
+- [ ] code that loops over all of `Loaded.exceptions` doesn't check "Event of its own" (`Loaded::of_its_own`): `delete_all` and `carry_exceptions` may delete Exceptions without their Recurring Event that `take` keeps
+
+Skipped:
+
+- [ ] split `Loaded.exceptions` in `Loaded::sorted` into those paired with an Occurrence and Events of their own, so callers can't forget the check (ties into the possible bug; changes behaviour)
+- [ ] do `Loaded::join` inside the writers that create or replace a Recurring Event (`Loaded::take`, `take_object`) instead of in import and sync
+- [ ] dedupe all Exceptions by `SEQUENCE` in `assemble`, joined ones too, and drop `latest` from `Loaded::take`
+- [ ] keep the "unreadable objects are fetched again" rule out of the CalDAV client (`Held.unreadable` in `caldav.rs`): sync passes the hrefs to fetch, so a future Remote (Google) needn't repeat it
+- [ ] unique index on `server_object (calendar_id, href)`, `objects_at` returning one object; unsure whether duplicates can arise
+- [ ] fewer `Loaded::of_uid` loads in import (`run`, up to three per Event) and sync (`join` loads even when a Recurring Event is stored; `moved` re-queries removed objects for each new one)
+- [ ] drop `journal::hash_as` and call `hash_with(…, None)` directly
+- [ ] one helper for writing a `StoredEvent` with a given recurrence ID (`take_exception`, `take_object`, `Loaded::join`)
+- [ ] `ReadFile` in import: one list of Events, split by `original` in `assemble`
+- [ ] old-row SQL test helper for the two migration tests in `journal.rs`
+- [ ] `reschedule` in `App.svelte`: avoid the `choice!` assertions
 
 # Global
 
+- [ ] squash db migrations
 - [ ] architecture work
   - [ ] table with events, table with server objects; task of the later is related to sync, but (after tickets 86-89), it will also be used to associate events that belong to the same recurring event.  This does not feel right.
     - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
+    - [ ] I would like to better understand how occurrences and exceptions work in ical and caldav
+      - [ ] how are they linked in Google calendar?
+      - [ ] Why is it needed that exceptions stay associated to their recurring event?
+    - [ ] two exceptions for one occurrence: why not show them both?
   - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
     - [ ] naming wtih respect to events and recurrence - Loaded, Opened, Edited, Occurrence
   - [ ] also no single owner of events table (journal, store)
