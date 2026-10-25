@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-**Effort:** XL
+**Effort:** L
 
 - [ ] Edits while the Account is Offline succeed locally and are queued
 - [ ] Queued changes are replayed when the network returns, in order, through the same conditional requests and Change Journal recording
@@ -22,3 +22,4 @@
 ## Comments
 - 2026-10-24: Start with a grilling on whether ADR 0010's structure is right for recording changes not yet sent: a pending mark on objects, rows without an object (not created yet) and objects without rows (deletes not sent), instead of the "queue" this ticket's wording assumes. Also: order of replay, and what the user sees as "not yet sent".
 - 2026-10-25 (grilling, ADR 0011): blocked by 91. The structure asked about above is decided: unsent changes are keys in `unsent_change` (Calendar, UID, recurrence ID, since), not a pending mark on objects; the three cases are read off rows and objects per key. Order of replay and what the user sees remain for this ticket's grilling.
+- 2026-10-25: Re-sized from XL to L. Ticket 91 brings the record of unsent changes with their `since`, and ticket 17 the sender that replay reuses; what's left is the replay trigger and its order, the counts and outlines, the reason shown, and the quit flow.
