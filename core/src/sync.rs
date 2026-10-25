@@ -32,7 +32,8 @@ pub(crate) fn apply(unit: &mut Unit, calendar_id: CalendarId, changes: &Changes)
 /// unreadable. A new object that holds a UID of rows of one of
 /// `moved_from`, the objects removed in the same sync, is that object moved
 /// to another address: it takes the object's place, which leaves
-/// `moved_from`.
+/// `moved_from`. A Recurring Event joins the Calendar's Exceptions that had
+/// none ([`Loaded::join`]).
 pub(crate) fn take(
     unit: &mut Unit,
     calendar_id: CalendarId,
@@ -49,6 +50,11 @@ pub(crate) fn take(
             Some(&object) => Some(object),
             None => moved(unit, &events, moved_from)?,
         };
+        for event in &events {
+            if event.rid.is_none() && event.incoming.rule.is_some() {
+                Loaded::of_uid(unit, calendar_id, event.uid)?.join(unit, &event.incoming.when)?;
+            }
+        }
         if !events.is_empty() {
             let object = unit.mirror(calendar_id, &one.object, object)?;
             event::take_object(unit, calendar_id, object, &events)?;
@@ -62,7 +68,8 @@ pub(crate) fn take(
 /// `events`, those of an object fetched with `batch`, as the object holds
 /// them: an Exception with the recurrence ID of the Occurrence it changed
 /// of its Recurring Event, the first in `batch`, otherwise the Calendar's.
-/// One without its Recurring Event is left out (ticket 88).
+/// One without its Recurring Event is an Event of its own, its recurrence
+/// ID in the zone it was given in (ticket 88).
 fn object_events<'a>(
     unit: &Unit,
     calendar_id: CalendarId,
@@ -88,10 +95,7 @@ fn object_events<'a>(
                     Some(when) => Some(when),
                     None => Loaded::of_uid(unit, calendar_id, &event.uid)?.recurring_when(),
                 };
-                match recurring.and_then(|when| event.recurrence_id_in(&when)) {
-                    Some(rid) => Some(rid),
-                    None => continue,
-                }
+                event.recurrence_id_in(recurring.as_ref())
             }
         };
         kept.push(ObjectEvent {

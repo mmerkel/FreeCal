@@ -800,6 +800,122 @@ mod server_objects {
         assert_eq!(synced.event("Standup moved").id, id);
     }
 
+    /// Exceptions without their Recurring Event, such as an invitation to
+    /// one Occurrence, are Events of their own until it arrives (ticket 88).
+    mod exceptions_alone {
+        use super::*;
+
+        /// `moved`, its recurrence ID given in New York's time: 04:00 there
+        /// is 08:00 UTC, the Occurrence's start.
+        fn moved_in_new_york(title: &str) -> String {
+            moved(title).replace(
+                "RECURRENCE-ID:20261012T080000Z",
+                "RECURRENCE-ID;TZID=America/New_York:20261012T040000",
+            )
+        }
+
+        /// The Calendar's Occurrences in October 2026, each with its title
+        /// and whether it is one of a Recurring Event.
+        fn shown(synced: &Synced) -> Vec<(String, bool)> {
+            synced
+                .core
+                .occurrences(date("2026-10-01"), date("2026-11-01"))
+                .unwrap()
+                .into_iter()
+                .map(|occurrence| (occurrence.title, occurrence.recurrence_id.is_some()))
+                .collect()
+        }
+
+        fn alone(title: &str) -> Vec<(String, bool)> {
+            vec![(title.to_owned(), false)]
+        }
+
+        fn weekly_with(title: &str) -> Vec<(String, bool)> {
+            ["Weekly", title, "Weekly"]
+                .into_iter()
+                .map(|title| (title.to_owned(), true))
+                .collect()
+        }
+
+        #[test]
+        fn shows_at_its_own_time_in_its_object() {
+            let synced = Synced::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
+
+            assert_eq!(shown(&synced), alone("Moved"));
+            let moved = synced.event("Moved");
+            assert_eq!(
+                moved.when,
+                support::timed("2026-10-12T11:00:00", "2026-10-12T12:00:00")
+            );
+            // With no Recurring Event to take the zone from, it keeps its own.
+            assert_eq!(
+                moved.recurrence_id.as_deref(),
+                Some("2026-10-12T04:00:00[America/New_York]")
+            );
+            assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+        }
+
+        #[test]
+        fn joins_its_recurring_event_when_that_arrives_in_another_object() {
+            let synced = Synced::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
+            let id = synced.event("Moved").id;
+            synced.write("weekly", weekly("Weekly"));
+
+            synced.sync();
+
+            assert_eq!(shown(&synced), weekly_with("Moved"));
+            let moved = synced.event("Moved");
+            assert_eq!(moved.id, id);
+            assert_eq!(moved.recurrence_id.as_deref(), Some("2026-10-12T08:00:00"));
+            assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+        }
+
+        #[test]
+        fn joins_its_recurring_event_when_its_object_comes_to_hold_it() {
+            let synced = Synced::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+            let id = synced.event("Moved").id;
+            synced.write(
+                "weekly",
+                ics(&format!("{}{}", recurring("Weekly"), moved("Moved again"))),
+            );
+
+            synced.sync();
+
+            assert_eq!(shown(&synced), weekly_with("Moved again"));
+            assert_eq!(synced.event("Moved again").id, id);
+        }
+
+        #[test]
+        fn a_known_object_that_comes_to_hold_only_it_keeps_it() {
+            let synced = Synced::with_files(&[(
+                "weekly",
+                ics(&format!("{}{}", recurring("Weekly"), moved("Moved"))),
+            )]);
+            let id = synced.event("Moved").id;
+            synced.write("weekly", ics(&moved("Moved again")));
+
+            synced.sync();
+
+            assert_eq!(shown(&synced), alone("Moved again"));
+            assert_eq!(synced.event("Moved again").id, id);
+        }
+
+        #[test]
+        fn one_that_matches_no_occurrence_stays_after_its_recurring_event_arrives() {
+            let synced = Synced::with_files(&[(
+                "weekly-odd",
+                ics(&moved("Odd").replace("20261012T080000Z", "20261013T080000Z")),
+            )]);
+            synced.write("weekly", weekly("Weekly"));
+
+            synced.sync();
+
+            let shown = shown(&synced);
+            assert_eq!(shown[2], ("Odd".to_owned(), false));
+            assert_eq!(shown.len(), 4);
+        }
+    }
+
     /// With a sync token, which lists only what changed since.
     #[test]
     fn an_object_freecal_couldnt_read_is_fetched_again_on_each_sync_until_it_reads() {

@@ -575,7 +575,13 @@ fn alone(
                 }
                 None => unit.create(&loaded.uid, &event)?,
             };
-            let recurrence_id = event.fields.recurrence_id.clone();
+            // One without its Recurring Event, or changing none of its
+            // Occurrences, is an Event of its own.
+            let recurrence_id = event
+                .fields
+                .recurrence_id
+                .clone()
+                .filter(|_| recurring.is_some() && changing.slot.is_some());
             Ok(edited(id, event, recurrence_id))
         }
     }

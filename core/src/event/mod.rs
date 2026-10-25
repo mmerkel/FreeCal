@@ -17,6 +17,7 @@ use chrono::NaiveDate;
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
+use crate::import::rejoined_id;
 use crate::journal::Unit;
 use crate::store::{Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
@@ -83,7 +84,9 @@ pub struct Occurrence {
     pub title: String,
     pub when: When,
     /// Which Occurrence of a Recurring Event this is: its original start, as
-    /// text that only the core reads. None for a single Event.
+    /// text that only the core reads. None for a single Event, and for an
+    /// Exception that is an Event of its own: without its Recurring Event,
+    /// or changing none of its Occurrences.
     pub recurrence_id: Option<String>,
 }
 
@@ -153,11 +156,6 @@ impl Loaded {
         Ok(Self::sorted(calendar_id, uid.to_owned(), events, None))
     }
 
-    /// No Events yet, of the Calendar `calendar_id` under a new UID.
-    pub fn new_uid(calendar_id: CalendarId) -> Self {
-        Self::sorted(calendar_id, new_uid(), Vec::new(), None)
-    }
-
     /// `events` sorted, with `opened`, if it isn't an Exception, as the
     /// Event.
     fn sorted(
@@ -191,10 +189,10 @@ impl Loaded {
         }
     }
 
-    /// Whether the Calendar has an Event with the UID that isn't an
-    /// Exception.
+    /// Whether the Calendar has an Event with the UID, an Exception without
+    /// its Recurring Event too.
     pub fn exists(&self) -> bool {
-        self.event.is_some()
+        self.event.is_some() || !self.exceptions.is_empty()
     }
 
     /// The Recurring Event, none when the Event doesn't repeat or is gone.
@@ -218,8 +216,11 @@ impl Loaded {
     /// Events with the UID, adding it if the Calendar has none (see [`Unit`]
     /// for the server object each gets). Exceptions are paired by the
     /// Occurrence they changed: those `incoming` has replace them or are
-    /// added, the latest of several for one Occurrence, and the others are
-    /// deleted. ADR 0007's rules 2 and 3 apply.
+    /// added, the latest of several for one Occurrence. The others are
+    /// deleted, but for Events of their own ([`Loaded::of_its_own`]), which
+    /// stay, joined beforehand ([`Loaded::join`]) if they had no Recurring
+    /// Event.
+    /// ADR 0007's rules 2 and 3 apply.
     pub fn take(&self, unit: &mut Unit, incoming: &ImportedEvent) -> Result<()> {
         let exceptions = latest(incoming.exceptions.iter().map(|exception| {
             let rid = exception
@@ -228,24 +229,24 @@ impl Loaded {
                 .and_then(rule::recurrence_id);
             (rid, exception)
         }));
-        let Some((id, previous)) = &self.event else {
-            let new = |fields| StoredEvent {
-                calendar_id: self.calendar_id,
-                fields,
-            };
-            unit.create(&self.uid, &new(fields(incoming, None)))?;
-            for (_, exception) in exceptions {
-                unit.create(&self.uid, &new(fields(exception, None)))?;
+        match &self.event {
+            Some((id, previous)) => unit.replace(
+                *id,
+                &StoredEvent {
+                    calendar_id: self.calendar_id,
+                    fields: fields_over(incoming, previous, None),
+                },
+            )?,
+            None => {
+                unit.create(
+                    &self.uid,
+                    &StoredEvent {
+                        calendar_id: self.calendar_id,
+                        fields: fields(incoming, None),
+                    },
+                )?;
             }
-            return Ok(());
-        };
-        unit.replace(
-            *id,
-            &StoredEvent {
-                calendar_id: self.calendar_id,
-                fields: fields_over(incoming, previous, None),
-            },
-        )?;
+        }
         let mut left: Vec<_> = self.exceptions.iter().collect();
         for (rid, exception) in exceptions {
             let same = rid.and_then(|rid| {
@@ -262,7 +263,67 @@ impl Loaded {
             self.write_exception(unit, previous, self, fields)?;
         }
         for stored in left {
-            unit.delete(stored.id)?;
+            if !self.of_its_own(stored) {
+                unit.delete(stored.id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Makes `incoming`, an Exception from a file without its Recurring
+    /// Event, one of the Events with the UID: an Exception of their
+    /// Recurring Event if they have one, otherwise an Event of its own
+    /// (ticket 88). It replaces the Exception for the same Occurrence or is
+    /// added, and the others stay. ADR 0007's rules 2 and 3 apply.
+    pub fn take_exception(&self, unit: &mut Unit, incoming: &ImportedEvent) -> Result<()> {
+        let rid = incoming
+            .recurrence_id_in(self.recurring_when().as_ref())
+            .as_deref()
+            .and_then(rule::recurrence_id);
+        let event = |fields: EventFields| StoredEvent {
+            calendar_id: self.calendar_id,
+            fields: EventFields {
+                recurrence_id: rid.clone(),
+                ..fields
+            },
+        };
+        match rid.as_deref().and_then(|rid| self.exception_at(rid)) {
+            Some(stored) => unit.replace(
+                stored.id,
+                &event(fields_over(incoming, &stored.fields, None)),
+            ),
+            None => unit
+                .create(&self.uid, &event(fields(incoming, None)))
+                .map(|_| ()),
+        }
+    }
+
+    /// Pairs the Exceptions with the UID with a Recurring Event at
+    /// `recurring` that they are about to get, if they have none yet: each
+    /// that was an Event of its own, its recurrence ID in the zone it was
+    /// given in, gets it normalised against the Recurring Event (ticket 88).
+    pub fn join(&self, unit: &mut Unit, recurring: &ImportedWhen) -> Result<()> {
+        if self.recurring().is_some() {
+            return Ok(());
+        }
+        for exception in &self.exceptions {
+            let joined = exception
+                .fields
+                .recurrence_id
+                .as_deref()
+                .and_then(|text| rejoined_id(text, recurring));
+            if let Some(joined) = joined {
+                unit.replace(
+                    exception.id,
+                    &StoredEvent {
+                        calendar_id: self.calendar_id,
+                        fields: EventFields {
+                            recurrence_id: Some(joined),
+                            ..exception.fields.clone()
+                        },
+                    },
+                )?;
+            }
         }
         Ok(())
     }
@@ -298,6 +359,18 @@ impl Loaded {
                 unit.create(&into.uid, &event)
             }
             None => unit.create(&into.uid, &event),
+        }
+    }
+
+    /// Whether `exception`, one of these Exceptions, is an Event of its own:
+    /// without their Recurring Event, or changing none of its Occurrences,
+    /// such as one for a cancelled Occurrence (ticket 88).
+    fn of_its_own(&self, exception: &Exception) -> bool {
+        match (self.recurring(), &exception.rid) {
+            (Some((_, fields)), Some(rid)) => {
+                !matches!(rule::occurrence_at(fields, rid), Ok(Some(_)))
+            }
+            _ => true,
         }
     }
 
@@ -352,7 +425,11 @@ pub(crate) struct Opened {
 
 impl Opened {
     pub fn load(source: &impl Source, id: EventId) -> Result<Self> {
-        let events = source.events_with_uid(Uid::Of(id))?;
+        Self::among(source.events_with_uid(Uid::Of(id))?, id)
+    }
+
+    /// The Event `id` of `events`, those with its UID.
+    fn among(events: Vec<UidEvent>, id: EventId) -> Result<Self> {
         let opened = events
             .iter()
             .find(|event| event.id == id)
@@ -373,6 +450,13 @@ impl Opened {
 
     fn is_exception(&self) -> bool {
         self.exception.is_some()
+    }
+
+    /// Whether it is an Exception that is an Event of its own
+    /// ([`Loaded::of_its_own`]).
+    fn is_of_its_own(&self) -> bool {
+        self.exception()
+            .is_some_and(|exception| self.loaded.of_its_own(exception))
     }
 
     fn id(&self) -> EventId {
@@ -400,11 +484,11 @@ impl Opened {
 
     /// The Event as the window shows it, in the Display Time Zone `zone`.
     /// An Exception repeats with its Recurring Event, which the editor can
-    /// change from it.
+    /// change from it, unless it is an Event of its own.
     pub fn to_event(&self, zone: Tz) -> Result<Event> {
         let fields = self.fields();
         let repeats = match &self.loaded.event {
-            Some((_, recurring)) if self.is_exception() => recurring,
+            Some((_, recurring)) if self.is_exception() && !self.is_of_its_own() => recurring,
             _ => fields,
         };
         let (repeat, custom_repeat) = rule::repeat_of(repeats);
@@ -426,11 +510,12 @@ impl Opened {
     }
 
     /// Deletes the Event, and with a Recurring Event or one of its
-    /// Exceptions, the whole Recurring Event with all its Exceptions.
+    /// Exceptions, the whole Recurring Event with all its Exceptions. An
+    /// Exception that is an Event of its own goes alone.
     pub fn delete(&self, unit: &mut Unit) -> Result<()> {
         match self.loaded.recurring() {
-            Some(_) => self.loaded.delete_all(unit),
-            None => unit.delete(self.id()),
+            Some(_) if !self.is_of_its_own() => self.loaded.delete_all(unit),
+            _ => unit.delete(self.id()),
         }
     }
 }
@@ -481,7 +566,8 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
 /// Recurring Events are expanded here, in wall time in their Event Time
 /// Zone, and their Exceptions stand in for the Occurrences they changed:
 /// of several for one Occurrence, as two server objects may hold, the first
-/// by ID.
+/// by ID. An Exception that is an Event of its own ([`Loaded::of_its_own`])
+/// has no recurrence ID.
 pub(crate) fn occurrences(
     store: &Store,
     from: NaiveDate,
@@ -491,14 +577,19 @@ pub(crate) fn occurrences(
     let range = StoredRange::new(from, to, zone);
     let mut occurrences = Vec::new();
     for event in store.shown_events_in(&range)? {
-        if let Some(rid) = event.fields.rid()
-            && store
-                .events_with_uid(Uid::Of(event.id))?
-                .into_iter()
+        let mut recurrence_id = event.fields.recurrence_id.clone();
+        if let Some(rid) = event.fields.rid() {
+            let with_uid = store.events_with_uid(Uid::Of(event.id))?;
+            if with_uid
+                .iter()
                 .find(|other| other.fields.rid().as_ref() == Some(&rid))
                 .is_some_and(|first| first.id != event.id)
-        {
-            continue;
+            {
+                continue;
+            }
+            if Opened::among(with_uid, event.id)?.is_of_its_own() {
+                recurrence_id = None;
+            }
         }
         let expanded = match event.fields.rule {
             None => None,
@@ -529,7 +620,7 @@ pub(crate) fn occurrences(
             }
             None => occurrences.push((
                 event.start_utc,
-                occurrence(&event.fields.when, event.fields.recurrence_id.clone())?,
+                occurrence(&event.fields.when, recurrence_id)?,
             )),
         }
     }
@@ -600,7 +691,7 @@ pub(crate) fn take_object(
 /// Occurrence: the one with the highest `SEQUENCE`, the first of equals.
 /// iCalendar allows several, revisions told apart by `SEQUENCE`, so this
 /// keeps an Occurrence to one Exception where the schema doesn't.
-fn latest<'a, K: PartialEq>(
+pub(crate) fn latest<'a, K: PartialEq>(
     versions: impl IntoIterator<Item = (K, &'a ImportedEvent)>,
 ) -> Vec<(K, &'a ImportedEvent)> {
     let mut kept: Vec<(K, &ImportedEvent)> = Vec::new();

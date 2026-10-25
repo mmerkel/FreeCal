@@ -11,8 +11,8 @@
 //! can't read gives no further Occurrences, so its Event shows as its first
 //! Occurrence only.
 //!
-//! A leaf of the Event module: outside it, only [`span`] and [`imported`]
-//! are open.
+//! A leaf of the Event module: outside it, only [`span`], [`imported`] and
+//! the text of recurrence IDs are open.
 
 use std::str::FromStr;
 
@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use super::when::{
     EventFields, StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text,
 };
+use crate::import::Time;
 use crate::{CoreError, Result};
 
 /// A repeat rule as the editor sets it.
@@ -467,14 +468,37 @@ pub(super) fn rule_until(fields: &EventFields, id: &str) -> Option<String> {
 }
 
 /// A recurrence ID as the Local Store writes it, from the text the window
-/// gives back; none when it isn't one.
-pub(super) fn recurrence_id(text: &str) -> Option<String> {
-    let start = start_of_id(text)?;
-    Some(if text.contains('T') {
-        wall_text(start)
-    } else {
-        start.date().to_string()
-    })
+/// gives back or a stored field; none when it isn't one.
+pub(crate) fn recurrence_id(text: &str) -> Option<String> {
+    original_of_id(text).map(|original| id_of_original(&original))
+}
+
+/// The recurrence ID of an Exception without its Recurring Event, which
+/// names the original start of the Occurrence it changed as a file gave it:
+/// a date, a wall time with no zone, or one in the zone it was given in,
+/// written after it as `2026-10-12T03:00:00[America/New_York]`. Paired with
+/// its Recurring Event, the zone goes (see [`crate::import`]).
+pub(crate) fn id_of_original(original: &Time) -> String {
+    match original {
+        Time::Date(date) => date.to_string(),
+        Time::Wall(wall, None) => wall_text(*wall),
+        Time::Wall(wall, Some(zone)) => format!("{}[{}]", wall_text(*wall), zone.name()),
+    }
+}
+
+/// The original start a recurrence ID as [`id_of_original`] writes it
+/// names; none when it isn't one, such as for a zone FreeCal doesn't know.
+pub(crate) fn original_of_id(text: &str) -> Option<Time> {
+    let (wall, zone) = match text.strip_suffix(']').and_then(|rest| rest.split_once('[')) {
+        Some((wall, zone)) => (wall, Some(zone.parse::<Tz>().ok()?)),
+        None => (text, None),
+    };
+    let start = start_of_id(wall)?;
+    match (wall.contains('T'), zone) {
+        (true, zone) => Some(Time::Wall(start, zone)),
+        (false, None) => Some(Time::Date(start.date())),
+        (false, Some(_)) => None,
+    }
 }
 
 /// `exdates` with `id` added, sorted and each once.

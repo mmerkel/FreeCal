@@ -180,7 +180,9 @@ export type Occurrence = {
 eventId: EventId, calendarId: CalendarId, title: string, when: When,
 /**
  * Which Occurrence of a Recurring Event this is: its original start, as
- * text that only the core reads. None for a single Event.
+ * text that only the core reads. None for a single Event, and for an
+ * Exception that is an Event of its own: without its Recurring Event,
+ * or changing none of its Occurrences.
  */
 recurrenceId: string | null, };
 

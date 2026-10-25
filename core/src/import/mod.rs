@@ -23,7 +23,7 @@ use icalendar::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::event::{Loaded, ServerObject, StoredWhen, instant, new_uid, rule, wall_text};
+use crate::event::{Loaded, ServerObject, StoredWhen, instant, latest, new_uid, rule, wall_text};
 use crate::journal::{Unit, UnitId};
 use crate::remote::Fetched;
 use crate::{CalendarId, CoreError, Result, StructuredText};
@@ -86,7 +86,8 @@ pub struct ImportPreview {
     pub existing_events: usize,
     /// The zones floating times were pinned to (ADR 0007), by zone name.
     pub pinned: Vec<PinnedZone>,
-    /// The Events, in file order, each UID once.
+    /// The Events, in file order, each UID once, then the Exceptions without
+    /// their Recurring Event, each an Event of its own.
     pub events: Vec<ImportedEvent>,
 }
 
@@ -145,8 +146,9 @@ pub struct ImportedEvent {
     /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
     /// separated by commas.
     pub exdates: String,
-    /// For an Exception, the recurrence ID of the Occurrence it changed, once
-    /// paired with its Recurring Event.
+    /// For an Exception, the recurrence ID of the Occurrence it changed:
+    /// paired with its Recurring Event, or as [`rule::id_of_original`] writes
+    /// it for one without.
     pub recurrence_id: Option<String>,
     /// Its `SEQUENCE`, which tells revisions of one Event apart: of several
     /// for one Occurrence, the highest is the latest.
@@ -168,11 +170,14 @@ impl ImportedEvent {
     }
 
     /// For an Exception, the recurrence ID of the Occurrence it changed of a
-    /// Recurring Event at `recurring`, as the Local Store writes it.
-    pub(crate) fn recurrence_id_in(&self, recurring: &ImportedWhen) -> Option<String> {
-        self.original
-            .as_ref()
-            .map(|original| recurrence_id_of(original, recurring))
+    /// Recurring Event at `recurring`, as the Local Store writes it; without
+    /// one, its original start as given, in the zone it was given in.
+    pub(crate) fn recurrence_id_in(&self, recurring: Option<&ImportedWhen>) -> Option<String> {
+        let original = self.original.as_ref()?;
+        Some(match recurring {
+            Some(recurring) => recurrence_id_of(original, recurring),
+            None => rule::id_of_original(original),
+        })
     }
 }
 
@@ -221,7 +226,8 @@ pub struct ImportOutcome {
 
 /// Runs the import `preview` in `unit`, which records each Event's previous
 /// version. Whether an Event exists is looked up again rather than taken from
-/// the preview.
+/// the preview, once per UID, as an Exception without its Recurring Event is
+/// an Event of its own with its Recurring Event's UID.
 pub(crate) fn run(
     unit: &mut Unit,
     preview: &ImportPreview,
@@ -235,24 +241,40 @@ pub(crate) fn run(
         updated: 0,
         skipped: 0,
     };
+    // Each UID's: whether the Calendar has it, and the UID its Events are
+    // written under, none when they are skipped.
+    let mut decided: HashMap<&str, (bool, Option<String>)> = HashMap::new();
     for event in &preview.events {
-        let loaded = Loaded::of_uid(unit, calendar_id, &event.uid)?;
-        match (loaded.exists(), existing) {
-            (true, ExistingEvents::Skip) => outcome.skipped += 1,
-            (true, ExistingEvents::Update) => {
-                outcome.updated += 1;
-                loaded.take(unit, event)?;
-            }
-            (exists, _) => {
-                outcome.imported += 1;
-                // A copy is added under a UID of its own.
-                let loaded = if exists {
-                    Loaded::new_uid(calendar_id)
-                } else {
-                    loaded
+        let (exists, into) = match decided.get(event.uid.as_str()) {
+            Some(decision) => decision.clone(),
+            None => {
+                let exists = Loaded::of_uid(unit, calendar_id, &event.uid)?.exists();
+                let into = match (exists, existing) {
+                    (true, ExistingEvents::Skip) => None,
+                    // A copy is added under a UID of its own.
+                    (true, ExistingEvents::Copy) => Some(new_uid()),
+                    _ => Some(event.uid.clone()),
                 };
-                loaded.take(unit, event)?;
+                decided.insert(&event.uid, (exists, into.clone()));
+                (exists, into)
             }
+        };
+        let Some(uid) = into else {
+            outcome.skipped += 1;
+            continue;
+        };
+        if exists && existing == ExistingEvents::Update {
+            outcome.updated += 1;
+        } else {
+            outcome.imported += 1;
+        }
+        if event.rule.is_some() {
+            Loaded::of_uid(unit, calendar_id, &uid)?.join(unit, &event.when)?;
+        }
+        let loaded = Loaded::of_uid(unit, calendar_id, &uid)?;
+        match event.original {
+            None => loaded.take(unit, event)?,
+            Some(_) => loaded.take_exception(unit, event)?,
         }
     }
     Ok(outcome)
@@ -311,9 +333,10 @@ pub(crate) fn read_server_objects(objects: Vec<ServerObject>, zone: Tz) -> Vec<F
 }
 
 /// The Events of `.ics` files read together, in order and each UID once.
-/// An Exception joins its Recurring Event; one without it in the files is
-/// left out. Several for one Occurrence all join, for [`Loaded`] to keep
-/// the latest.
+/// An Exception joins its Recurring Event; several for one Occurrence all
+/// join, for [`Loaded`] to keep the latest. Those without it in the files
+/// follow, each an Event of its own (ticket 88), the latest of several for
+/// one Occurrence.
 fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
     let mut seen = HashMap::new();
     let mut events: Vec<ImportedEvent> = Vec::new();
@@ -327,18 +350,35 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         }
         exceptions.extend(read.exceptions);
     }
+    let mut without_recurring = Vec::new();
     for mut exception in exceptions {
-        let Some(&index) = seen.get(&exception.uid) else {
-            continue;
-        };
-        let recurring = &mut events[index];
-        if recurring.rule.is_none() {
-            continue;
+        let recurring = seen
+            .get(&exception.uid)
+            .map(|&index| &mut events[index])
+            .filter(|recurring| recurring.rule.is_some());
+        exception.recurrence_id =
+            exception.recurrence_id_in(recurring.as_ref().map(|recurring| &recurring.when));
+        match recurring {
+            Some(recurring) => recurring.exceptions.push(exception),
+            None => without_recurring.push(exception),
         }
-        exception.recurrence_id = exception.recurrence_id_in(&recurring.when);
-        recurring.exceptions.push(exception);
     }
+    let alone = latest(without_recurring.iter().map(|exception| {
+        let occurrence = exception
+            .recurrence_id
+            .as_deref()
+            .and_then(rule::recurrence_id);
+        ((exception.uid.as_str(), occurrence), exception)
+    }));
+    events.extend(alone.into_iter().map(|(_, exception)| exception.clone()));
     events
+}
+
+/// The recurrence ID `text` of an Exception without its Recurring Event, as
+/// [`rule::id_of_original`] writes it, normalised against its Recurring Event
+/// at `recurring` once it arrives; none when it isn't one.
+pub(crate) fn rejoined_id(text: &str, recurring: &ImportedWhen) -> Option<String> {
+    rule::original_of_id(text).map(|original| recurrence_id_of(&original, recurring))
 }
 
 /// The `.ics` files in `file`, each with the name its errors give: the file
@@ -787,6 +827,35 @@ mod tests {
         let uids = store.event_uids(calendar_id).unwrap();
         assert_eq!(uids.len(), 2);
         assert!(uids.contains("kept"));
+    }
+
+    /// A stored field is untrusted: only a zone FreeCal knows reads.
+    #[test]
+    fn the_recurrence_id_of_an_exception_alone_reads_back_with_its_zone() {
+        let wall = NaiveDate::from_ymd_opt(2026, 10, 12)
+            .unwrap()
+            .and_hms_opt(3, 0, 0)
+            .unwrap();
+        for original in [
+            Time::Date(wall.date()),
+            Time::Wall(wall, None),
+            Time::Wall(wall, Some(chrono_tz::America::New_York)),
+        ] {
+            let text = rule::id_of_original(&original);
+            assert_eq!(rule::original_of_id(&text), Some(original), "{text}");
+        }
+        assert_eq!(
+            rule::recurrence_id("2026-10-12T3:0:0[America/New_York]").as_deref(),
+            Some("2026-10-12T03:00:00[America/New_York]")
+        );
+        for unreadable in [
+            "2026-10-12T03:00:00[<img src=x>]",
+            "2026-10-12T03:00:00[]",
+            "2026-10-12[America/New_York]",
+            "2026-10-12T03:00:00[America/New_York",
+        ] {
+            assert_eq!(rule::original_of_id(unreadable), None, "{unreadable}");
+        }
     }
 
     #[test]

@@ -725,3 +725,270 @@ fn a_rule_that_repeats_every_second_from_long_ago_doesnt_stall_the_grid() {
 
     occurrences(&core, "2026-10-01", "2026-11-01");
 }
+
+/// Exceptions without their Recurring Event, such as an invitation to one
+/// Occurrence, are Events of their own until it arrives (ticket 88).
+mod exceptions_alone {
+    use super::*;
+
+    /// An invitation to the Occurrence on 12 October of `WEEKLY_FROM_A_FILE`,
+    /// moved to 13:00, its recurrence ID given in New York's time: 03:00
+    /// there is 09:00 in Berlin.
+    const INVITATION: &str = "BEGIN:VEVENT\nUID:team\nSUMMARY:Team (invited)\n\
+         RECURRENCE-ID;TZID=America/New_York:20261012T030000\n\
+         DTSTART;TZID=Europe/Berlin:20261012T130000\nDTEND;TZID=Europe/Berlin:20261012T140000\n\
+         END:VEVENT\n";
+
+    /// The Exception `WEEKLY_FROM_A_FILE` has, of 26 October.
+    const MOVED: &str = "BEGIN:VEVENT\nUID:team\nSUMMARY:Team (moved)\n\
+         RECURRENCE-ID;TZID=Europe/Berlin:20261026T090000\n\
+         DTSTART;TZID=Europe/Berlin:20261026T110000\nDTEND;TZID=Europe/Berlin:20261026T120000\n\
+         END:VEVENT\n";
+
+    /// Each Occurrence in October and November with its title and whether
+    /// it is one of a Recurring Event.
+    fn shown(core: &Core) -> Vec<(String, When, bool)> {
+        occurrences(core, "2026-10-01", "2026-11-30")
+            .into_iter()
+            .map(|occurrence| {
+                let of_recurring = occurrence.recurrence_id.is_some();
+                (occurrence.title, occurrence.when, of_recurring)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shows_at_its_own_time_and_edits_as_a_single_event() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        let file = ImportFile::new("invitation.ics", ics(INVITATION));
+        let preview = core.preview_import(&file, home.id).unwrap();
+        assert_eq!((preview.new_events, preview.existing_events), (1, 0));
+
+        core.run_import(&preview, ExistingEvents::Update).unwrap();
+
+        let when = timed("2026-10-12T13:00:00", "2026-10-12T14:00:00");
+        assert_eq!(shown(&core), [("Team (invited)".to_owned(), when, false)]);
+        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let invited = core.event(id).unwrap();
+        // With no Recurring Event to take the zone from, it keeps its own.
+        assert_eq!(
+            invited.recurrence_id.as_deref(),
+            Some("2026-10-12T03:00:00[America/New_York]")
+        );
+        assert_eq!(invited.repeat, None);
+        core.edit_event(id, draft(home.id, "Team (renamed)", when))
+            .unwrap();
+        assert_eq!(shown(&core), [("Team (renamed)".to_owned(), when, false)]);
+        core.delete_event(id).unwrap();
+        assert!(shown(&core).is_empty());
+    }
+
+    #[test]
+    fn a_later_import_of_its_recurring_event_pairs_it_with_its_occurrence() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        import(&core, home.id, INVITATION, ExistingEvents::Update);
+        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+
+        import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+
+        let titles: Vec<_> = shown(&core)
+            .into_iter()
+            .map(|(title, _, of_recurring)| (title, of_recurring))
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                ("Team".to_owned(), true),
+                ("Team (invited)".to_owned(), true),
+                ("Team (moved)".to_owned(), true),
+                ("Team".to_owned(), true),
+            ]
+        );
+        let invited = core.event(id).unwrap();
+        assert_eq!(
+            invited.recurrence_id.as_deref(),
+            Some("2026-10-12T09:00:00")
+        );
+        assert_eq!(
+            invited.repeat,
+            Some(repeat(Frequency::Weekly, 1, until("2026-11-02")))
+        );
+    }
+
+    /// Ticket 87's rule: an Occurrence has one Exception.
+    #[test]
+    fn the_recurring_events_own_exception_for_the_occurrence_replaces_it() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        import(
+            &core,
+            home.id,
+            &MOVED.replace("Team (moved)", "Team (invited)"),
+            ExistingEvents::Update,
+        );
+        let id = occurrences(&core, "2026-10-26", "2026-10-27")[0].event_id;
+
+        import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+
+        let moved = occurrences(&core, "2026-10-26", "2026-10-27");
+        assert_eq!(
+            moved
+                .iter()
+                .map(|occurrence| (occurrence.title.as_str(), occurrence.event_id))
+                .collect::<Vec<_>>(),
+            [("Team (moved)", id)]
+        );
+        assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
+    }
+
+    #[test]
+    fn one_that_matches_no_occurrence_stays_an_event_of_its_own() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        // 19 October is cancelled.
+        let cancelled = INVITATION
+            .replace("20261012T030000", "20261019T030000")
+            .replace("20261012T1", "20261019T1");
+        import(&core, home.id, &cancelled, ExistingEvents::Update);
+
+        import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+
+        let invited = (
+            "Team (invited)".to_owned(),
+            timed("2026-10-19T13:00:00", "2026-10-19T14:00:00"),
+            false,
+        );
+        assert_eq!(shown(&core)[2], invited);
+        let id = occurrences(&core, "2026-10-19", "2026-10-20")[0].event_id;
+        assert_eq!(core.event(id).unwrap().repeat, None);
+        // Another import of the Recurring Event leaves it.
+        import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+        assert_eq!(shown(&core)[2], invited);
+        assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 5);
+        // Deleting it deletes it alone.
+        core.delete_event(id).unwrap();
+        assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
+    }
+
+    #[test]
+    fn an_all_day_one_keeps_its_date_and_joins_by_it() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        let daily = "BEGIN:VEVENT\nUID:trip\nSUMMARY:Trip\nDTSTART;VALUE=DATE:20261005\n\
+             DTEND;VALUE=DATE:20261006\nRRULE:FREQ=DAILY;COUNT=3\nEND:VEVENT\n";
+        let changed = "BEGIN:VEVENT\nUID:trip\nSUMMARY:Trip (changed)\n\
+             RECURRENCE-ID;VALUE=DATE:20261006\nDTSTART;VALUE=DATE:20261006\n\
+             DTEND;VALUE=DATE:20261007\nEND:VEVENT\n";
+        import(&core, home.id, changed, ExistingEvents::Update);
+        let id = occurrences(&core, "2026-10-06", "2026-10-07")[0].event_id;
+        assert_eq!(
+            core.event(id).unwrap().recurrence_id.as_deref(),
+            Some("2026-10-06")
+        );
+
+        import(&core, home.id, daily, ExistingEvents::Update);
+
+        assert_eq!(
+            shown(&core),
+            [
+                ("Trip".to_owned(), all_day("2026-10-05", "2026-10-06"), true),
+                (
+                    "Trip (changed)".to_owned(),
+                    all_day("2026-10-06", "2026-10-07"),
+                    true
+                ),
+                ("Trip".to_owned(), all_day("2026-10-07", "2026-10-08"), true),
+            ]
+        );
+    }
+
+    /// Another import of only Exceptions, or the same file again.
+    #[test]
+    fn another_import_of_it_updates_it_and_leaves_the_others() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        import(
+            &core,
+            home.id,
+            &format!("{INVITATION}{MOVED}"),
+            ExistingEvents::Update,
+        );
+        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let file = ImportFile::new(
+            "invitation.ics",
+            ics(&INVITATION.replace("Team (invited)", "Team (updated)")),
+        );
+        let preview = core.preview_import(&file, home.id).unwrap();
+        assert_eq!((preview.new_events, preview.existing_events), (0, 1));
+
+        core.run_import(&preview, ExistingEvents::Update).unwrap();
+
+        let titles: Vec<_> = occurrences(&core, "2026-10-01", "2026-11-30")
+            .into_iter()
+            .map(|occurrence| (occurrence.title, occurrence.event_id == id))
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                ("Team (updated)".to_owned(), true),
+                ("Team (moved)".to_owned(), false)
+            ]
+        );
+    }
+
+    /// iCalendar allows several revisions of one Exception, told apart by
+    /// `SEQUENCE`.
+    #[test]
+    fn of_two_for_one_occurrence_in_a_file_the_highest_sequence_is_kept() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        let later = INVITATION
+            .replace("Team (invited)", "Team (invited later)")
+            .replace("END:VEVENT", "SEQUENCE:1\nEND:VEVENT");
+
+        import(
+            &core,
+            home.id,
+            &format!("{later}{INVITATION}"),
+            ExistingEvents::Update,
+        );
+
+        let titles: Vec<_> = shown(&core).into_iter().map(|(title, ..)| title).collect();
+        assert_eq!(titles, ["Team (invited later)"]);
+    }
+
+    #[test]
+    fn skip_leaves_it_and_copy_adds_it_again_under_a_new_uid() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        let both = format!("{INVITATION}{MOVED}");
+        import(&core, home.id, &both, ExistingEvents::Update);
+        let changed = both.replace("Team (", "Team again (");
+
+        import(&core, home.id, &changed, ExistingEvents::Skip);
+        assert_eq!(shown(&core).len(), 2);
+        import(&core, home.id, &changed, ExistingEvents::Copy);
+
+        let mut titles: Vec<_> = shown(&core).into_iter().map(|(title, ..)| title).collect();
+        titles.sort();
+        assert_eq!(
+            titles,
+            [
+                "Team (invited)",
+                "Team (moved)",
+                "Team again (invited)",
+                "Team again (moved)"
+            ]
+        );
+    }
+}
