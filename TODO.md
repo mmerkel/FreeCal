@@ -1,6 +1,5 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
-- [ ] simplify past tickets
 - [ ] discuss remainder of tickets below
 
 ## Ticket 08: recurrence scopes
