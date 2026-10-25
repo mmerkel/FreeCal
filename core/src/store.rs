@@ -17,115 +17,97 @@ use crate::{
 
 /// Schema migrations, applied in order. `PRAGMA user_version` records how many
 /// have run.
-const MIGRATIONS: &[Migration] = &[
-    Migration::Sql(
-        "
+const MIGRATIONS: &[&str] = &[
+    // The baseline: the schema as it was when the migrations of development
+    // were squashed (ticket 63, ADR 0008). The Local Account is the one row
+    // a new Local Store starts with; `app_state` has exactly one row.
+    //
+    // A Calendar's `read_only` is the user's mark, `server_read_only` whether
+    // its server doesn't allow changing it. A server Account's Calendar has
+    // the `url` it lives at, which names its Available Calendar; whether its
+    // first sync finished; and the sync token (RFC 6578) its server gave for
+    // the last sync, if it gives them. A CalDAV Account's password lives in
+    // the keyring under `keyring_key`.
+    //
+    // An Event keeps wall times with an Event Time Zone each for start and
+    // end, with the UTC instants derived (ADR 0007). AUTOINCREMENT keeps an
+    // Event's ID from being given out again, so that the Change Journal
+    // never takes two Events for one. An Exception is an Event with the UID
+    // of its Recurring Event and the recurrence ID of the Occurrence it
+    // changed.
+    //
+    // Server objects mirror the server, with their data as received in its
+    // `format`, `pending` once FreeCal has changes to send, and `unreadable`
+    // once FreeCal couldn't read the server's version, so that the mirror
+    // holds the last version it could (ADR 0010).
+    //
+    // A Change Journal entry holds the Event's previous version with its
+    // Calendar, none when the change created it, and the hash of its new
+    // version, none when the change deleted it (ADR 0009). None of its
+    // `event_id`, `calendar_id` and `object_id` has a foreign key, because
+    // what they name may be gone since.
+    "
     CREATE TABLE account (
         id INTEGER PRIMARY KEY,
-        provider TEXT NOT NULL
+        provider TEXT NOT NULL,
+        url TEXT,
+        username TEXT,
+        keyring_key TEXT
     );
+    CREATE UNIQUE INDEX one_local_account ON account (provider) WHERE provider = 'local';
     INSERT INTO account (provider) VALUES ('local');
-    ",
-    ),
-    Migration::Sql(
-        "
     CREATE TABLE calendar (
         id INTEGER PRIMARY KEY,
         account_id INTEGER NOT NULL REFERENCES account (id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         colour TEXT NOT NULL,
-        shown INTEGER NOT NULL DEFAULT 1
+        shown INTEGER NOT NULL DEFAULT 1,
+        read_only INTEGER NOT NULL DEFAULT 0,
+        url TEXT,
+        synced INTEGER NOT NULL DEFAULT 0,
+        sync_token TEXT,
+        server_read_only INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX calendar_account ON calendar (account_id);
-    ",
-    ),
-    Migration::Sql(
-        "
-    ALTER TABLE calendar ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+    CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
+    CREATE TABLE server_object (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        href TEXT NOT NULL,
+        etag TEXT,
+        data TEXT NOT NULL,
+        format TEXT NOT NULL,
+        pending INTEGER NOT NULL DEFAULT 0,
+        unreadable INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
     CREATE TABLE event (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         uid TEXT NOT NULL,
         title TEXT NOT NULL,
         all_day INTEGER NOT NULL,
         start_at TEXT NOT NULL,
         end_at TEXT NOT NULL,
-        time_zone TEXT,
-        location TEXT NOT NULL,
-        description TEXT NOT NULL,
-        description_html INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX event_calendar_start ON event (calendar_id, start_at);
-    ",
-    ),
-    Migration::Sql(
-        "
-    CREATE TABLE app_state (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        view TEXT NOT NULL DEFAULT 'month'
-    );
-    INSERT INTO app_state (id) VALUES (1);
-    ",
-    ),
-    Migration::Sql(
-        "
-    ALTER TABLE app_state ADD COLUMN appearance TEXT NOT NULL DEFAULT 'system';
-    ",
-    ),
-    Migration::Code(event_times_as_wall_time),
-    Migration::Sql(
-        "
-    ALTER TABLE app_state ADD COLUMN sidebar_shown INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN sidebar_width REAL;
-    ",
-    ),
-    Migration::Sql(
-        "
-    CREATE UNIQUE INDEX one_local_account ON account (provider) WHERE provider = 'local';
-    ",
-    ),
-    // Ticket 58: the pinned mark (ADR 0007) and the Change Journal's imports.
-    // An entry holds the Event's previous version, or none when the import
-    // created it; `event_id` has no foreign key because the Event may be
-    // deleted since.
-    Migration::Sql(
-        "
-    ALTER TABLE event ADD COLUMN zone_pinned INTEGER NOT NULL DEFAULT 0;
-    CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
-    CREATE TABLE journal_import (
-        id INTEGER PRIMARY KEY,
-        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
-        made_at INTEGER NOT NULL
-    );
-    CREATE TABLE journal_entry (
-        id INTEGER PRIMARY KEY,
-        import_id INTEGER NOT NULL REFERENCES journal_import (id) ON DELETE CASCADE,
-        event_id INTEGER NOT NULL,
-        uid TEXT NOT NULL,
-        created INTEGER NOT NULL,
-        title TEXT,
-        all_day INTEGER,
-        start_at TEXT,
-        end_at TEXT,
         start_zone TEXT,
         end_zone TEXT,
-        location TEXT,
-        description TEXT,
-        description_html INTEGER,
-        zone_pinned INTEGER
+        start_utc INTEGER NOT NULL,
+        end_utc INTEGER NOT NULL,
+        location TEXT NOT NULL,
+        description TEXT NOT NULL,
+        description_html INTEGER NOT NULL DEFAULT 0,
+        zone_pinned INTEGER NOT NULL DEFAULT 0,
+        rrule TEXT,
+        exdates TEXT NOT NULL DEFAULT '',
+        recurrence_id TEXT,
+        object_id INTEGER REFERENCES server_object (id) ON DELETE SET NULL,
+        CHECK (CASE WHEN all_day
+            THEN start_zone IS NULL AND end_zone IS NULL
+            ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
     );
-    CREATE INDEX journal_entry_import ON journal_entry (import_id);
-    ",
-    ),
-    // Ticket 69: the Change Journal records every change (ADR 0009). An entry
-    // holds the Event's previous version with its Calendar, none when the
-    // change created it, and the hash of its new version, none when the
-    // change deleted it. Neither `event_id` nor `calendar_id` has a foreign
-    // key, because the Event or the Calendar may be deleted since.
-    Migration::Sql(
-        "
-    DROP TABLE journal_entry;
-    DROP TABLE journal_import;
+    CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
+    CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
+    CREATE INDEX event_object ON event (object_id);
     CREATE TABLE journal_unit (
         id INTEGER PRIMARY KEY,
         origin TEXT NOT NULL,
@@ -148,115 +130,24 @@ const MIGRATIONS: &[Migration] = &[
         location TEXT,
         description TEXT,
         description_html INTEGER,
-        zone_pinned INTEGER
+        zone_pinned INTEGER,
+        rrule TEXT,
+        exdates TEXT,
+        recurrence_id TEXT,
+        object_id INTEGER
     );
     CREATE INDEX journal_entry_unit ON journal_entry (unit_id);
     CREATE INDEX journal_entry_event ON journal_entry (event_id, uid);
-    ",
-    ),
-    Migration::Code(recurring_events),
-    // Ticket 76: server Accounts. A CalDAV Account has its server's URL and
-    // a username; its password lives in the keyring under `keyring_key`.
-    Migration::Sql(
-        "
-    ALTER TABLE account ADD COLUMN url TEXT;
-    ALTER TABLE account ADD COLUMN username TEXT;
-    ALTER TABLE account ADD COLUMN keyring_key TEXT;
-    ",
-    ),
-    // Ticket 78: a server Account's Calendar has the URL it lives at on the
-    // server, which names its Available Calendar; none for a Local Calendar.
-    Migration::Sql(
-        "
-    ALTER TABLE calendar ADD COLUMN url TEXT;
-    CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
-    ",
-    ),
-    // Ticket 81: a server Event's original server data (ADR 0004), which the
-    // Change Journal's entries hold too, and its hashes cover.
-    Migration::Sql(
-        "
-    ALTER TABLE event ADD COLUMN server_href TEXT;
-    ALTER TABLE event ADD COLUMN server_etag TEXT;
-    ALTER TABLE event ADD COLUMN server_data TEXT;
-    ALTER TABLE journal_entry ADD COLUMN server_href TEXT;
-    ALTER TABLE journal_entry ADD COLUMN server_etag TEXT;
-    ALTER TABLE journal_entry ADD COLUMN server_data TEXT;
-    ",
-    ),
-    // Ticket 82: how far a server Account's Calendar is synced: whether its
-    // first sync finished, and the sync token (RFC 6578) its server gave
-    // for the last sync, if it gives them.
-    Migration::Sql(
-        "
-    ALTER TABLE calendar ADD COLUMN synced INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE calendar ADD COLUMN sync_token TEXT;
-    ",
-    ),
-    // Ticket 56: whether a server Account's Calendar is read-only because
-    // its server doesn't allow changing it. `read_only` is the user's mark.
-    Migration::Sql(
-        "
-    ALTER TABLE calendar ADD COLUMN server_read_only INTEGER NOT NULL DEFAULT 0;
-    ",
-    ),
-    // Ticket 85: an Event's ID names it for good. Without AUTOINCREMENT,
-    // SQLite gave a new Event the ID of a deleted one that had the highest,
-    // and the Change Journal took the two for one Event. The sequence starts
-    // above every ID an Event or an entry holds.
-    Migration::Sql(
-        "
-    CREATE TABLE event_new (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
-        uid TEXT NOT NULL,
-        title TEXT NOT NULL,
-        all_day INTEGER NOT NULL,
-        start_at TEXT NOT NULL,
-        end_at TEXT NOT NULL,
-        start_zone TEXT,
-        end_zone TEXT,
-        start_utc INTEGER NOT NULL,
-        end_utc INTEGER NOT NULL,
-        location TEXT NOT NULL,
-        description TEXT NOT NULL,
-        description_html INTEGER NOT NULL DEFAULT 0,
-        zone_pinned INTEGER NOT NULL DEFAULT 0,
-        rrule TEXT,
-        exdates TEXT NOT NULL DEFAULT '',
-        recurrence_id TEXT,
-        server_href TEXT,
-        server_etag TEXT,
-        server_data TEXT,
-        CHECK (CASE WHEN all_day
-            THEN start_zone IS NULL AND end_zone IS NULL
-            ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
+    CREATE TABLE app_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        view TEXT NOT NULL DEFAULT 'month',
+        appearance TEXT NOT NULL DEFAULT 'system',
+        time_zone_rules TEXT NOT NULL DEFAULT '',
+        sidebar_shown INTEGER NOT NULL DEFAULT 1,
+        sidebar_width REAL
     );
-    INSERT INTO event_new (id, calendar_id, uid, title, all_day, start_at, end_at,
-        start_zone, end_zone, start_utc, end_utc, location, description, description_html,
-        zone_pinned, rrule, exdates, recurrence_id, server_href, server_etag, server_data)
-    SELECT id, calendar_id, uid, title, all_day, start_at, end_at,
-        start_zone, end_zone, start_utc, end_utc, location, description, description_html,
-        zone_pinned, rrule, exdates, recurrence_id, server_href, server_etag, server_data
-    FROM event;
-    DROP TABLE event;
-    ALTER TABLE event_new RENAME TO event;
-    CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
-    CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
-    DELETE FROM sqlite_sequence WHERE name = 'event';
-    INSERT INTO sqlite_sequence (name, seq)
-    SELECT 'event', COALESCE(MAX(id), 0)
-    FROM (SELECT id FROM event UNION ALL SELECT event_id FROM journal_entry);
+    INSERT INTO app_state (id) VALUES (1);
     ",
-    ),
-    Migration::Code(server_objects),
-    // Ticket 87: whether FreeCal couldn't read the server's version of an
-    // object, so that the mirror holds the last version it could.
-    Migration::Sql(
-        "
-    ALTER TABLE server_object ADD COLUMN unreadable INTEGER NOT NULL DEFAULT 0;
-    ",
-    ),
 ];
 
 /// Whether a newly added server Calendar starts marked read-only, so that
@@ -284,168 +175,9 @@ fn add_starting_calendars(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
-enum Migration {
-    Sql(&'static str),
-    Code(fn(&Transaction) -> Result<()>),
-}
-
-impl Migration {
-    fn run(&self, tx: &Transaction) -> Result<()> {
-        match self {
-            Migration::Sql(sql) => Ok(tx.execute_batch(sql)?),
-            Migration::Code(migrate) => migrate(tx),
-        }
-    }
-}
-
-/// Ticket 35 (ADR 0007): timed Events become wall times with an Event Time
-/// Zone each for start and end, and the UTC instants are derived.
-fn event_times_as_wall_time(tx: &Transaction) -> Result<()> {
-    tx.execute_batch(
-        "
-        CREATE TABLE event_new (
-            id INTEGER PRIMARY KEY,
-            calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
-            uid TEXT NOT NULL,
-            title TEXT NOT NULL,
-            all_day INTEGER NOT NULL,
-            start_at TEXT NOT NULL,
-            end_at TEXT NOT NULL,
-            start_zone TEXT,
-            end_zone TEXT,
-            start_utc INTEGER NOT NULL,
-            end_utc INTEGER NOT NULL,
-            location TEXT NOT NULL,
-            description TEXT NOT NULL,
-            description_html INTEGER NOT NULL DEFAULT 0,
-            CHECK (CASE WHEN all_day
-                THEN start_zone IS NULL AND end_zone IS NULL
-                ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
-        );
-        INSERT INTO event_new (id, calendar_id, uid, title, all_day, start_at, end_at,
-            start_zone, end_zone, start_utc, end_utc, location, description, description_html)
-        SELECT id, calendar_id, uid, title, all_day, start_at, end_at,
-            CASE WHEN all_day THEN NULL ELSE 'UTC' END,
-            CASE WHEN all_day THEN NULL ELSE 'UTC' END,
-            0, 0, location, description, description_html
-        FROM event;
-        ",
-    )?;
-    let timed = readable(
-        tx.prepare("SELECT id, start_at, end_at, time_zone FROM event WHERE NOT all_day")?
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })?,
-    )?;
-    for (id, start, end, zone) in timed {
-        let when = StoredWhen::from_utc_instants(&start, &end, zone.as_deref());
-        tx.execute(
-            "UPDATE event_new SET start_at = ?2, end_at = ?3, start_zone = ?4, end_zone = ?5 \
-             WHERE id = ?1",
-            params![id, when.start, when.end, when.start_zone, when.end_zone],
-        )?;
-    }
-    tx.execute_batch(
-        "
-        DROP TABLE event;
-        ALTER TABLE event_new RENAME TO event;
-        CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
-        ALTER TABLE app_state ADD COLUMN time_zone_rules TEXT NOT NULL DEFAULT '';
-        ",
-    )?;
-    Ok(())
-}
-
-/// Ticket 07: Recurring Events. A Recurring Event keeps its rule and its
-/// cancelled Occurrences; a changed Occurrence, an Exception, is an Event of
-/// its own with the UID of its Recurring Event and the recurrence ID of the
-/// Occurrence it changed. The Change Journal's entries hold them too, and its
-/// hashes, which now cover them, are made again once every migration ran.
-fn recurring_events(tx: &Transaction) -> Result<()> {
-    tx.execute_batch(
-        "
-        ALTER TABLE event ADD COLUMN rrule TEXT;
-        ALTER TABLE event ADD COLUMN exdates TEXT NOT NULL DEFAULT '';
-        ALTER TABLE event ADD COLUMN recurrence_id TEXT;
-        ALTER TABLE journal_entry ADD COLUMN rrule TEXT;
-        ALTER TABLE journal_entry ADD COLUMN exdates TEXT;
-        ALTER TABLE journal_entry ADD COLUMN recurrence_id TEXT;
-        UPDATE journal_entry SET exdates = '' WHERE calendar_id IS NOT NULL;
-        ",
-    )?;
-    Ok(())
-}
-
 /// How a server object's data is written: iCalendar, as CalDAV holds it.
 /// Google's will be its JSON as received (ADR 0010).
 pub(crate) const ICALENDAR: &str = "icalendar";
-
-/// Ticket 86 (ADR 0010): server objects mirror the server, with their data
-/// as received in its `format`, and `pending` once FreeCal has changes to
-/// send. An Event row refers to its object, which an entry of the Change
-/// Journal records instead of the object; `journal_entry.object_id` has no
-/// foreign key, because the object may be gone since. Each row's original
-/// server data becomes an object, the one a Calendar's first row at its
-/// href held, which that row's Exceptions refer to too, as it holds them;
-/// an entry refers to the object at its version's href, if there is one.
-/// Entries whose hashes covered the data are re-hashed before it goes.
-fn server_objects(tx: &Transaction) -> Result<()> {
-    tx.execute_batch(
-        "
-        CREATE TABLE server_object (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
-            href TEXT NOT NULL,
-            etag TEXT,
-            data TEXT NOT NULL,
-            format TEXT NOT NULL,
-            pending INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
-        ALTER TABLE event ADD COLUMN object_id INTEGER
-            REFERENCES server_object (id) ON DELETE SET NULL;
-        CREATE INDEX event_object ON event (object_id);
-        ALTER TABLE journal_entry ADD COLUMN object_id INTEGER;
-        -- `ICALENDAR`, written out, as a migration never changes.
-        INSERT INTO server_object (calendar_id, href, etag, data, format)
-        SELECT calendar_id, server_href, server_etag, server_data, 'icalendar' FROM event
-        WHERE id IN (SELECT MIN(id) FROM event
-            WHERE server_href IS NOT NULL AND server_data IS NOT NULL
-            GROUP BY calendar_id, server_href)
-        ORDER BY id;
-        UPDATE event SET object_id = (SELECT id FROM server_object
-            WHERE server_object.calendar_id = event.calendar_id
-              AND server_object.href = event.server_href)
-        WHERE server_href IS NOT NULL AND server_data IS NOT NULL;
-        UPDATE event SET object_id = (SELECT holder.object_id FROM event AS holder
-            WHERE holder.calendar_id = event.calendar_id AND holder.uid = event.uid
-              AND holder.recurrence_id IS NULL AND holder.object_id IS NOT NULL
-            ORDER BY holder.id LIMIT 1)
-        WHERE recurrence_id IS NOT NULL AND object_id IS NULL;
-        UPDATE journal_entry SET object_id = (SELECT id FROM server_object
-            WHERE server_object.calendar_id = journal_entry.calendar_id
-              AND server_object.href = journal_entry.server_href)
-        WHERE server_href IS NOT NULL AND server_data IS NOT NULL;
-        ",
-    )?;
-    crate::journal::rehash_server_data(tx)?;
-    tx.execute_batch(
-        "
-        ALTER TABLE event DROP COLUMN server_href;
-        ALTER TABLE event DROP COLUMN server_etag;
-        ALTER TABLE event DROP COLUMN server_data;
-        ALTER TABLE journal_entry DROP COLUMN server_href;
-        ALTER TABLE journal_entry DROP COLUMN server_etag;
-        ALTER TABLE journal_entry DROP COLUMN server_data;
-        ",
-    )?;
-    Ok(())
-}
 
 /// The time zone rules FreeCal was built with, which the derived UTC columns
 /// are computed with.
@@ -1040,26 +772,6 @@ fn sidebar_state(shown: Value, width: Value) -> SidebarState {
     }
 }
 
-/// A new Local Store at `path` with only the first `applied` migrations,
-/// for tests of the migrations after.
-#[cfg(test)]
-pub(crate) fn migrated_to(path: &Path, applied: usize) -> Connection {
-    let mut conn = Connection::open(path).unwrap();
-    conn.pragma_update(None, "foreign_keys", true).unwrap();
-    let tx = conn.transaction().unwrap();
-    for migration in &MIGRATIONS[..applied] {
-        migration.run(&tx).unwrap();
-    }
-    tx.pragma_update(None, "user_version", applied as i64)
-        .unwrap();
-    tx.commit().unwrap();
-    conn
-}
-
-/// How many migrations there are.
-#[cfg(test)]
-pub(crate) const MIGRATION_COUNT: usize = MIGRATIONS.len();
-
 fn migrate(conn: &mut Connection) -> Result<()> {
     // IMMEDIATE takes the write lock before `user_version` is read, so two
     // FreeCal processes opening a fresh Local Store at once can't both see
@@ -1074,15 +786,11 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         });
     }
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
-        migration.run(&tx)?;
+        tx.execute_batch(migration)?;
         tx.pragma_update(None, "user_version", index as i64 + 1)?;
     }
     if applied == 0 {
         add_starting_calendars(&tx)?;
-    } else if applied < known {
-        // After every migration, as a migration that adds a field Event
-        // hashes cover adds it to the Change Journal's entries too.
-        crate::journal::rehash(&tx)?;
     }
     recompute_instants(&tx)?;
     tx.commit()?;

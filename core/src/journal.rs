@@ -5,7 +5,7 @@
 //! A unit writes the server objects too (ADR 0010), which the Journal doesn't
 //! record: each Event's version holds only the object it refers to.
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -603,35 +603,21 @@ fn stored_event(row: &Row, first: usize) -> rusqlite::Result<StoredEvent> {
     })
 }
 
-/// The version of [`hash`]'s format, its first byte. Format 2 added the
-/// repeat rule, the cancelled Occurrences and the recurrence ID (ticket 07),
-/// format 3 the original server data (ticket 81, ADR 0004), and format 4
-/// covers the server object the row refers to instead (ticket 86, ADR 0010).
-const HASH_FORMAT: u8 = 4;
+/// The version of [`hash`]'s format, its first byte.
+const HASH_FORMAT: u8 = 1;
 
 /// The SHA-256 hash of an Event's version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
 ///
-/// A field added to Events joins the list and bumps [`HASH_FORMAT`], and the
-/// migration that adds it adds it to the Change Journal's entries too; the
-/// Local Store then re-hashes every entry ([`rehash`]).
+/// A field added to Events joins the list. Before the first release it goes
+/// into the baseline schema; after it, it bumps [`HASH_FORMAT`], and its
+/// migration adds it to the Change Journal's entries too, whose hashes then
+/// have to be made again in code.
 fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
-    hash_as(HASH_FORMAT, uid, event)
-}
-
-/// [`hash`] in the format `format`, for [`rehash`].
-fn hash_as(format: u8, uid: &str, event: &StoredEvent) -> Vec<u8> {
-    hash_with(format, uid, event, None)
-}
-
-/// [`hash_as`], with `server`, the original server data a row held in
-/// format 3, which only the migration to server objects still reads
-/// ([`rehash_server_data`]).
-fn hash_with(format: u8, uid: &str, event: &StoredEvent, server: Option<&ServerObject>) -> Vec<u8> {
     let fields = &event.fields;
     let when = &fields.when;
     let mut hasher = Sha256::new();
-    hasher.update([format]);
+    hasher.update([HASH_FORMAT]);
     let mut item = |bytes: &[u8]| {
         hasher.update((bytes.len() as u64).to_be_bytes());
         hasher.update(bytes);
@@ -653,152 +639,20 @@ fn hash_with(format: u8, uid: &str, event: &StoredEvent, server: Option<&ServerO
     item(fields.description.as_bytes());
     item(&[fields.description_html.into()]);
     item(&[fields.zone_pinned.into()]);
-    if format >= 2 {
-        item(&optional(&fields.rule));
-        item(fields.exdates.as_bytes());
-        item(&optional(&fields.recurrence_id));
-    }
-    if format == 3 {
-        match server {
-            None => item(&[0]),
-            Some(server) => {
-                item(&[1]);
-                item(server.href.as_bytes());
-                item(&optional(&server.etag));
-                item(server.data.as_bytes());
-            }
-        }
-    }
-    if format >= 4 {
-        match fields.object_id {
-            None => item(&[0]),
-            Some(object) => item(&[&[1], &object.0.to_be_bytes()[..]].concat()),
-        }
+    item(&optional(&fields.rule));
+    item(fields.exdates.as_bytes());
+    item(&optional(&fields.recurrence_id));
+    match fields.object_id {
+        None => item(&[0]),
+        Some(object) => item(&[&[1], &object.0.to_be_bytes()[..]].concat()),
     }
     hasher.finalize().to_vec()
-}
-
-/// Makes every entry's hash in an earlier format again in the current
-/// [`HASH_FORMAT`], after migrations that added fields to Events: the new
-/// version an entry hashes is the previous version the next entry for that
-/// Event holds, or the Event as it is now for its last entry. A hash that
-/// doesn't match that version in any format stays as it is, so that it
-/// still doesn't match. Format 3 covered columns that are gone; the
-/// migration that dropped them re-hashed its entries.
-pub(crate) fn rehash(conn: &Connection) -> Result<()> {
-    for hashed in hashed_versions(conn, "", |_, _| Ok(()))? {
-        if let Some((version, ())) = &hashed.version
-            && [1, 2]
-                .into_iter()
-                .any(|format| hash_as(format, &hashed.uid, version) == hashed.stored)
-        {
-            hashed.set(conn, hash(&hashed.uid, version))?;
-        }
-    }
-    Ok(())
-}
-
-/// [`rehash`] for entries in format 3, while the Event rows and entries
-/// still hold the original server data it covered, next to the server
-/// object they refer to now (ticket 86).
-pub(crate) fn rehash_server_data(conn: &Connection) -> Result<()> {
-    let server = |row: &Row, first: usize| -> rusqlite::Result<Option<ServerObject>> {
-        let href: Option<String> = row.get(first)?;
-        let etag = row.get(first + 1)?;
-        let data: Option<String> = row.get(first + 2)?;
-        Ok(href
-            .zip(data)
-            .map(|(href, data)| ServerObject { href, etag, data }))
-    };
-    let columns = ", server_href, server_etag, server_data";
-    for hashed in hashed_versions(conn, columns, server)? {
-        if let Some((version, server)) = &hashed.version
-            && hash_with(3, &hashed.uid, version, server.as_ref()) == hashed.stored
-        {
-            hashed.set(conn, hash(&hashed.uid, version))?;
-        }
-    }
-    Ok(())
-}
-
-/// An entry's hash with the version it hashes, as [`rehash`] finds it.
-struct Hashed<T> {
-    id: i64,
-    uid: String,
-    stored: Vec<u8>,
-    /// The version, with what `extra` columns hold; none if it can't be read.
-    version: Option<(StoredEvent, T)>,
-}
-
-impl<T> Hashed<T> {
-    fn set(&self, conn: &Connection, hash: Vec<u8>) -> Result<()> {
-        conn.execute(
-            "UPDATE journal_entry SET hash = ?2 WHERE id = ?1",
-            params![self.id, hash],
-        )?;
-        Ok(())
-    }
-}
-
-/// Every entry with a hash, with the version it hashes, read from
-/// [`EVENT_FIELDS`] followed by the columns `extra` with `read`.
-fn hashed_versions<T>(
-    conn: &Connection,
-    extra: &str,
-    read: impl Fn(&Row, usize) -> rusqlite::Result<T>,
-) -> Result<Vec<Hashed<T>>> {
-    let entries: Vec<(i64, EventId, String, Vec<u8>)> = conn
-        .prepare("SELECT id, event_id, uid, hash FROM journal_entry WHERE hash IS NOT NULL")?
-        .query_map([], |row| {
-            Ok((row.get(0)?, EventId(row.get(1)?), row.get(2)?, row.get(3)?))
-        })?
-        .filter_map(|entry| entry.ok())
-        .collect();
-    let columns = format!("calendar_id, {EVENT_FIELDS}{extra}");
-    let extra_at = 1 + EVENT_FIELDS.split(',').count();
-    let version =
-        |row: &Row| -> rusqlite::Result<_> { Ok((stored_event(row, 0)?, read(row, extra_at)?)) };
-    let mut hashed = Vec::new();
-    for (id, event_id, uid, stored) in entries {
-        let next = conn
-            .query_row(
-                &format!(
-                    "SELECT {columns} FROM journal_entry \
-                     WHERE event_id = ?1 AND uid = ?2 AND id > ?3 ORDER BY id LIMIT 1"
-                ),
-                params![event_id.0, uid, id],
-                |row| {
-                    let created = row.get::<_, Option<i64>>(0)?.is_none();
-                    Ok((!created).then(|| version(row)).transpose())
-                },
-            )
-            .optional()?;
-        let version = match next {
-            Some(previous) => previous.ok().flatten(),
-            None => conn
-                .query_row(
-                    &format!("SELECT {columns} FROM event WHERE id = ?1 AND uid = ?2"),
-                    params![event_id.0, uid],
-                    |row| Ok(version(row).ok()),
-                )
-                .optional()?
-                .flatten(),
-        };
-        hashed.push(Hashed {
-            id,
-            uid,
-            stored,
-            version,
-        });
-    }
-    Ok(hashed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::{EventFields, StoredWhen};
-    use crate::store::{MIGRATION_COUNT, migrated_to};
 
     fn dentist() -> StoredEvent {
         StoredEvent {
@@ -843,25 +697,7 @@ mod tests {
     fn the_hash_format_is_pinned() {
         assert_eq!(
             hex(hash("dentist", &dentist())),
-            "504502fffd075c19137680ff6a036cea6c6cea463231a133b67601c826fecd4e"
-        );
-    }
-
-    /// [`rehash`] and [`rehash_server_data`] recognise entries by their
-    /// hash in the formats before.
-    #[test]
-    fn the_formats_before_are_pinned_too() {
-        assert_eq!(
-            hex(hash_as(1, "dentist", &dentist())),
-            "b58a7dada5f3790c3b13fafabbe5a5b084fed79180f02f4a973156a43a3cd67e"
-        );
-        assert_eq!(
-            hex(hash_as(2, "dentist", &dentist())),
-            "f7e0c2e491d467b8c3f69ffe92aa06fc17219b6f1613034bf2b49ddb1628dc37"
-        );
-        assert_eq!(
-            hex(hash_with(3, "dentist", &dentist(), Some(&dentist_object()))),
-            "fe4126d5eb6b65344ab1724f86cd2625dcb74db6beb96dac243d25ae6901ee1c"
+            "843961e16d587cdc1b783e9dc7e58bc02db94ed18830ac77bf376c37d0086a27"
         );
     }
 
@@ -1043,175 +879,5 @@ mod tests {
         assert_eq!(object(joined), Some(pulled.object));
         assert_eq!(object(other), None);
         assert!(pulled.pending());
-    }
-
-    /// After a migration that added fields, an entry's hash in a format
-    /// before is made again in the current one; any other hash stays.
-    #[test]
-    fn rehash_makes_hashes_of_the_formats_before_again() {
-        let directory = tempfile::TempDir::new().unwrap();
-        let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
-        let mut event = dentist();
-        event.calendar_id = store.list_calendars().unwrap()[0].id;
-        // A user's Event, which has none.
-        event.fields.object_id = None;
-        let mut moved = event.clone();
-        moved.fields.title = "Dentist, moved".to_owned();
-        let created = record(&store, Origin::UserAction, 0, |unit| {
-            unit.create("dentist", &event)
-        })
-        .unwrap()
-        .value;
-        record(&store, Origin::UserAction, 0, |unit| {
-            unit.replace(created, &moved)
-        })
-        .unwrap();
-        let conn = store.connection();
-        let hashes = || -> Vec<Vec<u8>> {
-            conn.prepare("SELECT hash FROM journal_entry ORDER BY id")
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap()
-        };
-        let set = |id: i64, hash: Vec<u8>| {
-            conn.execute(
-                "UPDATE journal_entry SET hash = ?2 WHERE id = (SELECT MIN(id) FROM journal_entry) + ?1",
-                params![id, hash],
-            )
-            .unwrap();
-        };
-        set(0, hash_as(1, "dentist", &event));
-        set(1, b"unknown".to_vec());
-
-        rehash(conn).unwrap();
-
-        assert_eq!(hashes(), [hash("dentist", &event), b"unknown".to_vec()]);
-        set(1, hash_as(2, "dentist", &moved));
-        rehash(conn).unwrap();
-        assert_eq!(hashes()[1], hash("dentist", &moved));
-    }
-
-    /// Adds a unit of origin sync to a Local Store of an earlier version.
-    fn old_unit(conn: &Connection) -> i64 {
-        conn.execute(
-            "INSERT INTO journal_unit (origin, made_at) VALUES ('sync', 0)",
-            [],
-        )
-        .unwrap();
-        conn.last_insert_rowid()
-    }
-
-    /// Opening a Local Store from before the original server data re-hashes
-    /// its entries once the migrations ran.
-    #[test]
-    fn opening_a_local_store_from_before_rehashes_its_entries() {
-        let directory = tempfile::TempDir::new().unwrap();
-        let path = directory.path().join("freecal.sqlite3");
-        // Before ticket 81's migration and those of tickets 82, 56, 85, 86 and 87.
-        let conn = migrated_to(&path, MIGRATION_COUNT - 6);
-        let mut event = dentist();
-        event.fields.object_id = None;
-        conn.execute_batch(
-            "INSERT INTO calendar (account_id, name, colour) VALUES (1, 'Work', '#3f51b5');
-             INSERT INTO event (id, calendar_id, uid, title, all_day, start_at, end_at,
-                 start_zone, end_zone, start_utc, end_utc, location, description,
-                 description_html, rrule, exdates)
-             VALUES (1, 1, 'dentist', 'Dentist', 0, '2026-10-05T09:00:00',
-                 '2026-10-05T10:30:00', 'Europe/Berlin', 'Europe/Berlin', 0, 0,
-                 'Main Street 1', '<b>Bring the card</b>', 1, 'FREQ=WEEKLY;INTERVAL=2',
-                 '2026-10-19T09:00:00');",
-        )
-        .unwrap();
-        event.calendar_id = CalendarId(1);
-        let unit = old_unit(&conn);
-        conn.execute(
-            "INSERT INTO journal_entry (unit_id, event_id, uid, hash) VALUES (?1, 1, 'dentist', ?2)",
-            params![unit, hash_as(2, "dentist", &event)],
-        )
-        .unwrap();
-        drop(conn);
-
-        let store = Store::open(&path).unwrap();
-
-        let stored: Vec<u8> = store
-            .connection()
-            .query_row("SELECT hash FROM journal_entry", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(stored, hash("dentist", &event));
-    }
-
-    /// Ticket 86: a row's original server data becomes an object, which its
-    /// Exceptions and the entries of its versions refer to, and entries
-    /// whose hashes covered the data still undo.
-    #[test]
-    fn opening_a_local_store_from_before_server_objects_moves_the_data_into_them() {
-        let directory = tempfile::TempDir::new().unwrap();
-        let path = directory.path().join("freecal.sqlite3");
-        let conn = migrated_to(&path, MIGRATION_COUNT - 2);
-        let server = dentist_object();
-        conn.execute_batch(
-            "INSERT INTO calendar (account_id, name, colour) VALUES (1, 'Work', '#3f51b5');",
-        )
-        .unwrap();
-        let insert =
-            |id: i64, title: &str, recurrence_id: Option<&str>, server: Option<&ServerObject>| {
-                conn.execute(
-                    "INSERT INTO event (id, calendar_id, uid, title, all_day, start_at, end_at,
-                     start_zone, end_zone, start_utc, end_utc, location, description,
-                     description_html, rrule, exdates, recurrence_id, server_href, server_etag,
-                     server_data)
-                 VALUES (?1, 1, 'dentist', ?2, 0, '2026-10-05T09:00:00',
-                     '2026-10-05T10:30:00', 'Europe/Berlin', 'Europe/Berlin', 0, 0,
-                     'Main Street 1', '<b>Bring the card</b>', 1, ?3,
-                     '2026-10-19T09:00:00', ?4, ?5, ?6, ?7)",
-                    params![
-                        id,
-                        title,
-                        recurrence_id.is_none().then_some("FREQ=WEEKLY;INTERVAL=2"),
-                        recurrence_id,
-                        server.map(|server| &server.href),
-                        server.and_then(|server| server.etag.as_ref()),
-                        server.map(|server| &server.data),
-                    ],
-                )
-                .unwrap();
-            };
-        insert(1, "Dentist", None, Some(&server));
-        insert(2, "Dentist, later", Some("2026-10-19T09:00:00"), None);
-        // A sync renamed the Recurring Event: its previous version has the
-        // object's address with older data.
-        let mut event = dentist();
-        event.calendar_id = CalendarId(1);
-        event.fields.object_id = None;
-        let unit = old_unit(&conn);
-        conn.execute(
-            "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, title,
-                 all_day, start_at, end_at, start_zone, end_zone, location, description,
-                 description_html, zone_pinned, rrule, exdates, server_href, server_etag,
-                 server_data)
-             SELECT ?1, id, uid, ?2, calendar_id, 'Dentist, before', all_day, start_at,
-                 end_at, start_zone, end_zone, location, description, description_html,
-                 zone_pinned, rrule, exdates, server_href, '\"0\"', 'BEGIN:VCALENDAR'
-             FROM event WHERE id = 1",
-            params![unit, hash_with(3, "dentist", &event, Some(&server))],
-        )
-        .unwrap();
-        drop(conn);
-
-        let store = Store::open(&path).unwrap();
-
-        let object = store.find_event(EventId(1)).unwrap().fields.object_id;
-        assert!(object.is_some());
-        assert_eq!(store.server_object(object.unwrap()).unwrap(), Some(server));
-        assert_eq!(
-            store.find_event(EventId(2)).unwrap().fields.object_id,
-            object
-        );
-        undo(&store, UnitId(unit), 0).unwrap();
-        let undone = store.find_event(EventId(1)).unwrap();
-        assert_eq!(undone.fields.title, "Dentist, before");
-        assert_eq!(undone.fields.object_id, object);
     }
 }

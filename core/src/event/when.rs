@@ -194,26 +194,6 @@ impl StoredWhen {
         }
     }
 
-    /// A timed Event as ticket 03 stored it, a UTC instant in RFC 3339 and the
-    /// zone it was made in, as the wall time in that zone. A zone FreeCal
-    /// doesn't know becomes UTC; an unreadable instant is kept as it was.
-    pub fn from_utc_instants(start: &str, end: &str, zone: Option<&str>) -> Self {
-        let zone = zone.and_then(|name| name.parse().ok()).unwrap_or(Tz::UTC);
-        let wall = |text: &str| {
-            DateTime::parse_from_rfc3339(text).map_or_else(
-                |_| text.to_owned(),
-                |instant| wall_text(instant.with_timezone(&zone).naive_local()),
-            )
-        };
-        Self {
-            all_day: false,
-            start: wall(start),
-            end: wall(end),
-            start_zone: Some(zone.name().to_owned()),
-            end_zone: Some(zone.name().to_owned()),
-        }
-    }
-
     /// Reads it back as an imported time is given, for pairing an imported
     /// Exception with a stored Recurring Event.
     pub fn to_imported(&self) -> Result<ImportedWhen> {
