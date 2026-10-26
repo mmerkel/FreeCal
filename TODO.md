@@ -3,7 +3,10 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] implement 91
 - [ ] simplify from work by tickets 90 on
-- [ ] all database invariants within and across tables are secured by changes through single transactions? 
+- [ ] database:
+  - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
+  - [ ] all invariants within and across tables are secured by changes through single transactions
+  - [ ] also secure, e.g. edit: don't allow a write from another place between read and write - otherwise risk of journal inconsistency/loss
 - [ ] architecture work
     - [ ] wouldn't things be easier if we force things into a simpler structure in the db?  e.g. each exception should correspond to an occurrence. if not, then ask the user what to do with it (ask once, it's also a setting), but we won't do two exceptions for an occurrence - this only adds mess to the code, while it's almost never needed.
     - [ ] also, later, with Google recurring events, the convention is anyways different, so I guess we need to figure something out, here
