@@ -640,73 +640,112 @@ mod server_objects {
         ])
     }
 
+    /// ADR 0011: of two objects alike, the first mirrored, which depends on
+    /// the order the server listed them.
     #[test]
-    fn two_objects_with_one_uid_keep_their_own_rows_on_a_server_without_sync_tokens() {
+    fn of_two_objects_with_one_uid_the_first_owns_it_on_a_server_without_sync_tokens() {
         let synced = Synced::with_files(&[
             ("standup", standup("Standup")),
             ("standup-copy", standup("Standup copy")),
         ]);
         synced.without_sync_tokens();
-        // At one time, so in the order the server listed them.
-        let sorted = || {
-            let mut titles = synced.titles();
-            titles.sort();
-            titles
+        let shown = synced.titles();
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        let (owner, other) = if shown[0] == "Standup" {
+            ("standup", "standup-copy")
+        } else {
+            ("standup-copy", "standup")
         };
-        assert_eq!(sorted(), ["Standup", "Standup copy"]);
+        assert!(synced.href(&shown[0]).ends_with(&format!("/{owner}.ics")));
 
         assert_eq!(synced.sync(), None);
         assert_eq!(synced.sync(), None);
 
-        assert_eq!(sorted(), ["Standup", "Standup copy"]);
-        assert!(synced.href("Standup copy").ends_with("/standup-copy.ics"));
-        synced.put("standup", standup("Standup moved"));
+        synced.write(other, standup("Standup elsewhere"));
+        assert_eq!(synced.sync(), None, "the other object has no rows");
+        assert_eq!(synced.titles(), shown);
+        synced.write(owner, standup("Standup moved"));
         assert!(synced.sync().is_some());
-        assert_eq!(sorted(), ["Standup copy", "Standup moved"]);
+        assert_eq!(synced.titles(), ["Standup moved"]);
     }
 
     #[test]
-    fn exceptions_that_are_objects_of_their_own_stay_when_only_their_recurring_events_changes() {
-        let synced = google_like();
-        assert_eq!(synced.titles(), ["Weekly", "Moved", "Weekly"]);
-        let id = synced.event("Moved").id;
-        synced.put("weekly", weekly("Weekly renamed"));
+    fn the_object_holding_the_recurring_event_owns_its_uid_whichever_came_first() {
+        let together = google_like();
+        let exception_first = Synced::with_files(&[("weekly-moved", ics(&moved("Moved")))]);
+        assert_eq!(exception_first.titles(), ["Moved"]);
+        exception_first.write("weekly", weekly("Weekly"));
+        exception_first.sync();
+        let recurring_first = Synced::with_files(&[("weekly", weekly("Weekly"))]);
+        recurring_first.write("weekly-moved", ics(&moved("Moved")));
+        assert_eq!(recurring_first.sync(), None);
 
-        synced.sync();
-
-        assert_eq!(
-            synced.titles(),
-            ["Weekly renamed", "Moved", "Weekly renamed"]
-        );
-        assert_eq!(synced.event("Moved").id, id);
-        assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+        for synced in [together, exception_first, recurring_first] {
+            assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+            assert!(synced.href("Weekly").ends_with("/weekly.ics"));
+        }
     }
 
     #[test]
-    fn an_exception_that_is_an_object_of_its_own_changes_alone() {
+    fn an_object_that_owns_nothing_changes_no_row() {
         let synced = google_like();
-        let id = synced.event("Moved").id;
         synced.write("weekly-moved", ics(&moved("Moved again")));
 
+        assert_eq!(synced.sync(), None);
+
+        assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+    }
+
+    /// A removed object goes from the mirror; another object holding its
+    /// UID takes over, its rows read from what FreeCal holds of it.
+    #[test]
+    fn the_next_object_takes_over_when_the_owner_goes() {
+        for tokens in [true, false] {
+            let synced = Synced::writable(&[]);
+            synced.write("weekly", weekly("Weekly"));
+            synced.write("weekly-moved", ics(&moved("Moved")));
+            synced.sync();
+            if !tokens {
+                synced.without_sync_tokens();
+            }
+            synced.delete("weekly");
+
+            let unit = synced.sync().unwrap();
+
+            assert_eq!(synced.titles(), ["Moved"], "tokens: {tokens}");
+            assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+            synced.core.undo_unit(unit).unwrap();
+            assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+        }
+    }
+
+    /// It keeps its place in the order objects were mirrored.
+    #[test]
+    fn an_object_that_owns_nothing_moved_to_another_address_stays_the_same_object() {
+        let synced = Synced::with_files(&[("standup", standup("Standup"))]);
+        synced.write("standup-b", standup("Standup B"));
+        synced.sync();
+        synced.write("standup-c", standup("Standup C"));
+        synced.sync();
+        synced.delete("standup-b");
+        synced.write("standup-b-moved", standup("Standup B"));
         synced.sync();
 
-        assert_eq!(synced.titles(), ["Weekly", "Moved again", "Weekly"]);
-        assert_eq!(synced.event("Moved again").id, id);
+        synced.delete("standup");
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Standup B"]);
+        assert!(synced.href("Standup B").ends_with("/standup-b-moved.ics"));
     }
 
     #[test]
-    fn a_removed_object_takes_only_its_own_rows_with_it() {
-        let synced = Synced::writable(&[]);
-        synced.write("weekly", weekly("Weekly"));
-        synced.write("weekly-moved", ics(&moved("Moved")));
-        synced.sync();
+    fn a_removed_object_that_owns_nothing_changes_no_row() {
+        let synced = google_like();
         synced.delete("weekly-moved");
 
-        let unit = synced.sync().unwrap();
+        assert_eq!(synced.sync(), None);
 
         assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
-        synced.core.undo_unit(unit).unwrap();
-        assert_eq!(synced.titles(), ["Weekly", "Moved", "Weekly"]);
     }
 
     #[test]
@@ -727,8 +766,10 @@ mod server_objects {
         assert_eq!(synced.titles(), ["Weekly", "Latest", "Weekly"]);
     }
 
+    /// When the owner goes, the other object's Exception stays, an Event
+    /// of its own as if it had come alone (ticket 88).
     #[test]
-    fn of_two_objects_with_an_exception_for_one_occurrence_both_keep_it_and_the_first_shows() {
+    fn of_two_objects_with_an_exception_for_one_occurrence_the_recurring_events_shows() {
         let synced = Synced::with_files(&[
             (
                 "weekly",
@@ -736,40 +777,54 @@ mod server_objects {
             ),
             ("weekly-moved", ics(&moved("Moved elsewhere"))),
         ]);
-        // The first by ID, which depends on the order the server listed them.
-        let shown = synced.titles()[1].clone();
-        assert_eq!(synced.titles(), ["Weekly", &shown, "Weekly"]);
-        assert_eq!(synced.sync(), None);
-        let (name, other) = if shown == "Moved" {
-            ("weekly", "Moved elsewhere")
-        } else {
-            ("weekly-moved", "Moved")
-        };
-        assert!(synced.href(&shown).ends_with(&format!("/{name}.ics")));
+        assert_eq!(synced.titles(), ["Weekly", "Moved", "Weekly"]);
 
-        synced.delete(name);
+        synced.delete("weekly");
         synced.sync();
 
-        assert!(
-            synced.titles().contains(&other.to_owned()),
-            "{:?}",
-            synced.titles()
-        );
+        assert_eq!(synced.titles(), ["Moved elsewhere"]);
     }
 
+    /// ADR 0011: a row the server doesn't have yet belongs to the object
+    /// holding its UID.
     #[test]
-    fn an_object_whose_uid_changed_changes_only_its_own_rows() {
+    fn a_new_exception_not_yet_sent_belongs_to_the_object_of_its_recurring_event() {
+        let synced = Synced::writable(&[("weekly", weekly("Weekly"))]);
+        let second = support::on(&synced.core, "2026-10-12");
+
+        let moved = synced
+            .core
+            .reschedule_occurrence(
+                second.event_id,
+                second.recurrence_id.as_deref().unwrap(),
+                freecal_core::Scope::This,
+                false,
+                support::timed("2026-10-12T12:00:00", "2026-10-12T13:00:00"),
+            )
+            .unwrap()
+            .value;
+
+        assert_ne!(moved.event_id, second.event_id, "an Exception");
+        let held = synced.core.original_server_data(moved.event_id).unwrap();
+        assert!(held.is_some());
+        assert_eq!(held, synced.held("Weekly"));
+    }
+
+    /// Whichever of the two owned the UID, its Event stays the same.
+    #[test]
+    fn an_object_whose_uid_changed_leaves_its_old_uid_to_the_next_object_holding_it() {
         let synced = Synced::with_files(&[
             ("standup", standup("Standup")),
             ("standup-copy", standup("Standup copy")),
         ]);
-        let copy = synced.event("Standup copy").id;
+        let id = synced.event(&synced.titles()[0]).id;
         synced.write("standup", titled("review", "Review", "20261006"));
 
         synced.sync();
 
         assert_eq!(synced.titles(), ["Standup copy", "Review"]);
-        assert_eq!(synced.event("Standup copy").id, copy);
+        assert_eq!(synced.event("Standup copy").id, id);
+        assert!(synced.href("Standup copy").ends_with("/standup-copy.ics"));
     }
 
     #[test]
@@ -850,19 +905,30 @@ mod server_objects {
             assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
         }
 
+        /// ADR 0011: the object holding the Recurring Event owns the UID;
+        /// the other keeps its keys, renormalised with the rows, and takes
+        /// over when the owner goes.
         #[test]
-        fn joins_its_recurring_event_when_that_arrives_in_another_object() {
+        fn hides_once_its_recurring_event_arrives_in_another_object_until_that_goes() {
             let synced = Synced::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
-            let id = synced.event("Moved").id;
             synced.write("weekly", weekly("Weekly"));
+            synced.sync();
+            assert_eq!(shown(&synced), weekly_with("Weekly"));
 
+            synced.delete("weekly");
             synced.sync();
 
-            assert_eq!(shown(&synced), weekly_with("Moved"));
-            let moved = synced.event("Moved");
-            assert_eq!(moved.id, id);
-            assert_eq!(moved.recurrence_id.as_deref(), Some("2026-10-12T08:00:00"));
+            assert_eq!(shown(&synced), alone("Moved"));
             assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+            // As if it had come alone, so that its next version pairs with it.
+            let moved = synced.event("Moved");
+            assert_eq!(
+                moved.recurrence_id.as_deref(),
+                Some("2026-10-12T04:00:00[America/New_York]")
+            );
+            synced.write("weekly-moved", ics(&moved_in_new_york("Moved again")));
+            synced.sync();
+            assert_eq!(synced.event("Moved again").id, moved.id);
         }
 
         #[test]
@@ -897,11 +963,9 @@ mod server_objects {
 
         #[test]
         fn one_that_matches_no_occurrence_stays_after_its_recurring_event_arrives() {
-            let synced = Synced::with_files(&[(
-                "weekly-odd",
-                ics(&moved("Odd").replace("20261012T080000Z", "20261013T080000Z")),
-            )]);
-            synced.write("weekly", weekly("Weekly"));
+            let odd = moved("Odd").replace("20261012T080000Z", "20261013T080000Z");
+            let synced = Synced::with_files(&[("weekly", ics(&odd))]);
+            synced.write("weekly", ics(&format!("{}{odd}", recurring("Weekly"))));
 
             synced.sync();
 

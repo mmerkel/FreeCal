@@ -2,8 +2,9 @@
 //! to an Event goes through a [`Unit`] in [`record`], which keeps the Event's
 //! previous version and a hash of its new one, so that no change can skip
 //! the Journal. Changes made together, such as an import, are one unit.
-//! A unit writes the server objects too (ADR 0010), which the Journal doesn't
-//! record: each Event's version holds only the object it refers to.
+//! A unit writes the server objects and their keys too (ADR 0010, 0011),
+//! which the Journal doesn't record: an Event's version holds FreeCal's
+//! fields only, and its rows find their object through the keys.
 //!
 //! This file holds what the Journal decides and no SQL: it reads and writes
 //! through [`sql`](super::sql), whose writes to the tables it guards take a
@@ -89,8 +90,7 @@ impl Origin {
     }
 
     /// Whether it is a sync, whose changes come from the server: only a sync
-    /// writes the mirror, and only other origins' changes to an object's
-    /// rows mark the object pending, for FreeCal to send.
+    /// writes the mirror.
     fn is_sync(self) -> bool {
         matches!(self, Origin::FirstSync | Origin::Sync)
     }
@@ -120,7 +120,6 @@ pub(crate) fn record<T>(
             made_at,
             id: None,
             calendars: Vec::new(),
-            pending: Vec::new(),
         };
         let value = change(&mut unit)?;
         Ok(Recorded {
@@ -189,8 +188,6 @@ pub(crate) struct Unit<'a> {
     made_at: i64,
     id: Option<UnitId>,
     calendars: Vec<CalendarId>,
-    /// The server objects it marked pending.
-    pending: Vec<ObjectId>,
 }
 
 impl Unit<'_> {
@@ -204,42 +201,88 @@ impl Unit<'_> {
         self.store.objects_at(calendar_id, href)
     }
 
-    /// The rows of the server object `id`.
-    pub fn events_in_object(&self, id: ObjectId) -> Result<Vec<UidEvent>> {
-        self.store.events_in_object(id)
+    /// The server object of a Calendar that owns the UID `uid`
+    /// ([`Store::owner`]).
+    pub fn owner(&self, calendar_id: CalendarId, uid: &str) -> Result<Option<ObjectId>> {
+        self.store.owner(calendar_id, uid)
+    }
+
+    /// The UIDs the server object `id` owns.
+    pub fn owned_uids(&self, id: ObjectId) -> Result<Vec<String>> {
+        self.store.owned_uids(id)
+    }
+
+    /// The UIDs the server object `id` holds, owned or not.
+    pub fn held_uids(&self, id: ObjectId) -> Result<Vec<String>> {
+        self.store.held_uids(id)
+    }
+
+    /// The server object `id` as the mirror holds it, none if it is gone.
+    pub fn server_object(&self, id: ObjectId) -> Result<Option<ServerObject>> {
+        self.store.server_object(id)
     }
 
     /// Makes `object`, as the server holds it now, the mirror's version of
     /// the object `over` in a Calendar, address included, or of a new
-    /// object, and returns its ID. Only a sync writes the mirror, as only it
-    /// knows what the server holds.
+    /// object, and returns its ID. Its keys become `keys`, one per
+    /// component: its UID and recurrence ID, normalised as the rows hold
+    /// it. Only a sync writes the mirror, as only it knows what the server
+    /// holds.
     pub fn mirror(
         &self,
         calendar_id: CalendarId,
         object: &ServerObject,
         over: Option<ObjectId>,
+        keys: &[(&str, Option<&str>)],
     ) -> Result<ObjectId> {
         debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
         self.store
-            .write_object(JOURNALED, calendar_id, object, over)
+            .write_object(JOURNALED, calendar_id, object, over, keys)
+    }
+
+    /// Makes `keys`, all with the UID `uid`, the keys with that UID of the
+    /// server object `id`, whose data stays as it is: for when its rows
+    /// come to hold their recurrence IDs otherwise, as when it takes over
+    /// the UID from an object that held its Recurring Event.
+    pub fn rekey(&self, id: ObjectId, uid: &str, keys: &[(&str, Option<&str>)]) -> Result<()> {
+        debug_assert!(self.origin.is_sync());
+        self.store.write_uid_keys(JOURNALED, id, uid, keys)
+    }
+
+    /// Renormalises the recurrence IDs of the keys with the UID `uid` of a
+    /// Calendar's server objects as `rejoined` gives them, for the step
+    /// that renormalises the rows' ([`Loaded::join`]); a key it gives none
+    /// for keeps its own.
+    ///
+    /// [`Loaded::join`]: crate::event::Loaded::join
+    pub fn rejoin_keys(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+        rejoined: impl Fn(&str) -> Option<String>,
+    ) -> Result<()> {
+        for (key, recurrence_id) in self.store.keys_with_uid(calendar_id, uid)? {
+            if let Some(joined) = recurrence_id.as_deref().and_then(&rejoined) {
+                self.store.set_key_recurrence_id(JOURNALED, key, &joined)?;
+            }
+        }
+        Ok(())
     }
 
     /// Records that FreeCal couldn't read what the server holds now at
     /// `href` in a Calendar: the objects there keep the last version it
-    /// could, and their rows stay as they are.
+    /// could with its keys, and their rows stay as they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
         debug_assert!(self.origin.is_sync());
         self.store.mark_unreadable(JOURNALED, calendar_id, href)
     }
 
-    /// Removes the server object `id` from the mirror, and its rows with it,
-    /// as a sync finds it gone from the server.
-    pub fn remove_object(&mut self, id: ObjectId) -> Result<()> {
+    /// Removes the server object `id` from the mirror with its keys, as a
+    /// sync finds it gone from the server. The rows of the UIDs it owned
+    /// stay, for the sync to give to the next owner or delete.
+    pub fn remove_object(&self, id: ObjectId) -> Result<()> {
         debug_assert!(self.origin.is_sync());
-        for event in self.events_in_object(id)? {
-            self.delete(event.id)?;
-        }
         self.store.delete_object(JOURNALED, id)
     }
 
@@ -252,7 +295,6 @@ impl Unit<'_> {
     /// Adds an Event with the UID `uid`.
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
         self.writable(event.calendar_id)?;
-        let event = &self.placed(None, uid, event)?;
         let id = self
             .store
             .write_event(JOURNALED, None, uid, event, rule::span(&event.fields)?)?;
@@ -266,46 +308,12 @@ impl Unit<'_> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
         self.writable(event.calendar_id)?;
-        let event = &self.placed(Some(&previous), &uid, event)?;
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
         self.store
             .write_event(JOURNALED, Some(id), &uid, event, rule::span(&event.fields)?)?;
         self.entry(id, &uid, Some(&previous), Some(event))
-    }
-
-    /// `event`, a version of a row with the UID `uid`, in the server object
-    /// (ADR 0010) it gets: a sync's as given, an undo's while that object
-    /// exists, otherwise none, so that the row counts as not yet on the
-    /// server. A user action or an import keeps the object of the
-    /// `previous` version, none with a move to another Calendar, which
-    /// leaves the object without the row; a new row of theirs joins the
-    /// object of its Calendar's rows with its UID, as a CalDAV object holds
-    /// a Recurring Event with its Exceptions.
-    fn placed(
-        &self,
-        previous: Option<&StoredEvent>,
-        uid: &str,
-        event: &StoredEvent,
-    ) -> Result<StoredEvent> {
-        let object = match self.origin {
-            Origin::FirstSync | Origin::Sync => return Ok(event.clone()),
-            Origin::Undo => match event.fields.object_id {
-                Some(object) => self.store.object_in(object, event.calendar_id)?,
-                None => None,
-            },
-            Origin::UserAction | Origin::Import => match previous {
-                Some(previous) => previous
-                    .fields
-                    .object_id
-                    .filter(|_| previous.calendar_id == event.calendar_id),
-                None => self.store.object_of_uid(event.calendar_id, uid)?,
-            },
-        };
-        let mut event = event.clone();
-        event.fields.object_id = object;
-        Ok(event)
     }
 
     pub fn delete(&mut self, id: EventId) -> Result<()> {
@@ -323,7 +331,6 @@ impl Unit<'_> {
             return self.replace(id, event);
         }
         self.writable(event.calendar_id)?;
-        let event = &self.placed(None, uid, event)?;
         // A version FreeCal can't read the time of was stored like that; it
         // reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
@@ -354,9 +361,8 @@ impl Unit<'_> {
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for
-    /// an Event created or deleted, starting the unit with its first entry,
-    /// and marks the objects of both pending if the origin does. An origin
-    /// that isn't recorded only notes the Calendars.
+    /// an Event created or deleted, starting the unit with its first entry.
+    /// An origin that isn't recorded only notes the Calendars.
     fn entry(
         &mut self,
         id: EventId,
@@ -367,13 +373,6 @@ impl Unit<'_> {
         for event in previous.into_iter().chain(new) {
             if !self.calendars.contains(&event.calendar_id) {
                 self.calendars.push(event.calendar_id);
-            }
-            if let Some(object) = event.fields.object_id
-                && !self.origin.is_sync()
-                && !self.pending.contains(&object)
-            {
-                self.store.mark_pending(JOURNALED, object)?;
-                self.pending.push(object);
             }
         }
         let Some(origin) = self.origin.recorded_as() else {
@@ -416,10 +415,12 @@ pub(super) struct Entry {
 }
 
 /// The version of [`hash`]'s format, its first byte.
-const HASH_FORMAT: u8 = 1;
+const HASH_FORMAT: u8 = 2;
 
 /// The SHA-256 hash of an Event's version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
+/// FreeCal's fields only: which server object holds the Event isn't part of
+/// it (ADR 0011). Format 1 covered the object too.
 ///
 /// A field added to Events joins the list. Before the first release it goes
 /// into the baseline schema; after it, it bumps [`HASH_FORMAT`], and its
@@ -454,10 +455,6 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     item(&optional(&fields.rule));
     item(fields.exdates.as_bytes());
     item(&optional(&fields.recurrence_id));
-    match fields.object_id {
-        None => item(&[0]),
-        Some(object) => item(&[&[1], &object.0.to_be_bytes()[..]].concat()),
-    }
     hasher.finalize().to_vec()
 }
 
@@ -485,7 +482,6 @@ mod tests {
                 rule: Some("FREQ=WEEKLY;INTERVAL=2".to_owned()),
                 exdates: "2026-10-19T09:00:00".to_owned(),
                 recurrence_id: None,
-                object_id: Some(ObjectId(7)),
             },
         }
     }
@@ -499,6 +495,9 @@ mod tests {
         }
     }
 
+    /// The keys of [`dentist_object`].
+    const DENTIST_KEYS: &[(&str, Option<&str>)] = &[("dentist", None)];
+
     fn hex(hash: Vec<u8>) -> String {
         hash.iter().map(|byte| format!("{byte:02x}")).collect()
     }
@@ -509,22 +508,8 @@ mod tests {
     fn the_hash_format_is_pinned() {
         assert_eq!(
             hex(hash("dentist", &dentist())),
-            "843961e16d587cdc1b783e9dc7e58bc02db94ed18830ac77bf376c37d0086a27"
+            "f7e0c2e491d467b8c3f69ffe92aa06fc17219b6f1613034bf2b49ddb1628dc37"
         );
-    }
-
-    /// The object a row refers to counts, and having none differs from
-    /// having one.
-    #[test]
-    fn the_hash_covers_the_object() {
-        let with = |object| {
-            let mut event = dentist();
-            event.fields.object_id = object;
-            hash("dentist", &event)
-        };
-        let hashes = [with(Some(ObjectId(7))), with(Some(ObjectId(8))), with(None)];
-        let distinct: std::collections::HashSet<_> = hashes.iter().collect();
-        assert_eq!(distinct.len(), hashes.len());
     }
 
     /// A first sync writes, into a Read-only Calendar too, and records
@@ -535,7 +520,6 @@ mod tests {
         let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
         let mut event = dentist();
         event.calendar_id = store.list_calendars().unwrap()[0].id;
-        event.fields.object_id = None;
         let conn = store.connection();
         conn.execute(
             "UPDATE calendar SET read_only = 1 WHERE id = ?1",
@@ -575,10 +559,9 @@ mod tests {
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let calendar_id = store.list_calendars().unwrap()[0].id;
             let (object, id, event) = record(&store, Origin::Sync, 0, |unit| {
-                let object = unit.mirror(calendar_id, &dentist_object(), None)?;
+                let object = unit.mirror(calendar_id, &dentist_object(), None, DENTIST_KEYS)?;
                 let mut event = dentist();
                 event.calendar_id = calendar_id;
-                event.fields.object_id = Some(object);
                 Ok((object, unit.create("dentist", &event)?, event))
             })
             .unwrap()
@@ -592,37 +575,36 @@ mod tests {
             }
         }
 
-        fn pending(&self) -> bool {
-            self.store
-                .connection()
-                .query_row(
-                    "SELECT pending FROM server_object WHERE id = ?1",
-                    [self.object.0],
-                    |row| row.get(0),
-                )
-                .unwrap()
+        /// Mirrors another object holding the UID of [`dentist`] with
+        /// `keys`, at `href`.
+        fn mirror(&self, href: &str, keys: &[(&str, Option<&str>)]) -> ObjectId {
+            let object = ServerObject {
+                href: href.to_owned(),
+                ..dentist_object()
+            };
+            record(&self.store, Origin::Sync, 0, |unit| {
+                unit.mirror(self.event.calendar_id, &object, None, keys)
+            })
+            .unwrap()
+            .value
         }
 
-        fn renamed(&self, origin: Origin) -> Option<UnitId> {
-            let mut event = self.event.clone();
-            event.fields.title = "Dentist, renamed".to_owned();
-            record(&self.store, origin, 0, |unit| unit.replace(self.id, &event))
-                .unwrap()
-                .unit
+        fn owner(&self) -> Option<ObjectId> {
+            self.store.owner(self.event.calendar_id, "dentist").unwrap()
         }
     }
 
     #[test]
-    fn a_sync_mirrors_the_object_and_never_marks_it_pending() {
+    fn a_sync_mirrors_the_object_with_its_keys_and_records_neither() {
         let pulled = Pulled::new();
-        pulled.renamed(Origin::Sync);
         let again = ServerObject {
             etag: Some("\"2\"".to_owned()),
             ..dentist_object()
         };
+        let keys = [("dentist", None), ("dentist", Some("2026-10-19T09:00:00"))];
 
         let mirrored = record(&pulled.store, Origin::Sync, 0, |unit| {
-            unit.mirror(pulled.event.calendar_id, &again, Some(pulled.object))
+            unit.mirror(pulled.event.calendar_id, &again, Some(pulled.object), &keys)
         })
         .unwrap();
 
@@ -632,28 +614,38 @@ mod tests {
             pulled.store.server_object(pulled.object).unwrap(),
             Some(again)
         );
-        assert!(!pulled.pending());
+        assert_eq!(
+            pulled.store.keys(pulled.object).unwrap(),
+            keys.map(|(uid, rid)| (uid.to_owned(), rid.map(str::to_owned)))
+        );
     }
 
+    /// ADR 0011: a row isn't linked to its object, so no origin's change
+    /// moves it to another, and none is in the way of an undo.
     #[test]
-    fn a_user_action_an_import_and_an_undo_mark_the_object_pending() {
-        for origin in [Origin::UserAction, Origin::Import] {
+    fn rows_find_their_object_through_the_keys_whatever_changed_them() {
+        for origin in [Origin::UserAction, Origin::Import, Origin::Sync] {
             let pulled = Pulled::new();
-            pulled.renamed(origin);
-            assert!(pulled.pending(), "{origin:?}");
+            let mut renamed = pulled.event.clone();
+            renamed.fields.title = "Dentist, renamed".to_owned();
+            let unit = record(&pulled.store, origin, 0, |unit| {
+                unit.replace(pulled.id, &renamed)
+            })
+            .unwrap()
+            .unit
+            .unwrap();
+            undo(&pulled.store, unit, 0).unwrap();
+
             assert_eq!(
-                pulled.store.find_event(pulled.id).unwrap().fields.object_id,
-                Some(pulled.object)
+                pulled.store.object_of_event(pulled.id).unwrap(),
+                Some(pulled.object),
+                "{origin:?}"
             );
         }
-        let pulled = Pulled::new();
-        let unit = pulled.renamed(Origin::Sync).unwrap();
-        undo(&pulled.store, unit, 0).unwrap();
-        assert!(pulled.pending());
     }
 
     #[test]
-    fn a_move_to_another_calendar_leaves_the_object_without_the_row() {
+    fn a_row_moved_to_another_calendar_has_no_object_there() {
         let pulled = Pulled::new();
         let mut moved = pulled.event.clone();
         moved.calendar_id = pulled.store.list_calendars().unwrap()[1].id;
@@ -663,20 +655,16 @@ mod tests {
         })
         .unwrap();
 
-        let row = pulled.store.find_event(pulled.id).unwrap();
-        assert_eq!(row.calendar_id, moved.calendar_id);
-        assert_eq!(row.fields.object_id, None);
-        assert!(pulled.pending());
+        assert_eq!(pulled.store.object_of_event(pulled.id).unwrap(), None);
     }
 
     /// As a CalDAV object holds a Recurring Event with its Exceptions.
     #[test]
-    fn a_new_row_joins_the_object_of_its_uid() {
+    fn a_new_row_belongs_to_the_object_holding_its_uid() {
         let pulled = Pulled::new();
         let mut exception = pulled.event.clone();
         exception.fields.rule = None;
         exception.fields.recurrence_id = Some("2026-10-19T09:00:00".to_owned());
-        exception.fields.object_id = None;
 
         let (joined, other) = record(&pulled.store, Origin::UserAction, 0, |unit| {
             Ok((
@@ -687,9 +675,62 @@ mod tests {
         .unwrap()
         .value;
 
-        let object = |id| pulled.store.find_event(id).unwrap().fields.object_id;
+        let object = |id| pulled.store.object_of_event(id).unwrap();
         assert_eq!(object(joined), Some(pulled.object));
         assert_eq!(object(other), None);
-        assert!(pulled.pending());
+    }
+
+    #[test]
+    fn of_two_objects_holding_a_uid_the_one_holding_the_recurring_event_owns_it() {
+        let pulled = Pulled::new();
+        let exception = Some("2026-10-19T09:00:00");
+
+        let later = pulled.mirror("/user/work/copy.ics", &[("dentist", exception)]);
+
+        assert_eq!(pulled.owner(), Some(pulled.object));
+        assert_eq!(
+            pulled.store.owned_uids(later).unwrap(),
+            Vec::<String>::new()
+        );
+        record(&pulled.store, Origin::Sync, 0, |unit| {
+            unit.mirror(
+                pulled.event.calendar_id,
+                &dentist_object(),
+                Some(pulled.object),
+                &[("dentist", exception)],
+            )?;
+            unit.mirror(
+                pulled.event.calendar_id,
+                &dentist_object(),
+                Some(later),
+                DENTIST_KEYS,
+            )
+        })
+        .unwrap();
+        assert_eq!(pulled.owner(), Some(later), "whichever came first");
+    }
+
+    #[test]
+    fn of_two_objects_holding_a_uid_alike_the_first_mirrored_owns_it_until_it_goes() {
+        let pulled = Pulled::new();
+        let later = pulled.mirror("/user/work/copy.ics", DENTIST_KEYS);
+        assert_eq!(pulled.owner(), Some(pulled.object));
+        assert_eq!(
+            pulled.store.owned_uids(later).unwrap(),
+            Vec::<String>::new()
+        );
+
+        record(&pulled.store, Origin::Sync, 0, |unit| {
+            unit.remove_object(pulled.object)
+        })
+        .unwrap();
+
+        assert_eq!(pulled.owner(), Some(later));
+        assert_eq!(pulled.store.keys(pulled.object).unwrap(), []);
+        assert_eq!(pulled.store.owned_uids(later).unwrap(), ["dentist"]);
+        assert_eq!(
+            pulled.store.object_of_event(pulled.id).unwrap(),
+            Some(later)
+        );
     }
 }

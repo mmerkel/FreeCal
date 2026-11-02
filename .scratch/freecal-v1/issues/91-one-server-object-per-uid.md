@@ -4,18 +4,18 @@
 
 **Blocked by:** 90
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** L
 
-- [ ] Schema, in the baseline (nothing is released, ADR 0008): `server_object_key (object_id, uid, recurrence_id)`; `event.object_id`, `journal_entry.object_id` and `server_object.pending` go
-- [ ] `Unit::mirror` writes an object's keys with its data, one per component, recurrence IDs normalised as the rows hold them; an unreadable object keeps the keys of its last readable version. Where the Store renormalises a UID's recurrence IDs (`Loaded::join`, ticket 88), it renormalises the keys in the same function
-- [ ] Rows find their object through the keys: on CalDAV the object holding the row's Calendar and UID. Google's rule, by UID and recurrence ID, comes with ticket 26. `Store::events_in_object`, `original_server_data` and `sync::moved` go through the keys
-- [ ] Ownership, in one function that sync and ticket 23 both use: of several objects in a Calendar holding one UID, the one holding the Recurring Event owns it, otherwise the first mirrored. The others are mirrored without rows. When the owner is removed, the next one takes over, its rows read from its mirrored data
-- [ ] `event::take_object` replaces the rows of the UIDs the object owns; it never writes rows of a UID another object owns
-- [ ] `EventFields.object_id` and `Unit::placed` go. Versions and their hash hold FreeCal's fields only, a new hash format, with no rehashing of existing Local Stores
-- [ ] Core tests: two objects with one UID (the Recurring Event's object owns it, whichever came first; the other has no rows; it takes over when the owner goes, with a sync token too); a user's new Exception and an undone delete not yet sent find their object through the keys; an Exception without its Recurring Event keeps matching its keys after joining it
-- [ ] Ticket 87's and 88's tests that keep rows of a UID in two objects change to the ownership rule
+- [x] Schema, in the baseline (nothing is released, ADR 0008): `server_object_key (object_id, uid, recurrence_id)`; `event.object_id`, `journal_entry.object_id` and `server_object.pending` go
+- [x] `Unit::mirror` writes an object's keys with its data, one per component, recurrence IDs normalised as the rows hold them; an unreadable object keeps the keys of its last readable version. Where the Store renormalises a UID's recurrence IDs (`Loaded::join`, ticket 88), it renormalises the keys in the same function
+- [x] Rows find their object through the keys: on CalDAV the object holding the row's Calendar and UID. Google's rule, by UID and recurrence ID, comes with ticket 26. `Store::events_in_object`, `original_server_data` and `sync::moved` go through the keys
+- [x] Ownership, in one function that sync and ticket 23 both use: of several objects in a Calendar holding one UID, the one holding the Recurring Event owns it, otherwise the first mirrored. The others are mirrored without rows. When the owner is removed, the next one takes over, its rows read from its mirrored data
+- [x] `event::take_object` replaces the rows of the UIDs the object owns; it never writes rows of a UID another object owns
+- [x] `EventFields.object_id` and `Unit::placed` go. Versions and their hash hold FreeCal's fields only, a new hash format, with no rehashing of existing Local Stores
+- [x] Core tests: two objects with one UID (the Recurring Event's object owns it, whichever came first; the other has no rows; it takes over when the owner goes, with a sync token too); a user's new Exception and an undone delete not yet sent find their object through the keys; an Exception without its Recurring Event keeps matching its keys after joining it
+- [x] Ticket 87's and 88's tests that keep rows of a UID in two objects change to the ownership rule
 
 ## Comments
 
@@ -23,3 +23,6 @@
 - 2026-10-25: Reporting an object that isn't shown because another owns its UID waits for ticket 23; so does the reason an unsent change failed, for ticket 17.
 - 2026-10-25 (from 90): The SQL that writes `server_object_key` and `unsent_change` goes in `store/sql.rs`, behind `Unit` methods, like the other tables the Change Journal guards: each write takes a `Journaled`; add both tables to the doc comment at the top of `sql.rs`. Box 12's renormalisation of keys is a `Unit` call from `Loaded::join`, which already takes the unit; code outside `store` can't write those tables itself.
 - 2026-11-02: Split so each part fits one agent session. The `unsent_change` table and recording changes in it are now ticket 92. `server_object.pending` still goes here: until 92 lands nothing records what is waiting to be sent, which is harmless while nothing reads it (ticket 17 is the first reader).
+- 2026-11-02: Done. `server_object_key` holds one key per component, written by `Unit::mirror`, and `Store::owner` decides ownership in SQL. It reads "holding the Recurring Event" as holding a component without a recurrence ID, so a non-repeating single Event counts as well. Ticket 23 should keep that in mind when it reuses `owner`. Rows find their object through `Store::object_of_event` (`Core::original_server_data`). `sync::moved` matches a removed object's keys, objects that own nothing included, so a moved object keeps its ID and its place in the "first mirrored" order. `Store::events_in_object` went, since nothing uses it any more. `event::take_object` writes the rows of the UIDs the object owns. When an owner goes, or no longer holds a UID, `sync::settle` hands the UID to the next owner and reads its rows from its mirrored data. Their recurrence IDs are normalised only against that object's own Recurring Event, so an Exception left alone gets ticket 88's own-zone form, and `Unit::rekey` rewrites that object's keys to match. The next fetch therefore pairs with the same Event. An Exception whose Recurring Event went is a new Event of its own, not the old row. Reading mirrored data needs the zone floating times are pinned to, so `remote::Changes` gained `zone`, and CalDAV now also asks for it when only removals came. `Remote::all_events` hands the zone to each page. `Unit::remove_object` leaves the rows for `settle`. `Loaded::join` renormalises keys through `Unit::rejoin_keys`. `server_object.pending` went, and `HASH_FORMAT` is 2.
+  - Left open, for ticket 26 (keys by recurrence ID) or 17/20: keys aren't journaled. Undoing a unit that joined an Exception puts the row's zoned recurrence ID back but leaves its key normalised, which is harmless while CalDAV finds objects by UID. Undoing a sync with a takeover brings back rows that the new owner doesn't hold, and a later sync that fetches that object again drops them. Sending (ticket 17, from ticket 92's unsent changes) is where that should be decided.
+  - Review judgement calls not taken: a type for a key in place of `(&str, Option<&str>)`, and a newtype for the key rowid that `Store::keys_with_uid` returns.

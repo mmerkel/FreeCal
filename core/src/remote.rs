@@ -56,6 +56,9 @@ pub(crate) struct Changes {
     pub removed: Vec<String>,
     /// The Calendar's sync state after these changes.
     pub state: SyncPoint,
+    /// The zone floating times are pinned to (ADR 0007), for those of the
+    /// objects FreeCal holds already as well.
+    pub zone: Tz,
 }
 
 /// A server Account's server, logged in.
@@ -67,14 +70,14 @@ pub(crate) trait Remote {
     /// to `page`, up to [`FIRST_SYNC_PAGE`] at a time, stopping at the first
     /// error, its own or `page`'s. Floating times are pinned to the
     /// Calendar's own time zone if the server gives one, otherwise to
-    /// `display` (ADR 0007). Returns the Calendar's sync state as of before
-    /// it was listed, so that a change made meanwhile comes with the next
-    /// sync.
+    /// `display` (ADR 0007), the zone `page` gets with them. Returns the
+    /// Calendar's sync state as of before it was listed, so that a change
+    /// made meanwhile comes with the next sync.
     fn all_events(
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
@@ -101,7 +104,7 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
     ) -> Result<SyncPoint> {
         caldav::Client::all_events(self, url, display, page)
     }

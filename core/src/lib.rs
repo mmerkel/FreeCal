@@ -255,9 +255,9 @@ impl Core {
     /// page, as a first sync. A Calendar removed meanwhile ends it.
     fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
         let pulled = remote
-            .all_events(url, self.clock.time_zone(), &mut |fetched| {
+            .all_events(url, self.clock.time_zone(), &mut |fetched, zone| {
                 self.record(Origin::FirstSync, |unit| {
-                    sync::take(unit, id, &fetched, &mut Vec::new())
+                    sync::take(unit, id, &fetched, zone, &mut Vec::new())
                 })
                 .map(drop)
             })
@@ -509,12 +509,13 @@ impl Core {
         Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
     }
 
-    /// The server object an Event refers to (ADR 0010), as the server last
-    /// gave it: for an Exception too, the object holding it. None for an
-    /// Event not on a server yet.
+    /// The server object an Event belongs to (ADR 0011), as the server last
+    /// gave it: the object holding its UID in its Calendar, for an
+    /// Exception too. None for an Event no object holds, such as one not on
+    /// a server yet.
     pub fn original_server_data(&self, id: EventId) -> Result<Option<ServerObject>> {
         let store = self.store();
-        match store.find_event(id)?.fields.object_id {
+        match store.object_of_event(id)? {
             Some(object) => store.server_object(object),
             None => Ok(None),
         }

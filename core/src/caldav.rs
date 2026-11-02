@@ -215,19 +215,20 @@ impl Client {
     /// Every object of the Calendar at `calendar`, handed to `page`
     /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
     /// then fetched with `calendar-multiget` (RFC 4791). Floating times are
-    /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`.
-    /// Returns the Calendar's sync token as the listing gave it.
+    /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`,
+    /// the zone `page` gets with them. Returns the Calendar's sync token as
+    /// the listing gave it.
     pub fn all_events(
         &self,
         calendar: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>) -> Result<()>,
+        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
     ) -> Result<SyncPoint> {
         let listing = self.listing(&stored_url(&self.url, calendar)?, display)?;
         let members: Vec<String> = listing.members.into_iter().map(|(path, _)| path).collect();
         for hrefs in members.chunks(FIRST_SYNC_PAGE) {
             let zone = listing.zone.unwrap_or(display);
-            page(self.multiget(&listing.calendar, hrefs, zone)?)?;
+            page(self.multiget(&listing.calendar, hrefs, zone)?, zone)?;
         }
         Ok(SyncPoint {
             token: listing.token,
@@ -304,8 +305,10 @@ impl Client {
             .map(|(path, _)| path.clone())
             .collect();
         fetch.extend(unchanged);
+        // A removed object's rows may go to another object holding its UID,
+        // read from what FreeCal holds of it.
         let zone = match listing.zone {
-            _ if fetch.is_empty() => display,
+            _ if fetch.is_empty() && removed.is_empty() => display,
             Some(zone) => zone,
             None => {
                 let (answer, _) =
@@ -323,6 +326,7 @@ impl Client {
             state: SyncPoint {
                 token: listing.token,
             },
+            zone,
         })
     }
 

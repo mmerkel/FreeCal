@@ -264,9 +264,6 @@ pub(crate) struct EventFields {
     pub exdates: String,
     /// For an Exception, the recurrence ID of the Occurrence it changed.
     pub recurrence_id: Option<String>,
-    /// The server object the row came from or will be written to; none for
-    /// a row not on a server yet.
-    pub object_id: Option<ObjectId>,
 }
 
 impl EventFields {
@@ -292,9 +289,9 @@ pub struct ObjectId(pub i64);
 /// back, one CalDAV resource at its href, or one Google event resource. Its
 /// row mirrors the server's last known state of it (address, version tag,
 /// data as received), and only a sync or a successful write to the server
-/// changes it. Event rows refer to the object they came from or will be
-/// written to. A read-only feed has no server objects, because FreeCal never
-/// writes to it.
+/// changes it. A Calendar's rows with one UID belong to the object holding
+/// that UID, found through the objects' keys (ADR 0011). A read-only feed
+/// has no server objects, because FreeCal never writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerObject {
     /// The object's address on the server, as the server gave it.

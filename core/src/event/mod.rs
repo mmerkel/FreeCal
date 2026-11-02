@@ -215,11 +215,10 @@ impl Loaded {
     }
 
     /// Makes `incoming`, a new version from a file with its Exceptions, the
-    /// Events with the UID, adding it if the Calendar has none (see [`Unit`]
-    /// for the server object each gets). Exceptions are paired by the
-    /// Occurrence they changed: those `incoming` has replace them or are
-    /// added, the latest of several for one Occurrence. The others are
-    /// deleted, but for Events of their own ([`Loaded::of_its_own`]), which
+    /// Events with the UID, adding it if the Calendar has none. Exceptions
+    /// are paired by the Occurrence they changed: those `incoming` has
+    /// replace them or are added, the latest of several for one Occurrence.
+    /// The others are deleted, but for Events of their own ([`Loaded::of_its_own`]), which
     /// stay, joined beforehand ([`Loaded::join`]) if they had no Recurring
     /// Event.
     /// ADR 0007's rules 2 and 3 apply.
@@ -235,7 +234,7 @@ impl Loaded {
                 *id,
                 &StoredEvent {
                     calendar_id: self.calendar_id,
-                    fields: fields_over(incoming, previous, None),
+                    fields: fields_over(incoming, previous),
                 },
             )?,
             None => {
@@ -243,7 +242,7 @@ impl Loaded {
                     &self.uid,
                     &StoredEvent {
                         calendar_id: self.calendar_id,
-                        fields: fields(incoming, None),
+                        fields: fields(incoming),
                     },
                 )?;
             }
@@ -255,11 +254,8 @@ impl Loaded {
                     .position(|stored| stored.rid.as_ref() == Some(&rid))
             });
             let (previous, fields) = match same.map(|index| left.remove(index)) {
-                Some(stored) => (
-                    Some(stored.id),
-                    fields_over(exception, &stored.fields, None),
-                ),
-                None => (None, fields(exception, None)),
+                Some(stored) => (Some(stored.id), fields_over(exception, &stored.fields)),
+                None => (None, fields(exception)),
             };
             self.write_exception(unit, previous, self, fields)?;
         }
@@ -289,13 +285,8 @@ impl Loaded {
             },
         };
         match rid.as_deref().and_then(|rid| self.exception_at(rid)) {
-            Some(stored) => unit.replace(
-                stored.id,
-                &event(fields_over(incoming, &stored.fields, None)),
-            ),
-            None => unit
-                .create(&self.uid, &event(fields(incoming, None)))
-                .map(|_| ()),
+            Some(stored) => unit.replace(stored.id, &event(fields_over(incoming, &stored.fields))),
+            None => unit.create(&self.uid, &event(fields(incoming))).map(|_| ()),
         }
     }
 
@@ -303,10 +294,16 @@ impl Loaded {
     /// `recurring` that they are about to get, if they have none yet: each
     /// that was an Event of its own, its recurrence ID in the zone it was
     /// given in, gets it normalised against the Recurring Event (ticket 88).
+    /// The keys of the server objects holding the UID get theirs
+    /// normalised alike, as keys hold recurrence IDs as the rows do (ADR
+    /// 0011).
     pub fn join(&self, unit: &mut Unit, recurring: &ImportedWhen) -> Result<()> {
         if self.recurring().is_some() {
             return Ok(());
         }
+        unit.rejoin_keys(self.calendar_id, &self.uid, |text| {
+            rejoined_id(text, recurring)
+        })?;
         for exception in &self.exceptions {
             let joined = exception
                 .fields
@@ -561,7 +558,6 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
             rule,
             exdates: String::new(),
             recurrence_id: None,
-            object_id: None,
         },
     };
     unit.create(&new_uid(), &event)
@@ -571,8 +567,8 @@ pub(crate) fn create_event(unit: &mut Unit, zone: Tz, draft: EventDraft) -> Resu
 /// (exclusive), in the Display Time Zone `zone` and ordered by start.
 /// Recurring Events are expanded here, in wall time in their Event Time
 /// Zone, and their Exceptions stand in for the Occurrences they changed:
-/// of several for one Occurrence, as two server objects may hold, the first
-/// by ID. An Exception that is an Event of its own ([`Loaded::of_its_own`])
+/// of several for one Occurrence, as another program may have written, the
+/// first by ID. An Exception that is an Event of its own ([`Loaded::of_its_own`])
 /// has no recurrence ID.
 pub(crate) fn occurrences(
     store: &Store,
@@ -656,52 +652,62 @@ pub(crate) struct ObjectEvent<'a> {
 }
 
 /// Makes `events`, the Events the server object `object` of the Calendar
-/// `calendar_id` holds now, the object's rows, and changes no other row
-/// (ADR 0010): each replaces the object's row with its UID and recurrence
-/// ID or is added, and the object's other rows are deleted, whatever their
-/// UIDs. Of several with one UID and recurrence ID, the latest is kept.
-/// ADR 0007's rules 2 and 3 apply.
+/// `calendar_id` holds now, the rows of the UIDs it owns ([`Unit::owner`]),
+/// and changes no other row (ADR 0011): of each such UID, each Event
+/// replaces the row with its recurrence ID or is added, and the UID's other
+/// rows are deleted. The Events of a UID another object owns write
+/// nothing, as `object` is mirrored without rows of it. Of several with one
+/// UID and recurrence ID, the latest is kept. ADR 0007's rules 2 and 3
+/// apply.
 pub(crate) fn take_object(
     unit: &mut Unit,
     calendar_id: CalendarId,
     object: ObjectId,
     events: &[ObjectEvent],
 ) -> Result<()> {
-    let mut left = unit.events_in_object(object)?;
-    let events = latest(
-        events
-            .iter()
-            .map(|event| ((event.uid, event.rid.as_deref()), event.incoming)),
-    );
-    for ((uid, rid), incoming) in events {
-        // A stored recurrence ID that isn't one pairs with nothing.
-        let same = left.iter().position(|row| {
-            let stored = match &row.fields.recurrence_id {
-                Some(text) => rule::recurrence_id(text).map(Some),
-                None => Some(None),
-            };
-            row.uid == uid
-                && stored
-                    .as_ref()
-                    .is_some_and(|stored| stored.as_deref() == rid)
-        });
-        let event = |fields: EventFields| StoredEvent {
-            calendar_id,
-            fields: EventFields {
-                recurrence_id: rid.map(str::to_owned),
-                ..fields
-            },
-        };
-        match same.map(|index| left.remove(index)) {
-            Some(row) => unit.replace(
-                row.id,
-                &event(fields_over(incoming, &row.fields, Some(object))),
-            )?,
-            None => _ = unit.create(uid, &event(fields(incoming, Some(object))))?,
+    let mut uids: Vec<&str> = Vec::new();
+    for event in events {
+        if !uids.contains(&event.uid) {
+            uids.push(event.uid);
         }
     }
-    for row in left {
-        unit.delete(row.id)?;
+    for uid in uids {
+        if unit.owner(calendar_id, uid)? != Some(object) {
+            continue;
+        }
+        let mut left = unit.events_with_uid(Uid::In(calendar_id, uid))?;
+        let events = latest(
+            events
+                .iter()
+                .filter(|event| event.uid == uid)
+                .map(|event| (event.rid.as_deref(), event.incoming)),
+        );
+        for (rid, incoming) in events {
+            // A stored recurrence ID that isn't one pairs with nothing.
+            let same = left.iter().position(|row| {
+                let stored = match &row.fields.recurrence_id {
+                    Some(text) => rule::recurrence_id(text).map(Some),
+                    None => Some(None),
+                };
+                stored
+                    .as_ref()
+                    .is_some_and(|stored| stored.as_deref() == rid)
+            });
+            let event = |fields: EventFields| StoredEvent {
+                calendar_id,
+                fields: EventFields {
+                    recurrence_id: rid.map(str::to_owned),
+                    ..fields
+                },
+            };
+            match same.map(|index| left.remove(index)) {
+                Some(row) => unit.replace(row.id, &event(fields_over(incoming, &row.fields)))?,
+                None => _ = unit.create(uid, &event(fields(incoming)))?,
+            }
+        }
+        for row in left {
+            unit.delete(row.id)?;
+        }
     }
     Ok(())
 }
@@ -729,9 +735,8 @@ pub(crate) fn new_uid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// An incoming version's fields, as the Local Store holds them, in the
-/// server object `object`.
-fn fields(incoming: &ImportedEvent, object: Option<ObjectId>) -> EventFields {
+/// An incoming version's fields, as the Local Store holds them.
+fn fields(incoming: &ImportedEvent) -> EventFields {
     EventFields {
         title: incoming.title.clone(),
         when: StoredWhen::imported(&incoming.when),
@@ -742,7 +747,6 @@ fn fields(incoming: &ImportedEvent, object: Option<ObjectId>) -> EventFields {
         rule: incoming.rule.clone(),
         exdates: incoming.exdates.clone(),
         recurrence_id: incoming.recurrence_id.clone(),
-        object_id: object,
     }
 }
 
@@ -750,12 +754,8 @@ fn fields(incoming: &ImportedEvent, object: Option<ObjectId>) -> EventFields {
 /// `previous`: one floating end takes the zone of the other (ADR 0007, rule
 /// 3), so only a version floating at both keeps the zone pinned before
 /// (rule 2).
-fn fields_over(
-    incoming: &ImportedEvent,
-    previous: &EventFields,
-    object: Option<ObjectId>,
-) -> EventFields {
-    let fields = fields(incoming, object);
+fn fields_over(incoming: &ImportedEvent, previous: &EventFields) -> EventFields {
+    let fields = fields(incoming);
     if incoming.all_floating && previous.zone_pinned {
         EventFields {
             when: fields.when.in_zones_of(&previous.when),

@@ -2,10 +2,11 @@
 //! here and nowhere else.
 //!
 //! Writing the tables the Change Journal guards (ADR 0011), `event`,
-//! `server_object`, `journal_unit` and `journal_entry`, takes a
-//! [`Journaled`], which only [`journal`](super::journal) can make: so the
-//! compiler keeps everything else from writing them. A new write to one of
-//! those tables takes one too.
+//! `server_object`, `server_object_key`, `journal_unit` and
+//! `journal_entry`, takes a [`Journaled`], which only
+//! [`journal`](super::journal) can make: so the compiler keeps everything
+//! else from writing them. A new write to one of those tables takes one
+//! too.
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,7 +53,7 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 /// The columns [`event_fields`] reads, in its order, which the Change
 /// Journal's entries share with the `event` table.
 const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
-     description, description_html, zone_pinned, rrule, exdates, recurrence_id, object_id";
+     description, description_html, zone_pinned, rrule, exdates, recurrence_id";
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
 fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
@@ -66,7 +67,6 @@ fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
         rule: row.get(first + 10)?,
         exdates: row.get(first + 11)?,
         recurrence_id: row.get(first + 12)?,
-        object_id: row.get::<_, Option<i64>>(first + 13)?.map(ObjectId),
     })
 }
 
@@ -310,16 +310,86 @@ impl Store {
         Ok(objects)
     }
 
-    /// The rows of the server object `id`, in the order they were added.
-    pub fn events_in_object(&self, id: ObjectId) -> Result<Vec<UidEvent>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, calendar_id, uid, {EVENT_FIELDS} FROM event WHERE object_id = ?1 \
-             ORDER BY id"
-        ))?;
-        let events = stmt
-            .query_map([id.0], uid_event)?
+    /// The server object of a Calendar that owns the UID `uid`, the one
+    /// its rows with the UID belong to (ADR 0011); none when no object
+    /// holds it. Of several objects holding it, the one holding the Event
+    /// that isn't an Exception, the Recurring Event when it repeats, owns
+    /// it, otherwise the first mirrored. The others are mirrored without
+    /// rows. This is the one place that decides it.
+    pub fn owner(&self, calendar_id: CalendarId, uid: &str) -> Result<Option<ObjectId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT server_object.id FROM server_object_key \
+                 JOIN server_object ON server_object.id = server_object_key.object_id \
+                 WHERE server_object.calendar_id = ?1 AND server_object_key.uid = ?2 \
+                 GROUP BY server_object.id \
+                 ORDER BY MAX(server_object_key.recurrence_id IS NULL) DESC, server_object.id \
+                 LIMIT 1",
+                params![calendar_id.0, uid],
+                |row| row.get(0).map(ObjectId),
+            )
+            .optional()?)
+    }
+
+    /// The UIDs the server object `id` owns ([`Store::owner`]), in the
+    /// order its keys were written.
+    pub fn owned_uids(&self, id: ObjectId) -> Result<Vec<String>> {
+        let Some(calendar_id) = self.object_calendar(id)? else {
+            return Ok(Vec::new());
+        };
+        let mut owned = Vec::new();
+        for uid in self.held_uids(id)? {
+            if self.owner(calendar_id, &uid)? == Some(id) {
+                owned.push(uid);
+            }
+        }
+        Ok(owned)
+    }
+
+    /// The UIDs the server object `id` holds, owned or not, in the order its
+    /// keys were written.
+    pub fn held_uids(&self, id: ObjectId) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid FROM server_object_key WHERE object_id = ?1 \
+             GROUP BY uid ORDER BY MIN(rowid)",
+        )?;
+        readable(stmt.query_map([id.0], |row| row.get(0))?)
+    }
+
+    /// The Calendar of the server object `id`, none if it is gone.
+    fn object_calendar(&self, id: ObjectId) -> Result<Option<CalendarId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT calendar_id FROM server_object WHERE id = ?1",
+                [id.0],
+                |row| row.get(0).map(CalendarId),
+            )
+            .optional()?)
+    }
+
+    /// The server object the Event `id` belongs to, through the keys: on
+    /// CalDAV the owner of its Calendar and UID. None for an Event no
+    /// object holds, such as one not on a server yet.
+    pub fn object_of_event(&self, id: EventId) -> Result<Option<ObjectId>> {
+        match self.event_and_uid(id)? {
+            Some((uid, event)) => self.owner(event.calendar_id, &uid),
+            None => Err(CoreError::EventNotFound(id)),
+        }
+    }
+
+    /// The keys of the server object `id`: each component's UID and
+    /// recurrence ID, in the order they were written.
+    #[cfg(test)]
+    pub fn keys(&self, id: ObjectId) -> Result<Vec<(String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT uid, recurrence_id FROM server_object_key WHERE object_id = ?1 ORDER BY rowid",
+        )?;
+        let keys = stmt
+            .query_map([id.0], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        Ok(events)
+        Ok(keys)
     }
 
     /// The server object `id` as the server last gave it, none if it is
@@ -540,38 +610,23 @@ impl Store {
             .optional()?)
     }
 
-    /// The server object `id`, if it exists in the Calendar `calendar_id`.
-    pub(super) fn object_in(
-        &self,
-        id: ObjectId,
-        calendar_id: CalendarId,
-    ) -> Result<Option<ObjectId>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT id FROM server_object WHERE id = ?1 AND calendar_id = ?2",
-                params![id.0, calendar_id.0],
-                |row| row.get(0).map(ObjectId),
-            )
-            .optional()?)
-    }
-
-    /// The server object of the first of a Calendar's rows with the UID
-    /// `uid` that has one.
-    pub(super) fn object_of_uid(
+    /// The ID and recurrence ID of each key of the Calendar's server
+    /// objects with the UID `uid`.
+    pub(super) fn keys_with_uid(
         &self,
         calendar_id: CalendarId,
         uid: &str,
-    ) -> Result<Option<ObjectId>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT object_id FROM event WHERE calendar_id = ?1 AND uid = ?2 \
-                 AND object_id IS NOT NULL ORDER BY id LIMIT 1",
-                params![calendar_id.0, uid],
-                |row| row.get(0).map(ObjectId),
-            )
-            .optional()?)
+    ) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT server_object_key.rowid, server_object_key.recurrence_id \
+             FROM server_object_key \
+             JOIN server_object ON server_object.id = server_object_key.object_id \
+             WHERE server_object.calendar_id = ?1 AND server_object_key.uid = ?2 \
+             ORDER BY server_object_key.rowid",
+        )?;
+        readable(stmt.query_map(params![calendar_id.0, uid], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?)
     }
 
     /// The Change Journal's entries of the unit `id`, in the order they were
@@ -668,9 +723,9 @@ impl Store {
         self.conn.execute(
             "INSERT INTO event (id, uid, calendar_id, title, all_day, start_at, end_at, \
              start_zone, end_zone, start_utc, end_utc, location, description, \
-             description_html, zone_pinned, rrule, exdates, recurrence_id, object_id) \
+             description_html, zone_pinned, rrule, exdates, recurrence_id) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-               ?18, ?19) \
+               ?18) \
              ON CONFLICT (id) DO UPDATE SET uid = excluded.uid, \
                calendar_id = excluded.calendar_id, title = excluded.title, \
                all_day = excluded.all_day, start_at = excluded.start_at, \
@@ -680,8 +735,7 @@ impl Store {
                description = excluded.description, \
                description_html = excluded.description_html, \
                zone_pinned = excluded.zone_pinned, rrule = excluded.rrule, \
-               exdates = excluded.exdates, recurrence_id = excluded.recurrence_id, \
-               object_id = excluded.object_id",
+               exdates = excluded.exdates, recurrence_id = excluded.recurrence_id",
             params![
                 id.map(|id| id.0),
                 uid,
@@ -701,7 +755,6 @@ impl Store {
                 fields.rule,
                 fields.exdates,
                 fields.recurrence_id,
-                fields.object_id.map(|object| object.0),
             ],
         )?;
         Ok(id.unwrap_or(EventId(self.conn.last_insert_rowid())))
@@ -715,8 +768,59 @@ impl Store {
     }
 
     /// Writes `object` over the server object `over`, address included, or
-    /// as a new object of a Calendar, and returns its ID.
+    /// as a new object of a Calendar, with `keys` as its keys, and returns
+    /// its ID.
     pub(super) fn write_object(
+        &self,
+        journaled: &Journaled,
+        calendar_id: CalendarId,
+        object: &ServerObject,
+        over: Option<ObjectId>,
+        keys: &[(&str, Option<&str>)],
+    ) -> Result<ObjectId> {
+        let id = self.write_object_row(journaled, calendar_id, object, over)?;
+        self.conn
+            .execute("DELETE FROM server_object_key WHERE object_id = ?1", [id.0])?;
+        self.insert_keys(journaled, id, keys)?;
+        Ok(id)
+    }
+
+    /// Makes `keys`, all with the UID `uid`, the server object `id`'s keys
+    /// with that UID.
+    pub(super) fn write_uid_keys(
+        &self,
+        journaled: &Journaled,
+        id: ObjectId,
+        uid: &str,
+        keys: &[(&str, Option<&str>)],
+    ) -> Result<()> {
+        debug_assert!(keys.iter().all(|(key_uid, _)| *key_uid == uid));
+        self.conn.execute(
+            "DELETE FROM server_object_key WHERE object_id = ?1 AND uid = ?2",
+            params![id.0, uid],
+        )?;
+        self.insert_keys(journaled, id, keys)
+    }
+
+    /// Adds `keys` to the server object `id`.
+    fn insert_keys(
+        &self,
+        _: &Journaled,
+        id: ObjectId,
+        keys: &[(&str, Option<&str>)],
+    ) -> Result<()> {
+        for (uid, recurrence_id) in keys {
+            self.conn.execute(
+                "INSERT INTO server_object_key (object_id, uid, recurrence_id) \
+                 VALUES (?1, ?2, ?3)",
+                params![id.0, uid, recurrence_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// [`Store::write_object`]'s write of the object itself.
+    fn write_object_row(
         &self,
         _: &Journaled,
         calendar_id: CalendarId,
@@ -763,17 +867,26 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes the server object `id`; its rows keep no object.
-    pub(super) fn delete_object(&self, _: &Journaled, id: ObjectId) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM server_object WHERE id = ?1", [id.0])?;
+    /// Writes the recurrence ID of the server object key `key`, an ID
+    /// [`Store::keys_with_uid`] gave.
+    pub(super) fn set_key_recurrence_id(
+        &self,
+        _: &Journaled,
+        key: i64,
+        recurrence_id: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE server_object_key SET recurrence_id = ?2 WHERE rowid = ?1",
+            params![key, recurrence_id],
+        )?;
         Ok(())
     }
 
-    /// Marks the server object `id` as having changes for FreeCal to send.
-    pub(super) fn mark_pending(&self, _: &Journaled, id: ObjectId) -> Result<()> {
+    /// Deletes the server object `id` with its keys, by the schema's
+    /// cascade; rows aren't written.
+    pub(super) fn delete_object(&self, _: &Journaled, id: ObjectId) -> Result<()> {
         self.conn
-            .execute("UPDATE server_object SET pending = 1 WHERE id = ?1", [id.0])?;
+            .execute("DELETE FROM server_object WHERE id = ?1", [id.0])?;
         Ok(())
     }
 
@@ -805,7 +918,7 @@ impl Store {
                 "INSERT INTO journal_entry (unit_id, event_id, uid, hash, calendar_id, \
                  {EVENT_FIELDS}) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                   ?16, ?17, ?18, ?19)"
+                   ?16, ?17, ?18)"
             ),
             params![
                 unit.0,
@@ -826,7 +939,6 @@ impl Store {
                 fields.and_then(|fields| fields.rule.as_ref()),
                 fields.map(|fields| &fields.exdates),
                 fields.and_then(|fields| fields.recurrence_id.as_ref()),
-                fields.and_then(|fields| fields.object_id.map(|object| object.0)),
             ],
         )?;
         Ok(())

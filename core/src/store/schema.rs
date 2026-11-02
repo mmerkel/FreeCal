@@ -27,15 +27,18 @@ const MIGRATIONS: &[&str] = &[
     // changed.
     //
     // Server objects mirror the server, with their data as received in its
-    // `format`, `pending` once FreeCal has changes to send, and `unreadable`
-    // once FreeCal couldn't read the server's version, so that the mirror
-    // holds the last version it could (ADR 0010).
+    // `format`, and `unreadable` once FreeCal couldn't read the server's
+    // version, so that the mirror holds the last version it could (ADR
+    // 0010). Each object's keys are the UID and recurrence ID of each of its
+    // components, the recurrence ID normalised as the rows hold it: a
+    // Calendar's rows with one UID find the object they belong to through
+    // them (ADR 0011).
     //
     // A Change Journal entry holds the Event's previous version with its
     // Calendar, none when the change created it, and the hash of its new
-    // version, none when the change deleted it (ADR 0009). None of its
-    // `event_id`, `calendar_id` and `object_id` has a foreign key, because
-    // what they name may be gone since.
+    // version, none when the change deleted it (ADR 0009). Neither its
+    // `event_id` nor its `calendar_id` has a foreign key, because what they
+    // name may be gone since.
     "
     CREATE TABLE account (
         id INTEGER PRIMARY KEY,
@@ -67,10 +70,16 @@ const MIGRATIONS: &[&str] = &[
         etag TEXT,
         data TEXT NOT NULL,
         format TEXT NOT NULL,
-        pending INTEGER NOT NULL DEFAULT 0,
         unreadable INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
+    CREATE TABLE server_object_key (
+        object_id INTEGER NOT NULL REFERENCES server_object (id) ON DELETE CASCADE,
+        uid TEXT NOT NULL,
+        recurrence_id TEXT
+    );
+    CREATE INDEX server_object_key_object ON server_object_key (object_id);
+    CREATE INDEX server_object_key_uid ON server_object_key (uid);
     CREATE TABLE event (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
@@ -90,14 +99,12 @@ const MIGRATIONS: &[&str] = &[
         rrule TEXT,
         exdates TEXT NOT NULL DEFAULT '',
         recurrence_id TEXT,
-        object_id INTEGER REFERENCES server_object (id) ON DELETE SET NULL,
         CHECK (CASE WHEN all_day
             THEN start_zone IS NULL AND end_zone IS NULL
             ELSE start_zone IS NOT NULL AND end_zone IS NOT NULL END)
     );
     CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
     CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
-    CREATE INDEX event_object ON event (object_id);
     CREATE TABLE journal_unit (
         id INTEGER PRIMARY KEY,
         origin TEXT NOT NULL,
@@ -123,8 +130,7 @@ const MIGRATIONS: &[&str] = &[
         zone_pinned INTEGER,
         rrule TEXT,
         exdates TEXT,
-        recurrence_id TEXT,
-        object_id INTEGER
+        recurrence_id TEXT
     );
     CREATE INDEX journal_entry_unit ON journal_entry (unit_id);
     CREATE INDEX journal_entry_event ON journal_entry (event_id, uid);
