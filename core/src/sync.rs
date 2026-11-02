@@ -84,15 +84,13 @@ pub(crate) fn take(
             Some(object) => unit.owned_uids(object)?,
             None => Vec::new(),
         };
-        let keys: Vec<_> = events
-            .iter()
-            .map(|event| (event.uid, event.rid.as_deref()))
-            .collect();
-        let object = unit.mirror(calendar_id, &one.object, object, &keys)?;
+        let object = unit.mirror(calendar_id, &one.object, object, &keys(&events))?;
         event::take_object(unit, calendar_id, object, &events)?;
-        let now = unit.owned_uids(object)?;
-        let lost: Vec<String> = owned.into_iter().filter(|uid| !now.contains(uid)).collect();
-        settle(unit, calendar_id, &lost, zone)?;
+        if !owned.is_empty() {
+            let now = unit.owned_uids(object)?;
+            let lost: Vec<String> = owned.into_iter().filter(|uid| !now.contains(uid)).collect();
+            settle(unit, calendar_id, &lost, zone)?;
+        }
     }
     Ok(())
 }
@@ -129,18 +127,10 @@ fn settle(unit: &mut Unit, calendar_id: CalendarId, uids: &[String], zone: Tz) -
         let Some(events) = &read[0].events else {
             continue;
         };
-        let events: Vec<ImportedEvent> = events
-            .iter()
-            .filter(|event| event.uid == *uid)
-            .cloned()
-            .collect();
         let recurring = recurring_of(&read);
-        let events = object_events(&events, |uid| Ok(recurring.get(uid).copied()))?;
-        let keys: Vec<_> = events
-            .iter()
-            .map(|event| (event.uid, event.rid.as_deref()))
-            .collect();
-        unit.rekey(owner, uid, &keys)?;
+        let mut events = object_events(events, |uid| Ok(recurring.get(uid).copied()))?;
+        events.retain(|event| event.uid == uid);
+        unit.rekey(owner, uid, &keys(&events))?;
         event::take_object(unit, calendar_id, owner, &events)?;
     }
     Ok(())
@@ -183,6 +173,14 @@ fn object_events<'a>(
         });
     }
     Ok(kept)
+}
+
+/// The key of each of `events`: its UID and recurrence ID (ADR 0011).
+fn keys<'a>(events: &'a [ObjectEvent]) -> Vec<(&'a str, Option<&'a str>)> {
+    events
+        .iter()
+        .map(|event| (event.uid, event.rid.as_deref()))
+        .collect()
 }
 
 /// The object of `moved_from` that holds a UID of `events`, by its keys,

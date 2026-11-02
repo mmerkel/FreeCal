@@ -844,12 +844,11 @@ impl Store {
         id: ObjectId,
         keys: &[(&str, Option<&str>)],
     ) -> Result<()> {
+        let mut stmt = self.conn.prepare(
+            "INSERT INTO server_object_key (object_id, uid, recurrence_id) VALUES (?1, ?2, ?3)",
+        )?;
         for (uid, recurrence_id) in keys {
-            self.conn.execute(
-                "INSERT INTO server_object_key (object_id, uid, recurrence_id) \
-                 VALUES (?1, ?2, ?3)",
-                params![id.0, uid, recurrence_id],
-            )?;
+            stmt.execute(params![id.0, uid, recurrence_id])?;
         }
         Ok(())
     }

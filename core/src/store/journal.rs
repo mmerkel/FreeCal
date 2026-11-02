@@ -264,16 +264,16 @@ impl Unit<'_> {
         uid: &str,
         rejoined: impl Fn(&str) -> Option<String>,
     ) -> Result<()> {
-        for (key, recurrence_id) in self.store.keys_with_uid(calendar_id, uid)? {
-            if let Some(joined) = recurrence_id.as_deref().and_then(&rejoined) {
-                self.store.set_key_recurrence_id(JOURNALED, key, &joined)?;
-            }
+        let joined = |rows: Vec<(i64, Option<String>)>| {
+            rows.into_iter()
+                .filter_map(|(row, rid)| Some((row, rejoined(rid.as_deref()?)?)))
+        };
+        for (key, joined) in joined(self.store.keys_with_uid(calendar_id, uid)?) {
+            self.store.set_key_recurrence_id(JOURNALED, key, &joined)?;
         }
-        for (row, recurrence_id) in self.store.unsent_with_uid(calendar_id, uid)? {
-            if let Some(joined) = recurrence_id.as_deref().and_then(&rejoined) {
-                self.store
-                    .set_unsent_recurrence_id(JOURNALED, row, &joined)?;
-            }
+        for (row, joined) in joined(self.store.unsent_with_uid(calendar_id, uid)?) {
+            self.store
+                .set_unsent_recurrence_id(JOURNALED, row, &joined)?;
         }
         Ok(())
     }
@@ -520,6 +520,23 @@ mod tests {
     /// The keys of [`dentist_object`].
     const DENTIST_KEYS: &[(&str, Option<&str>)] = &[("dentist", None)];
 
+    const EXCEPTION: &str = "2026-10-19T09:00:00";
+
+    /// `event` with another title.
+    fn renamed(event: &StoredEvent) -> StoredEvent {
+        let mut renamed = event.clone();
+        renamed.fields.title = "Dentist, renamed".to_owned();
+        renamed
+    }
+
+    /// `event` as the Exception with the recurrence ID `rid`.
+    fn exception(event: &StoredEvent, rid: &str) -> StoredEvent {
+        let mut exception = event.clone();
+        exception.fields.rule = None;
+        exception.fields.recurrence_id = Some(rid.to_owned());
+        exception
+    }
+
     fn hex(hash: Vec<u8>) -> String {
         hash.iter().map(|byte| format!("{byte:02x}")).collect()
     }
@@ -623,7 +640,7 @@ mod tests {
             etag: Some("\"2\"".to_owned()),
             ..dentist_object()
         };
-        let keys = [("dentist", None), ("dentist", Some("2026-10-19T09:00:00"))];
+        let keys = [("dentist", None), ("dentist", Some(EXCEPTION))];
 
         let mirrored = record(&pulled.store, Origin::Sync, 0, |unit| {
             unit.mirror(pulled.event.calendar_id, &again, Some(pulled.object), &keys)
@@ -648,8 +665,7 @@ mod tests {
     fn rows_find_their_object_through_the_keys_whatever_changed_them() {
         for origin in [Origin::UserAction, Origin::Import, Origin::Sync] {
             let pulled = Pulled::new();
-            let mut renamed = pulled.event.clone();
-            renamed.fields.title = "Dentist, renamed".to_owned();
+            let renamed = renamed(&pulled.event);
             let unit = record(&pulled.store, origin, 0, |unit| {
                 unit.replace(pulled.id, &renamed)
             })
@@ -684,9 +700,7 @@ mod tests {
     #[test]
     fn a_new_row_belongs_to_the_object_holding_its_uid() {
         let pulled = Pulled::new();
-        let mut exception = pulled.event.clone();
-        exception.fields.rule = None;
-        exception.fields.recurrence_id = Some("2026-10-19T09:00:00".to_owned());
+        let exception = exception(&pulled.event, EXCEPTION);
 
         let (joined, other) = record(&pulled.store, Origin::UserAction, 0, |unit| {
             Ok((
@@ -705,9 +719,7 @@ mod tests {
     #[test]
     fn of_two_objects_holding_a_uid_the_one_holding_the_recurring_event_owns_it() {
         let pulled = Pulled::new();
-        let exception = Some("2026-10-19T09:00:00");
-
-        let later = pulled.mirror("/user/work/copy.ics", &[("dentist", exception)]);
+        let later = pulled.mirror("/user/work/copy.ics", &[("dentist", Some(EXCEPTION))]);
 
         assert_eq!(pulled.owner(), Some(pulled.object));
         assert_eq!(
@@ -719,7 +731,7 @@ mod tests {
                 pulled.event.calendar_id,
                 &dentist_object(),
                 Some(pulled.object),
-                &[("dentist", exception)],
+                &[("dentist", Some(EXCEPTION))],
             )?;
             unit.mirror(
                 pulled.event.calendar_id,
@@ -814,8 +826,6 @@ mod tests {
         }
     }
 
-    const EXCEPTION: &str = "2026-10-19T09:00:00";
-
     #[test]
     fn a_sync_leaves_nothing_unsent() {
         let on_server = OnServer::new();
@@ -826,9 +836,7 @@ mod tests {
     #[test]
     fn a_create_leaves_its_key_unsent() {
         let on_server = OnServer::new();
-        let mut exception = on_server.event.clone();
-        exception.fields.rule = None;
-        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
+        let exception = exception(&on_server.event, EXCEPTION);
 
         on_server.change(7, |unit| unit.create("dentist", &exception));
 
@@ -842,12 +850,9 @@ mod tests {
     #[test]
     fn an_edit_leaves_its_previous_and_new_key_unsent_once() {
         let on_server = OnServer::new();
-        let mut renamed = on_server.event.clone();
-        renamed.fields.title = "Dentist, renamed".to_owned();
+        let renamed = renamed(&on_server.event);
         on_server.change(7, |unit| unit.replace(on_server.id, &renamed));
-        let mut exception = renamed.clone();
-        exception.fields.rule = None;
-        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
+        let exception = exception(&renamed, EXCEPTION);
 
         on_server.change(9, |unit| unit.replace(on_server.id, &exception));
 
@@ -908,8 +913,7 @@ mod tests {
     #[test]
     fn a_sync_that_moves_a_row_to_another_object_leaves_nothing_unsent() {
         let on_server = OnServer::new();
-        let mut renamed = on_server.event.clone();
-        renamed.fields.title = "Dentist, renamed".to_owned();
+        let renamed = renamed(&on_server.event);
 
         record(&on_server.store, Origin::Sync, 7, |unit| {
             let old = unit.owner(on_server.server, "dentist")?.unwrap();
@@ -935,9 +939,7 @@ mod tests {
     fn rejoining_keys_renormalises_the_unsent_ones() {
         let on_server = OnServer::new();
         let zoned = "2026-10-19T09:00:00 Europe/Berlin";
-        let mut exception = on_server.event.clone();
-        exception.fields.rule = None;
-        exception.fields.recurrence_id = Some(zoned.to_owned());
+        let mut exception = exception(&on_server.event, zoned);
         on_server.change(7, |unit| unit.create("dentist", &exception));
         exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
         on_server.change(9, |unit| unit.create("dentist", &exception));

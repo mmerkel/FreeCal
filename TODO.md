@@ -14,6 +14,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
   - [ ] event::Loaded vs Event - pattern probably repeats, where what is sent to the frontend is a projection of a backend type - correct? If so, shall we develop a consistent naming scheme; e.g. backend: Event, interface to frontend: EventView; any better suggestion that suffix View?
     - [ ] naming with respect to events and recurrence - Loaded, Opened, Edited, Occurrence
   - [ ] all passes through tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
+  - [ ] once time zone stuff is done (or before) have a discussion about all the places where they appear
 - [ ] have a file, e.g. in docs/, where all decisions made are listed, e.g. a doc that can later be converted to a detailed reference for a user, or for developers; e.g. what to do when DTSTART does not fulfill the RRULE 
 - [ ] caldav sync: 
   - [ ] I would like to understand the different authentication methods, and what was built in and why
