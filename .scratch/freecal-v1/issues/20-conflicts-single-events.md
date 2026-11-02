@@ -2,7 +2,7 @@
 
 **What to build:** When a local change and a newer server change to the same Event can't both be kept, FreeCal holds a Conflict instead of guessing. The Event carries a Conflict badge, the user can list all open Conflicts, see both versions and choose.
 
-**Blocked by:** 17, 91
+**Blocked by:** 17, 91, 92
 
 **Status:** ready-for-agent
 
@@ -22,3 +22,4 @@
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
 - 2026-10-24: Per ADR 0010, a server change to an object that is pending (changed in FreeCal, not sent yet) is a Conflict, never a silent replacement; today sync takes it. This includes an undone pulled change waiting to be sent.
 - 2026-10-25 (grilling, ADR 0011): blocked by 91. "Pending" now means an object with one of its keys in `unsent_change`.
+- 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.
