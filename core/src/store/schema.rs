@@ -34,6 +34,13 @@ const MIGRATIONS: &[&str] = &[
     // Calendar's rows with one UID find the object they belong to through
     // them (ADR 0011).
     //
+    // An unsent change is the key of an Event in a server Calendar that
+    // FreeCal changed since, to be sent: its UID and recurrence ID, as the
+    // rows hold them, and `since` when it was first changed (Unix seconds).
+    // Every change but a sync adds the Event's previous and new key; a key
+    // is there once, the two indexes keeping it so with and without a
+    // recurrence ID (ADR 0011).
+    //
     // A Change Journal entry holds the Event's previous version with its
     // Calendar, none when the change created it, and the hash of its new
     // version, none when the change deleted it (ADR 0009). Neither its
@@ -80,6 +87,15 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX server_object_key_object ON server_object_key (object_id);
     CREATE INDEX server_object_key_uid ON server_object_key (uid);
+    CREATE TABLE unsent_change (
+        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        uid TEXT NOT NULL,
+        recurrence_id TEXT,
+        since INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX unsent_change_key ON unsent_change (calendar_id, uid, recurrence_id);
+    CREATE UNIQUE INDEX unsent_change_uid ON unsent_change (calendar_id, uid)
+        WHERE recurrence_id IS NULL;
     CREATE TABLE event (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,

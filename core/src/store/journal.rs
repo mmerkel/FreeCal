@@ -4,7 +4,9 @@
 //! the Journal. Changes made together, such as an import, are one unit.
 //! A unit writes the server objects and their keys too (ADR 0010, 0011),
 //! which the Journal doesn't record: an Event's version holds FreeCal's
-//! fields only, and its rows find their object through the keys.
+//! fields only, and its rows find their object through the keys. Every unit
+//! but a sync's adds the keys of the Events it changes to the unsent
+//! changes, what FreeCal has to send.
 //!
 //! This file holds what the Journal decides and no SQL: it reads and writes
 //! through [`sql`](super::sql), whose writes to the tables it guards take a
@@ -251,9 +253,9 @@ impl Unit<'_> {
     }
 
     /// Renormalises the recurrence IDs of the keys with the UID `uid` of a
-    /// Calendar's server objects as `rejoined` gives them, for the step
-    /// that renormalises the rows' ([`Loaded::join`]); a key it gives none
-    /// for keeps its own.
+    /// Calendar's server objects and unsent changes as `rejoined` gives
+    /// them, for the step that renormalises the rows' ([`Loaded::join`]); a
+    /// key it gives none for keeps its own.
     ///
     /// [`Loaded::join`]: crate::event::Loaded::join
     pub fn rejoin_keys(
@@ -265,6 +267,12 @@ impl Unit<'_> {
         for (key, recurrence_id) in self.store.keys_with_uid(calendar_id, uid)? {
             if let Some(joined) = recurrence_id.as_deref().and_then(&rejoined) {
                 self.store.set_key_recurrence_id(JOURNALED, key, &joined)?;
+            }
+        }
+        for (row, recurrence_id) in self.store.unsent_with_uid(calendar_id, uid)? {
+            if let Some(joined) = recurrence_id.as_deref().and_then(&rejoined) {
+                self.store
+                    .set_unsent_recurrence_id(JOURNALED, row, &joined)?;
             }
         }
         Ok(())
@@ -363,6 +371,10 @@ impl Unit<'_> {
     /// Records that the Event `id` went from `previous` to `new`, none for
     /// an Event created or deleted, starting the unit with its first entry.
     /// An origin that isn't recorded only notes the Calendars.
+    ///
+    /// Every origin but a sync also adds both versions' keys to the unsent
+    /// changes, in a server Calendar (ADR 0011): a write into a Read-only
+    /// one was refused already. A sync's changes are what the server holds.
     fn entry(
         &mut self,
         id: EventId,
@@ -373,6 +385,15 @@ impl Unit<'_> {
         for event in previous.into_iter().chain(new) {
             if !self.calendars.contains(&event.calendar_id) {
                 self.calendars.push(event.calendar_id);
+            }
+            if !self.origin.is_sync() {
+                self.store.add_unsent_change(
+                    JOURNALED,
+                    event.calendar_id,
+                    uid,
+                    event.fields.recurrence_id.as_deref(),
+                    self.made_at,
+                )?;
             }
         }
         let Some(origin) = self.origin.recorded_as() else {
@@ -462,6 +483,7 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::event::{EventFields, StoredWhen};
+    use crate::store::sql::UnsentChange;
 
     fn dentist() -> StoredEvent {
         StoredEvent {
@@ -708,6 +730,234 @@ mod tests {
         })
         .unwrap();
         assert_eq!(pulled.owner(), Some(later), "whichever came first");
+    }
+
+    /// A Local Store with a writable server Calendar holding [`dentist`],
+    /// pulled by a sync into its object, and a Local Calendar.
+    struct OnServer {
+        _directory: tempfile::TempDir,
+        store: Store,
+        server: CalendarId,
+        local: CalendarId,
+        id: EventId,
+        event: StoredEvent,
+    }
+
+    impl OnServer {
+        fn new() -> Self {
+            use crate::{AvailableCalendar, Provider, ServerLogin};
+            let directory = tempfile::TempDir::new().unwrap();
+            let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+            let local = store.list_calendars().unwrap()[0].id;
+            let login = ServerLogin {
+                url: "https://dav.example/".to_owned(),
+                username: "anna".to_owned(),
+            };
+            let account = store
+                .insert_server_account(Provider::CalDav, &login, "key")
+                .unwrap();
+            let available = AvailableCalendar {
+                url: "/user/work/".to_owned(),
+                name: "Work".to_owned(),
+                colour: None,
+                read_only: false,
+            };
+            let server = store
+                .insert_server_calendar(account.id, &available)
+                .unwrap()
+                .id;
+            // A new server Calendar starts marked read-only.
+            store
+                .connection()
+                .execute(
+                    "UPDATE calendar SET read_only = 0 WHERE id = ?1",
+                    [server.0],
+                )
+                .unwrap();
+            let mut event = dentist();
+            event.calendar_id = server;
+            let id = record(&store, Origin::Sync, 0, |unit| {
+                unit.mirror(server, &dentist_object(), None, DENTIST_KEYS)?;
+                unit.create("dentist", &event)
+            })
+            .unwrap()
+            .value;
+            Self {
+                _directory: directory,
+                store,
+                server,
+                local,
+                id,
+                event,
+            }
+        }
+
+        /// Records `change` as a user's change made at `made_at`.
+        fn change<T>(&self, made_at: i64, change: impl FnOnce(&mut Unit) -> Result<T>) -> T {
+            record(&self.store, Origin::UserAction, made_at, change)
+                .unwrap()
+                .value
+        }
+
+        fn unsent(&self) -> Vec<UnsentChange> {
+            self.store.unsent_changes().unwrap()
+        }
+
+        /// An unsent change in the server Calendar.
+        fn key(&self, uid: &str, recurrence_id: Option<&str>, since: i64) -> UnsentChange {
+            UnsentChange {
+                calendar_id: self.server,
+                uid: uid.to_owned(),
+                recurrence_id: recurrence_id.map(str::to_owned),
+                since,
+            }
+        }
+    }
+
+    const EXCEPTION: &str = "2026-10-19T09:00:00";
+
+    #[test]
+    fn a_sync_leaves_nothing_unsent() {
+        let on_server = OnServer::new();
+
+        assert_eq!(on_server.unsent(), []);
+    }
+
+    #[test]
+    fn a_create_leaves_its_key_unsent() {
+        let on_server = OnServer::new();
+        let mut exception = on_server.event.clone();
+        exception.fields.rule = None;
+        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
+
+        on_server.change(7, |unit| unit.create("dentist", &exception));
+
+        assert_eq!(
+            on_server.unsent(),
+            [on_server.key("dentist", Some(EXCEPTION), 7)]
+        );
+    }
+
+    /// An existing row keeps its `since`.
+    #[test]
+    fn an_edit_leaves_its_previous_and_new_key_unsent_once() {
+        let on_server = OnServer::new();
+        let mut renamed = on_server.event.clone();
+        renamed.fields.title = "Dentist, renamed".to_owned();
+        on_server.change(7, |unit| unit.replace(on_server.id, &renamed));
+        let mut exception = renamed.clone();
+        exception.fields.rule = None;
+        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
+
+        on_server.change(9, |unit| unit.replace(on_server.id, &exception));
+
+        assert_eq!(
+            on_server.unsent(),
+            [
+                on_server.key("dentist", None, 7),
+                on_server.key("dentist", Some(EXCEPTION), 9)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_move_to_a_local_calendar_leaves_only_the_previous_key_unsent() {
+        let on_server = OnServer::new();
+        let mut moved = on_server.event.clone();
+        moved.calendar_id = on_server.local;
+
+        on_server.change(7, |unit| unit.replace(on_server.id, &moved));
+
+        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
+    }
+
+    #[test]
+    fn a_delete_and_its_undo_leave_the_key_unsent() {
+        let on_server = OnServer::new();
+
+        let unit = record(&on_server.store, Origin::UserAction, 7, |unit| {
+            unit.delete(on_server.id)
+        })
+        .unwrap()
+        .unit
+        .unwrap();
+        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
+        undo(&on_server.store, unit, 9).unwrap();
+
+        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
+    }
+
+    #[test]
+    fn a_change_in_a_local_calendar_leaves_nothing_unsent() {
+        let on_server = OnServer::new();
+        let mut local = on_server.event.clone();
+        local.calendar_id = on_server.local;
+
+        on_server.change(7, |unit| {
+            let id = unit.create("local", &local)?;
+            local.fields.title = "Renamed".to_owned();
+            unit.replace(id, &local)?;
+            unit.delete(id)
+        });
+
+        assert_eq!(on_server.unsent(), []);
+    }
+
+    /// The object holding the row changes; the Event doesn't, and the
+    /// server already holds it.
+    #[test]
+    fn a_sync_that_moves_a_row_to_another_object_leaves_nothing_unsent() {
+        let on_server = OnServer::new();
+        let mut renamed = on_server.event.clone();
+        renamed.fields.title = "Dentist, renamed".to_owned();
+
+        record(&on_server.store, Origin::Sync, 7, |unit| {
+            let old = unit.owner(on_server.server, "dentist")?.unwrap();
+            unit.remove_object(old)?;
+            let moved = ServerObject {
+                href: "/user/work/moved.ics".to_owned(),
+                ..dentist_object()
+            };
+            unit.mirror(on_server.server, &moved, None, DENTIST_KEYS)?;
+            unit.replace(on_server.id, &renamed)
+        })
+        .unwrap();
+
+        assert_eq!(on_server.unsent(), []);
+    }
+
+    /// As [`Loaded::join`] renormalises an Exception's recurrence ID when
+    /// its Recurring Event arrives: the unsent key goes with the row, and
+    /// the earliest `since` stays.
+    ///
+    /// [`Loaded::join`]: crate::event::Loaded::join
+    #[test]
+    fn rejoining_keys_renormalises_the_unsent_ones() {
+        let on_server = OnServer::new();
+        let zoned = "2026-10-19T09:00:00 Europe/Berlin";
+        let mut exception = on_server.event.clone();
+        exception.fields.rule = None;
+        exception.fields.recurrence_id = Some(zoned.to_owned());
+        on_server.change(7, |unit| unit.create("dentist", &exception));
+        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
+        on_server.change(9, |unit| unit.create("dentist", &exception));
+        exception.fields.recurrence_id = Some("other".to_owned());
+        on_server.change(11, |unit| unit.create("dentist", &exception));
+
+        record(&on_server.store, Origin::Sync, 13, |unit| {
+            unit.rejoin_keys(on_server.server, "dentist", |text| {
+                (text == zoned).then(|| EXCEPTION.to_owned())
+            })
+        })
+        .unwrap();
+
+        assert_eq!(
+            on_server.unsent(),
+            [
+                on_server.key("dentist", Some(EXCEPTION), 7),
+                on_server.key("dentist", Some("other"), 11)
+            ]
+        );
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //! here and nowhere else.
 //!
 //! Writing the tables the Change Journal guards (ADR 0011), `event`,
-//! `server_object`, `server_object_key`, `journal_unit` and
-//! `journal_entry`, takes a [`Journaled`], which only
+//! `server_object`, `server_object_key`, `unsent_change`, `journal_unit`
+//! and `journal_entry`, takes a [`Journaled`], which only
 //! [`journal`](super::journal) can make: so the compiler keeps everything
 //! else from writing them. A new write to one of those tables takes one
 //! too.
@@ -629,6 +629,41 @@ impl Store {
         })?)
     }
 
+    /// The ID and recurrence ID of each unsent change of a Calendar with the
+    /// UID `uid`.
+    pub(super) fn unsent_with_uid(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT rowid, recurrence_id FROM unsent_change \
+             WHERE calendar_id = ?1 AND uid = ?2 ORDER BY rowid",
+        )?;
+        readable(stmt.query_map(params![calendar_id.0, uid], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?)
+    }
+
+    /// Every unsent change, in the order they were added.
+    #[cfg(test)]
+    pub fn unsent_changes(&self) -> Result<Vec<UnsentChange>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT calendar_id, uid, recurrence_id, since FROM unsent_change ORDER BY rowid",
+        )?;
+        let unsent = stmt
+            .query_map([], |row| {
+                Ok(UnsentChange {
+                    calendar_id: CalendarId(row.get(0)?),
+                    uid: row.get(1)?,
+                    recurrence_id: row.get(2)?,
+                    since: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(unsent)
+    }
+
     /// The Change Journal's entries of the unit `id`, in the order they were
     /// made.
     pub(super) fn entries(&self, id: UnitId) -> Result<Vec<Entry>> {
@@ -882,6 +917,55 @@ impl Store {
         Ok(())
     }
 
+    /// Adds the key of an Event in a Calendar to the unsent changes, as
+    /// changed at `since`, if the Calendar is a server Calendar; a key
+    /// already there keeps its `since`.
+    pub(super) fn add_unsent_change(
+        &self,
+        _: &Journaled,
+        calendar_id: CalendarId,
+        uid: &str,
+        recurrence_id: Option<&str>,
+        since: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO unsent_change (calendar_id, uid, recurrence_id, since) \
+             SELECT id, ?2, ?3, ?4 FROM calendar WHERE id = ?1 AND url IS NOT NULL \
+             ON CONFLICT DO NOTHING",
+            params![calendar_id.0, uid, recurrence_id, since],
+        )?;
+        Ok(())
+    }
+
+    /// Writes the recurrence ID of the unsent change `row`, an ID
+    /// [`Store::unsent_with_uid`] gave. Should its Calendar and UID have
+    /// that key already, the two become one, with the earlier `since`.
+    pub(super) fn set_unsent_recurrence_id(
+        &self,
+        _: &Journaled,
+        row: i64,
+        recurrence_id: &str,
+    ) -> Result<()> {
+        let merged = self.conn.execute(
+            "UPDATE unsent_change AS kept \
+             SET since = MIN(kept.since, (SELECT since FROM unsent_change WHERE rowid = ?1)) \
+             WHERE kept.rowid <> ?1 AND kept.recurrence_id = ?2 \
+               AND (kept.calendar_id, kept.uid) = \
+                 (SELECT calendar_id, uid FROM unsent_change WHERE rowid = ?1)",
+            params![row, recurrence_id],
+        )?;
+        if merged > 0 {
+            self.conn
+                .execute("DELETE FROM unsent_change WHERE rowid = ?1", [row])?;
+        } else {
+            self.conn.execute(
+                "UPDATE unsent_change SET recurrence_id = ?2 WHERE rowid = ?1",
+                params![row, recurrence_id],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Deletes the server object `id` with its keys, by the schema's
     /// cascade; rows aren't written.
     pub(super) fn delete_object(&self, _: &Journaled, id: ObjectId) -> Result<()> {
@@ -1013,6 +1097,16 @@ impl Store {
             .execute("DELETE FROM account WHERE id = ?1", [id.0])?;
         Ok(())
     }
+}
+
+/// A row of `unsent_change`, for tests to compare.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnsentChange {
+    pub calendar_id: CalendarId,
+    pub uid: String,
+    pub recurrence_id: Option<String>,
+    pub since: i64,
 }
 
 /// Reads the sidebar's stored columns, which are untrusted like every stored
