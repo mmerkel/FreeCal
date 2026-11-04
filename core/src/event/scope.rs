@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     EventDraft, EventFields, Exception, Loaded, Opened, Source, StoredWhen, new_uid, rule,
 };
-use crate::store::{StoredEvent, Unit};
+use crate::store::{JournalTransaction, StoredEvent};
 use crate::{CalendarId, CoreError, EventId, Repeat, Result, When};
 
 /// Which Occurrences of a Recurring Event a change to one of them changes.
@@ -108,7 +108,7 @@ pub(crate) struct Edited {
 /// (see [`ExceptionCounts`]). Times in `change` are in the Display Time Zone
 /// `zone`.
 pub(crate) fn edit_occurrence(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     zone: Tz,
     id: EventId,
     recurrence_id: &str,
@@ -117,14 +117,22 @@ pub(crate) fn edit_occurrence(
     change: Edit,
 ) -> Result<Edited> {
     let rid = rule::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
-    let opened = Opened::load(unit, id)?;
-    edit_opened(unit, zone, &opened, rid, scope, exceptions_too, change)
+    let opened = Opened::load(journal_transaction, id)?;
+    edit_opened(
+        journal_transaction,
+        zone,
+        &opened,
+        rid,
+        scope,
+        exceptions_too,
+        change,
+    )
 }
 
 /// Changes the Occurrence `rid`, normalised, of the Event `opened` in
 /// `scope`, as [`edit_occurrence`] does.
 fn edit_opened(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     zone: Tz,
     opened: &Opened,
     rid: String,
@@ -148,7 +156,7 @@ fn edit_opened(
             fields,
             slot: None,
         };
-        return alone(unit, zone, loaded, &changing, &rid, change);
+        return alone(journal_transaction, zone, loaded, &changing, &rid, change);
     };
     let slot = rule::occurrence_at(fields, &rid)?;
     let changing = match exception {
@@ -163,21 +171,48 @@ fn edit_opened(
         }
     };
     match scope {
-        Scope::This => alone(unit, zone, loaded, &changing, &rid, change),
-        Scope::ThisAndFollowing => {
-            following(unit, zone, loaded, &changing, &rid, exceptions_too, change)
-        }
-        Scope::All => all(unit, zone, loaded, &changing, &rid, exceptions_too, change),
+        Scope::This => alone(journal_transaction, zone, loaded, &changing, &rid, change),
+        Scope::ThisAndFollowing => following(
+            journal_transaction,
+            zone,
+            loaded,
+            &changing,
+            &rid,
+            exceptions_too,
+            change,
+        ),
+        Scope::All => all(
+            journal_transaction,
+            zone,
+            loaded,
+            &changing,
+            &rid,
+            exceptions_too,
+            change,
+        ),
     }
 }
 
 /// Changes an Event as a whole: a single Event or an Exception alone, a
 /// Recurring Event with all its Occurrences, from its first date.
-pub(crate) fn edit_event(unit: &mut Unit, zone: Tz, id: EventId, change: Edit) -> Result<Edited> {
-    let opened = Opened::load(unit, id)?;
+pub(crate) fn edit_event(
+    journal_transaction: &mut JournalTransaction,
+    zone: Tz,
+    id: EventId,
+    change: Edit,
+) -> Result<Edited> {
+    let opened = Opened::load(journal_transaction, id)?;
     if let Some(own) = opened.exception() {
         let rid = own.rid.clone().ok_or(CoreError::OccurrenceNotFound(id))?;
-        return edit_opened(unit, zone, &opened, rid, Scope::This, false, change);
+        return edit_opened(
+            journal_transaction,
+            zone,
+            &opened,
+            rid,
+            Scope::This,
+            false,
+            change,
+        );
     }
     let fields = opened.fields();
     let start = fields.when.start.clone();
@@ -190,11 +225,26 @@ pub(crate) fn edit_event(unit: &mut Unit, zone: Tz, id: EventId, change: Edit) -
                 fields: fields.clone(),
                 slot: None,
             };
-            return alone(unit, zone, &opened.loaded, &changing, &start, change);
+            return alone(
+                journal_transaction,
+                zone,
+                &opened.loaded,
+                &changing,
+                &start,
+                change,
+            );
         }
         Some(_) => Changing::occurrence(fields, start.clone(), fields.when.clone(), None),
     };
-    all(unit, zone, &opened.loaded, &changing, &start, false, change)
+    all(
+        journal_transaction,
+        zone,
+        &opened.loaded,
+        &changing,
+        &start,
+        false,
+        change,
+    )
 }
 
 /// What is being changed: a stored Event, one that doesn't repeat or an
@@ -318,7 +368,7 @@ impl Loaded {
     /// the new ID of `changing`, if it is kept.
     fn carry_exceptions(
         &self,
-        unit: &mut Unit,
+        journal_transaction: &mut JournalTransaction,
         carried: impl Fn(Option<&str>) -> bool,
         changes: &Changes,
         first: &StoredWhen,
@@ -346,7 +396,7 @@ impl Loaded {
                 _ => None,
             };
             let (Some(moved), Some(slot)) = (moved, slot) else {
-                unit.delete(*id)?;
+                journal_transaction.delete(*id)?;
                 continue;
             };
             let mut exception = if Some(*id) == changing {
@@ -372,7 +422,7 @@ impl Loaded {
                 exception
             };
             exception.recurrence_id = Some(moved);
-            let written = self.write_exception(unit, Some(*id), new, exception)?;
+            let written = self.write_exception(journal_transaction, Some(*id), new, exception)?;
             if Some(*id) == changing {
                 kept = Some(written);
             }
@@ -395,7 +445,7 @@ fn differs(fields: &EventFields, recurring: &EventFields, slot: &StoredWhen) -> 
 /// Changes every Occurrence: the whole Recurring Event. Its cancelled
 /// Occurrences and Exceptions move with it.
 fn all(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
@@ -416,7 +466,7 @@ fn all(
         None => String::new(),
     };
     let calendar_id = changes.calendar_id.unwrap_or(loaded.calendar_id);
-    unit.replace(
+    journal_transaction.replace(
         *id,
         &StoredEvent {
             calendar_id,
@@ -425,8 +475,15 @@ fn all(
     )?;
     let moved = rule::moved_id(rid, was, &fields.when);
     let new = became(calendar_id, loaded.uid.clone(), *id, fields);
-    let kept = loaded.carry_exceptions(unit, |_| true, &changes, was, &new, changing.stored)?;
-    now_at(unit, &new, kept, moved)
+    let kept = loaded.carry_exceptions(
+        journal_transaction,
+        |_| true,
+        &changes,
+        was,
+        &new,
+        changing.stored,
+    )?;
+    now_at(journal_transaction, &new, kept, moved)
 }
 
 /// Changes the Occurrence `rid` and every later one: the Recurring Event
@@ -434,7 +491,7 @@ fn all(
 /// cancelled Occurrences and Exceptions among them. From the first
 /// Occurrence on, that is all of them.
 fn following(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
@@ -446,7 +503,15 @@ fn following(
     let not_found = || CoreError::OccurrenceNotFound(*id);
     let slot = changing.slot.as_ref().ok_or_else(not_found)?;
     let Some(ended) = rule::rule_until(recurring, rid) else {
-        return all(unit, zone, loaded, changing, rid, exceptions_too, change);
+        return all(
+            journal_transaction,
+            zone,
+            loaded,
+            changing,
+            rid,
+            exceptions_too,
+            change,
+        );
     };
     let changes = loaded.changes(change, changing, zone, exceptions_too)?;
     let carried = |id: &str| rule::is_from(id, rid);
@@ -457,7 +522,7 @@ fn following(
         }),
         None => String::new(),
     };
-    unit.replace(
+    journal_transaction.replace(
         *id,
         &StoredEvent {
             calendar_id: loaded.calendar_id,
@@ -474,7 +539,7 @@ fn following(
     )?;
     let uid = new_uid();
     let calendar_id = changes.calendar_id.unwrap_or(loaded.calendar_id);
-    let id = unit.create(
+    let id = journal_transaction.create(
         &uid,
         &StoredEvent {
             calendar_id,
@@ -484,16 +549,28 @@ fn following(
     let moved = rule::moved_id(rid, slot, &fields.when);
     let new = became(calendar_id, uid, id, fields);
     let carried = |id: Option<&str>| id.is_some_and(carried);
-    let kept = loaded.carry_exceptions(unit, carried, &changes, slot, &new, changing.stored)?;
-    now_at(unit, &new, kept, moved)
+    let kept = loaded.carry_exceptions(
+        journal_transaction,
+        carried,
+        &changes,
+        slot,
+        &new,
+        changing.stored,
+    )?;
+    now_at(journal_transaction, &new, kept, moved)
 }
 
 /// The Occurrence that the changed one is now: the Exception `kept`, or the
 /// Occurrence `rid` of `new`, or its first when it has no such Occurrence
 /// any more.
-fn now_at(unit: &Unit, new: &Loaded, kept: Option<EventId>, rid: Option<String>) -> Result<Edited> {
+fn now_at(
+    journal_transaction: &JournalTransaction,
+    new: &Loaded,
+    kept: Option<EventId>,
+    rid: Option<String>,
+) -> Result<Edited> {
     if let Some(kept) = kept {
-        let event = unit.find_event(kept)?;
+        let event = journal_transaction.find_event(kept)?;
         let recurrence_id = event.fields.recurrence_id.clone();
         return Ok(edited(kept, event, recurrence_id));
     }
@@ -627,7 +704,7 @@ impl Changes {
 /// Exception, or an Event of its own when it moves to another Calendar, as
 /// an Exception lives in its Recurring Event's Calendar.
 fn alone(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
@@ -649,7 +726,7 @@ fn alone(
     }
     match (recurring, changes.calendar_id) {
         (Some(_), Some(target)) => {
-            loaded.cancel(unit, rid)?;
+            loaded.cancel(journal_transaction, rid)?;
             let event = StoredEvent {
                 calendar_id: target,
                 fields: EventFields {
@@ -657,7 +734,7 @@ fn alone(
                     ..fields
                 },
             };
-            let id = unit.create(&new_uid(), &event)?;
+            let id = journal_transaction.create(&new_uid(), &event)?;
             Ok(edited(id, event, None))
         }
         (Some((id, recurring)), None) if changes.is_empty() && changing.stored.is_none() => {
@@ -681,10 +758,10 @@ fn alone(
             // Only a Recurring Event gives an Occurrence that isn't stored.
             let id = match changing.stored {
                 Some(id) => {
-                    unit.replace(id, &event)?;
+                    journal_transaction.replace(id, &event)?;
                     id
                 }
-                None => unit.create(&loaded.uid, &event)?,
+                None => journal_transaction.create(&loaded.uid, &event)?,
             };
             // One without its Recurring Event, or changing none of its
             // Occurrences, is an Event of its own.

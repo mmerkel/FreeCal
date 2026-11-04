@@ -383,12 +383,12 @@ export const samples = {
     "skip",
     "copy"
   ],
-  UnitId: [
+  JournalTransactionId: [
     4
   ],
   ImportOutcome: [
     {
-      "unit": 4,
+      "journalTransaction": 4,
       "imported": 40,
       "updated": 2,
       "skipped": 0
@@ -396,7 +396,7 @@ export const samples = {
   ],
   Changed: [
     {
-      "unit": 4,
+      "journalTransaction": 4,
       "value": {
         "id": 3,
         "calendarId": 2,
@@ -447,7 +447,7 @@ export const samples = {
       }
     },
     {
-      "unit": null,
+      "journalTransaction": null,
       "value": {
         "id": 3,
         "calendarId": 2,
@@ -564,10 +564,10 @@ export const samples = {
       "file": "takeout.zip/Calendar/Work.ics"
     },
     {
-      "code": "unitNotFound"
+      "code": "journalTransactionNotFound"
     },
     {
-      "code": "changedSinceUnit"
+      "code": "changedSinceJournalTransaction"
     },
     {
       "code": "alreadyUndone"
@@ -660,7 +660,7 @@ type Samples = {
   ImportSummary: Unbranded<T.ImportSummary>[];
   PinnedZone: Unbranded<T.PinnedZone>[];
   ExistingEvents: Unbranded<T.ExistingEvents>[];
-  UnitId: Unbranded<T.UnitId>[];
+  JournalTransactionId: Unbranded<T.JournalTransactionId>[];
   ImportOutcome: Unbranded<T.ImportOutcome>[];
   Changed: Unbranded<T.Changed<T.Event>>[];
   ErrorCode: Unbranded<T.ErrorCode>[];

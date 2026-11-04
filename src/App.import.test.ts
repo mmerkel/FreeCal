@@ -229,8 +229,8 @@ test('undoing runs under “Working…” too, and a refused undo says why and c
   home.readOnly = true;
   core.calendars[0].readOnly = true;
   let finish!: () => void;
-  const undo = core.undoUnit.bind(core);
-  vi.spyOn(core, 'undoUnit').mockImplementationOnce(async (id) => {
+  const undo = core.undoJournalTransaction.bind(core);
+  vi.spyOn(core, 'undoJournalTransaction').mockImplementationOnce(async (id) => {
     await new Promise<void>((resolve) => (finish = resolve));
     return undo(id);
   });

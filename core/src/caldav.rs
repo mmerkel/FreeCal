@@ -305,8 +305,8 @@ impl Client {
             .map(|(path, _)| path.clone())
             .collect();
         fetch.extend(unchanged);
-        // A removed object's rows may go to another object holding its UID,
-        // read from what FreeCal holds of it.
+        // A removed Server Object's Event Rows may go to another holding its
+        // UID, read from what FreeCal holds of it.
         let zone = match listing.zone {
             _ if fetch.is_empty() && removed.is_empty() => display,
             Some(zone) => zone,

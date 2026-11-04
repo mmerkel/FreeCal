@@ -231,7 +231,8 @@ mod original_server_data {
             )
             .unwrap();
         assert_eq!(core.original_server_data(moved.value.id).unwrap(), None);
-        core.undo_unit(moved.unit.unwrap()).unwrap();
+        core.undo_journal_transaction(moved.journal_transaction.unwrap())
+            .unwrap();
 
         assert!(pulled.is_some());
         assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);
@@ -244,7 +245,8 @@ mod original_server_data {
         let pulled = core.original_server_data(id).unwrap();
 
         let deleted = core.delete_event(id).unwrap();
-        core.undo_unit(deleted.unit.unwrap()).unwrap();
+        core.undo_journal_transaction(deleted.journal_transaction.unwrap())
+            .unwrap();
 
         assert!(pulled.is_some());
         assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);

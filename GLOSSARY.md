@@ -127,7 +127,7 @@ FreeCal's copy of every Server Object as the server last had it. Only a sync or 
 _Avoid_: Cache, server copy
 
 **Combined Event Key**:
-A Calendar, a UID and a recurrence ID, with the recurrence ID normalised as the Event Rows hold it. Event Rows find their Server Object through its Combined Event Keys (`server_object_key`); an Unsent Change is a Combined Event Key.
+A Calendar, a UID and a recurrence ID, with the recurrence ID normalised as the Event Rows hold it. Event Rows find their Server Object through its Combined Event Keys (`combined_event_key`); an Unsent Change is a Combined Event Key.
 _Avoid_: Key (on its own), Event Key, Event ID (that is the Event Row's own ID)
 
 **Corresponding Server Object**:

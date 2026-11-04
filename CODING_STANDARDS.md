@@ -25,7 +25,7 @@ Every stored field is untrusted, whatever its origin (spec: "Untrusted content" 
 ## Local Store
 
 - SQL lives only in `core/src/store/schema.rs` (the schema and its migrations) and `core/src/store/sql.rs` (every query and write).
-- In `sql.rs`, every statement that writes a table the Change Journal guards (`event`, `server_object`, `server_object_key`, `unsent_change`, `journal_unit`, `journal_entry`) is in a function that takes a `&Journaled` (ADR 0011).
+- In `sql.rs`, every statement that writes a table the Change Journal guards (`event`, `server_object`, `combined_event_key`, `unsent_change`, `journal_transaction`, `modification`) is in a function that takes a `&Journaled` (ADR 0011).
 
 ## Dependencies
 

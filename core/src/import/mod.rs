@@ -1,6 +1,6 @@
 //! Reading `.ics` files, or `.zip` files of them such as a Google Takeout
 //! export, into an import preview, and running a previewed import in one
-//! Change Journal unit.
+//! Journal Transaction.
 //!
 //! The files are untrusted (spec: "Untrusted content"): they are parsed by
 //! the `icalendar` and `zip` libraries, a `.zip` is read in memory and never
@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::{Loaded, ServerObject, StoredWhen, instant, latest, new_uid, rule, wall_text};
 use crate::remote::Fetched;
-use crate::store::{Unit, UnitId};
+use crate::store::{JournalTransaction, JournalTransactionId};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -223,26 +223,26 @@ pub enum ExistingEvents {
 #[serde(rename_all = "camelCase")]
 pub struct ImportOutcome {
     /// What undoes it; none when it changed nothing.
-    pub unit: Option<UnitId>,
+    pub journal_transaction: Option<JournalTransactionId>,
     /// How many Events it added, copies included.
     pub imported: usize,
     pub updated: usize,
     pub skipped: usize,
 }
 
-/// Runs the import `preview` in `unit`, which records each Event's previous
-/// version. Whether an Event exists is looked up again rather than taken from
-/// the preview, once per UID, as an Exception without its Recurring Event is
-/// an Event of its own with its Recurring Event's UID.
+/// Runs the import `preview` in `journal_transaction`, which records each
+/// Event's previous Event Version. Whether an Event exists is looked up again
+/// rather than taken from the preview, once per UID, as an Exception without
+/// its Recurring Event is an Event of its own with its Recurring Event's UID.
 pub(crate) fn run(
-    unit: &mut Unit,
+    journal_transaction: &mut JournalTransaction,
     preview: &ImportPreview,
     existing: ExistingEvents,
 ) -> Result<ImportOutcome> {
     let calendar_id = preview.calendar_id;
-    unit.writable(calendar_id)?;
+    journal_transaction.writable(calendar_id)?;
     let mut outcome = ImportOutcome {
-        unit: None,
+        journal_transaction: None,
         imported: 0,
         updated: 0,
         skipped: 0,
@@ -254,7 +254,7 @@ pub(crate) fn run(
         let (exists, into) = match decided.get(event.uid.as_str()) {
             Some(decision) => decision.clone(),
             None => {
-                let exists = Loaded::of_uid(unit, calendar_id, &event.uid)?.exists();
+                let exists = Loaded::of_uid(journal_transaction, calendar_id, &event.uid)?.exists();
                 let into = match (exists, existing) {
                     (true, ExistingEvents::Skip) => None,
                     // A copy is added under a UID of its own.
@@ -275,12 +275,13 @@ pub(crate) fn run(
             outcome.imported += 1;
         }
         if event.rule.is_some() {
-            Loaded::of_uid(unit, calendar_id, &uid)?.join(unit, &event.when)?;
+            Loaded::of_uid(journal_transaction, calendar_id, &uid)?
+                .join(journal_transaction, &event.when)?;
         }
-        let loaded = Loaded::of_uid(unit, calendar_id, &uid)?;
+        let loaded = Loaded::of_uid(journal_transaction, calendar_id, &uid)?;
         match event.original {
-            None => loaded.take(unit, event)?,
-            Some(_) => loaded.take_exception(unit, event)?,
+            None => loaded.take(journal_transaction, event)?,
+            Some(_) => loaded.take_exception(journal_transaction, event)?,
         }
     }
     Ok(outcome)
@@ -803,7 +804,7 @@ fn looks_like_html(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{self, Origin, Store};
+    use crate::store::{self, Store, TransactionOrigin};
 
     /// UIDs aren't part of the core interface, so this looks at the Local
     /// Store itself.
@@ -821,9 +822,12 @@ mod tests {
         let preview = preview(&file, calendar_id, &HashSet::new(), Tz::UTC).unwrap();
 
         for _ in 0..2 {
-            store::record(&store, Origin::Import, 0, |unit| {
-                run(unit, &preview, ExistingEvents::Copy)
-            })
+            store::record(
+                &store,
+                TransactionOrigin::Import,
+                0,
+                |journal_transaction| run(journal_transaction, &preview, ExistingEvents::Copy),
+            )
             .unwrap();
         }
 

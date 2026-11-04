@@ -20,7 +20,7 @@ import type {
   SettingsUpdate,
   SidebarState,
   Signal,
-  UnitId,
+  JournalTransactionId,
   View,
   When,
 } from './types';
@@ -96,7 +96,7 @@ export interface CoreApi {
   event(id: EventId): Promise<Event>;
   /**
    * Creates an Event in a writable Calendar. Each change to Events comes
-   * back with its Change Journal unit, which undoes it, or `null` when it
+   * back with its Journal Transaction, which undoes it, or `null` when it
    * changed nothing.
    */
   createEvent(draft: EventDraft): Promise<Changed<Event>>;
@@ -162,18 +162,18 @@ export interface CoreApi {
   previewImport(calendarId: CalendarId): Promise<ImportSummary>;
   /**
    * Imports the picked file into a writable Calendar, doing with the Events
-   * it already has (same UID) what `existing` says, as one undoable unit.
+   * it already has (same UID) what `existing` says, as one Journal Transaction.
    * Afterwards no file is picked.
    */
   runImport(calendarId: CalendarId, existing: ExistingEvents): Promise<ImportOutcome>;
   /** Lets go of the picked file without importing it. */
   discardImport(): Promise<void>;
   /**
-   * Undoes a Change Journal unit whole, refused while an Event it changed
-   * was changed since. A unit is undone once; the undo is a unit itself,
-   * which redoes it.
+   * Undoes a Journal Transaction whole, refused while an Event it changed
+   * was changed since. A Journal Transaction is undone once; the undo is a
+   * Journal Transaction itself, which redoes it.
    */
-  undoUnit(id: UnitId): Promise<Changed<null>>;
+  undoJournalTransaction(id: JournalTransactionId): Promise<Changed<null>>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
   /** FreeCal's version, such as `0.1.0`. */

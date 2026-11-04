@@ -1,7 +1,7 @@
 //! The Local Store: one SQLite database (ADR 0004).
 //!
 //! Journaling is one of its invariants (ADR 0011): code outside this module
-//! changes an Event only through a [`Unit`] of the Change Journal. Its SQL
+//! changes an Event only through a [`JournalTransaction`]. Its SQL
 //! lives in two places: [`schema`] holds the schema and its migrations,
 //! [`sql`] every query and write. [`journal`] holds the Change Journal and no
 //! SQL; it makes the [`Journaled`](journal::Journaled) that writing the
@@ -11,8 +11,10 @@ mod journal;
 mod schema;
 mod sql;
 
-pub use journal::{Changed, UnitId};
-pub(crate) use journal::{Origin, Recorded, Unit, delete_account, delete_calendar, record, undo};
+pub use journal::{Changed, JournalTransactionId};
+pub(crate) use journal::{
+    JournalTransaction, Recorded, TransactionOrigin, delete_account, delete_calendar, record, undo,
+};
 
 use std::path::Path;
 
@@ -78,7 +80,8 @@ impl Store {
         &self.conn
     }
 
-    /// Runs `change` in one transaction: if it fails, nothing it did is kept.
+    /// Runs `change` in one database transaction: if it fails, nothing it did
+    /// is kept.
     pub fn transaction<T>(&self, change: impl FnOnce() -> Result<T>) -> Result<T> {
         let tx = self.conn.unchecked_transaction()?;
         let done = change()?;

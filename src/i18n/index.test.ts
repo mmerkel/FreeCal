@@ -19,9 +19,13 @@ test('an error without a file is translated from its code alone', () => {
 });
 
 test('a refused undo says why', () => {
-  expect(errorText({ code: 'changedSinceUnit' })).toBe('events it changed were changed since');
+  expect(errorText({ code: 'changedSinceJournalTransaction' })).toBe(
+    'events it changed were changed since',
+  );
   expect(errorText({ code: 'alreadyUndone' })).toBe('it was undone already');
-  expect(errorText({ code: 'unitNotFound' })).toBe('the change is no longer in the Change Journal');
+  expect(errorText({ code: 'journalTransactionNotFound' })).toBe(
+    'the change is no longer in the Change Journal',
+  );
 });
 
 test('a server’s own text is quoted as text, never read for placeholders', () => {

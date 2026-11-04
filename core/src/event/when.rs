@@ -280,18 +280,19 @@ impl EventFields {
     }
 }
 
-/// A server object's row in the Local Store, which names it for good: IDs
+/// A Server Object's row in the Local Store, which names it for good: IDs
 /// are never given out again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectId(pub i64);
 
-/// A server object (ADR 0010): the unit a server stores and FreeCal writes
-/// back, one CalDAV resource at its href, or one Google event resource. Its
-/// row mirrors the server's last known state of it (address, version tag,
-/// data as received), and only a sync or a successful write to the server
-/// changes it. A Calendar's rows with one UID belong to the object holding
-/// that UID, found through the objects' keys (ADR 0011). A read-only feed
-/// has no server objects, because FreeCal never writes to it.
+/// A Server Object (ADR 0010): what a server stores as one piece and
+/// FreeCal writes back, one CalDAV resource at its href, or one Google event
+/// resource. Its row mirrors the server's last known state of it (address,
+/// version tag, data as received), and only a sync or a successful write to
+/// the server changes it. A Calendar's Event Rows with one UID belong to the
+/// UID's Corresponding Server Object, found through the Server Objects'
+/// Combined Event Keys (ADR 0011). A read-only feed has no Server Objects,
+/// because FreeCal never writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerObject {
     /// The object's address on the server, as the server gave it.

@@ -26,7 +26,7 @@ pub(crate) struct SyncPoint {
     pub token: Option<String>,
 }
 
-/// A server object as a sync fetched it, with the Events FreeCal reads in
+/// A Server Object as a sync fetched it, with the Events FreeCal reads in
 /// it.
 #[derive(Debug, Clone)]
 pub(crate) struct Fetched {
@@ -36,7 +36,7 @@ pub(crate) struct Fetched {
     pub events: Option<Vec<ImportedEvent>>,
 }
 
-/// A server object FreeCal holds, as a sync asks for what changed.
+/// A Server Object FreeCal holds, as a sync asks for what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Held {
     /// The ETag of the version FreeCal holds; none if the server gave none.
@@ -49,9 +49,9 @@ pub(crate) struct Held {
 /// What changed in a Calendar on its server.
 #[derive(Debug, Clone)]
 pub(crate) struct Changes {
-    /// Each server object that is new or changed.
+    /// Each Server Object that is new or changed.
     pub changed: Vec<Fetched>,
-    /// The addresses of the server objects FreeCal holds that are gone, as
+    /// The addresses of the Server Objects FreeCal holds that are gone, as
     /// FreeCal holds them.
     pub removed: Vec<String>,
     /// The Calendar's sync state after these changes.
@@ -66,7 +66,7 @@ pub(crate) trait Remote {
     /// The Calendars the Account has on its server that take Events.
     fn discover(&self) -> Result<Vec<AvailableCalendar>>;
 
-    /// Fetches every server object of the Calendar at `url` and hands them
+    /// Fetches every Server Object of the Calendar at `url` and hands them
     /// to `page`, up to [`FIRST_SYNC_PAGE`] at a time, stopping at the first
     /// error, its own or `page`'s. Floating times are pinned to the
     /// Calendar's own time zone if the server gives one, otherwise to
@@ -81,7 +81,7 @@ pub(crate) trait Remote {
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
-    /// last held `known` without one: the server objects FreeCal holds, by
+    /// last held `known` without one: the Server Objects FreeCal holds, by
     /// address. An object whose ETag FreeCal holds already isn't fetched
     /// again, unless FreeCal couldn't read it, so that it is fetched on each
     /// sync until it reads. Floating times are pinned as

@@ -1,12 +1,13 @@
 //! The Change Journal (ADR 0009) and the only writer of Events: every change
-//! to an Event goes through a [`Unit`] in [`record`], which keeps the Event's
-//! previous version and a hash of its new one, so that no change can skip
-//! the Journal. Changes made together, such as an import, are one unit.
-//! A unit writes the server objects and their keys too (ADR 0010, 0011),
-//! which the Journal doesn't record: an Event's version holds FreeCal's
-//! fields only, and its rows find their object through the keys. Every unit
-//! but a sync's adds the keys of the Events it changes to the unsent
-//! changes, what FreeCal has to send.
+//! to an Event goes through a [`JournalTransaction`] in [`record`], which
+//! keeps the Event's previous Event Version and a hash of its new one, so
+//! that no change can skip the Journal. Changes made together, such as an
+//! import, are one Journal Transaction. A Journal Transaction writes the
+//! Server Objects and their Combined Event Keys too (ADR 0010, 0011), which
+//! the Journal doesn't record: an Event Version holds FreeCal's fields only,
+//! and Event Rows find their Server Object through the Combined Event Keys.
+//! Every Journal Transaction but a sync's adds the Combined Event Keys of the
+//! Events it changes to the Unsent Changes, what FreeCal has to send.
 //!
 //! This file holds what the Journal decides and no SQL: it reads and writes
 //! through [`sql`](super::sql), whose writes to the tables it guards take a
@@ -32,8 +33,8 @@ const TIME_ZONE_RULES: &str = chrono_tz::IANA_TZDB_VERSION;
 
 /// Recomputes every Event's derived UTC instants when the Local Store's were
 /// computed with other time zone rules than this build's, while it opens. The
-/// Journal doesn't record them, so this writes outside any unit. A row whose
-/// time can't be read keeps what it had.
+/// Journal doesn't record them, so this writes outside any Journal
+/// Transaction. An Event Row whose time can't be read keeps what it had.
 pub(super) fn recompute_instants(store: &Store) -> Result<()> {
     if store.time_zone_rules()? == TIME_ZONE_RULES {
         return Ok(());
@@ -46,121 +47,138 @@ pub(super) fn recompute_instants(store: &Store) -> Result<()> {
     store.set_time_zone_rules(TIME_ZONE_RULES)
 }
 
-/// A Change Journal unit: what undoes a change, or changes made together.
+/// A Journal Transaction: what undoes a change, or changes made together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     test,
     derive(ts_rs::TS),
-    ts(type = "number & { readonly __brand: \"UnitId\" }")
+    ts(type = "number & { readonly __brand: \"JournalTransactionId\" }")
 )]
 #[serde(transparent)]
-pub struct UnitId(pub i64);
+pub struct JournalTransactionId(pub i64);
 
-/// What a change to Events returns: its value, and the unit that undoes it,
-/// none when it changed nothing.
+/// What a change to Events returns: its value, and the Journal Transaction
+/// that undoes it, none when it changed nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct Changed<T> {
-    pub unit: Option<UnitId>,
+    pub journal_transaction: Option<JournalTransactionId>,
     pub value: T,
 }
 
-/// Where a unit's changes came from, which decides where they may write.
+/// Where a Journal Transaction's changes came from, which decides where they
+/// may write.
 /// Snapshot restore and Conflict resolution come with their tickets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Origin {
+pub(crate) enum TransactionOrigin {
     UserAction,
     Import,
     Undo,
-    /// A Calendar's first sync, the baseline: it writes like any origin but
-    /// records nothing (ADR 0009), so its unit is never stored.
+    /// A Calendar's First Sync: it writes like any Transaction Origin but
+    /// records nothing (ADR 0009), so its Journal Transaction is never
+    /// stored.
     FirstSync,
     /// An incremental sync of one Calendar, what its server changed.
     Sync,
 }
 
-impl Origin {
-    /// How a stored unit records it; none for an origin that isn't recorded.
+impl TransactionOrigin {
+    /// How a stored Journal Transaction records it; none for a Transaction
+    /// Origin that isn't recorded.
     fn recorded_as(self) -> Option<&'static str> {
         match self {
-            Origin::UserAction => Some("user"),
-            Origin::Import => Some("import"),
-            Origin::Undo => Some("undo"),
-            Origin::Sync => Some("sync"),
-            Origin::FirstSync => None,
+            TransactionOrigin::UserAction => Some("user"),
+            TransactionOrigin::Import => Some("import"),
+            TransactionOrigin::Undo => Some("undo"),
+            TransactionOrigin::Sync => Some("sync"),
+            TransactionOrigin::FirstSync => None,
         }
     }
 
     /// Whether it is a sync, whose changes come from the server: only a sync
-    /// writes the mirror.
+    /// writes the Mirror.
     fn is_sync(self) -> bool {
-        matches!(self, Origin::FirstSync | Origin::Sync)
+        matches!(self, TransactionOrigin::FirstSync | TransactionOrigin::Sync)
     }
 }
 
-/// What [`record`] did: the unit, none when nothing changed, and the
-/// Calendars whose Events changed, in the order they were first changed.
+/// What [`record`] did: the Journal Transaction, none when nothing changed,
+/// and the Calendars whose Events changed, in the order they were first
+/// changed.
 pub(crate) struct Recorded<T> {
-    pub unit: Option<UnitId>,
+    pub journal_transaction: Option<JournalTransactionId>,
     pub calendars: Vec<CalendarId>,
     pub value: T,
 }
 
-/// Runs `change` in one transaction as one unit of `origin`, made at
-/// `made_at` (Unix seconds). If it fails, nothing it did is kept. A unit that
-/// changed nothing isn't stored.
+/// Runs `change` in one database transaction as one Journal Transaction of
+/// `origin`, made at `made_at` (Unix seconds). If it fails, nothing it did is
+/// kept. A Journal Transaction that changed nothing isn't stored.
 pub(crate) fn record<T>(
     store: &Store,
-    origin: Origin,
+    origin: TransactionOrigin,
     made_at: i64,
-    change: impl FnOnce(&mut Unit) -> Result<T>,
+    change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
 ) -> Result<Recorded<T>> {
     store.transaction(|| {
-        let mut unit = Unit {
+        let mut journal_transaction = JournalTransaction {
             store,
             origin,
             made_at,
             id: None,
             calendars: Vec::new(),
         };
-        let value = change(&mut unit)?;
+        let value = change(&mut journal_transaction)?;
         Ok(Recorded {
-            unit: unit.id,
-            calendars: unit.calendars,
+            journal_transaction: journal_transaction.id,
+            calendars: journal_transaction.calendars,
             value,
         })
     })
 }
 
-/// Undoes the unit `id` whole, as a unit of origin undo: every Event gets its
-/// previous version back under the same identity. Refused while an Event
-/// changed since, and for a unit undone already.
-pub(crate) fn undo(store: &Store, id: UnitId, made_at: i64) -> Result<Recorded<()>> {
-    record(store, Origin::Undo, made_at, |unit| {
-        let entries = store.entries(id)?;
-        if entries.iter().any(|entry| entry.undone) {
-            return Err(CoreError::AlreadyUndone(id));
-        }
-        // Latest first, so that each entry finds the version it made.
-        for entry in entries.iter().rev() {
-            let current = store.current_event(entry.event_id, &entry.uid)?;
-            if current.map(|event| hash(&entry.uid, &event)) != entry.hash {
-                return Err(CoreError::ChangedSinceUnit(id));
+/// Undoes the Journal Transaction `id` whole, as a Journal Transaction with
+/// the Transaction Origin undo: every Event gets its previous Event Version
+/// back under the same identity. Refused while an Event changed since, and
+/// for a Journal Transaction undone already.
+pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Result<Recorded<()>> {
+    record(
+        store,
+        TransactionOrigin::Undo,
+        made_at,
+        |journal_transaction| {
+            let modifications = store.modifications(id)?;
+            if modifications.iter().any(|modification| modification.undone) {
+                return Err(CoreError::AlreadyUndone(id));
             }
-            match &entry.previous {
-                None => unit.delete(entry.event_id)?,
-                Some(previous) => unit.put_back(entry.event_id, &entry.uid, previous)?,
+            // Latest first, so that each Modification finds the Event Version
+            // it made.
+            for modification in modifications.iter().rev() {
+                let current = store.current_event(modification.event_id, &modification.uid)?;
+                if current.map(|event| hash(&modification.uid, &event)) != modification.hash {
+                    return Err(CoreError::ChangedSinceJournalTransaction(id));
+                }
+                match &modification.previous {
+                    None => journal_transaction.delete(modification.event_id)?,
+                    Some(previous) => journal_transaction.put_back(
+                        modification.event_id,
+                        &modification.uid,
+                        previous,
+                    )?,
+                }
             }
-        }
-        store.mark_undone(JOURNALED, id)
-    })
+            store.mark_undone(JOURNALED, id)
+        },
+    )
 }
 
 /// Deletes a Calendar with its Events. This isn't recorded (ADR 0009): the
-/// entries of its Events go too, and units left without entries. So do the
-/// entries that would put an Event back into it, such as one moved out or
-/// deleted, with that Event's earlier entries, which are undone only through
-/// them; its later entries stay.
+/// Modifications of its Events go too, and Journal Transactions left without
+/// Modifications. So do the Modifications that would put an Event back into
+/// it, such as one moved out or deleted, with that Event's earlier
+/// Modifications, which are undone only through them; its later
+/// Modifications stay.
 pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
     store.transaction(|| delete_calendar_within(store, id))
 }
@@ -176,89 +194,102 @@ pub(crate) fn delete_account(store: &Store, id: AccountId) -> Result<()> {
     })
 }
 
-/// [`delete_calendar`] inside a transaction already begun.
+/// [`delete_calendar`] inside a database transaction already begun.
 fn delete_calendar_within(store: &Store, id: CalendarId) -> Result<()> {
     store.delete_calendar_events(JOURNALED, id)?;
     store.delete_calendar_row(JOURNALED, id)
 }
 
-/// One unit being recorded, inside [`record`]'s transaction. Each write reads
-/// the Event's previous version itself.
-pub(crate) struct Unit<'a> {
+/// One Journal Transaction being recorded, inside [`record`]'s database
+/// transaction. Each write reads the Event's previous Event Version itself.
+pub(crate) struct JournalTransaction<'a> {
     store: &'a Store,
-    origin: Origin,
+    origin: TransactionOrigin,
     made_at: i64,
-    id: Option<UnitId>,
+    id: Option<JournalTransactionId>,
     calendars: Vec<CalendarId>,
 }
 
-impl Unit<'_> {
+impl JournalTransaction<'_> {
     pub fn find_event(&self, id: EventId) -> Result<StoredEvent> {
         self.store.find_event(id)
     }
 
-    /// The server objects of a Calendar at `href`, in the order they were
+    /// The Server Objects of a Calendar at `href`, in the order they were
     /// added.
     pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
         self.store.objects_at(calendar_id, href)
     }
 
-    /// The server object of a Calendar that owns the UID `uid`
-    /// ([`Store::owner`]).
-    pub fn owner(&self, calendar_id: CalendarId, uid: &str) -> Result<Option<ObjectId>> {
-        self.store.owner(calendar_id, uid)
+    /// The Corresponding Server Object of the UID `uid` in a Calendar
+    /// ([`Store::corresponding_server_object`]).
+    pub fn corresponding_server_object(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Option<ObjectId>> {
+        self.store.corresponding_server_object(calendar_id, uid)
     }
 
-    /// The UIDs the server object `id` owns.
-    pub fn owned_uids(&self, id: ObjectId) -> Result<Vec<String>> {
-        self.store.owned_uids(id)
+    /// The UIDs whose Corresponding Server Object is `id`.
+    pub fn corresponding_uids(&self, id: ObjectId) -> Result<Vec<String>> {
+        self.store.corresponding_uids(id)
     }
 
-    /// The UIDs the server object `id` holds, owned or not.
+    /// The UIDs the Server Object `id` holds, whether it is their
+    /// Corresponding Server Object or not.
     pub fn held_uids(&self, id: ObjectId) -> Result<Vec<String>> {
         self.store.held_uids(id)
     }
 
-    /// The server object `id` as the mirror holds it, none if it is gone.
+    /// The Server Object `id` as the Mirror holds it, none if it is gone.
     pub fn server_object(&self, id: ObjectId) -> Result<Option<ServerObject>> {
         self.store.server_object(id)
     }
 
-    /// Makes `object`, as the server holds it now, the mirror's version of
-    /// the object `over` in a Calendar, address included, or of a new
-    /// object, and returns its ID. Its keys become `keys`, one per
-    /// component: its UID and recurrence ID, normalised as the rows hold
-    /// it. Only a sync writes the mirror, as only it knows what the server
-    /// holds.
+    /// Makes `object`, as the server holds it now, the Mirror's version of
+    /// the Server Object `over` in a Calendar, address included, or of a
+    /// new one, and returns its ID. Its Combined Event Keys become
+    /// `combined_event_keys`, one per component: its UID and recurrence ID,
+    /// normalised as the Event Rows hold it. Only a sync writes the Mirror,
+    /// as only it knows what the server holds.
     pub fn mirror(
         &self,
         calendar_id: CalendarId,
         object: &ServerObject,
         over: Option<ObjectId>,
-        keys: &[(&str, Option<&str>)],
+        combined_event_keys: &[(&str, Option<&str>)],
     ) -> Result<ObjectId> {
         debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
         self.store
-            .write_object(JOURNALED, calendar_id, object, over, keys)
+            .write_object(JOURNALED, calendar_id, object, over, combined_event_keys)
     }
 
-    /// Makes `keys`, all with the UID `uid`, the keys with that UID of the
-    /// server object `id`, whose data stays as it is: for when its rows
-    /// come to hold their recurrence IDs otherwise, as when it takes over
-    /// the UID from an object that held its Recurring Event.
-    pub fn rekey(&self, id: ObjectId, uid: &str, keys: &[(&str, Option<&str>)]) -> Result<()> {
+    /// Makes `combined_event_keys`, all with the UID `uid`, the Combined
+    /// Event Keys with that UID of the Server Object `id`, whose data stays
+    /// as it is: for when its Event Rows come to hold their recurrence IDs
+    /// otherwise, as when it becomes the UID's Corresponding Server Object
+    /// in place of one that held its Recurring Event.
+    pub fn rewrite_combined_event_keys(
+        &self,
+        id: ObjectId,
+        uid: &str,
+        combined_event_keys: &[(&str, Option<&str>)],
+    ) -> Result<()> {
         debug_assert!(self.origin.is_sync());
-        self.store.write_uid_keys(JOURNALED, id, uid, keys)
+        self.store
+            .write_uid_combined_event_keys(JOURNALED, id, uid, combined_event_keys)
     }
 
-    /// Renormalises the recurrence IDs of the keys with the UID `uid` of a
-    /// Calendar's server objects and unsent changes as `rejoined` gives
-    /// them, for the step that renormalises the rows' ([`Loaded::join`]); a
-    /// key it gives none for keeps its own.
+    /// Renormalises the recurrence IDs of the Combined Event Keys with the
+    /// UID `uid` of a Calendar's Server Objects and Unsent Changes as
+    /// `rejoined` gives them, for the step that renormalises the Event
+    /// Rows' ([`Loaded::join`]); a Combined Event Key it gives none for
+    /// keeps its own.
     ///
     /// [`Loaded::join`]: crate::event::Loaded::join
-    pub fn rejoin_keys(
+    pub fn rejoin_combined_event_keys(
         &self,
         calendar_id: CalendarId,
         uid: &str,
@@ -268,8 +299,9 @@ impl Unit<'_> {
             rows.into_iter()
                 .filter_map(|(row, rid)| Some((row, rejoined(rid.as_deref()?)?)))
         };
-        for (key, joined) in joined(self.store.keys_with_uid(calendar_id, uid)?) {
-            self.store.set_key_recurrence_id(JOURNALED, key, &joined)?;
+        for (row, joined) in joined(self.store.combined_event_keys_with_uid(calendar_id, uid)?) {
+            self.store
+                .set_combined_event_key_recurrence_id(JOURNALED, row, &joined)?;
         }
         for (row, joined) in joined(self.store.unsent_with_uid(calendar_id, uid)?) {
             self.store
@@ -279,23 +311,25 @@ impl Unit<'_> {
     }
 
     /// Records that FreeCal couldn't read what the server holds now at
-    /// `href` in a Calendar: the objects there keep the last version it
-    /// could with its keys, and their rows stay as they are.
+    /// `href` in a Calendar: the Server Objects there keep the last version
+    /// it could with their Combined Event Keys, and their Event Rows stay as
+    /// they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
         debug_assert!(self.origin.is_sync());
         self.store.mark_unreadable(JOURNALED, calendar_id, href)
     }
 
-    /// Removes the server object `id` from the mirror with its keys, as a
-    /// sync finds it gone from the server. The rows of the UIDs it owned
-    /// stay, for the sync to give to the next owner or delete.
+    /// Removes the Server Object `id` from the Mirror with its Combined Event
+    /// Keys, as a sync finds it gone from the server. The Event Rows of the
+    /// UIDs it was the Corresponding Server Object of stay, for the sync to
+    /// give to their next Corresponding Server Object or delete.
     pub fn remove_object(&self, id: ObjectId) -> Result<()> {
         debug_assert!(self.origin.is_sync());
         self.store.delete_object(JOURNALED, id)
     }
 
-    /// Records, with the unit's changes, that a sync of a Calendar
-    /// finished with the sync token `token`.
+    /// Records, with the Journal Transaction's changes, that a sync of a
+    /// Calendar finished with the sync token `token`.
     pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
         self.store.set_synced(calendar_id, token)
     }
@@ -306,7 +340,7 @@ impl Unit<'_> {
         let id = self
             .store
             .write_event(JOURNALED, None, uid, event, rule::span(&event.fields)?)?;
-        self.entry(id, uid, None, Some(event))?;
+        self.record_modification(id, uid, None, Some(event))?;
         Ok(id)
     }
 
@@ -321,30 +355,31 @@ impl Unit<'_> {
         }
         self.store
             .write_event(JOURNALED, Some(id), &uid, event, rule::span(&event.fields)?)?;
-        self.entry(id, &uid, Some(&previous), Some(event))
+        self.record_modification(id, &uid, Some(&previous), Some(event))
     }
 
     pub fn delete(&mut self, id: EventId) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
         self.store.delete_event(JOURNALED, id)?;
-        self.entry(id, &uid, Some(&previous), None)
+        self.record_modification(id, &uid, Some(&previous), None)
     }
 
-    /// Writes an earlier version back under its own ID: over the Event `id`
-    /// while it is the one with the UID `uid`, otherwise as a new Event. No
-    /// other Event has that ID, as IDs are never given out again (ticket 85).
+    /// Writes an earlier Event Version back under its own ID: over the Event
+    /// `id` while it is the one with the UID `uid`, otherwise as a new Event.
+    /// No other Event has that ID, as IDs are never given out again (ticket
+    /// 85).
     fn put_back(&mut self, id: EventId, uid: &str, event: &StoredEvent) -> Result<()> {
         if self.store.current_event(id, uid)?.is_some() {
             return self.replace(id, event);
         }
         self.writable(event.calendar_id)?;
-        // A version FreeCal can't read the time of was stored like that; it
-        // reads as unreadable again rather than stopping the undo.
+        // An Event Version FreeCal can't read the time of was stored like
+        // that; it reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
         self.store
             .write_event(JOURNALED, Some(id), uid, event, instants)?;
-        self.entry(id, uid, None, Some(event))
+        self.record_modification(id, uid, None, Some(event))
     }
 
     fn previous(&self, id: EventId) -> Result<(String, StoredEvent)> {
@@ -354,14 +389,16 @@ impl Unit<'_> {
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
-    /// every origin but a sync, which loads what the server has.
+    /// every Transaction Origin but a sync, which loads what the server has.
     /// Every write checks this itself; a change that targets a Calendar, such
     /// as an import, checks it first, so that it is refused even when it
     /// would write nothing.
     pub fn writable(&self, id: CalendarId) -> Result<()> {
         let read_only = self.store.find_calendar(id)?.read_only;
         match self.origin {
-            Origin::UserAction | Origin::Import | Origin::Undo if read_only => {
+            TransactionOrigin::UserAction | TransactionOrigin::Import | TransactionOrigin::Undo
+                if read_only =>
+            {
                 Err(CoreError::CalendarReadOnly(id))
             }
             _ => Ok(()),
@@ -369,13 +406,15 @@ impl Unit<'_> {
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for
-    /// an Event created or deleted, starting the unit with its first entry.
-    /// An origin that isn't recorded only notes the Calendars.
+    /// an Event created or deleted, as a Modification, starting the Journal
+    /// Transaction with its first one. A Transaction Origin that isn't
+    /// recorded only notes the Calendars.
     ///
-    /// Every origin but a sync also adds both versions' keys to the unsent
-    /// changes, in a server Calendar (ADR 0011): a write into a Read-only
-    /// one was refused already. A sync's changes are what the server holds.
-    fn entry(
+    /// Every Transaction Origin but a sync also adds both Event Versions'
+    /// Combined Event Keys to the Unsent Changes, in a server Calendar (ADR
+    /// 0011): a write into a Read-only one was refused already. A sync's
+    /// changes are what the server holds.
+    fn record_modification(
         &mut self,
         id: EventId,
         uid: &str,
@@ -399,15 +438,17 @@ impl Unit<'_> {
         let Some(origin) = self.origin.recorded_as() else {
             return Ok(());
         };
-        let unit = match self.id {
-            Some(unit) => unit,
-            None => *self
-                .id
-                .insert(self.store.insert_unit(JOURNALED, origin, self.made_at)?),
+        let journal_transaction = match self.id {
+            Some(journal_transaction) => journal_transaction,
+            None => *self.id.insert(self.store.insert_journal_transaction(
+                JOURNALED,
+                origin,
+                self.made_at,
+            )?),
         };
-        self.store.insert_entry(
+        self.store.insert_modification(
             JOURNALED,
-            unit,
+            journal_transaction,
             id,
             uid,
             previous,
@@ -416,20 +457,20 @@ impl Unit<'_> {
     }
 }
 
-impl Source for Unit<'_> {
+impl Source for JournalTransaction<'_> {
     fn events_with_uid(&self, uid: Uid) -> Result<Vec<UidEvent>> {
         self.store.events_with_uid(uid)
     }
 }
 
-/// One Event's change in a unit, as the Change Journal holds it.
-pub(super) struct Entry {
+/// One Event's change in a Journal Transaction, as the Change Journal holds it.
+pub(super) struct Modification {
     pub event_id: EventId,
     /// The Event's UID, which its hashes cover.
     pub uid: String,
-    /// Its version before the change; none when the change created it.
+    /// Its Event Version before the change; none when the change created it.
     pub previous: Option<StoredEvent>,
-    /// The hash of its version after the change; none when the change
+    /// The hash of its Event Version after the change; none when the change
     /// deleted it.
     pub hash: Option<Vec<u8>>,
     pub undone: bool,
@@ -438,15 +479,15 @@ pub(super) struct Entry {
 /// The version of [`hash`]'s format, its first byte.
 const HASH_FORMAT: u8 = 2;
 
-/// The SHA-256 hash of an Event's version: its Calendar, UID and fields, as
+/// The SHA-256 hash of an Event Version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
-/// FreeCal's fields only: which server object holds the Event isn't part of
-/// it (ADR 0011). Format 1 covered the object too.
+/// FreeCal's fields only: which Server Object holds the Event isn't part of
+/// it (ADR 0011). Format 1 covered the Server Object too.
 ///
 /// A field added to Events joins the list. Before the first release it goes
 /// into the baseline schema; after it, it bumps [`HASH_FORMAT`], and its
-/// migration adds it to the Change Journal's entries too, whose hashes then
-/// have to be made again in code.
+/// migration adds it to the Change Journal's Modifications too, whose hashes
+/// then have to be made again in code.
 fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     let fields = &event.fields;
     let when = &fields.when;
@@ -508,7 +549,7 @@ mod tests {
         }
     }
 
-    /// The object holding [`dentist`], as a server gives it.
+    /// The Server Object holding [`dentist`], as a server gives it.
     fn dentist_object() -> ServerObject {
         ServerObject {
             href: "/user/work/dentist.ics".to_owned(),
@@ -517,8 +558,8 @@ mod tests {
         }
     }
 
-    /// The keys of [`dentist_object`].
-    const DENTIST_KEYS: &[(&str, Option<&str>)] = &[("dentist", None)];
+    /// The Combined Event Keys of [`dentist_object`].
+    const DENTIST_COMBINED_EVENT_KEYS: &[(&str, Option<&str>)] = &[("dentist", None)];
 
     const EXCEPTION: &str = "2026-10-19T09:00:00";
 
@@ -566,24 +607,27 @@ mod tests {
         )
         .unwrap();
 
-        let recorded = record(&store, Origin::FirstSync, 0, |unit| {
-            unit.create("dentist", &event)
-        })
+        let recorded = record(
+            &store,
+            TransactionOrigin::FirstSync,
+            0,
+            |journal_transaction| journal_transaction.create("dentist", &event),
+        )
         .unwrap();
 
-        assert_eq!(recorded.unit, None);
+        assert_eq!(recorded.journal_transaction, None);
         assert_eq!(recorded.calendars, [event.calendar_id]);
         assert_eq!(
             store.find_event(recorded.value).unwrap().fields.title,
             "Dentist"
         );
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
-        assert_eq!(count("SELECT COUNT(*) FROM journal_unit"), 0);
-        assert_eq!(count("SELECT COUNT(*) FROM journal_entry"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM journal_transaction"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM modification"), 0);
     }
 
     /// A Local Store with [`dentist`] pulled by a sync into its first
-    /// Calendar, in its object.
+    /// Calendar, in its Server Object.
     struct Pulled {
         _directory: tempfile::TempDir,
         store: Store,
@@ -597,14 +641,24 @@ mod tests {
             let directory = tempfile::TempDir::new().unwrap();
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let calendar_id = store.list_calendars().unwrap()[0].id;
-            let (object, id, event) = record(&store, Origin::Sync, 0, |unit| {
-                let object = unit.mirror(calendar_id, &dentist_object(), None, DENTIST_KEYS)?;
-                let mut event = dentist();
-                event.calendar_id = calendar_id;
-                Ok((object, unit.create("dentist", &event)?, event))
-            })
-            .unwrap()
-            .value;
+            let (object, id, event) =
+                record(&store, TransactionOrigin::Sync, 0, |journal_transaction| {
+                    let object = journal_transaction.mirror(
+                        calendar_id,
+                        &dentist_object(),
+                        None,
+                        DENTIST_COMBINED_EVENT_KEYS,
+                    )?;
+                    let mut event = dentist();
+                    event.calendar_id = calendar_id;
+                    Ok((
+                        object,
+                        journal_transaction.create("dentist", &event)?,
+                        event,
+                    ))
+                })
+                .unwrap()
+                .value;
             Self {
                 _directory: directory,
                 store,
@@ -614,65 +668,95 @@ mod tests {
             }
         }
 
-        /// Mirrors another object holding the UID of [`dentist`] with
-        /// `keys`, at `href`.
-        fn mirror(&self, href: &str, keys: &[(&str, Option<&str>)]) -> ObjectId {
+        /// Mirrors another Server Object holding the UID of [`dentist`] with
+        /// `combined_event_keys`, at `href`.
+        fn mirror(&self, href: &str, combined_event_keys: &[(&str, Option<&str>)]) -> ObjectId {
             let object = ServerObject {
                 href: href.to_owned(),
                 ..dentist_object()
             };
-            record(&self.store, Origin::Sync, 0, |unit| {
-                unit.mirror(self.event.calendar_id, &object, None, keys)
-            })
+            record(
+                &self.store,
+                TransactionOrigin::Sync,
+                0,
+                |journal_transaction| {
+                    journal_transaction.mirror(
+                        self.event.calendar_id,
+                        &object,
+                        None,
+                        combined_event_keys,
+                    )
+                },
+            )
             .unwrap()
             .value
         }
 
-        fn owner(&self) -> Option<ObjectId> {
-            self.store.owner(self.event.calendar_id, "dentist").unwrap()
+        fn corresponding_server_object(&self) -> Option<ObjectId> {
+            self.store
+                .corresponding_server_object(self.event.calendar_id, "dentist")
+                .unwrap()
         }
     }
 
     #[test]
-    fn a_sync_mirrors_the_object_with_its_keys_and_records_neither() {
+    fn a_sync_mirrors_the_server_object_with_its_combined_event_keys_and_records_neither() {
         let pulled = Pulled::new();
         let again = ServerObject {
             etag: Some("\"2\"".to_owned()),
             ..dentist_object()
         };
-        let keys = [("dentist", None), ("dentist", Some(EXCEPTION))];
+        let combined_event_keys = [("dentist", None), ("dentist", Some(EXCEPTION))];
 
-        let mirrored = record(&pulled.store, Origin::Sync, 0, |unit| {
-            unit.mirror(pulled.event.calendar_id, &again, Some(pulled.object), &keys)
-        })
+        let mirrored = record(
+            &pulled.store,
+            TransactionOrigin::Sync,
+            0,
+            |journal_transaction| {
+                journal_transaction.mirror(
+                    pulled.event.calendar_id,
+                    &again,
+                    Some(pulled.object),
+                    &combined_event_keys,
+                )
+            },
+        )
         .unwrap();
 
         assert_eq!(mirrored.value, pulled.object);
-        assert_eq!(mirrored.unit, None, "the Journal doesn't record objects");
+        assert_eq!(
+            mirrored.journal_transaction, None,
+            "the Journal doesn't record Server Objects"
+        );
         assert_eq!(
             pulled.store.server_object(pulled.object).unwrap(),
             Some(again)
         );
         assert_eq!(
-            pulled.store.keys(pulled.object).unwrap(),
-            keys.map(|(uid, rid)| (uid.to_owned(), rid.map(str::to_owned)))
+            pulled.store.combined_event_keys(pulled.object).unwrap(),
+            combined_event_keys.map(|(uid, rid)| (uid.to_owned(), rid.map(str::to_owned)))
         );
     }
 
-    /// ADR 0011: a row isn't linked to its object, so no origin's change
-    /// moves it to another, and none is in the way of an undo.
+    /// ADR 0011: an Event Row isn't linked to its Server Object, so no
+    /// Transaction Origin's change moves it to another, and none is in the
+    /// way of an undo.
     #[test]
-    fn rows_find_their_object_through_the_keys_whatever_changed_them() {
-        for origin in [Origin::UserAction, Origin::Import, Origin::Sync] {
+    fn event_rows_find_their_server_object_through_the_combined_event_keys_whatever_changed_them() {
+        for origin in [
+            TransactionOrigin::UserAction,
+            TransactionOrigin::Import,
+            TransactionOrigin::Sync,
+        ] {
             let pulled = Pulled::new();
             let renamed = renamed(&pulled.event);
-            let unit = record(&pulled.store, origin, 0, |unit| {
-                unit.replace(pulled.id, &renamed)
+            let journal_transaction = record(&pulled.store, origin, 0, |journal_transaction| {
+                journal_transaction.replace(pulled.id, &renamed)
             })
             .unwrap()
-            .unit
+            .journal_transaction
             .unwrap();
-            undo(&pulled.store, unit, 0).unwrap();
+            undo(&pulled.store, journal_transaction, 0).unwrap();
 
             assert_eq!(
                 pulled.store.object_of_event(pulled.id).unwrap(),
@@ -683,31 +767,39 @@ mod tests {
     }
 
     #[test]
-    fn a_row_moved_to_another_calendar_has_no_object_there() {
+    fn an_event_row_moved_to_another_calendar_has_no_server_object_there() {
         let pulled = Pulled::new();
         let mut moved = pulled.event.clone();
         moved.calendar_id = pulled.store.list_calendars().unwrap()[1].id;
 
-        record(&pulled.store, Origin::UserAction, 0, |unit| {
-            unit.replace(pulled.id, &moved)
-        })
+        record(
+            &pulled.store,
+            TransactionOrigin::UserAction,
+            0,
+            |journal_transaction| journal_transaction.replace(pulled.id, &moved),
+        )
         .unwrap();
 
         assert_eq!(pulled.store.object_of_event(pulled.id).unwrap(), None);
     }
 
-    /// As a CalDAV object holds a Recurring Event with its Exceptions.
+    /// As a CalDAV Server Object holds a Recurring Event with its Exceptions.
     #[test]
-    fn a_new_row_belongs_to_the_object_holding_its_uid() {
+    fn a_new_event_row_belongs_to_the_server_object_holding_its_uid() {
         let pulled = Pulled::new();
         let exception = exception(&pulled.event, EXCEPTION);
 
-        let (joined, other) = record(&pulled.store, Origin::UserAction, 0, |unit| {
-            Ok((
-                unit.create("dentist", &exception)?,
-                unit.create("other", &exception)?,
-            ))
-        })
+        let (joined, other) = record(
+            &pulled.store,
+            TransactionOrigin::UserAction,
+            0,
+            |journal_transaction| {
+                Ok((
+                    journal_transaction.create("dentist", &exception)?,
+                    journal_transaction.create("other", &exception)?,
+                ))
+            },
+        )
         .unwrap()
         .value;
 
@@ -717,35 +809,44 @@ mod tests {
     }
 
     #[test]
-    fn of_two_objects_holding_a_uid_the_one_holding_the_recurring_event_owns_it() {
+    fn of_two_server_objects_holding_a_uid_the_one_holding_the_recurring_event_corresponds() {
         let pulled = Pulled::new();
         let later = pulled.mirror("/user/work/copy.ics", &[("dentist", Some(EXCEPTION))]);
 
-        assert_eq!(pulled.owner(), Some(pulled.object));
+        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(
-            pulled.store.owned_uids(later).unwrap(),
+            pulled.store.corresponding_uids(later).unwrap(),
             Vec::<String>::new()
         );
-        record(&pulled.store, Origin::Sync, 0, |unit| {
-            unit.mirror(
-                pulled.event.calendar_id,
-                &dentist_object(),
-                Some(pulled.object),
-                &[("dentist", Some(EXCEPTION))],
-            )?;
-            unit.mirror(
-                pulled.event.calendar_id,
-                &dentist_object(),
-                Some(later),
-                DENTIST_KEYS,
-            )
-        })
+        record(
+            &pulled.store,
+            TransactionOrigin::Sync,
+            0,
+            |journal_transaction| {
+                journal_transaction.mirror(
+                    pulled.event.calendar_id,
+                    &dentist_object(),
+                    Some(pulled.object),
+                    &[("dentist", Some(EXCEPTION))],
+                )?;
+                journal_transaction.mirror(
+                    pulled.event.calendar_id,
+                    &dentist_object(),
+                    Some(later),
+                    DENTIST_COMBINED_EVENT_KEYS,
+                )
+            },
+        )
         .unwrap();
-        assert_eq!(pulled.owner(), Some(later), "whichever came first");
+        assert_eq!(
+            pulled.corresponding_server_object(),
+            Some(later),
+            "whichever came first"
+        );
     }
 
     /// A Local Store with a writable server Calendar holding [`dentist`],
-    /// pulled by a sync into its object, and a Local Calendar.
+    /// pulled by a sync into its Server Object, and a Local Calendar.
     struct OnServer {
         _directory: tempfile::TempDir,
         store: Store,
@@ -788,9 +889,14 @@ mod tests {
                 .unwrap();
             let mut event = dentist();
             event.calendar_id = server;
-            let id = record(&store, Origin::Sync, 0, |unit| {
-                unit.mirror(server, &dentist_object(), None, DENTIST_KEYS)?;
-                unit.create("dentist", &event)
+            let id = record(&store, TransactionOrigin::Sync, 0, |journal_transaction| {
+                journal_transaction.mirror(
+                    server,
+                    &dentist_object(),
+                    None,
+                    DENTIST_COMBINED_EVENT_KEYS,
+                )?;
+                journal_transaction.create("dentist", &event)
             })
             .unwrap()
             .value;
@@ -805,8 +911,12 @@ mod tests {
         }
 
         /// Records `change` as a user's change made at `made_at`.
-        fn change<T>(&self, made_at: i64, change: impl FnOnce(&mut Unit) -> Result<T>) -> T {
-            record(&self.store, Origin::UserAction, made_at, change)
+        fn change<T>(
+            &self,
+            made_at: i64,
+            change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
+        ) -> T {
+            record(&self.store, TransactionOrigin::UserAction, made_at, change)
                 .unwrap()
                 .value
         }
@@ -815,8 +925,13 @@ mod tests {
             self.store.unsent_changes().unwrap()
         }
 
-        /// An unsent change in the server Calendar.
-        fn key(&self, uid: &str, recurrence_id: Option<&str>, since: i64) -> UnsentChange {
+        /// An Unsent Change in the server Calendar.
+        fn unsent_change(
+            &self,
+            uid: &str,
+            recurrence_id: Option<&str>,
+            since: i64,
+        ) -> UnsentChange {
             UnsentChange {
                 calendar_id: self.server,
                 uid: uid.to_owned(),
@@ -834,62 +949,82 @@ mod tests {
     }
 
     #[test]
-    fn a_create_leaves_its_key_unsent() {
+    fn a_create_leaves_its_combined_event_key_unsent() {
         let on_server = OnServer::new();
         let exception = exception(&on_server.event, EXCEPTION);
 
-        on_server.change(7, |unit| unit.create("dentist", &exception));
+        on_server.change(7, |journal_transaction| {
+            journal_transaction.create("dentist", &exception)
+        });
 
         assert_eq!(
             on_server.unsent(),
-            [on_server.key("dentist", Some(EXCEPTION), 7)]
+            [on_server.unsent_change("dentist", Some(EXCEPTION), 7)]
         );
     }
 
-    /// An existing row keeps its `since`.
+    /// An existing Unsent Change keeps its `since`.
     #[test]
-    fn an_edit_leaves_its_previous_and_new_key_unsent_once() {
+    fn an_edit_leaves_its_previous_and_new_combined_event_key_unsent_once() {
         let on_server = OnServer::new();
         let renamed = renamed(&on_server.event);
-        on_server.change(7, |unit| unit.replace(on_server.id, &renamed));
+        on_server.change(7, |journal_transaction| {
+            journal_transaction.replace(on_server.id, &renamed)
+        });
         let exception = exception(&renamed, EXCEPTION);
 
-        on_server.change(9, |unit| unit.replace(on_server.id, &exception));
+        on_server.change(9, |journal_transaction| {
+            journal_transaction.replace(on_server.id, &exception)
+        });
 
         assert_eq!(
             on_server.unsent(),
             [
-                on_server.key("dentist", None, 7),
-                on_server.key("dentist", Some(EXCEPTION), 9)
+                on_server.unsent_change("dentist", None, 7),
+                on_server.unsent_change("dentist", Some(EXCEPTION), 9)
             ]
         );
     }
 
     #[test]
-    fn a_move_to_a_local_calendar_leaves_only_the_previous_key_unsent() {
+    fn a_move_to_a_local_calendar_leaves_only_the_previous_combined_event_key_unsent() {
         let on_server = OnServer::new();
         let mut moved = on_server.event.clone();
         moved.calendar_id = on_server.local;
 
-        on_server.change(7, |unit| unit.replace(on_server.id, &moved));
+        on_server.change(7, |journal_transaction| {
+            journal_transaction.replace(on_server.id, &moved)
+        });
 
-        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
+        assert_eq!(
+            on_server.unsent(),
+            [on_server.unsent_change("dentist", None, 7)]
+        );
     }
 
     #[test]
-    fn a_delete_and_its_undo_leave_the_key_unsent() {
+    fn a_delete_and_its_undo_leave_the_combined_event_key_unsent() {
         let on_server = OnServer::new();
 
-        let unit = record(&on_server.store, Origin::UserAction, 7, |unit| {
-            unit.delete(on_server.id)
-        })
+        let journal_transaction = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            7,
+            |journal_transaction| journal_transaction.delete(on_server.id),
+        )
         .unwrap()
-        .unit
+        .journal_transaction
         .unwrap();
-        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
-        undo(&on_server.store, unit, 9).unwrap();
+        assert_eq!(
+            on_server.unsent(),
+            [on_server.unsent_change("dentist", None, 7)]
+        );
+        undo(&on_server.store, journal_transaction, 9).unwrap();
 
-        assert_eq!(on_server.unsent(), [on_server.key("dentist", None, 7)]);
+        assert_eq!(
+            on_server.unsent(),
+            [on_server.unsent_change("dentist", None, 7)]
+        );
     }
 
     #[test]
@@ -898,88 +1033,116 @@ mod tests {
         let mut local = on_server.event.clone();
         local.calendar_id = on_server.local;
 
-        on_server.change(7, |unit| {
-            let id = unit.create("local", &local)?;
+        on_server.change(7, |journal_transaction| {
+            let id = journal_transaction.create("local", &local)?;
             local.fields.title = "Renamed".to_owned();
-            unit.replace(id, &local)?;
-            unit.delete(id)
+            journal_transaction.replace(id, &local)?;
+            journal_transaction.delete(id)
         });
 
         assert_eq!(on_server.unsent(), []);
     }
 
-    /// The object holding the row changes; the Event doesn't, and the
-    /// server already holds it.
+    /// The Server Object holding the Event Row changes; the Event doesn't,
+    /// and the server already holds it.
     #[test]
-    fn a_sync_that_moves_a_row_to_another_object_leaves_nothing_unsent() {
+    fn a_sync_that_moves_an_event_row_to_another_server_object_leaves_nothing_unsent() {
         let on_server = OnServer::new();
         let renamed = renamed(&on_server.event);
 
-        record(&on_server.store, Origin::Sync, 7, |unit| {
-            let old = unit.owner(on_server.server, "dentist")?.unwrap();
-            unit.remove_object(old)?;
-            let moved = ServerObject {
-                href: "/user/work/moved.ics".to_owned(),
-                ..dentist_object()
-            };
-            unit.mirror(on_server.server, &moved, None, DENTIST_KEYS)?;
-            unit.replace(on_server.id, &renamed)
-        })
+        record(
+            &on_server.store,
+            TransactionOrigin::Sync,
+            7,
+            |journal_transaction| {
+                let old = journal_transaction
+                    .corresponding_server_object(on_server.server, "dentist")?
+                    .unwrap();
+                journal_transaction.remove_object(old)?;
+                let moved = ServerObject {
+                    href: "/user/work/moved.ics".to_owned(),
+                    ..dentist_object()
+                };
+                journal_transaction.mirror(
+                    on_server.server,
+                    &moved,
+                    None,
+                    DENTIST_COMBINED_EVENT_KEYS,
+                )?;
+                journal_transaction.replace(on_server.id, &renamed)
+            },
+        )
         .unwrap();
 
         assert_eq!(on_server.unsent(), []);
     }
 
     /// As [`Loaded::join`] renormalises an Exception's recurrence ID when
-    /// its Recurring Event arrives: the unsent key goes with the row, and
-    /// the earliest `since` stays.
+    /// its Recurring Event arrives: the Unsent Change goes with the Event
+    /// Row, and the earliest `since` stays.
     ///
     /// [`Loaded::join`]: crate::event::Loaded::join
     #[test]
-    fn rejoining_keys_renormalises_the_unsent_ones() {
+    fn rejoining_combined_event_keys_renormalises_the_unsent_changes() {
         let on_server = OnServer::new();
         let zoned = "2026-10-19T09:00:00 Europe/Berlin";
         let mut exception = exception(&on_server.event, zoned);
-        on_server.change(7, |unit| unit.create("dentist", &exception));
+        on_server.change(7, |journal_transaction| {
+            journal_transaction.create("dentist", &exception)
+        });
         exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
-        on_server.change(9, |unit| unit.create("dentist", &exception));
+        on_server.change(9, |journal_transaction| {
+            journal_transaction.create("dentist", &exception)
+        });
         exception.fields.recurrence_id = Some("other".to_owned());
-        on_server.change(11, |unit| unit.create("dentist", &exception));
+        on_server.change(11, |journal_transaction| {
+            journal_transaction.create("dentist", &exception)
+        });
 
-        record(&on_server.store, Origin::Sync, 13, |unit| {
-            unit.rejoin_keys(on_server.server, "dentist", |text| {
-                (text == zoned).then(|| EXCEPTION.to_owned())
-            })
-        })
+        record(
+            &on_server.store,
+            TransactionOrigin::Sync,
+            13,
+            |journal_transaction| {
+                journal_transaction.rejoin_combined_event_keys(
+                    on_server.server,
+                    "dentist",
+                    |text| (text == zoned).then(|| EXCEPTION.to_owned()),
+                )
+            },
+        )
         .unwrap();
 
         assert_eq!(
             on_server.unsent(),
             [
-                on_server.key("dentist", Some(EXCEPTION), 7),
-                on_server.key("dentist", Some("other"), 11)
+                on_server.unsent_change("dentist", Some(EXCEPTION), 7),
+                on_server.unsent_change("dentist", Some("other"), 11)
             ]
         );
     }
 
     #[test]
-    fn of_two_objects_holding_a_uid_alike_the_first_mirrored_owns_it_until_it_goes() {
+    fn of_two_server_objects_holding_a_uid_alike_the_first_mirrored_corresponds_until_it_goes() {
         let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", DENTIST_KEYS);
-        assert_eq!(pulled.owner(), Some(pulled.object));
+        let later = pulled.mirror("/user/work/copy.ics", DENTIST_COMBINED_EVENT_KEYS);
+        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(
-            pulled.store.owned_uids(later).unwrap(),
+            pulled.store.corresponding_uids(later).unwrap(),
             Vec::<String>::new()
         );
 
-        record(&pulled.store, Origin::Sync, 0, |unit| {
-            unit.remove_object(pulled.object)
-        })
+        record(
+            &pulled.store,
+            TransactionOrigin::Sync,
+            0,
+            |journal_transaction| journal_transaction.remove_object(pulled.object),
+        )
         .unwrap();
 
-        assert_eq!(pulled.owner(), Some(later));
-        assert_eq!(pulled.store.keys(pulled.object).unwrap(), []);
-        assert_eq!(pulled.store.owned_uids(later).unwrap(), ["dentist"]);
+        assert_eq!(pulled.corresponding_server_object(), Some(later));
+        assert_eq!(pulled.store.combined_event_keys(pulled.object).unwrap(), []);
+        assert_eq!(pulled.store.corresponding_uids(later).unwrap(), ["dentist"]);
         assert_eq!(
             pulled.store.object_of_event(pulled.id).unwrap(),
             Some(later)

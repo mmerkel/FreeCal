@@ -13,7 +13,7 @@
 - [ ] A new Local Calendar gets the next palette colour; its name can be changed in the preview
 - [ ] A single `.ics` offers "New Local Calendar" in the same select
 - [ ] The update / skip / copy choice stays one per import
-- [ ] The whole `.zip` is one import and one Change Journal unit; undoing it removes the Calendars it created if they are empty by then, otherwise keeps them and says so
+- [ ] The whole `.zip` is one import and one Journal Transaction; undoing it removes the Calendars it created if they are empty by then, otherwise keeps them and says so
 - [ ] Core tests and component tests against the fake core; checked by hand with `run-freecal` on a Takeout-like `.zip` of two Calendars
 
 ## Comments

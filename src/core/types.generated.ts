@@ -77,10 +77,10 @@ firstSync: boolean, };
 export type CalendarId = number & { readonly __brand: "CalendarId" };
 
 /**
- * What a change to Events returns: its value, and the unit that undoes it,
- * none when it changed nothing.
+ * What a change to Events returns: its value, and the Journal Transaction
+ * that undoes it, none when it changed nothing.
  */
-export type Changed<T> = { unit: UnitId | null, value: T, };
+export type Changed<T> = { journalTransaction: JournalTransactionId | null, value: T, };
 
 /**
  * A Calendar's colour, always `#rrggbb` in lower case, so that it can only
@@ -94,7 +94,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "unitNotFound" } | { "code": "changedSinceUnit" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "journalTransactionNotFound" } | { "code": "changedSinceJournalTransaction" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -166,7 +166,7 @@ export type ImportOutcome = {
 /**
  * What undoes it; none when it changed nothing.
  */
-unit: UnitId | null,
+journalTransaction: JournalTransactionId | null,
 /**
  * How many Events it added, copies included.
  */
@@ -176,6 +176,11 @@ imported: number, updated: number, skipped: number, };
  * An import preview as the window shows it: the counts, not the Events.
  */
 export type ImportSummary = { calendarId: CalendarId, newEvents: number, existingEvents: number, pinned: Array<PinnedZone>, };
+
+/**
+ * A Journal Transaction: what undoes a change, or changes made together.
+ */
+export type JournalTransactionId = number & { readonly __brand: "JournalTransactionId" };
 
 /**
  * One dated appearance of an Event in the grid. A single Event has exactly
@@ -276,11 +281,6 @@ paragraphs: Array<Array<Piece>>,
  * edit.
  */
 text: string, };
-
-/**
- * A Change Journal unit: what undoes a change, or changes made together.
- */
-export type UnitId = number & { readonly __brand: "UnitId" };
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

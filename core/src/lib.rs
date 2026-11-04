@@ -46,14 +46,14 @@ pub use remote::FIRST_SYNC_PAGE;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
-pub use store::{Changed, UnitId};
+pub use store::{Changed, JournalTransactionId};
 pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
 use event::{Edit, Opened};
 use remote::{Remote, SyncPoint};
-use store::{Origin, Store, Unit};
+use store::{JournalTransaction, Store, TransactionOrigin};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -201,8 +201,8 @@ impl Core {
     /// as its Calendars, all or none. Their names and colours are the
     /// server's as it offers them now.
     ///
-    /// Then each one's first sync pulls its Events, one after the other. It
-    /// is the baseline, which the Change Journal doesn't record (ADR 0009).
+    /// Then each one's First Sync pulls its Events, one after the other,
+    /// which the Change Journal doesn't record (ADR 0009).
     /// While it runs, the Calendar says so ([`Calendar::first_sync`]), with
     /// "Calendars changed" as it starts and ends, and it commits page by page,
     /// with "Occurrences changed" for each page. A Calendar removed meanwhile
@@ -256,8 +256,8 @@ impl Core {
     fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
         let pulled = remote
             .all_events(url, self.clock.time_zone(), &mut |fetched, zone| {
-                self.record(Origin::FirstSync, |unit| {
-                    sync::take(unit, id, &fetched, zone, &mut Vec::new())
+                self.record(TransactionOrigin::FirstSync, |journal_transaction| {
+                    sync::take(journal_transaction, id, &fetched, zone, &mut Vec::new())
                 })
                 .map(drop)
             })
@@ -271,16 +271,17 @@ impl Core {
     /// Syncs a server Account on demand: each of its Calendars gets what
     /// changed on its server since its last sync, fetching only that where
     /// the server can tell (see [`Remote::changes`]). Each Calendar's sync
-    /// is one Change Journal unit of origin sync, in Read-only Calendars
-    /// too, and sends one "Occurrences changed" once committed; a sync that
-    /// changes nothing records no unit. A Calendar whose first sync didn't
-    /// finish gets the rest of it, as part of the baseline, while the
+    /// is one Journal Transaction with the Transaction Origin sync, in
+    /// Read-only Calendars too, and sends one "Occurrences changed" once
+    /// committed; a sync that changes nothing records no Journal
+    /// Transaction. A Calendar whose First Sync didn't finish gets the rest
+    /// of its First Sync, unrecorded like the rest, while the
     /// Calendar says so as [`Core::add_calendars`] does. A Calendar on its
     /// first sync now, or removed meanwhile, is left out.
     ///
     /// Should a Calendar's sync fail, the others still sync, and the first
-    /// error is returned. Returns each Calendar synced, with its unit. None
-    /// for the Local Account.
+    /// error is returned. Returns each Calendar synced, with its Journal
+    /// Transaction. None for the Local Account.
     pub fn sync_account(&self, id: AccountId) -> Result<Vec<Changed<CalendarId>>> {
         let Some(remote) = self.remote(id)? else {
             return Ok(Vec::new());
@@ -298,8 +299,8 @@ impl Core {
     }
 
     /// Syncs the Calendar `id` at `url` on the server from `state`, a first
-    /// sync's rest without one. Returns the Calendar with its unit, none
-    /// when it is left out.
+    /// sync's rest without one. Returns the Calendar with its Journal
+    /// Transaction, none when it is left out.
     fn sync_calendar(
         &self,
         remote: &dyn Remote,
@@ -326,11 +327,13 @@ impl Core {
             let token = state.and_then(|state| state.token);
             let changes = remote.changes(url, token.as_deref(), &known, self.clock.time_zone())?;
             let origin = if first {
-                Origin::FirstSync
+                TransactionOrigin::FirstSync
             } else {
-                Origin::Sync
+                TransactionOrigin::Sync
             };
-            self.record(origin, |unit| sync::apply(unit, id, &changes))
+            self.record(origin, |journal_transaction| {
+                sync::apply(journal_transaction, id, &changes)
+            })
         })();
         if first {
             {
@@ -341,7 +344,7 @@ impl Core {
         }
         match synced {
             Ok(changed) => Ok(Some(Changed {
-                unit: changed.unit,
+                journal_transaction: changed.journal_transaction,
                 value: id,
             })),
             Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(None),
@@ -509,7 +512,7 @@ impl Core {
         Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
     }
 
-    /// The server object an Event belongs to (ADR 0011), as the server last
+    /// The Server Object an Event belongs to (ADR 0011), as the server last
     /// gave it: the object holding its UID in its Calendar, for an
     /// Exception too. None for an Event no object holds, such as one not on
     /// a server yet.
@@ -525,8 +528,8 @@ impl Core {
     /// draft has a repeat rule.
     pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let created = self.record(Origin::UserAction, |unit| {
-            event::create_event(unit, zone, draft)
+        let created = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+            event::create_event(journal_transaction, zone, draft)
         })?;
         self.changed_event(created)
     }
@@ -552,11 +555,11 @@ impl Core {
 
     fn edit_whole(&self, id: EventId, edit: Edit) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let edited = self.record(Origin::UserAction, |unit| {
-            event::edit_event(unit, zone, id, edit)
+        let edited = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+            event::edit_event(journal_transaction, zone, id, edit)
         })?;
         self.changed_event(Changed {
-            unit: edited.unit,
+            journal_transaction: edited.journal_transaction,
             value: edited.value.id,
         })
     }
@@ -618,12 +621,20 @@ impl Core {
         edit: Edit,
     ) -> Result<Changed<Occurrence>> {
         let zone = self.clock.time_zone();
-        let edited = self.record(Origin::UserAction, |unit| {
-            event::edit_occurrence(unit, zone, id, recurrence_id, scope, exceptions_too, edit)
+        let edited = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+            event::edit_occurrence(
+                journal_transaction,
+                zone,
+                id,
+                recurrence_id,
+                scope,
+                exceptions_too,
+                edit,
+            )
         })?;
         let occurrence = edited.value;
         Ok(Changed {
-            unit: edited.unit,
+            journal_transaction: edited.journal_transaction,
             value: Occurrence {
                 event_id: occurrence.id,
                 calendar_id: occurrence.calendar_id,
@@ -638,8 +649,8 @@ impl Core {
     /// one of its Exceptions, that is the whole Recurring Event with all its
     /// Exceptions.
     pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
-        self.record(Origin::UserAction, |unit| {
-            Opened::load(unit, id)?.delete(unit)
+        self.record(TransactionOrigin::UserAction, |journal_transaction| {
+            Opened::load(journal_transaction, id)?.delete(journal_transaction)
         })
     }
 
@@ -649,8 +660,8 @@ impl Core {
     /// Exception, and an Exception that changed it is deleted. The only
     /// Occurrence of a single Event is the Event.
     pub fn delete_occurrence(&self, id: EventId, recurrence_id: &str) -> Result<Changed<()>> {
-        self.record(Origin::UserAction, |unit| {
-            event::cancel_occurrence(unit, id, recurrence_id)
+        self.record(TransactionOrigin::UserAction, |journal_transaction| {
+            event::cancel_occurrence(journal_transaction, id, recurrence_id)
         })
     }
 
@@ -671,41 +682,44 @@ impl Core {
     }
 
     /// Runs a previewed import into a writable Calendar, doing with the
-    /// Events it already has what `existing` says, as one Change Journal unit.
+    /// Events it already has what `existing` says, as one Journal Transaction.
     pub fn run_import(
         &self,
         preview: &ImportPreview,
         existing: ExistingEvents,
     ) -> Result<ImportOutcome> {
-        let run = self.record(Origin::Import, |unit| import::run(unit, preview, existing))?;
+        let run = self.record(TransactionOrigin::Import, |journal_transaction| {
+            import::run(journal_transaction, preview, existing)
+        })?;
         Ok(ImportOutcome {
-            unit: run.unit,
+            journal_transaction: run.journal_transaction,
             ..run.value
         })
     }
 
-    /// Undoes a Change Journal unit whole: every Event it changed gets its
-    /// previous version back under the same identity. Refused while an Event
-    /// changed since, and for a unit undone already. The undo is a unit
-    /// itself, and undoing it redoes the change.
-    pub fn undo_unit(&self, id: UnitId) -> Result<Changed<()>> {
+    /// Undoes a Journal Transaction whole: every Event it changed gets its
+    /// previous Event Version back under the same identity. Refused while an
+    /// Event changed since, and for a Journal Transaction undone already. The
+    /// undo is a Journal Transaction itself, and undoing it redoes the
+    /// change.
+    pub fn undo_journal_transaction(&self, id: JournalTransactionId) -> Result<Changed<()>> {
         let undone = store::undo(&self.store(), id, self.clock.now().timestamp())?;
         Ok(self.signal(undone))
     }
 
-    /// Runs `change` as one Change Journal unit of `origin` and sends
+    /// Runs `change` as one Journal Transaction of `origin` and sends
     /// "Occurrences changed" for the Calendars it changed Events in.
     fn record<T>(
         &self,
-        origin: Origin,
-        change: impl FnOnce(&mut Unit) -> Result<T>,
+        origin: TransactionOrigin,
+        change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
     ) -> Result<Changed<T>> {
         let recorded = store::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
         Ok(self.signal(recorded))
     }
 
-    /// Sends "Occurrences changed" for a recorded unit's Calendars, once the
-    /// Store lock is released.
+    /// Sends "Occurrences changed" for a recorded Journal Transaction's
+    /// Calendars, once the Store lock is released.
     fn signal<T>(&self, recorded: store::Recorded<T>) -> Changed<T> {
         if !recorded.calendars.is_empty() {
             self.signals.send(Signal::OccurrencesChanged {
@@ -713,14 +727,14 @@ impl Core {
             });
         }
         Changed {
-            unit: recorded.unit,
+            journal_transaction: recorded.journal_transaction,
             value: recorded.value,
         }
     }
 
     fn changed_event(&self, changed: Changed<EventId>) -> Result<Changed<Event>> {
         self.event(changed.value).map(|value| Changed {
-            unit: changed.unit,
+            journal_transaction: changed.journal_transaction,
             value,
         })
     }

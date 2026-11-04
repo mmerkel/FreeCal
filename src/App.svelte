@@ -15,7 +15,7 @@
     SettingsUpdate,
     SidebarState,
     Signal,
-    UnitId,
+    JournalTransactionId,
     View,
     When,
   } from './core/types';
@@ -559,7 +559,7 @@
     working = t('working.importing', { file });
     try {
       const outcome = await core.runImport(calendarId, existing);
-      const { unit } = outcome;
+      const { journalTransaction } = outcome;
       close();
       toast = {
         message: t('import.done', {
@@ -568,8 +568,8 @@
           updated: String(outcome.updated),
           skipped: String(outcome.skipped),
         }),
-        // An import that changed nothing has no unit to undo.
-        undo: unit === null ? undefined : () => undoImport(file, unit),
+        // An import that changed nothing has no Journal Transaction to undo.
+        undo: journalTransaction === null ? undefined : () => undoImport(file, journalTransaction),
       };
     } catch (error) {
       importFailure = t('import.failed', { error: errorText(error) });
@@ -578,11 +578,11 @@
     }
   }
 
-  async function undoImport(file: string, id: UnitId) {
+  async function undoImport(file: string, id: JournalTransactionId) {
     toast = undefined;
     working = t('working.undoingImport', { file });
     try {
-      await core.undoUnit(id);
+      await core.undoJournalTransaction(id);
       toast = { message: t('import.undone', { file }) };
     } catch (error) {
       // Undo can succeed later, such as once the Calendar is writable again.

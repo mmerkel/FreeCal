@@ -13,8 +13,8 @@ use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
     Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents,
-    ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope, Settings,
-    SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, UnitId, View, When,
+    ImportFile, ImportOutcome, ImportPreview, ImportSummary, JournalTransactionId, Occurrence,
+    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View, When,
     link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -380,8 +380,11 @@ fn discard_import(picked: State<PickedImport>) {
 }
 
 #[tauri::command]
-async fn undo_unit(core: State<'_, Core>, id: UnitId) -> CommandResult<Changed<()>> {
-    core.undo_unit(id).map_err(ErrorCode::from)
+async fn undo_journal_transaction(
+    core: State<'_, Core>,
+    id: JournalTransactionId,
+) -> CommandResult<Changed<()>> {
+    core.undo_journal_transaction(id).map_err(ErrorCode::from)
 }
 
 /// Opens a link from a description or location in the system browser. The scheme
@@ -588,7 +591,7 @@ fn main() {
             preview_import,
             run_import,
             discard_import,
-            undo_unit,
+            undo_journal_transaction,
             open_link,
             version,
             show_window,

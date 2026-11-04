@@ -1,11 +1,12 @@
-//! The Change Journal: every change to an Event is a unit that undoes it
-//! exactly, and an undo is a unit too, which redoes it.
+//! The Change Journal: every change to an Event is a Journal Transaction
+//! that undoes it exactly, and an undo is a Journal Transaction too, which
+//! redoes it.
 
 mod support;
 
 use freecal_core::{
-    Calendar, CalendarId, Core, CoreError, Event, ExistingEvents, ImportFile, RepeatEnd, Scope,
-    Signal, UnitId,
+    Calendar, CalendarId, Core, CoreError, Event, ExistingEvents, ImportFile, JournalTransactionId,
+    RepeatEnd, Scope, Signal,
 };
 use support::{Harness, all_day, calendar, date, draft, event, ics, on, timed, yoga};
 
@@ -45,11 +46,14 @@ fn import(
     calendar_id: CalendarId,
     contents: Vec<u8>,
     existing: ExistingEvents,
-) -> UnitId {
+) -> JournalTransactionId {
     let preview = core
         .preview_import(&ImportFile::new("events.ics", contents), calendar_id)
         .unwrap();
-    core.run_import(&preview, existing).unwrap().unit.unwrap()
+    core.run_import(&preview, existing)
+        .unwrap()
+        .journal_transaction
+        .unwrap()
 }
 
 const MONDAY: (&str, &str) = ("DTSTART:20261005T070000Z", "DTEND:20261005T080000Z");
@@ -70,20 +74,21 @@ fn home_with_dentist(harness: &Harness, core: &Core) -> (Calendar, Event) {
     (home, dentist)
 }
 
-/// Checks that undoing `unit` brings back `before` and signals `calendars`.
+/// Checks that undoing `journal_transaction` brings back `before` and
+/// signals `calendars`.
 fn undoes_exactly(
     harness: &Harness,
     core: &Core,
-    unit: UnitId,
+    journal_transaction: JournalTransactionId,
     before: &[Event],
     calendars: &[CalendarId],
 ) {
     assert_ne!(contents(core), before, "the change changed something");
     harness.signals.clear();
 
-    let undone = core.undo_unit(unit).unwrap();
+    let undone = core.undo_journal_transaction(journal_transaction).unwrap();
 
-    assert!(undone.unit.is_some());
+    assert!(undone.journal_transaction.is_some());
     assert_eq!(contents(core), before);
     assert_eq!(harness.signals.received(), changed(calendars));
 }
@@ -105,7 +110,13 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
             ))
             .unwrap();
 
-        undoes_exactly(&harness, &core, created.unit.unwrap(), &[], &[home.id]);
+        undoes_exactly(
+            &harness,
+            &core,
+            created.journal_transaction.unwrap(),
+            &[],
+            &[home.id],
+        );
     }
 
     #[test]
@@ -119,7 +130,13 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
 
         let edited = core.edit_event(dentist.id, edit).unwrap();
 
-        undoes_exactly(&harness, &core, edited.unit.unwrap(), &before, &[home.id]);
+        undoes_exactly(
+            &harness,
+            &core,
+            edited.journal_transaction.unwrap(),
+            &before,
+            &[home.id],
+        );
     }
 
     #[test]
@@ -136,7 +153,7 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
         undoes_exactly(
             &harness,
             &core,
-            rescheduled.unit.unwrap(),
+            rescheduled.journal_transaction.unwrap(),
             &before,
             &[home.id],
         );
@@ -151,7 +168,13 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
 
         let deleted = core.delete_event(dentist.id).unwrap();
 
-        undoes_exactly(&harness, &core, deleted.unit.unwrap(), &before, &[home.id]);
+        undoes_exactly(
+            &harness,
+            &core,
+            deleted.journal_transaction.unwrap(),
+            &before,
+            &[home.id],
+        );
         assert_eq!(core.event(dentist.id).unwrap(), dentist);
     }
 
@@ -175,9 +198,9 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
         ]
         .concat());
 
-        let unit = import(&core, home.id, file, ExistingEvents::Update);
+        let journal_transaction = import(&core, home.id, file, ExistingEvents::Update);
 
-        undoes_exactly(&harness, &core, unit, &before, &[home.id]);
+        undoes_exactly(&harness, &core, journal_transaction, &before, &[home.id]);
     }
 }
 
@@ -197,14 +220,14 @@ fn an_edit_moving_an_event_to_another_calendar_is_undone_into_the_first() {
     undoes_exactly(
         &harness,
         &core,
-        moved.unit.unwrap(),
+        moved.journal_transaction.unwrap(),
         &before,
         &[work.id, home.id],
     );
 }
 
 #[test]
-fn a_change_that_changes_nothing_is_no_unit_and_sends_no_signal() {
+fn a_change_that_changes_nothing_is_no_journal_transaction_and_sends_no_signal() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let (home, dentist) = home_with_dentist(&harness, &core);
@@ -228,34 +251,43 @@ fn a_change_that_changes_nothing_is_no_unit_and_sends_no_signal() {
         .unwrap();
     let updated = core.run_import(&preview, ExistingEvents::Update).unwrap();
 
-    assert_eq!(edited.unit, None);
+    assert_eq!(edited.journal_transaction, None);
     assert_eq!(edited.value, dentist);
-    assert_eq!(rescheduled.unit, None);
-    assert_eq!((updated.unit, updated.updated), (None, 1));
+    assert_eq!(rescheduled.journal_transaction, None);
+    assert_eq!((updated.journal_transaction, updated.updated), (None, 1));
     assert_eq!(harness.signals.received(), []);
 }
 
 #[test]
-fn undoing_the_undo_redoes_and_an_undone_unit_is_undone_once() {
+fn undoing_the_undo_redoes_and_an_undone_journal_transaction_is_undone_once() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let (home, dentist) = home_with_dentist(&harness, &core);
-    let deleted = core.delete_event(dentist.id).unwrap().unit.unwrap();
-    let undo = core.undo_unit(deleted).unwrap().unit.unwrap();
+    let deleted = core
+        .delete_event(dentist.id)
+        .unwrap()
+        .journal_transaction
+        .unwrap();
+    let undo = core
+        .undo_journal_transaction(deleted)
+        .unwrap()
+        .journal_transaction
+        .unwrap();
     assert_eq!(contents(&core), std::slice::from_ref(&dentist));
     harness.signals.clear();
 
-    let again = core.undo_unit(deleted);
-    let redo = core.undo_unit(undo).unwrap();
+    let again = core.undo_journal_transaction(deleted);
+    let redo = core.undo_journal_transaction(undo).unwrap();
 
     assert!(matches!(again, Err(CoreError::AlreadyUndone(id)) if id == deleted));
     assert_eq!(contents(&core), []);
     assert_eq!(harness.signals.received(), changed(&[home.id]));
     assert!(matches!(
-        core.undo_unit(undo),
+        core.undo_journal_transaction(undo),
         Err(CoreError::AlreadyUndone(_))
     ));
-    core.undo_unit(redo.unit.unwrap()).unwrap();
+    core.undo_journal_transaction(redo.journal_transaction.unwrap())
+        .unwrap();
     assert_eq!(contents(&core), [dentist]);
 }
 
@@ -264,7 +296,7 @@ fn undo_is_refused_in_a_calendar_now_read_only() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar(&core, "Home");
-    let unit = import(
+    let journal_transaction = import(
         &core,
         home.id,
         ics(&event("new", MONDAY.0, MONDAY.1)),
@@ -274,7 +306,7 @@ fn undo_is_refused_in_a_calendar_now_read_only() {
     make_read_only(&harness, &home);
     harness.signals.clear();
 
-    let refused = core.undo_unit(unit);
+    let refused = core.undo_journal_transaction(journal_transaction);
 
     assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == home.id));
     assert_eq!(contents(&core), imported);
@@ -301,14 +333,16 @@ mod an_event_changed_since_refuses_the_undo {
             event("new", MONDAY.0, MONDAY.1),
         ]
         .concat());
-        let unit = import(&core, home.id, file, ExistingEvents::Update);
+        let journal_transaction = import(&core, home.id, file, ExistingEvents::Update);
         change(&core, &home);
         let since = contents(&core);
         harness.signals.clear();
 
-        let refused = core.undo_unit(unit);
+        let refused = core.undo_journal_transaction(journal_transaction);
 
-        assert!(matches!(refused, Err(CoreError::ChangedSinceUnit(id)) if id == unit));
+        assert!(
+            matches!(refused, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == journal_transaction)
+        );
         assert_eq!(contents(&core), since);
         assert_eq!(harness.signals.received(), []);
     }
@@ -363,7 +397,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
     let deleted = core
         .delete_occurrence(moved.event_id, moved.recurrence_id.as_deref().unwrap())
         .unwrap()
-        .unit
+        .journal_transaction
         .unwrap();
     let second = on(&core, "2026-10-12");
     let made_since = core
@@ -379,7 +413,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
     assert_ne!(made_since.event_id, exception.id);
     let made_since = core.event(made_since.event_id).unwrap();
 
-    core.undo_unit(deleted).unwrap();
+    core.undo_journal_transaction(deleted).unwrap();
 
     assert_eq!(core.event(exception.id).unwrap(), exception);
     assert_eq!(core.event(made_since.id).unwrap(), made_since);
@@ -387,11 +421,11 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
 }
 
 #[test]
-fn deleting_a_calendar_removes_the_units_of_its_events() {
+fn deleting_a_calendar_removes_the_journal_transactions_of_its_events() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar(&core, "Home");
-    let unit = import(
+    let journal_transaction = import(
         &core,
         home.id,
         ics(&event("new", MONDAY.0, MONDAY.1)),
@@ -400,17 +434,19 @@ fn deleting_a_calendar_removes_the_units_of_its_events() {
     core.delete_calendar(home.id).unwrap();
     harness.signals.clear();
 
-    let refused = core.undo_unit(unit);
+    let refused = core.undo_journal_transaction(journal_transaction);
 
-    assert!(matches!(refused, Err(CoreError::UnitNotFound(id)) if id == unit));
+    assert!(
+        matches!(refused, Err(CoreError::JournalTransactionNotFound(id)) if id == journal_transaction)
+    );
     assert_eq!(harness.signals.received(), []);
 }
 
-/// The entries of an Event moved out of a Calendar deleted since can't be
-/// undone: undoing the move would put it back there, and its earlier
-/// entries are undone only through the move.
+/// The Modifications of an Event moved out of a Calendar deleted since
+/// can't be undone: undoing the move would put it back there, and its
+/// earlier Modifications are undone only through the move.
 #[test]
-fn deleting_a_calendar_removes_the_entries_that_would_put_an_event_back_into_it() {
+fn deleting_a_calendar_removes_the_modifications_that_would_put_an_event_back_into_it() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar(&core, "Home");
@@ -437,11 +473,20 @@ fn deleting_a_calendar_removes_the_entries_that_would_put_an_event_back_into_it(
     core.delete_calendar(home.id).unwrap();
     harness.signals.clear();
 
-    for unit in [created.unit, moved.unit, deleted.unit].map(Option::unwrap) {
-        let refused = core.undo_unit(unit);
-        assert!(matches!(refused, Err(CoreError::UnitNotFound(id)) if id == unit));
+    for journal_transaction in [
+        created.journal_transaction,
+        moved.journal_transaction,
+        deleted.journal_transaction,
+    ]
+    .map(Option::unwrap)
+    {
+        let refused = core.undo_journal_transaction(journal_transaction);
+        assert!(
+            matches!(refused, Err(CoreError::JournalTransactionNotFound(id)) if id == journal_transaction)
+        );
     }
     assert_eq!(harness.signals.received(), []);
-    core.undo_unit(renamed.unit.unwrap()).unwrap();
+    core.undo_journal_transaction(renamed.journal_transaction.unwrap())
+        .unwrap();
     assert_eq!(the_one(&core, "Dentist").calendar_id, work.id);
 }

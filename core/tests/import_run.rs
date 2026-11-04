@@ -208,7 +208,7 @@ fn an_import_into_a_read_only_calendar_is_refused_even_when_it_would_skip_every_
 }
 
 #[test]
-fn an_import_that_changes_nothing_is_no_unit_and_sends_no_signal() {
+fn an_import_that_changes_nothing_is_no_journal_transaction_and_sends_no_signal() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar_with_kept(&harness, &core);
@@ -221,7 +221,7 @@ fn an_import_that_changes_nothing_is_no_unit_and_sends_no_signal() {
     );
 
     assert_eq!(outcome.skipped, 1);
-    assert_eq!(outcome.unit, None);
+    assert_eq!(outcome.journal_transaction, None);
     assert_eq!(harness.signals.received(), []);
 }
 

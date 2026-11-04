@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{AccountId, CalendarId, EventId, KeyringError, UnitId};
+use crate::{AccountId, CalendarId, EventId, JournalTransactionId, KeyringError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -49,12 +49,12 @@ pub enum CoreError {
     ImportZipWithoutCalendars { file: String },
     #[error("{file:?} is larger than an import may be")]
     ImportTooLarge { file: String },
-    #[error("there is no Change Journal unit {0:?}")]
-    UnitNotFound(UnitId),
-    #[error("an Event of Change Journal unit {0:?} changed since")]
-    ChangedSinceUnit(UnitId),
-    #[error("Change Journal unit {0:?} is undone already")]
-    AlreadyUndone(UnitId),
+    #[error("there is no Journal Transaction {0:?}")]
+    JournalTransactionNotFound(JournalTransactionId),
+    #[error("an Event of Journal Transaction {0:?} changed since")]
+    ChangedSinceJournalTransaction(JournalTransactionId),
+    #[error("Journal Transaction {0:?} is undone already")]
+    AlreadyUndone(JournalTransactionId),
     #[error("Account {0:?} gets its Calendars from its server")]
     NotLocalAccount(AccountId),
     #[error("Calendar {0:?} comes from a server and is removed, not deleted")]
@@ -118,8 +118,10 @@ impl CoreError {
                 ErrorCode::ImportZipWithoutCalendars { file: file.clone() }
             }
             CoreError::ImportTooLarge { file } => ErrorCode::ImportTooLarge { file: file.clone() },
-            CoreError::UnitNotFound(_) => ErrorCode::UnitNotFound,
-            CoreError::ChangedSinceUnit(_) => ErrorCode::ChangedSinceUnit,
+            CoreError::JournalTransactionNotFound(_) => ErrorCode::JournalTransactionNotFound,
+            CoreError::ChangedSinceJournalTransaction(_) => {
+                ErrorCode::ChangedSinceJournalTransaction
+            }
             CoreError::AlreadyUndone(_) => ErrorCode::AlreadyUndone,
             CoreError::NotLocalAccount(_) => ErrorCode::NotLocalAccount,
             CoreError::NotLocalCalendar(_) => ErrorCode::NotLocalCalendar,
@@ -190,9 +192,9 @@ pub enum ErrorCode {
     },
     /// A change to undo is no longer in the Change Journal, as when its
     /// Calendar was deleted.
-    UnitNotFound,
+    JournalTransactionNotFound,
     /// A change to undo can't be: an Event it changed was changed since.
-    ChangedSinceUnit,
+    ChangedSinceJournalTransaction,
     /// A change to undo was undone already.
     AlreadyUndone,
     /// Calendars can be created only in the Local Account; a server
@@ -276,8 +278,8 @@ impl ErrorCode {
             ErrorCode::ImportNotCalendar { file: file() },
             ErrorCode::ImportZipWithoutCalendars { file: file() },
             ErrorCode::ImportTooLarge { file: file() },
-            ErrorCode::UnitNotFound,
-            ErrorCode::ChangedSinceUnit,
+            ErrorCode::JournalTransactionNotFound,
+            ErrorCode::ChangedSinceJournalTransaction,
             ErrorCode::AlreadyUndone,
             ErrorCode::NotLocalAccount,
             ErrorCode::NotLocalCalendar,

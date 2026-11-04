@@ -14,7 +14,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ## Talking to the user
 
-- The user knows the domain, the ADRs, the specs and the tickets, but not the code in detail. When you mention code, first say what it does in `GLOSSARY.md` terms, then give the identifier or `file:line` as a pointer, e.g. "the step that renormalises the Keys when an Exception joins its Recurring Event (`Unit::rejoin_keys`, `core/src/store/journal.rs`)", not just "`rejoin_keys`". Don't assume the user remembers a file's structure or an earlier diff.
+- The user knows the domain, the ADRs, the specs and the tickets, but not the code in detail. When you mention code, first say what it does in `GLOSSARY.md` terms, then give the identifier or `file:line` as a pointer, e.g. "the step that renormalises the Combined Event Keys when an Exception joins its Recurring Event (`JournalTransaction::rejoin_combined_event_keys`, `core/src/store/journal.rs`)", not just "`rejoin_combined_event_keys`". Don't assume the user remembers a file's structure or an earlier diff.
 - Internal vocabulary needs agreement, as user-facing vocabulary does. Terms for the code and the ADRs live in the "Internals" section of `GLOSSARY.md`. Before using a term that is in neither section, propose it marked as new, e.g. "New term: **Send Batch**, the Unsent Changes sent in one request. OK?", and add it to Internals once the user agrees. Name types, modules and tables after agreed terms. When the user isn't in the loop (`/implement`), use the term marked "(new term)" and list it in the report; `/code-review` lists every new term for the user to approve or rename.
 
 ## Code conventions

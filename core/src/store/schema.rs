@@ -26,26 +26,27 @@ const MIGRATIONS: &[&str] = &[
     // of its Recurring Event and the recurrence ID of the Occurrence it
     // changed.
     //
-    // Server objects mirror the server, with their data as received in its
+    // Server Objects mirror the server, with their data as received in its
     // `format`, and `unreadable` once FreeCal couldn't read the server's
-    // version, so that the mirror holds the last version it could (ADR
-    // 0010). Each object's keys are the UID and recurrence ID of each of its
-    // components, the recurrence ID normalised as the rows hold it: a
-    // Calendar's rows with one UID find the object they belong to through
-    // them (ADR 0011).
+    // version, so that the Mirror holds the last version it could (ADR
+    // 0010). Each Server Object's Combined Event Keys are the UID and
+    // recurrence ID of each of its components, the recurrence ID normalised
+    // as the Event Rows hold it: a Calendar's Event Rows with one UID find
+    // the Server Object they belong to through them (ADR 0011).
     //
-    // An unsent change is the key of an Event in a server Calendar that
-    // FreeCal changed since, to be sent: its UID and recurrence ID, as the
-    // rows hold them, and `since` when it was first changed (Unix seconds).
-    // Every change but a sync adds the Event's previous and new key; a key
-    // is there once, the two indexes keeping it so with and without a
-    // recurrence ID (ADR 0011).
+    // An Unsent Change is the Combined Event Key of an Event in a server
+    // Calendar that FreeCal changed since, to be sent: its UID and
+    // recurrence ID, as the Event Rows hold them, and `since` when it was
+    // first changed (Unix seconds). Every change but a sync adds the Event's
+    // previous and new Combined Event Key; each is there once, the two
+    // indexes keeping it so with and without a recurrence ID (ADR 0011).
     //
-    // A Change Journal entry holds the Event's previous version with its
-    // Calendar, none when the change created it, and the hash of its new
-    // version, none when the change deleted it (ADR 0009). Neither its
-    // `event_id` nor its `calendar_id` has a foreign key, because what they
-    // name may be gone since.
+    // A Journal Transaction records its Transaction Origin. A Modification
+    // holds the Event's previous Event Version with its Calendar, none when
+    // the change created it, and the hash of its new Event Version, none
+    // when the change deleted it (ADR 0009). Neither its `event_id` nor its
+    // `calendar_id` has a foreign key, because what they name may be gone
+    // since.
     "
     CREATE TABLE account (
         id INTEGER PRIMARY KEY,
@@ -80,20 +81,20 @@ const MIGRATIONS: &[&str] = &[
         unreadable INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
-    CREATE TABLE server_object_key (
+    CREATE TABLE combined_event_key (
         object_id INTEGER NOT NULL REFERENCES server_object (id) ON DELETE CASCADE,
         uid TEXT NOT NULL,
         recurrence_id TEXT
     );
-    CREATE INDEX server_object_key_object ON server_object_key (object_id);
-    CREATE INDEX server_object_key_uid ON server_object_key (uid);
+    CREATE INDEX combined_event_key_object ON combined_event_key (object_id);
+    CREATE INDEX combined_event_key_uid ON combined_event_key (uid);
     CREATE TABLE unsent_change (
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         uid TEXT NOT NULL,
         recurrence_id TEXT,
         since INTEGER NOT NULL
     );
-    CREATE UNIQUE INDEX unsent_change_key ON unsent_change (calendar_id, uid, recurrence_id);
+    CREATE UNIQUE INDEX unsent_change_combined_event_key ON unsent_change (calendar_id, uid, recurrence_id);
     CREATE UNIQUE INDEX unsent_change_uid ON unsent_change (calendar_id, uid)
         WHERE recurrence_id IS NULL;
     CREATE TABLE event (
@@ -121,14 +122,14 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
     CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
-    CREATE TABLE journal_unit (
+    CREATE TABLE journal_transaction (
         id INTEGER PRIMARY KEY,
         origin TEXT NOT NULL,
         made_at INTEGER NOT NULL
     );
-    CREATE TABLE journal_entry (
+    CREATE TABLE modification (
         id INTEGER PRIMARY KEY,
-        unit_id INTEGER NOT NULL REFERENCES journal_unit (id) ON DELETE CASCADE,
+        journal_transaction_id INTEGER NOT NULL REFERENCES journal_transaction (id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL,
         uid TEXT NOT NULL,
         hash BLOB,
@@ -148,8 +149,8 @@ const MIGRATIONS: &[&str] = &[
         exdates TEXT,
         recurrence_id TEXT
     );
-    CREATE INDEX journal_entry_unit ON journal_entry (unit_id);
-    CREATE INDEX journal_entry_event ON journal_entry (event_id, uid);
+    CREATE INDEX modification_journal_transaction ON modification (journal_transaction_id);
+    CREATE INDEX modification_event ON modification (event_id, uid);
     CREATE TABLE app_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         view TEXT NOT NULL DEFAULT 'month',

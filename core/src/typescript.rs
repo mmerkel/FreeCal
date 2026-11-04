@@ -16,9 +16,9 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::{
     Account, AccountId, AddedAccount, Appearance, AvailableCalendar, Calendar, CalendarId, Changed,
     Colour, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
-    ImportOutcome, ImportSummary, Occurrence, Piece, PinnedZone, Provider, Repeat, RepeatEnd,
-    Scope, ServerLogin, Settings, SettingsUpdate, SidebarState, Signal, StructuredText, UnitId,
-    View, When,
+    ImportOutcome, ImportSummary, JournalTransactionId, Occurrence, Piece, PinnedZone, Provider,
+    Repeat, RepeatEnd, Scope, ServerLogin, Settings, SettingsUpdate, SidebarState, Signal,
+    StructuredText, View, When,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -291,9 +291,9 @@ fn samples_file() -> (String, Vec<String>) {
             ExistingEvents::Skip,
             ExistingEvents::Copy,
         ]),
-        samples(&[UnitId(4)]),
+        samples(&[JournalTransactionId(4)]),
         samples(&[ImportOutcome {
-            unit: Some(UnitId(4)),
+            journal_transaction: Some(JournalTransactionId(4)),
             imported: 40,
             updated: 2,
             skipped: 0,
@@ -301,11 +301,11 @@ fn samples_file() -> (String, Vec<String>) {
         generic_samples(
             &[
                 Changed {
-                    unit: Some(UnitId(4)),
+                    journal_transaction: Some(JournalTransactionId(4)),
                     value: event.clone(),
                 },
                 Changed {
-                    unit: None,
+                    journal_transaction: None,
                     value: event,
                 },
             ],
