@@ -134,6 +134,18 @@ _Avoid_: Key (on its own), Event Key, Event ID (that is the Event Row's own ID)
 The one Server Object of a Calendar that a UID's Event Rows belong to: of the Server Objects holding that UID, the one holding the Recurring Event, otherwise the first one mirrored. Any other Server Object holding the UID has no Event Rows.
 _Avoid_: Owner, primary object, home object
 
+**Corresponding UIDs**:
+The UIDs a Server Object is the Corresponding Server Object of; it corresponds to each of them.
+_Avoid_: Owned UIDs
+
+**Rewrite Combined Event Keys**:
+Replace a Server Object's Combined Event Keys of one UID, its data unchanged, for when its Event Rows come to hold their recurrence IDs otherwise.
+_Avoid_: Rekey
+
+**Record a Modification**:
+Store one Modification in the Change Journal, starting the Journal Transaction with its first one.
+_Avoid_: Entry, add entry
+
 **Sender**:
 The code that sends the Unsent Changes, comparing each Combined Event Key's Event Rows with its Server Object to decide between create, update and delete.
 _Avoid_: Uploader, pusher, outbox
