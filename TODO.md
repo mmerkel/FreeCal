@@ -1,8 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] implement 91
-- [ ] simplify from work by tickets 90 on
+- [ ] start again from altitude findings
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
