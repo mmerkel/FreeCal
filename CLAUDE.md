@@ -12,6 +12,11 @@ Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, 
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+## Talking to the user
+
+- The user knows the domain, the ADRs, the specs and the tickets, but not the code in detail. When you mention code, first say what it does in `GLOSSARY.md` terms, then give the identifier or `file:line` as a pointer, e.g. "the step that renormalises the Keys when an Exception joins its Recurring Event (`Unit::rejoin_keys`, `core/src/store/journal.rs`)", not just "`rejoin_keys`". Don't assume the user remembers a file's structure or an earlier diff.
+- Internal vocabulary needs agreement, as user-facing vocabulary does. Terms for the code and the ADRs live in the "Internals" section of `GLOSSARY.md`. Before using a term that is in neither section, propose it marked as new, e.g. "New term: **Send Batch**, the Unsent Changes sent in one request. OK?", and add it to Internals once the user agrees. Name types, modules and tables after agreed terms. When the user isn't in the loop (`/implement`), use the term marked "(new term)" and list it in the report; `/code-review` lists every new term for the user to approve or rename.
+
 ## Code conventions
 
 - In a design trade-off, choose long-term consistency over short-term ease, since agents write all the code: one rule for every case, invariants the compiler or the Local Store enforces. Name the trade-off when choosing.

@@ -15,4 +15,4 @@
 
 ## Comments
 - 2026-10-24: Per ADR 0010, each Google event resource, a Recurring Event or an Exception, is a server object of its own, with its JSON as received.
-- 2026-10-25 (grilling, ADR 0011): blocked by 91. A Google row's object is the one holding its Calendar, UID and recurrence ID in `server_object_key`; a new Exception has none until it is created. Fill the keys from Google's JSON (`iCalUID`, `originalStartTime`), with recurrence IDs normalised as the rows hold them.
+- 2026-10-25 (grilling, ADR 0011): blocked by 91. A Google Event Row's Corresponding Server Object is the one holding its Calendar, UID and recurrence ID in `server_object_key`; a new Exception has none until it is created. Fill the Combined Event Keys from Google's JSON (`iCalUID`, `originalStartTime`), with recurrence IDs normalised as the Event Rows hold them.

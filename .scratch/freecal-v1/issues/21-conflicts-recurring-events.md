@@ -14,5 +14,5 @@
 
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
-- 2026-10-25 (grilling, ADR 0011): blocked by 91, as ticket 20 is. A Recurring Event's rows are one object on CalDAV, but several on Google; a Conflict there is on the objects whose keys are unsent.
+- 2026-10-25 (grilling, ADR 0011): blocked by 91, as ticket 20 is. A Recurring Event's Event Rows are one Server Object on CalDAV, but several on Google; a Conflict there is on the Server Objects whose Combined Event Keys are unsent.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.

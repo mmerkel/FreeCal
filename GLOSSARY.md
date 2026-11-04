@@ -83,8 +83,20 @@ _Avoid_: Connection state, health
 ## Safety
 
 **Change Journal**:
-The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is an entry holding the Event's previous version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one unit, which records where its changes came from.
+The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin.
 _Avoid_: History, log, audit trail, undo stack
+
+**Journal Transaction**:
+Changes recorded together in the Change Journal, such as one user action, an import or one sync of a Calendar, with their Transaction Origin. It runs as one database transaction, and all writes to Event Rows go through one.
+_Avoid_: Unit, transaction (on its own: a plain database transaction), batch, change set
+
+**Modification**:
+One change to one Event inside a Journal Transaction, holding the Event's previous Event Version and the hash of its new one. Creating and deleting an Event are Modifications too.
+_Avoid_: Entry, journal entry, change (on its own: Unsent Change and Change Journal use it)
+
+**Event Version**:
+The fields FreeCal manages of one Event at one moment, as a Modification stores it. Server data is not part of it.
+_Avoid_: Version (on its own), revision, snapshot (a Snapshot is a backup file)
 
 **Mass-Change Guard**:
 The safeguard that pauses a Calendar's sync and asks the user before one sync deletes or changes an unusually large number of its Events.
@@ -93,3 +105,51 @@ _Avoid_: Circuit breaker, sync limit
 **Snapshot**:
 A periodic full `.ics` copy of a Calendar, kept locally as a last-resort backup.
 _Avoid_: Backup, dump, export (an export is user-initiated)
+
+## Internals
+
+Terms for the code and the ADRs, never shown to the user. Each needs the user's agreement before it is used (see `CLAUDE.md`).
+
+**Event Row**:
+One stored Event in the `event` table: a single Event, a Recurring Event or one Exception. A Recurring Event with Exceptions is several Event Rows.
+_Avoid_: Row (on its own), event table row, record
+
+**Loaded Event**:
+An Event read from the Local Store as one value, a Recurring Event together with its rule and Exceptions (`event::Loaded`).
+_Avoid_: Opened event, full event
+
+**Server Object**:
+What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
+_Avoid_: Resource (on its own), remote event, original server data
+
+**Mirror**:
+FreeCal's copy of every Server Object as the server last had it. Only a sync or a successful send changes it.
+_Avoid_: Cache, server copy
+
+**Combined Event Key**:
+A Calendar, a UID and a recurrence ID, with the recurrence ID normalised as the Event Rows hold it. Event Rows find their Server Object through its Combined Event Keys (`server_object_key`); an Unsent Change is a Combined Event Key.
+_Avoid_: Key (on its own), Event Key, Event ID (that is the Event Row's own ID)
+
+**Corresponding Server Object**:
+The one Server Object of a Calendar that a UID's Event Rows belong to: of the Server Objects holding that UID, the one holding the Recurring Event, otherwise the first one mirrored. Any other Server Object holding the UID has no Event Rows.
+_Avoid_: Owner, primary object, home object
+
+**Sender**:
+The code that sends the Unsent Changes, comparing each Combined Event Key's Event Rows with its Server Object to decide between create, update and delete.
+_Avoid_: Uploader, pusher, outbox
+
+**Transaction Origin**:
+Where a Journal Transaction's changes came from: a user action, an import, an undo, a first sync or a sync.
+_Avoid_: Origin (on its own), source, cause
+
+**First Sync**:
+A Calendar's first sync, which the Change Journal doesn't record because undoing it would delete the whole Calendar.
+_Avoid_: Baseline (that word is the squashed schema migration, ADR 0008), initial import
+
+**Dangerous Undo**:
+An undo that also undoes later changes, reverts a change from a server, or exceeds the Mass-Change Guard's thresholds, and so asks first. Every other undo is benign and runs at once.
+_Avoid_: Risky undo, unsafe undo
+
+**Pinned Zone**:
+The Event Time Zone FreeCal gave an Event that arrived with floating times (ADR 0007). It stays until the user changes the Event's time.
+_Avoid_: Assumed zone, default zone

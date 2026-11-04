@@ -15,11 +15,11 @@
 - [ ] A list of all open Conflicts; resolving one applies the choice and records it in the Change Journal when it writes to the server
 - [ ] The core sends "Problems changed" when a Conflict is raised or resolved
 - [ ] The Conflict shows what each side changed against the common version from the Change Journal ("you changed the time, they changed the title")
-- [ ] Resolving is a Change Journal unit that keeps the losing version, so a wrong choice can be undone
+- [ ] Resolving is a Journal Transaction that keeps the losing Event Version, so a wrong choice can be undone
 - [ ] Written test-first against Radicale
 
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
 - 2026-10-24: Per ADR 0010, a server change to an object that is pending (changed in FreeCal, not sent yet) is a Conflict, never a silent replacement; today sync takes it. This includes an undone pulled change waiting to be sent.
-- 2026-10-25 (grilling, ADR 0011): blocked by 91. "Pending" now means an object with one of its keys in `unsent_change`.
+- 2026-10-25 (grilling, ADR 0011): blocked by 91. "Pending" now means a Server Object with one of its Combined Event Keys in `unsent_change`.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.

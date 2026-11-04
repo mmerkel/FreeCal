@@ -10,6 +10,8 @@ Use /tdd where possible, at pre-agreed seams.
 
 Run typechecking regularly and single test files regularly. The commit's pre-commit hook runs the full suite; a failing hook means the work isn't done.
 
+Use the vocabulary of `GLOSSARY.md`, including its "Internals" section, for names and comments. If a concept needs a term that isn't there, use one and mark it "(new term)" with a one-line definition in the ticket comment; don't add it to `GLOSSARY.md` yourself. The user approves or renames it after `/code-review` lists it.
+
 Once done, use /code-review to review the work.
 
 Close the ticket: tick each box only after checking it is done. A box that is partly done, or waits on another ticket, stays open, with a comment naming what is left and which ticket finishes it. On the local tracker, set `**Status:** done` once every box is ticked, then run the `tickets-pdf` skill.
