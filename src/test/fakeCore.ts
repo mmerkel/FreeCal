@@ -36,8 +36,8 @@ export interface FakeImportFile {
   pinned?: PinnedZone[];
 }
 
-/** A Modification: one Event's change in a Journal Transaction, its Event Versions before and after, none when it was created or deleted. */
-interface Modification {
+/** A Journal Event Modification: one Event's change in a Journal Transaction, its Event Versions before and after, none when it was created or deleted. */
+interface JournalEventModification {
   id: EventId;
   uid: string;
   before?: Event;
@@ -46,7 +46,7 @@ interface Modification {
 
 /** A Journal Transaction: changes made together, which are undone together. */
 interface JournalTransaction {
-  modifications: Modification[];
+  journalEventModifications: JournalEventModification[];
   undone: boolean;
 }
 
@@ -391,18 +391,21 @@ export class FakeCore implements CoreApi {
     this.events = this.events.filter((event) => !gone.has(event.id));
     const journalTransactions = [...this.journalTransactions];
     const lastBack = new Map<EventId, number>();
-    journalTransactions.forEach(([, { modifications }], index) => {
+    journalTransactions.forEach(([, { journalEventModifications: modifications }], index) => {
       for (const modification of modifications) {
         if (modification.before?.calendarId === id) lastBack.set(modification.id, index);
       }
     });
-    for (const [index, [journalTransaction, { modifications }]] of journalTransactions.entries()) {
+    for (const [
+      index,
+      [journalTransaction, { journalEventModifications: modifications }],
+    ] of journalTransactions.entries()) {
       const kept = modifications.filter(
         (modification) =>
           !gone.has(modification.id) && index > (lastBack.get(modification.id) ?? -1),
       );
       if (kept.length === 0) this.journalTransactions.delete(journalTransaction);
-      else this.journalTransactions.get(journalTransaction)!.modifications = kept;
+      else this.journalTransactions.get(journalTransaction)!.journalEventModifications = kept;
     }
   }
 
@@ -465,7 +468,9 @@ export class FakeCore implements CoreApi {
     this.calls.push('createEvent');
     this.writable(draft.calendarId);
     const created = this.addEvent({ ...draft, description: draft.description });
-    const journalTransaction = this.record([this.modification(created.id, undefined, created)]);
+    const journalTransaction = this.record([
+      this.journalEventModification(created.id, undefined, created),
+    ]);
     return { journalTransaction, value: structuredClone(created) };
   }
 
@@ -484,7 +489,7 @@ export class FakeCore implements CoreApi {
           : plainText(draft.description),
       pinnedZone: keptPinnedZone(event, draft.when),
     });
-    const journalTransaction = this.record([this.modification(id, before, event)]);
+    const journalTransaction = this.record([this.journalEventModification(id, before, event)]);
     return { journalTransaction, value: structuredClone(event) };
   }
 
@@ -495,7 +500,7 @@ export class FakeCore implements CoreApi {
     this.writable(event.calendarId);
     event.pinnedZone = keptPinnedZone(event, when);
     event.when = { ...when };
-    const journalTransaction = this.record([this.modification(id, before, event)]);
+    const journalTransaction = this.record([this.journalEventModification(id, before, event)]);
     return { journalTransaction, value: structuredClone(event) };
   }
 
@@ -606,7 +611,9 @@ export class FakeCore implements CoreApi {
           this.uids.get(event.id) === this.uids.get(id)),
     );
     this.events = this.events.filter((event) => !gone.includes(event));
-    const modifications = gone.map((event) => this.modification(event.id, event, undefined));
+    const modifications = gone.map((event) =>
+      this.journalEventModification(event.id, event, undefined),
+    );
     return { journalTransaction: this.record(modifications), value: null };
   }
 
@@ -621,7 +628,7 @@ export class FakeCore implements CoreApi {
     if (event.recurrenceId !== null) {
       this.events = this.events.filter((other) => other.id !== id);
       return {
-        journalTransaction: this.record([this.modification(id, event, undefined)]),
+        journalTransaction: this.record([this.journalEventModification(id, event, undefined)]),
         value: null,
       };
     }
@@ -658,7 +665,7 @@ export class FakeCore implements CoreApi {
     this.calls.push('runImport');
     const file = this.picked();
     this.writable(calendarId);
-    const modifications: Modification[] = [];
+    const modifications: JournalEventModification[] = [];
     const outcome: ImportOutcome = {
       journalTransaction: null,
       imported: 0,
@@ -672,13 +679,13 @@ export class FakeCore implements CoreApi {
       } else if (found && existing === 'update') {
         const before = structuredClone(found);
         Object.assign(found, { title: imported.title, when: { ...imported.when } });
-        modifications.push(this.modification(found.id, before, found));
+        modifications.push(this.journalEventModification(found.id, before, found));
         outcome.updated++;
       } else {
         const uid = found ? `${imported.uid}-copy` : imported.uid;
         const { title, when } = imported;
         const added = this.addEvent({ calendarId, title, when: { ...when }, uid });
-        modifications.push(this.modification(added.id, undefined, added));
+        modifications.push(this.journalEventModification(added.id, undefined, added));
         outcome.imported++;
       }
     }
@@ -698,8 +705,8 @@ export class FakeCore implements CoreApi {
     const journalTransaction = this.journalTransactions.get(id);
     if (!journalTransaction) throw failure('journalTransactionNotFound');
     if (journalTransaction.undone) throw failure('alreadyUndone');
-    const modifications = [...journalTransaction.modifications].reverse();
-    const current = (modification: Modification) =>
+    const modifications = [...journalTransaction.journalEventModifications].reverse();
+    const current = (modification: JournalEventModification) =>
       this.events.find(
         (event) => event.id === modification.id && this.uids.get(event.id) === modification.uid,
       );
@@ -748,7 +755,11 @@ export class FakeCore implements CoreApi {
     if (this.startupError) throw this.startupError;
   }
 
-  private modification(id: EventId, before?: Event, after?: Event): Modification {
+  private journalEventModification(
+    id: EventId,
+    before?: Event,
+    after?: Event,
+  ): JournalEventModification {
     const uid = this.uids.get(id)!;
     return { id, uid, before: structuredClone(before), after: structuredClone(after) };
   }
@@ -758,13 +769,13 @@ export class FakeCore implements CoreApi {
    * sends "Occurrences changed" for their Calendars. A Journal Transaction
    * that changed nothing isn't kept.
    */
-  private record(modifications: Modification[]): JournalTransactionId | null {
+  private record(modifications: JournalEventModification[]): JournalTransactionId | null {
     const changed = modifications.filter(
       (modification) => JSON.stringify(modification.before) !== JSON.stringify(modification.after),
     );
     if (changed.length === 0) return null;
     const id = journalTransactionId(this.nextJournalTransactionId++);
-    this.journalTransactions.set(id, { modifications: changed, undone: false });
+    this.journalTransactions.set(id, { journalEventModifications: changed, undone: false });
     const calendarIds = [
       ...new Set(
         changed.flatMap((modification) =>

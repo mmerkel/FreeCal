@@ -41,11 +41,11 @@ const MIGRATIONS: &[&str] = &[
     // previous and new Combined Event Key; each is there once, the two
     // indexes keeping it so with and without a recurrence ID (ADR 0011).
     //
-    // A Journal Transaction records its Transaction Origin. A Modification
-    // holds the Event's previous Event Version with its Calendar, none when
-    // the change created it, and the hash of its new Event Version, none
-    // when the change deleted it (ADR 0009). Neither its `event_id` nor its
-    // `calendar_id` has a foreign key, because what they name may be gone
+    // A Journal Transaction records its Transaction Origin. A Journal Event
+    // Modification holds the Event's previous Event Version with its Calendar,
+    // none when the change created it, and the hash of its new Event Version,
+    // none when the change deleted it (ADR 0009). Neither its `event_id` nor
+    // its `calendar_id` has a foreign key, because what they name may be gone
     // since.
     "
     CREATE TABLE account (
@@ -127,7 +127,7 @@ const MIGRATIONS: &[&str] = &[
         origin TEXT NOT NULL,
         made_at INTEGER NOT NULL
     );
-    CREATE TABLE modification (
+    CREATE TABLE journal_event_modification (
         id INTEGER PRIMARY KEY,
         journal_transaction_id INTEGER NOT NULL REFERENCES journal_transaction (id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL,
@@ -149,8 +149,9 @@ const MIGRATIONS: &[&str] = &[
         exdates TEXT,
         recurrence_id TEXT
     );
-    CREATE INDEX modification_journal_transaction ON modification (journal_transaction_id);
-    CREATE INDEX modification_event ON modification (event_id, uid);
+    CREATE INDEX journal_event_modification_journal_transaction
+        ON journal_event_modification (journal_transaction_id);
+    CREATE INDEX journal_event_modification_event ON journal_event_modification (event_id, uid);
     CREATE TABLE app_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         view TEXT NOT NULL DEFAULT 'month',

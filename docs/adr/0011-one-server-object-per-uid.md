@@ -10,7 +10,7 @@ Event Versions and their hashes hold FreeCal's fields only. An Event Row getting
 
 ## Considered Options
 
-- **The Server Object's ID on each Event Row, in the journaled Event Version** (ticket 86): the Event Row had to get its Server Object somewhere, so the journal module decided placement for new Event Rows and undos; a create reaching the server would either have been a Modification that changes nothing visible, or would have broken the hash; and a server rearranging its resources recorded changes the user can't see.
+- **The Server Object's ID on each Event Row, in the journaled Event Version** (ticket 86): the Event Row had to get its Server Object somewhere, so the journal module decided placement for new Event Rows and undos; a create reaching the server would either have been a Journal Event Modification that changes nothing visible, or would have broken the hash; and a server rearranging its resources recorded changes the user can't see.
 - **The Server Object's ID on each Event Row, outside the journal, plus a key table for Event Rows without one**: exact for Server Objects that break RFC 4791, but it keeps a stored link, a key table and placement rules side by side for two edge cases.
 - **A `uid` column on `server_object`**: Server Objects can hold several UIDs, and Google needs the recurrence ID.
 - **Recurrence IDs in the Combined Event Keys only for Google**: CalDAV wouldn't need to renormalise them, but one column would mean different things per Provider. One rule for every Provider was preferred to the work it saves, since long-term consistency counts for more than short-term ease in code agents write.

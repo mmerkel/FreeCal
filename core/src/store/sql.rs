@@ -3,7 +3,8 @@
 //!
 //! Writing the tables the Change Journal guards (ADR 0011), `event`,
 //! `server_object`, `combined_event_key`, `unsent_change`,
-//! `journal_transaction` and `modification`, takes a [`Journaled`], which only
+//! `journal_transaction` and `journal_event_modification`, takes a
+//! [`Journaled`], which only
 //! [`journal`](super::journal) can make: so the compiler keeps everything
 //! else from writing them. A new write to one of those tables takes one
 //! too.
@@ -13,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
-use super::journal::{Journaled, Modification};
+use super::journal::{JournalEventModification, Journaled};
 use super::{JournalTransactionId, RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, ObjectId, ServerObject, StoredRange, StoredWhen};
 use crate::remote::{Held, SyncPoint};
@@ -51,7 +52,7 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 }
 
 /// The columns [`event_fields`] reads, in its order, which the Change
-/// Journal's Modifications share with the `event` table.
+/// Journal's Journal Event Modifications share with the `event` table.
 const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
      description, description_html, zone_pinned, rrule, exdates, recurrence_id";
 
@@ -671,17 +672,20 @@ impl Store {
         Ok(unsent)
     }
 
-    /// The Modifications of the Journal Transaction `id`, in the order they
-    /// were made.
-    pub(super) fn modifications(&self, id: JournalTransactionId) -> Result<Vec<Modification>> {
+    /// The Journal Event Modifications of the Journal Transaction `id`, in the
+    /// order they were made.
+    pub(super) fn journal_event_modifications(
+        &self,
+        id: JournalTransactionId,
+    ) -> Result<Vec<JournalEventModification>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} FROM modification \
-             WHERE journal_transaction_id = ?1 ORDER BY id"
+            "SELECT event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} \
+             FROM journal_event_modification WHERE journal_transaction_id = ?1 ORDER BY id"
         ))?;
-        let modifications: Vec<Modification> = stmt
+        let modifications: Vec<JournalEventModification> = stmt
             .query_map([id.0], |row| {
                 let created = row.get::<_, Option<i64>>(4)?.is_none();
-                Ok(Modification {
+                Ok(JournalEventModification {
                     event_id: EventId(row.get(0)?),
                     uid: row.get(1)?,
                     hash: row.get(2)?,
@@ -1002,10 +1006,10 @@ impl Store {
         Ok(JournalTransactionId(self.conn.last_insert_rowid()))
     }
 
-    /// Stores a Modification of `journal_transaction`: the Event `id` with
-    /// the UID `uid` went from `previous`, none when it was created, to an
-    /// Event Version with the hash `hash`, none when it was deleted.
-    pub(super) fn insert_modification(
+    /// Stores a Journal Event Modification of `journal_transaction`: the Event
+    /// `id` with the UID `uid` went from `previous`, none when it was created,
+    /// to an Event Version with the hash `hash`, none when it was deleted.
+    pub(super) fn insert_journal_event_modification(
         &self,
         _: &Journaled,
         journal_transaction: JournalTransactionId,
@@ -1018,8 +1022,8 @@ impl Store {
         let when = fields.map(|fields| &fields.when);
         self.conn.execute(
             &format!(
-                "INSERT INTO modification (journal_transaction_id, event_id, uid, hash, calendar_id, \
-                 {EVENT_FIELDS}) \
+                "INSERT INTO journal_event_modification \
+                 (journal_transaction_id, event_id, uid, hash, calendar_id, {EVENT_FIELDS}) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
                    ?16, ?17, ?18)"
             ),
@@ -1047,41 +1051,43 @@ impl Store {
         Ok(())
     }
 
-    /// Marks every Modification of `journal_transaction` undone.
+    /// Marks every Journal Event Modification of `journal_transaction` undone.
     pub(super) fn mark_undone(
         &self,
         _: &Journaled,
         journal_transaction: JournalTransactionId,
     ) -> Result<()> {
         self.conn.execute(
-            "UPDATE modification SET undone = 1 WHERE journal_transaction_id = ?1",
+            "UPDATE journal_event_modification SET undone = 1 WHERE journal_transaction_id = ?1",
             [journal_transaction.0],
         )?;
         Ok(())
     }
 
-    /// Deletes a Calendar's Events with their Modifications, the
-    /// Modifications that would put an Event back into it with that Event's
-    /// earlier Modifications, and the Journal Transactions left without
-    /// Modifications.
+    /// Deletes a Calendar's Events with their Journal Event Modifications, the
+    /// Journal Event Modifications that would put an Event back into it with
+    /// that Event's earlier Journal Event Modifications, and the Journal
+    /// Transactions left without Journal Event Modifications.
     pub(super) fn delete_calendar_events(&self, _: &Journaled, id: CalendarId) -> Result<()> {
         self.conn.execute(
-            "DELETE FROM modification WHERE EXISTS (SELECT 1 FROM event \
-             WHERE event.calendar_id = ?1 AND event.id = modification.event_id \
-               AND event.uid = modification.uid)",
+            "DELETE FROM journal_event_modification WHERE EXISTS (SELECT 1 FROM event \
+             WHERE event.calendar_id = ?1 AND event.id = journal_event_modification.event_id \
+               AND event.uid = journal_event_modification.uid)",
             [id.0],
         )?;
         self.conn.execute(
-            "DELETE FROM modification WHERE id <= (SELECT MAX(back.id) \
-             FROM modification AS back WHERE back.calendar_id = ?1 \
-               AND back.event_id = modification.event_id AND back.uid = modification.uid)",
+            "DELETE FROM journal_event_modification WHERE id <= (SELECT MAX(back.id) \
+             FROM journal_event_modification AS back WHERE back.calendar_id = ?1 \
+               AND back.event_id = journal_event_modification.event_id \
+               AND back.uid = journal_event_modification.uid)",
             [id.0],
         )?;
         self.conn
             .execute("DELETE FROM event WHERE calendar_id = ?1", [id.0])?;
         self.conn.execute(
             "DELETE FROM journal_transaction WHERE NOT EXISTS \
-             (SELECT 1 FROM modification WHERE journal_transaction_id = journal_transaction.id)",
+             (SELECT 1 FROM journal_event_modification \
+              WHERE journal_transaction_id = journal_transaction.id)",
             [],
         )?;
         Ok(())

@@ -9,7 +9,7 @@ The Change Journal records Event Rows only, with the Server Object each refers t
 ## Considered Options
 
 - **Server data on the Recurring Event's Event Row** (ticket 81): Server Objects holding only Exceptions had nowhere to live and were dropped, Google's per-Exception resources didn't fit, and two Server Objects with one UID took each other's Event Row on every sync without a sync token.
-- **Server Objects journaled as part of each Event Version**: undo restored an ETag the server no longer had, so the write after an undo of a pulled change failed as a false Conflict; and Server Objects shared by several Event Rows needed Modifications, hashes and an undo order of their own.
+- **Server Objects journaled as part of each Event Version**: undo restored an ETag the server no longer had, so the write after an undo of a pulled change failed as a false Conflict; and Server Objects shared by several Event Rows needed Journal Event Modifications, hashes and an undo order of their own.
 - **Mirror, plus the Server Object data of each Event Version in the journal**: exact undo of fields FreeCal doesn't understand, at the cost of two copies of each Server Object and a merge of "my unknown fields" with the server's on every write.
 - **Grouping by an internal group ID instead of the UID**: the UID lookups move to sync and import rather than going away, Google's paging and late-arriving Recurring Events need group merges, and a group ID that disagrees with the UID is wrong in a way neither shows. It only helps where RFC 4791 forbids the data.
 - **Finding pending changes by comparing Event Rows with the Server Object**: FreeCal changes what it stores (Pinned Zones, normalised recurrence IDs, rules it can't expand), so unchanged Events would look changed.

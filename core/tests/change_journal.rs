@@ -442,11 +442,11 @@ fn deleting_a_calendar_removes_the_journal_transactions_of_its_events() {
     assert_eq!(harness.signals.received(), []);
 }
 
-/// The Modifications of an Event moved out of a Calendar deleted since
-/// can't be undone: undoing the move would put it back there, and its
-/// earlier Modifications are undone only through the move.
+/// The Journal Event Modifications of an Event moved out of a Calendar deleted
+/// since can't be undone: undoing the move would put it back there, and its
+/// earlier Journal Event Modifications are undone only through the move.
 #[test]
-fn deleting_a_calendar_removes_the_modifications_that_would_put_an_event_back_into_it() {
+fn deleting_a_calendar_removes_the_journal_event_modifications_putting_events_back() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
     let home = calendar(&core, "Home");

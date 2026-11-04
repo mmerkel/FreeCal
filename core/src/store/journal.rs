@@ -148,12 +148,12 @@ pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Res
         TransactionOrigin::Undo,
         made_at,
         |journal_transaction| {
-            let modifications = store.modifications(id)?;
+            let modifications = store.journal_event_modifications(id)?;
             if modifications.iter().any(|modification| modification.undone) {
                 return Err(CoreError::AlreadyUndone(id));
             }
-            // Latest first, so that each Modification finds the Event Version
-            // it made.
+            // Latest first, so that each Journal Event Modification finds the
+            // Event Version it made.
             for modification in modifications.iter().rev() {
                 let current = store.current_event(modification.event_id, &modification.uid)?;
                 if current.map(|event| hash(&modification.uid, &event)) != modification.hash {
@@ -174,11 +174,11 @@ pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Res
 }
 
 /// Deletes a Calendar with its Events. This isn't recorded (ADR 0009): the
-/// Modifications of its Events go too, and Journal Transactions left without
-/// Modifications. So do the Modifications that would put an Event back into
-/// it, such as one moved out or deleted, with that Event's earlier
-/// Modifications, which are undone only through them; its later
-/// Modifications stay.
+/// Journal Event Modifications of its Events go too, and Journal Transactions
+/// left without Journal Event Modifications. So do the Journal Event
+/// Modifications that would put an Event back into it, such as one moved out or
+/// deleted, with that Event's earlier Journal Event Modifications, which are
+/// undone only through them; its later Journal Event Modifications stay.
 pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
     store.transaction(|| delete_calendar_within(store, id))
 }
@@ -340,7 +340,7 @@ impl JournalTransaction<'_> {
         let id = self
             .store
             .write_event(JOURNALED, None, uid, event, rule::span(&event.fields)?)?;
-        self.record_modification(id, uid, None, Some(event))?;
+        self.record_journal_event_modification(id, uid, None, Some(event))?;
         Ok(id)
     }
 
@@ -355,14 +355,14 @@ impl JournalTransaction<'_> {
         }
         self.store
             .write_event(JOURNALED, Some(id), &uid, event, rule::span(&event.fields)?)?;
-        self.record_modification(id, &uid, Some(&previous), Some(event))
+        self.record_journal_event_modification(id, &uid, Some(&previous), Some(event))
     }
 
     pub fn delete(&mut self, id: EventId) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
         self.writable(previous.calendar_id)?;
         self.store.delete_event(JOURNALED, id)?;
-        self.record_modification(id, &uid, Some(&previous), None)
+        self.record_journal_event_modification(id, &uid, Some(&previous), None)
     }
 
     /// Writes an earlier Event Version back under its own ID: over the Event
@@ -379,7 +379,7 @@ impl JournalTransaction<'_> {
         let instants = rule::span(&event.fields).unwrap_or_default();
         self.store
             .write_event(JOURNALED, Some(id), uid, event, instants)?;
-        self.record_modification(id, uid, None, Some(event))
+        self.record_journal_event_modification(id, uid, None, Some(event))
     }
 
     fn previous(&self, id: EventId) -> Result<(String, StoredEvent)> {
@@ -405,16 +405,16 @@ impl JournalTransaction<'_> {
         }
     }
 
-    /// Records that the Event `id` went from `previous` to `new`, none for
-    /// an Event created or deleted, as a Modification, starting the Journal
-    /// Transaction with its first one. A Transaction Origin that isn't
+    /// Records that the Event `id` went from `previous` to `new`, none for an
+    /// Event created or deleted, as a Journal Event Modification, starting the
+    /// Journal Transaction with its first one. A Transaction Origin that isn't
     /// recorded only notes the Calendars.
     ///
     /// Every Transaction Origin but a sync also adds both Event Versions'
     /// Combined Event Keys to the Unsent Changes, in a server Calendar (ADR
     /// 0011): a write into a Read-only one was refused already. A sync's
     /// changes are what the server holds.
-    fn record_modification(
+    fn record_journal_event_modification(
         &mut self,
         id: EventId,
         uid: &str,
@@ -446,7 +446,7 @@ impl JournalTransaction<'_> {
                 self.made_at,
             )?),
         };
-        self.store.insert_modification(
+        self.store.insert_journal_event_modification(
             JOURNALED,
             journal_transaction,
             id,
@@ -464,7 +464,7 @@ impl Source for JournalTransaction<'_> {
 }
 
 /// One Event's change in a Journal Transaction, as the Change Journal holds it.
-pub(super) struct Modification {
+pub(super) struct JournalEventModification {
     pub event_id: EventId,
     /// The Event's UID, which its hashes cover.
     pub uid: String,
@@ -486,8 +486,8 @@ const HASH_FORMAT: u8 = 2;
 ///
 /// A field added to Events joins the list. Before the first release it goes
 /// into the baseline schema; after it, it bumps [`HASH_FORMAT`], and its
-/// migration adds it to the Change Journal's Modifications too, whose hashes
-/// then have to be made again in code.
+/// migration adds it to the Change Journal's Journal Event Modifications too,
+/// whose hashes then have to be made again in code.
 fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     let fields = &event.fields;
     let when = &fields.when;
@@ -623,7 +623,7 @@ mod tests {
         );
         let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
         assert_eq!(count("SELECT COUNT(*) FROM journal_transaction"), 0);
-        assert_eq!(count("SELECT COUNT(*) FROM modification"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM journal_event_modification"), 0);
     }
 
     /// A Local Store with [`dentist`] pulled by a sync into its first

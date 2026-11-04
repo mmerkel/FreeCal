@@ -10,9 +10,9 @@
 
 - [ ] The Change Journal list: one timeline, newest first, of every Journal Transaction (the user's changes, imports including those into Local Calendars, syncs as "Changed on the server: 3 Events in Work", Conflict resolutions, Snapshot restores, undos)
 - [ ] A Journal Transaction expands into its Events, each with Undo; the Journal Transaction has "Undo all" for the Events still not undone
-- [ ] Undo one Modification: the previous Event Version is written back under the same identity (original ID, all details), later changes to the same Events with it
+- [ ] Undo one Journal Event Modification: the previous Event Version is written back under the same identity (original ID, all details), later changes to the same Events with it
 - [ ] Undo everything for a Calendar since a given time
-- [ ] A History button in the Event's details lists the Event's Modifications, each with Undo
+- [ ] A History button in the Event's details lists the Event's Journal Event Modifications, each with Undo
 - [ ] Dangerous Undos ask first as in ticket 70; the confirmation is the Mass-Change Guard's approval, so the next sync doesn't pause the Calendar
 - [ ] Undo sends "Occurrences changed"
 

@@ -83,19 +83,19 @@ _Avoid_: Connection state, health
 ## Safety
 
 **Change Journal**:
-The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin.
+The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Journal Event Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin.
 _Avoid_: History, log, audit trail, undo stack
 
 **Journal Transaction**:
 Changes recorded together in the Change Journal, such as one user action, an import or one sync of a Calendar, with their Transaction Origin. It runs as one database transaction, and all writes to Event Rows go through one.
 _Avoid_: Unit, transaction (on its own: a plain database transaction), batch, change set
 
-**Modification**:
-One change to one Event inside a Journal Transaction, holding the Event's previous Event Version and the hash of its new one. Creating and deleting an Event are Modifications too.
-_Avoid_: Entry, journal entry, change (on its own: Unsent Change and Change Journal use it)
+**Journal Event Modification**:
+One change to one Event inside a Journal Transaction, holding the Event's previous Event Version and the hash of its new one. Creating and deleting an Event are Journal Event Modifications too.
+_Avoid_: Modification (on its own), entry, journal entry, change (on its own: Unsent Change and Change Journal use it)
 
 **Event Version**:
-The fields FreeCal manages of one Event at one moment, as a Modification stores it. Server data is not part of it.
+The fields FreeCal manages of one Event at one moment, as a Journal Event Modification stores it. Server data is not part of it.
 _Avoid_: Version (on its own), revision, snapshot (a Snapshot is a backup file)
 
 **Mass-Change Guard**:
@@ -142,8 +142,8 @@ _Avoid_: Owned UIDs
 Replace a Server Object's Combined Event Keys of one UID, its data unchanged, for when its Event Rows come to hold their recurrence IDs otherwise.
 _Avoid_: Rekey
 
-**Record a Modification**:
-Store one Modification in the Change Journal, starting the Journal Transaction with its first one.
+**Record a Journal Event Modification**:
+Store one Journal Event Modification in the Change Journal, starting the Journal Transaction with its first one.
 _Avoid_: Entry, add entry
 
 **Sender**:
