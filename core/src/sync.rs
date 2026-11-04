@@ -11,7 +11,7 @@ use chrono_tz::Tz;
 use crate::event::{self, Loaded, ObjectEvent, ObjectId};
 use crate::import::read_server_objects;
 use crate::remote::{Changes, Fetched};
-use crate::store::JournalTransaction;
+use crate::store::{EventKeyInCalendar, JournalTransaction};
 use crate::{CalendarId, ImportedEvent, ImportedWhen, Result};
 
 /// Applies `changes` to the Calendar `calendar_id` in
@@ -98,7 +98,7 @@ pub(crate) fn take(
             calendar_id,
             &one.object,
             object,
-            &combined_event_keys(&events),
+            &event_keys_in_calendar(&events),
         )?;
         event::take_object(journal_transaction, calendar_id, object, &events)?;
         if !corresponding_uids.is_empty() {
@@ -166,7 +166,7 @@ fn settle(
         journal_transaction.rewrite_combined_event_keys(
             corresponding_server_object,
             uid,
-            &combined_event_keys(&events),
+            &event_keys_in_calendar(&events),
         )?;
         event::take_object(
             journal_transaction,
@@ -217,12 +217,12 @@ fn object_events<'a>(
     Ok(kept)
 }
 
-/// The Combined Event Key of each of `events`: its UID and recurrence ID
-/// (ADR 0011).
-fn combined_event_keys<'a>(events: &'a [ObjectEvent]) -> Vec<(&'a str, Option<&'a str>)> {
+/// The Combined Event Key of each of `events`, in the Calendar of the Server
+/// Object holding them (ADR 0011).
+fn event_keys_in_calendar(events: &[ObjectEvent]) -> Vec<EventKeyInCalendar> {
     events
         .iter()
-        .map(|event| (event.uid, event.rid.as_deref()))
+        .map(|event| EventKeyInCalendar::new(event.uid, event.rid.as_deref()))
         .collect()
 }
 
@@ -327,7 +327,7 @@ mod tests {
             let combined_event_keys = self.store.combined_event_keys(self.object).unwrap();
             combined_event_keys
                 .into_iter()
-                .map(|(_, rid)| rid)
+                .map(|event_key| event_key.recurrence_id)
                 .collect()
         }
 

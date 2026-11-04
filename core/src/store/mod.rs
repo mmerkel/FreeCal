@@ -51,6 +51,32 @@ pub enum Uid<'a> {
     In(CalendarId, &'a str),
 }
 
+/// An Event Key in Calendar: a Combined Event Key without its Calendar, for
+/// where something else gives the Calendar, as a Server Object gives it its
+/// Combined Event Keys (ADR 0011).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventKeyInCalendar {
+    pub uid: String,
+    /// Normalised as the Event Rows hold it.
+    pub recurrence_id: Option<String>,
+}
+
+impl EventKeyInCalendar {
+    pub fn new(uid: &str, recurrence_id: Option<&str>) -> Self {
+        Self {
+            uid: uid.to_owned(),
+            recurrence_id: recurrence_id.map(str::to_owned),
+        }
+    }
+}
+
+/// A Combined Event Key: a Calendar and an Event Key in Calendar (ADR 0011).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CombinedEventKey {
+    pub calendar_id: CalendarId,
+    pub event_key: EventKeyInCalendar,
+}
+
 /// An Event with its Calendar and UID.
 pub struct UidEvent {
     pub id: EventId,

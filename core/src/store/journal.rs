@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{Store, StoredEvent, Uid, UidEvent};
+use super::{CombinedEventKey, EventKeyInCalendar, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{ObjectId, ServerObject, Source, rule};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
@@ -250,36 +250,36 @@ impl JournalTransaction<'_> {
     /// Makes `object`, as the server holds it now, the Mirror's version of
     /// the Server Object `over` in a Calendar, address included, or of a
     /// new one, and returns its ID. Its Combined Event Keys become
-    /// `combined_event_keys`, one per component: its UID and recurrence ID,
-    /// normalised as the Event Rows hold it. Only a sync writes the Mirror,
-    /// as only it knows what the server holds.
+    /// `event_keys`, one per component, in the Calendar the Server Object is
+    /// in. Only a sync writes the Mirror, as only it knows what the server
+    /// holds.
     pub fn mirror(
         &self,
         calendar_id: CalendarId,
         object: &ServerObject,
         over: Option<ObjectId>,
-        combined_event_keys: &[(&str, Option<&str>)],
+        event_keys: &[EventKeyInCalendar],
     ) -> Result<ObjectId> {
         debug_assert!(self.origin.is_sync());
         self.writable(calendar_id)?;
         self.store
-            .write_object(JOURNALED, calendar_id, object, over, combined_event_keys)
+            .write_object(JOURNALED, calendar_id, object, over, event_keys)
     }
 
-    /// Makes `combined_event_keys`, all with the UID `uid`, the Combined
-    /// Event Keys with that UID of the Server Object `id`, whose data stays
-    /// as it is: for when its Event Rows come to hold their recurrence IDs
-    /// otherwise, as when it becomes the UID's Corresponding Server Object
-    /// in place of one that held its Recurring Event.
+    /// Makes `event_keys`, all with the UID `uid`, the Combined Event Keys
+    /// with that UID of the Server Object `id`, whose data stays as it is:
+    /// for when its Event Rows come to hold their recurrence IDs otherwise,
+    /// as when it becomes the UID's Corresponding Server Object in place of
+    /// one that held its Recurring Event.
     pub fn rewrite_combined_event_keys(
         &self,
         id: ObjectId,
         uid: &str,
-        combined_event_keys: &[(&str, Option<&str>)],
+        event_keys: &[EventKeyInCalendar],
     ) -> Result<()> {
         debug_assert!(self.origin.is_sync());
         self.store
-            .write_uid_combined_event_keys(JOURNALED, id, uid, combined_event_keys)
+            .write_uid_combined_event_keys(JOURNALED, id, uid, event_keys)
     }
 
     /// Renormalises the recurrence IDs of the Combined Event Keys with the
@@ -426,13 +426,12 @@ impl JournalTransaction<'_> {
                 self.calendars.push(event.calendar_id);
             }
             if !self.origin.is_sync() {
-                self.store.add_unsent_change(
-                    JOURNALED,
-                    event.calendar_id,
-                    uid,
-                    event.fields.recurrence_id.as_deref(),
-                    self.made_at,
-                )?;
+                let combined_event_key = CombinedEventKey {
+                    calendar_id: event.calendar_id,
+                    event_key: EventKeyInCalendar::new(uid, event.fields.recurrence_id.as_deref()),
+                };
+                self.store
+                    .add_unsent_change(JOURNALED, &combined_event_key, self.made_at)?;
             }
         }
         let Some(origin) = self.origin.recorded_as() else {
@@ -559,7 +558,9 @@ mod tests {
     }
 
     /// The Combined Event Keys of [`dentist_object`].
-    const DENTIST_COMBINED_EVENT_KEYS: &[(&str, Option<&str>)] = &[("dentist", None)];
+    fn dentist_event_keys() -> [EventKeyInCalendar; 1] {
+        [EventKeyInCalendar::new("dentist", None)]
+    }
 
     const EXCEPTION: &str = "2026-10-19T09:00:00";
 
@@ -647,7 +648,7 @@ mod tests {
                         calendar_id,
                         &dentist_object(),
                         None,
-                        DENTIST_COMBINED_EVENT_KEYS,
+                        &dentist_event_keys(),
                     )?;
                     let mut event = dentist();
                     event.calendar_id = calendar_id;
@@ -669,8 +670,8 @@ mod tests {
         }
 
         /// Mirrors another Server Object holding the UID of [`dentist`] with
-        /// `combined_event_keys`, at `href`.
-        fn mirror(&self, href: &str, combined_event_keys: &[(&str, Option<&str>)]) -> ObjectId {
+        /// the Combined Event Keys `event_keys`, at `href`.
+        fn mirror(&self, href: &str, event_keys: &[EventKeyInCalendar]) -> ObjectId {
             let object = ServerObject {
                 href: href.to_owned(),
                 ..dentist_object()
@@ -680,12 +681,7 @@ mod tests {
                 TransactionOrigin::Sync,
                 0,
                 |journal_transaction| {
-                    journal_transaction.mirror(
-                        self.event.calendar_id,
-                        &object,
-                        None,
-                        combined_event_keys,
-                    )
+                    journal_transaction.mirror(self.event.calendar_id, &object, None, event_keys)
                 },
             )
             .unwrap()
@@ -706,7 +702,10 @@ mod tests {
             etag: Some("\"2\"".to_owned()),
             ..dentist_object()
         };
-        let combined_event_keys = [("dentist", None), ("dentist", Some(EXCEPTION))];
+        let event_keys = [
+            EventKeyInCalendar::new("dentist", None),
+            EventKeyInCalendar::new("dentist", Some(EXCEPTION)),
+        ];
 
         let mirrored = record(
             &pulled.store,
@@ -717,7 +716,7 @@ mod tests {
                     pulled.event.calendar_id,
                     &again,
                     Some(pulled.object),
-                    &combined_event_keys,
+                    &event_keys,
                 )
             },
         )
@@ -734,7 +733,7 @@ mod tests {
         );
         assert_eq!(
             pulled.store.combined_event_keys(pulled.object).unwrap(),
-            combined_event_keys.map(|(uid, rid)| (uid.to_owned(), rid.map(str::to_owned)))
+            event_keys
         );
     }
 
@@ -811,7 +810,10 @@ mod tests {
     #[test]
     fn of_two_server_objects_holding_a_uid_the_one_holding_the_recurring_event_corresponds() {
         let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", &[("dentist", Some(EXCEPTION))]);
+        let later = pulled.mirror(
+            "/user/work/copy.ics",
+            &[EventKeyInCalendar::new("dentist", Some(EXCEPTION))],
+        );
 
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(
@@ -827,13 +829,13 @@ mod tests {
                     pulled.event.calendar_id,
                     &dentist_object(),
                     Some(pulled.object),
-                    &[("dentist", Some(EXCEPTION))],
+                    &[EventKeyInCalendar::new("dentist", Some(EXCEPTION))],
                 )?;
                 journal_transaction.mirror(
                     pulled.event.calendar_id,
                     &dentist_object(),
                     Some(later),
-                    DENTIST_COMBINED_EVENT_KEYS,
+                    &dentist_event_keys(),
                 )
             },
         )
@@ -894,7 +896,7 @@ mod tests {
                     server,
                     &dentist_object(),
                     None,
-                    DENTIST_COMBINED_EVENT_KEYS,
+                    &dentist_event_keys(),
                 )?;
                 journal_transaction.create("dentist", &event)
             })
@@ -933,9 +935,10 @@ mod tests {
             since: i64,
         ) -> UnsentChange {
             UnsentChange {
-                calendar_id: self.server,
-                uid: uid.to_owned(),
-                recurrence_id: recurrence_id.map(str::to_owned),
+                combined_event_key: CombinedEventKey {
+                    calendar_id: self.server,
+                    event_key: EventKeyInCalendar::new(uid, recurrence_id),
+                },
                 since,
             }
         }
@@ -1067,7 +1070,7 @@ mod tests {
                     on_server.server,
                     &moved,
                     None,
-                    DENTIST_COMBINED_EVENT_KEYS,
+                    &dentist_event_keys(),
                 )?;
                 journal_transaction.replace(on_server.id, &renamed)
             },
@@ -1125,7 +1128,7 @@ mod tests {
     #[test]
     fn of_two_server_objects_holding_a_uid_alike_the_first_mirrored_corresponds_until_it_goes() {
         let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", DENTIST_COMBINED_EVENT_KEYS);
+        let later = pulled.mirror("/user/work/copy.ics", &dentist_event_keys());
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(
             pulled.store.corresponding_uids(later).unwrap(),

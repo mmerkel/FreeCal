@@ -15,7 +15,10 @@ use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use super::journal::{JournalEventModification, Journaled};
-use super::{JournalTransactionId, RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use super::{
+    CombinedEventKey, EventKeyInCalendar, JournalTransactionId, RangeEvent, Store, StoredEvent,
+    Uid, UidEvent,
+};
 use crate::event::{EventFields, ObjectId, ServerObject, StoredRange, StoredWhen};
 use crate::remote::{Held, SyncPoint};
 use crate::{
@@ -387,15 +390,20 @@ impl Store {
         }
     }
 
-    /// The Combined Event Keys of the Server Object `id`: each component's
-    /// UID and recurrence ID, in the order they were written.
+    /// The Combined Event Keys of the Server Object `id`, one per component,
+    /// in the order they were written.
     #[cfg(test)]
-    pub fn combined_event_keys(&self, id: ObjectId) -> Result<Vec<(String, Option<String>)>> {
+    pub fn combined_event_keys(&self, id: ObjectId) -> Result<Vec<EventKeyInCalendar>> {
         let mut stmt = self.conn.prepare(
             "SELECT uid, recurrence_id FROM combined_event_key WHERE object_id = ?1 ORDER BY rowid",
         )?;
         let combined_event_keys = stmt
-            .query_map([id.0], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map([id.0], |row| {
+                Ok(EventKeyInCalendar {
+                    uid: row.get(0)?,
+                    recurrence_id: row.get(1)?,
+                })
+            })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(combined_event_keys)
     }
@@ -662,9 +670,13 @@ impl Store {
         let unsent = stmt
             .query_map([], |row| {
                 Ok(UnsentChange {
-                    calendar_id: CalendarId(row.get(0)?),
-                    uid: row.get(1)?,
-                    recurrence_id: row.get(2)?,
+                    combined_event_key: CombinedEventKey {
+                        calendar_id: CalendarId(row.get(0)?),
+                        event_key: EventKeyInCalendar {
+                            uid: row.get(1)?,
+                            recurrence_id: row.get(2)?,
+                        },
+                    },
                     since: row.get(3)?,
                 })
             })?
@@ -814,58 +826,54 @@ impl Store {
     }
 
     /// Writes `object` over the Server Object `over`, address included, or
-    /// as a new one of a Calendar, with `combined_event_keys` as its Combined
-    /// Event Keys, and returns its ID.
+    /// as a new one of a Calendar, with `event_keys` as its Combined Event
+    /// Keys, and returns its ID.
     pub(super) fn write_object(
         &self,
         journaled: &Journaled,
         calendar_id: CalendarId,
         object: &ServerObject,
         over: Option<ObjectId>,
-        combined_event_keys: &[(&str, Option<&str>)],
+        event_keys: &[EventKeyInCalendar],
     ) -> Result<ObjectId> {
         let id = self.write_object_row(journaled, calendar_id, object, over)?;
         self.conn.execute(
             "DELETE FROM combined_event_key WHERE object_id = ?1",
             [id.0],
         )?;
-        self.insert_combined_event_keys(journaled, id, combined_event_keys)?;
+        self.insert_combined_event_keys(journaled, id, event_keys)?;
         Ok(id)
     }
 
-    /// Makes `combined_event_keys`, all with the UID `uid`, the Server
-    /// Object `id`'s Combined Event Keys with that UID.
+    /// Makes `event_keys`, all with the UID `uid`, the Server Object `id`'s
+    /// Combined Event Keys with that UID.
     pub(super) fn write_uid_combined_event_keys(
         &self,
         journaled: &Journaled,
         id: ObjectId,
         uid: &str,
-        combined_event_keys: &[(&str, Option<&str>)],
+        event_keys: &[EventKeyInCalendar],
     ) -> Result<()> {
-        debug_assert!(
-            combined_event_keys
-                .iter()
-                .all(|(key_uid, _)| *key_uid == uid)
-        );
+        debug_assert!(event_keys.iter().all(|event_key| event_key.uid == uid));
         self.conn.execute(
             "DELETE FROM combined_event_key WHERE object_id = ?1 AND uid = ?2",
             params![id.0, uid],
         )?;
-        self.insert_combined_event_keys(journaled, id, combined_event_keys)
+        self.insert_combined_event_keys(journaled, id, event_keys)
     }
 
-    /// Adds `combined_event_keys` to the Server Object `id`.
+    /// Adds `event_keys` to the Server Object `id`'s Combined Event Keys.
     fn insert_combined_event_keys(
         &self,
         _: &Journaled,
         id: ObjectId,
-        combined_event_keys: &[(&str, Option<&str>)],
+        event_keys: &[EventKeyInCalendar],
     ) -> Result<()> {
         let mut stmt = self.conn.prepare(
             "INSERT INTO combined_event_key (object_id, uid, recurrence_id) VALUES (?1, ?2, ?3)",
         )?;
-        for (uid, recurrence_id) in combined_event_keys {
-            stmt.execute(params![id.0, uid, recurrence_id])?;
+        for event_key in event_keys {
+            stmt.execute(params![id.0, event_key.uid, event_key.recurrence_id])?;
         }
         Ok(())
     }
@@ -933,22 +941,24 @@ impl Store {
         Ok(())
     }
 
-    /// Adds the Combined Event Key of an Event in a Calendar to the Unsent
-    /// Changes, as changed at `since`, if the Calendar is a server Calendar;
-    /// one already there keeps its `since`.
+    /// Adds the Combined Event Key `combined_event_key` of an Event to the
+    /// Unsent Changes, as changed at `since`, if its Calendar is a server
+    /// Calendar; one already there keeps its `since`.
     pub(super) fn add_unsent_change(
         &self,
         _: &Journaled,
-        calendar_id: CalendarId,
-        uid: &str,
-        recurrence_id: Option<&str>,
+        combined_event_key: &CombinedEventKey,
         since: i64,
     ) -> Result<()> {
+        let CombinedEventKey {
+            calendar_id,
+            event_key,
+        } = combined_event_key;
         self.conn.execute(
             "INSERT INTO unsent_change (calendar_id, uid, recurrence_id, since) \
              SELECT id, ?2, ?3, ?4 FROM calendar WHERE id = ?1 AND url IS NOT NULL \
              ON CONFLICT DO NOTHING",
-            params![calendar_id.0, uid, recurrence_id, since],
+            params![calendar_id.0, event_key.uid, event_key.recurrence_id, since],
         )?;
         Ok(())
     }
@@ -1133,9 +1143,7 @@ impl Store {
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnsentChange {
-    pub calendar_id: CalendarId,
-    pub uid: String,
-    pub recurrence_id: Option<String>,
+    pub combined_event_key: CombinedEventKey,
     pub since: i64,
 }
 
