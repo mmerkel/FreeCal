@@ -256,7 +256,7 @@ impl Loaded {
                 *id,
                 &StoredEvent {
                     calendar_id: self.calendar_id,
-                    fields: fields_over(incoming, previous),
+                    fields: fields_over(incoming, previous, previous.recurrence_id.clone()),
                 },
             )?,
             None => {
@@ -281,7 +281,13 @@ impl Loaded {
                 })
             });
             let (previous, fields) = match same.map(|index| left.remove(index)) {
-                Some(stored) => (Some(stored.id), fields_over(exception, &stored.fields)),
+                Some(stored) => {
+                    let kept = stored.fields.recurrence_id.clone();
+                    (
+                        Some(stored.id),
+                        fields_over(exception, &stored.fields, kept),
+                    )
+                }
                 None => (None, fields(exception)),
             };
             self.write_exception(journal_transaction, previous, self, fields)?;
@@ -312,7 +318,11 @@ impl Loaded {
                 stored.id,
                 &StoredEvent {
                     calendar_id: self.calendar_id,
-                    fields: fields_over(incoming, &stored.fields),
+                    fields: fields_over(
+                        incoming,
+                        &stored.fields,
+                        stored.fields.recurrence_id.clone(),
+                    ),
                 },
             ),
             None => journal_transaction
@@ -725,15 +735,16 @@ pub(crate) fn take_object(
             });
             let event = |fields: EventFields| StoredEvent {
                 calendar_id,
-                fields: EventFields {
-                    recurrence_id: incoming.recurrence_id(),
-                    ..fields
-                },
+                fields,
             };
             match same.map(|index| left.remove(index)) {
                 Some(event_row) => journal_transaction.replace(
                     event_row.id,
-                    &event(fields_over(incoming, &event_row.fields)),
+                    &event(fields_over(
+                        incoming,
+                        &event_row.fields,
+                        incoming.recurrence_id(),
+                    )),
                 )?,
                 None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
             }
@@ -805,15 +816,20 @@ fn fields(incoming: &ImportedEvent) -> EventFields {
 }
 
 /// An incoming version's fields as the new version of an Event that has
-/// `previous`, for the same Occurrence: its recurrence ID stays as stored,
-/// so that a version from a file giving it in another form changes nothing
-/// and leaves no Unsent Change in a form the Server Object doesn't hold
-/// (ADR 0012); [`take_object`] gives it the Server Object's. One floating
-/// end takes the zone of the other (ADR 0007, rule 3), so only a version
-/// floating at both keeps the zone pinned before (rule 2).
-fn fields_over(incoming: &ImportedEvent, previous: &EventFields) -> EventFields {
+/// `previous`, for the same Occurrence, with the recurrence ID
+/// `recurrence_id`: the form its Server Object holds (ADR 0012). An import
+/// passes the stored one, so that a file giving it in another form leaves
+/// no Unsent Change in a form the Server Object doesn't hold; Propagate
+/// ([`take_object`]) passes the Server Object's. One floating end takes the
+/// zone of the other (ADR 0007, rule 3), so only a version floating at both
+/// keeps the zone pinned before (rule 2).
+fn fields_over(
+    incoming: &ImportedEvent,
+    previous: &EventFields,
+    recurrence_id: Option<RecurrenceId>,
+) -> EventFields {
     let fields = EventFields {
-        recurrence_id: previous.recurrence_id.clone(),
+        recurrence_id,
         ..fields(incoming)
     };
     if incoming.all_floating && previous.zone_pinned {
