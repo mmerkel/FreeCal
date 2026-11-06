@@ -25,3 +25,4 @@ The Change Journal records Event Rows only, with the Server Object each refers t
 ## Amendments
 
 - 2026-10-25, ADR 0011: a Calendar's Event Rows with one UID belong to their Corresponding Server Object, found through the Server Objects' Combined Event Keys instead of a Server Object ID on each Event Row, so Server Objects that break RFC 4791 are no longer kept with Event Rows of their own. The Change Journal no longer records any Server Object, and what FreeCal has to send is a list of Unsent Changes instead of a pending mark on Server Objects.
+- 2026-11-06, ADR 0013: each Provider has Mirror tables of its own, so a Google Server Object's JSON and a CalDAV Server Object's iCalendar no longer share one column; both are still kept as received.

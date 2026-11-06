@@ -23,3 +23,9 @@ Event Versions and their hashes hold FreeCal's fields only. An Event Row getting
 - Undoing a delete or a move not sent yet puts the Event Row back where its Server Object still is, so nothing is sent for it.
 - A Conflict is a server change to a Server Object while one of its Combined Event Keys is in `unsent_change`.
 - The hash of an Event Version changes format; no Local Store needs rehashing.
+
+## Amendments
+
+- 2026-11-06, ADR 0012: recurrence IDs are stored as given and compared by Occurrence. Nothing renormalises them any more, so the sentences above on recurrence IDs "normalised exactly as the Event Rows hold it" and on renormalising a UID's Combined Event Keys with its Event Rows no longer hold, nor does that part of the Change Journal's Write Permission.
+- 2026-11-06, ADR 0013: each Provider has Mirror tables of its own, and `combined_event_key` goes. A CalDAV Server Object holds exactly one UID, and the Corresponding Server Object is found in the Provider's Mirror tables: on CalDAV by UID and whether it holds the Event that isn't an Exception. The rejected option "a `uid` column on `server_object`" is what CalDAV now has, since Google's Server Objects are in tables of their own and resources holding several UIDs are reported instead of supported. Unsent Changes keep this ADR's shape.
+- 2026-11-06, ADR 0014: Conflicts are found in the Provider-neutral core, per Occurrence, from the Server Version, instead of as "a server change to a Server Object while one of its Combined Event Keys is in `unsent_change`".
