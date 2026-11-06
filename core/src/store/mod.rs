@@ -136,6 +136,7 @@ impl Store {
 /// of its methods, in [`sql`], so a write outside one doesn't compile. It
 /// writes nothing until [`DatabaseTransaction::commit`], and dropped without
 /// it, nothing it wrote is kept. It reads as the Local Store it is on.
+#[must_use = "a Database Transaction dropped without `commit` keeps nothing it wrote"]
 pub struct DatabaseTransaction<'a> {
     store: &'a Store,
     tx: Transaction<'a>,
