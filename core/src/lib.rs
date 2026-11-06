@@ -340,14 +340,19 @@ impl Core {
             self.signals.send(Signal::CalendarsChanged);
         }
         let synced = (|| {
-            let known = {
+            let known_server_resources = {
                 let store = self.store();
                 let mut known = store.server_objects(id)?;
                 known.extend(store.ignored_resources(id)?);
                 known
             };
             let token = state.and_then(|state| state.token);
-            let changes = remote.changes(url, token.as_deref(), &known, self.clock.time_zone())?;
+            let changes = remote.changes(
+                url,
+                token.as_deref(),
+                &known_server_resources,
+                self.clock.time_zone(),
+            )?;
             let origin = if first {
                 TransactionOrigin::FirstSync
             } else {

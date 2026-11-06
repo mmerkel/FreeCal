@@ -175,7 +175,7 @@ One SQLite transaction on the Local Store, committed all or nothing. Every write
 _Avoid_: Transaction (on its own), db transaction
 
 **Write Permission**:
-A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts; the Sync Engine's covers the Mirror.
+A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts; the Sync Engine's covers the Mirror and the Ignored Resources.
 _Avoid_: Token, Journaled, owner
 
 **Guard**:

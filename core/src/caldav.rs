@@ -237,15 +237,15 @@ impl Client {
 
     /// What changed in the Calendar at `calendar` since `token`, asked with
     /// `sync-collection` (RFC 6578), or else found by listing the whole
-    /// Calendar with ETags and comparing with `known`: the objects FreeCal
-    /// holds or ignores, by their address as the server gave it. Objects whose ETag
+    /// Calendar with ETags and comparing with `known_server_resources`, the
+    /// Known Server Resources, by their address as the server gave it. Objects whose ETag
     /// FreeCal holds are left out, unless FreeCal couldn't read them; the
     /// others are fetched with `calendar-multiget`.
     pub fn changes(
         &self,
         calendar: &str,
         token: Option<&str>,
-        known: &HashMap<String, Held>,
+        known_server_resources: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes> {
         let calendar = stored_url(&self.url, calendar)?;
@@ -263,7 +263,7 @@ impl Client {
             None => (self.listing(&calendar, display)?, None),
         };
         // What FreeCal holds, by the path `member` gives each object.
-        let held: HashMap<String, (&String, &Held)> = known
+        let held: HashMap<String, (&String, &Held)> = known_server_resources
             .iter()
             .filter_map(|(href, etag)| {
                 let path = follow_href(&listing.calendar, href)?.path().to_owned();

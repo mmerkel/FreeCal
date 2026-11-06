@@ -33,8 +33,8 @@ pub(crate) struct Fetched {
     pub holds: Holds,
 }
 
-/// A Server Object FreeCal holds, or an Ignored Resource it remembers, as
-/// an Incoming Sync asks for what changed.
+/// A Known Server Resource: a Server Object FreeCal holds, or an Ignored
+/// Resource it remembers, as an Incoming Sync asks for what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Held {
     /// The ETag of the version FreeCal holds; none if the server gave none.
@@ -79,17 +79,18 @@ pub(crate) trait Remote {
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
-    /// last held `known` without one: the Server Objects FreeCal holds and
-    /// the Ignored Resources it remembers, by address. An object whose ETag
-    /// FreeCal holds already isn't fetched again, unless FreeCal couldn't
-    /// read it, so that it is fetched on each Incoming Sync until it reads.
-    /// A known one that is gone is among the removed. Floating times are pinned as
+    /// last held `known_server_resources` without one, the Known Server
+    /// Resources: the Server Objects FreeCal holds and the Ignored Resources
+    /// it remembers, by address. An object whose ETag FreeCal holds already
+    /// isn't fetched again, unless FreeCal couldn't read it, so that it is
+    /// fetched on each Incoming Sync until it reads. A Known Server Resource
+    /// that is gone is among the removed. Floating times are pinned as
     /// [`Remote::all_events`] pins them.
     fn changes(
         &self,
         url: &str,
         token: Option<&str>,
-        known: &HashMap<String, Held>,
+        known_server_resources: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes>;
 }
@@ -112,10 +113,10 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         token: Option<&str>,
-        known: &HashMap<String, Held>,
+        known_server_resources: &HashMap<String, Held>,
         display: Tz,
     ) -> Result<Changes> {
-        caldav::Client::changes(self, url, token, known, display)
+        caldav::Client::changes(self, url, token, known_server_resources, display)
     }
 }
 

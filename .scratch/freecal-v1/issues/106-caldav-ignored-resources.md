@@ -29,10 +29,10 @@
 - Beyond the ticket: an Ignored Resource that comes to hold nothing FreeCal keeps (only a VTODO, say) is forgotten; one FreeCal can't read keeps its old ETag, so it is fetched again, as an unreadable Server Object is.
 - Radicale refuses to serve a resource holding two UIDs, so the end-to-end tests (`ignored_resources` in `core/tests/caldav_sync.rs`) reach Radicale through a proxy that rewrites one resource into two UIDs and counts its fetches.
 - Left open: a server that gives no ETag has every resource fetched on each sync, Ignored Resources included, as before.
-- `GLOSSARY.md`'s "Write Permission" still says the Sync Engine's covers only the Mirror; ADR 0015 adds the Ignored Resources. Not changed, as glossary edits wait for approval.
+- `GLOSSARY.md`'s "Write Permission" now names the Ignored Resources under the Sync Engine's, as ADR 0015 does.
 
 New terms:
 
-- **Known set** (new term): the Server Objects FreeCal holds and the Ignored Resources it remembers, by address, which the listing compares with.
-- **Forget an Ignored Resource** (new term): remove it from `caldav_ignored_resource`, as gone, mirrored or holding nothing FreeCal keeps (`forget_ignored`, `forget_ignored_resource`); remembering one is `ignore`, `ignore_resource`.
+- **Known Server Resources** (approved, renamed from "known set"): the Server Objects FreeCal holds and the Ignored Resources it remembers, by address, which the listing compares with.
+- **Forget an Ignored Resource** (approved): remove it from `caldav_ignored_resource`, as gone, mirrored or holding nothing FreeCal keeps (`forget_ignored`, `forget_ignored_resource`); remembering one is `ignore`, `ignore_resource`.
 - **Rewriting proxy** (new term, tests only): `RewritingProxy`, a stand-in server in front of Radicale that rewrites its answers.
