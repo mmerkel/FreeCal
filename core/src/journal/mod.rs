@@ -5,9 +5,9 @@
 //! import, are one Journal Transaction, which runs inside one Database
 //! Transaction. The Journal doesn't record Server Objects (ADR 0010, 0011):
 //! an Event Version holds FreeCal's fields only, and Event Rows find their
-//! Server Object through the Combined Event Keys. An Incoming Sync writes the
-//! Mirror in the Journal Transaction's Database Transaction, outside the
-//! Journal Transaction. Every Journal Transaction but an Incoming Sync's adds
+//! Corresponding Server Object in the Mirror by their UID. An Incoming Sync
+//! writes the Mirror in the Journal Transaction's Database Transaction,
+//! outside the Journal Transaction. Every Journal Transaction but an Incoming Sync's adds
 //! the Combined Event Keys of the Events it changes to the Unsent Changes,
 //! what FreeCal has to send.
 //!
@@ -19,9 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::event::{ObjectId, ServerObject, Source, rule};
-use crate::store::{
-    CombinedEventKey, DatabaseTransaction, EventKeyInCalendar, Store, StoredEvent, Uid, UidEvent,
-};
+use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Uid, UidEvent};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// The Change Journal's Write Permission (ADR 0011), which the writes of
@@ -253,15 +251,16 @@ impl JournalTransaction<'_> {
             .corresponding_server_object(calendar_id, uid)
     }
 
-    /// The UIDs whose Corresponding Server Object is `id`.
-    pub fn corresponding_uids(&self, id: ObjectId) -> Result<Vec<String>> {
-        self.database_transaction.corresponding_uids(id)
+    /// The UID the Server Object `id` holds if it is its Corresponding
+    /// Server Object ([`Store::corresponding_uid`]).
+    pub fn corresponding_uid(&self, id: ObjectId) -> Result<Option<String>> {
+        self.database_transaction.corresponding_uid(id)
     }
 
-    /// The UIDs the Server Object `id` holds, whether it is their
+    /// The UID the CalDAV Server Object `id` holds, whether it is its
     /// Corresponding Server Object or not.
-    pub fn held_uids(&self, id: ObjectId) -> Result<Vec<String>> {
-        self.database_transaction.held_uids(id)
+    pub fn held_uid(&self, id: ObjectId) -> Result<Option<String>> {
+        self.database_transaction.held_uid(id)
     }
 
     /// The Server Object `id` as the Mirror holds it, none if it is gone.
@@ -386,7 +385,8 @@ impl JournalTransaction<'_> {
             if !self.origin.is_incoming_sync() {
                 let combined_event_key = CombinedEventKey {
                     calendar_id: event.calendar_id,
-                    event_key: EventKeyInCalendar::new(uid, event.fields.recurrence_id.as_ref()),
+                    uid: uid.to_owned(),
+                    recurrence_id: event.fields.recurrence_id.clone(),
                 };
                 self.database_transaction.add_unsent_change(
                     WRITE_PERMISSION,
@@ -524,11 +524,6 @@ mod tests {
         }
     }
 
-    /// The Combined Event Keys of [`dentist_object`].
-    fn dentist_event_keys() -> [EventKeyInCalendar; 1] {
-        [EventKeyInCalendar::new("dentist", None)]
-    }
-
     const EXCEPTION: &str = "2026-10-19T09:00:00";
 
     /// `event` with another title.
@@ -619,7 +614,8 @@ mod tests {
                         calendar_id,
                         &dentist_object(),
                         None,
-                        &dentist_event_keys(),
+                        "dentist",
+                        true,
                     )?;
                     let mut event = dentist();
                     event.calendar_id = calendar_id;
@@ -641,9 +637,9 @@ mod tests {
             }
         }
 
-        /// Mirrors another Server Object holding the UID of [`dentist`] with
-        /// the Combined Event Keys `event_keys`, at `href`.
-        fn mirror(&self, href: &str, event_keys: &[EventKeyInCalendar]) -> ObjectId {
+        /// Mirrors another Server Object holding the UID of [`dentist`] at
+        /// `href`, holding its Recurring Event when `holds_non_exception`.
+        fn mirror(&self, href: &str, holds_non_exception: bool) -> ObjectId {
             let object = ServerObject {
                 href: href.to_owned(),
                 ..dentist_object()
@@ -658,7 +654,8 @@ mod tests {
                         self.event.calendar_id,
                         &object,
                         None,
-                        event_keys,
+                        "dentist",
+                        holds_non_exception,
                     )
                 },
             )
@@ -674,17 +671,12 @@ mod tests {
     }
 
     #[test]
-    fn an_incoming_sync_mirrors_the_server_object_with_its_combined_event_keys_and_records_neither()
-    {
+    fn an_incoming_sync_mirrors_the_server_object_with_its_uid_and_records_nothing() {
         let pulled = Pulled::new();
         let again = ServerObject {
             etag: Some("\"2\"".to_owned()),
             ..dentist_object()
         };
-        let event_keys = [
-            EventKeyInCalendar::new("dentist", None),
-            EventKeyInCalendar::new("dentist", Some(&RecurrenceId::obtained(EXCEPTION))),
-        ];
 
         let mirrored = record(
             &pulled.store,
@@ -696,7 +688,8 @@ mod tests {
                     pulled.event.calendar_id,
                     &again,
                     Some(pulled.object),
-                    &event_keys,
+                    "dentist",
+                    false,
                 )
             },
         )
@@ -712,11 +705,12 @@ mod tests {
             Some(again)
         );
         assert_eq!(
-            pulled.store.combined_event_keys(pulled.object).unwrap(),
-            [
-                ("dentist".to_owned(), None),
-                ("dentist".to_owned(), Some(EXCEPTION.to_owned()))
-            ]
+            pulled.store.held_uid(pulled.object).unwrap().as_deref(),
+            Some("dentist")
+        );
+        assert_eq!(
+            pulled.store.holds_non_exception(pulled.object).unwrap(),
+            Some(false)
         );
     }
 
@@ -724,7 +718,7 @@ mod tests {
     /// Transaction Origin's change moves it to another, and none is in the
     /// way of an undo.
     #[test]
-    fn event_rows_find_their_server_object_through_the_combined_event_keys_whatever_changed_them() {
+    fn event_rows_find_their_server_object_by_their_uid_whatever_changed_them() {
         for origin in [
             TransactionOrigin::UserAction,
             TransactionOrigin::Import,
@@ -793,19 +787,10 @@ mod tests {
     #[test]
     fn of_two_server_objects_holding_a_uid_the_one_holding_the_recurring_event_corresponds() {
         let pulled = Pulled::new();
-        let later = pulled.mirror(
-            "/user/work/copy.ics",
-            &[EventKeyInCalendar::new(
-                "dentist",
-                Some(&RecurrenceId::obtained(EXCEPTION)),
-            )],
-        );
+        let later = pulled.mirror("/user/work/copy.ics", false);
 
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
-        assert_eq!(
-            pulled.store.corresponding_uids(later).unwrap(),
-            Vec::<String>::new()
-        );
+        assert_eq!(pulled.store.corresponding_uid(later).unwrap(), None);
         record(
             &pulled.store,
             TransactionOrigin::IncomingSync,
@@ -816,17 +801,16 @@ mod tests {
                     pulled.event.calendar_id,
                     &dentist_object(),
                     Some(pulled.object),
-                    &[EventKeyInCalendar::new(
-                        "dentist",
-                        Some(&RecurrenceId::obtained(EXCEPTION)),
-                    )],
+                    "dentist",
+                    false,
                 )?;
                 sync::caldav::testing::mirror(
                     journal_transaction,
                     pulled.event.calendar_id,
                     &dentist_object(),
                     Some(later),
-                    &dentist_event_keys(),
+                    "dentist",
+                    true,
                 )
             },
         )
@@ -896,7 +880,8 @@ mod tests {
                         server,
                         &dentist_object(),
                         None,
-                        &dentist_event_keys(),
+                        "dentist",
+                        true,
                     )?;
                     journal_transaction.create("dentist", &event)
                 },
@@ -1071,7 +1056,8 @@ mod tests {
                     on_server.server,
                     &moved,
                     None,
-                    &dentist_event_keys(),
+                    "dentist",
+                    true,
                 )?;
                 journal_transaction.replace(on_server.id, &renamed)
             },
@@ -1084,12 +1070,9 @@ mod tests {
     #[test]
     fn of_two_server_objects_holding_a_uid_alike_the_first_mirrored_corresponds_until_it_goes() {
         let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", &dentist_event_keys());
+        let later = pulled.mirror("/user/work/copy.ics", true);
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
-        assert_eq!(
-            pulled.store.corresponding_uids(later).unwrap(),
-            Vec::<String>::new()
-        );
+        assert_eq!(pulled.store.corresponding_uid(later).unwrap(), None);
 
         record(
             &pulled.store,
@@ -1102,8 +1085,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(pulled.corresponding_server_object(), Some(later));
-        assert_eq!(pulled.store.combined_event_keys(pulled.object).unwrap(), []);
-        assert_eq!(pulled.store.corresponding_uids(later).unwrap(), ["dentist"]);
+        assert_eq!(pulled.store.held_uid(pulled.object).unwrap(), None);
+        assert_eq!(
+            pulled.store.corresponding_uid(later).unwrap().as_deref(),
+            Some("dentist")
+        );
         assert_eq!(
             pulled.store.object_of_event(pulled.id).unwrap(),
             Some(later)

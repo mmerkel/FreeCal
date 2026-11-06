@@ -5,7 +5,7 @@
 
 use chrono_tz::Tz;
 
-use super::{event_keys_in_calendar, mirror, moved, remove_object, settle, unreadable};
+use super::{holds_non_exception, mirror, moved, of_its_uid, remove_object, settle, unreadable};
 use crate::event::{self, ObjectId};
 use crate::journal::JournalTransaction;
 use crate::remote::{Changes, Fetched};
@@ -40,19 +40,19 @@ pub(crate) fn incoming_sync(
 
 /// Mirrors and propagates the Server Objects `fetched` into the Calendar
 /// `calendar_id` in `journal_transaction`, their floating times pinned to
-/// `zone`. Each one FreeCal can read is mirrored with its Combined Event
-/// Keys, and its Events become the Event Rows of the UIDs it is the
-/// Corresponding Server Object of, as [`event::propagate_to_event_rows`]
-/// writes them; a UID it was that of before and no longer is goes as
-/// [`settle`] gives it. A Server Object holding nothing FreeCal keeps goes
-/// from the Mirror, as [`remove`] removes it. One it can't read keeps its
-/// last readable version, its Combined Event Keys and its Event Rows,
-/// recorded as unreadable. A new Server Object that holds a UID that one of
-/// `moved_from`, the Server Objects removed in the same Incoming Sync, holds
-/// is that one moved to another address: it takes its place, which leaves
-/// `moved_from`. A Recurring Event that arrives joins the Calendar's
-/// Exceptions that had none without writing them, as they keep their
-/// recurrence IDs as obtained (ADR 0012).
+/// `zone`. Each one FreeCal can read is mirrored with the UID it holds, and
+/// its Events of it ([`of_its_uid`]) become the UID's Event Rows if it is
+/// the UID's Corresponding Server Object, as
+/// [`event::propagate_to_event_rows`] writes them; a UID it was that of
+/// before and no longer is goes as [`settle`] gives it. A Server Object
+/// holding nothing FreeCal keeps goes from the Mirror, as [`remove`]
+/// removes it. One it can't read keeps its last readable version and its
+/// Event Rows, recorded as unreadable. A new Server Object that holds the
+/// UID that one of `moved_from`, the Server Objects removed in the same
+/// Incoming Sync, holds is that one moved to another address: it takes its
+/// place, which leaves `moved_from`. A Recurring Event that arrives joins
+/// the Calendar's Exceptions that had none without writing them, as they
+/// keep their recurrence IDs as obtained (ADR 0012).
 pub(crate) fn mirror_and_propagate(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -65,37 +65,37 @@ pub(crate) fn mirror_and_propagate(
             unreadable(journal_transaction, calendar_id, &one.object.href)?;
             continue;
         };
-        let object = match journal_transaction
+        let at = journal_transaction
             .objects_at(calendar_id, &one.object.href)?
             .first()
-        {
-            Some(&object) => Some(object),
-            None => moved(journal_transaction, events, moved_from)?,
-        };
+            .copied();
         if events.is_empty() {
-            if let Some(object) = object {
+            if let Some(object) = at {
                 remove(journal_transaction, calendar_id, object, zone)?;
             }
             continue;
         }
-        let corresponding_uids = match object {
-            Some(object) => journal_transaction.corresponding_uids(object)?,
-            None => Vec::new(),
+        let (uid, events) = of_its_uid(events);
+        let object = match at {
+            Some(object) => Some(object),
+            None => moved(journal_transaction, uid, moved_from)?,
+        };
+        let corresponding_uid = match object {
+            Some(object) => journal_transaction.corresponding_uid(object)?,
+            None => None,
         };
         let object = mirror(
             journal_transaction,
             calendar_id,
             &one.object,
             object,
-            &event_keys_in_calendar(events),
+            uid,
+            holds_non_exception(events),
         )?;
-        event::propagate_to_event_rows(journal_transaction, calendar_id, object, events)?;
-        if !corresponding_uids.is_empty() {
-            let now = journal_transaction.corresponding_uids(object)?;
-            let lost: Vec<String> = corresponding_uids
-                .into_iter()
-                .filter(|uid| !now.contains(uid))
-                .collect();
+        event::propagate_to_event_rows(journal_transaction, calendar_id, object, uid, events)?;
+        if let Some(lost) = corresponding_uid
+            && journal_transaction.corresponding_uid(object)?.as_ref() != Some(&lost)
+        {
             settle(journal_transaction, calendar_id, &lost, zone)?;
         }
     }
@@ -103,7 +103,7 @@ pub(crate) fn mirror_and_propagate(
 }
 
 /// Removes the Server Object `object` of the Calendar `calendar_id` from
-/// the Mirror, as gone from the server; each UID it was the Corresponding
+/// the Mirror, as gone from the server; the UID it was the Corresponding
 /// Server Object of goes as [`settle`] gives it.
 fn remove(
     journal_transaction: &mut JournalTransaction,
@@ -111,9 +111,12 @@ fn remove(
     object: ObjectId,
     zone: Tz,
 ) -> Result<()> {
-    let corresponding_uids = journal_transaction.corresponding_uids(object)?;
+    let corresponding_uid = journal_transaction.corresponding_uid(object)?;
     remove_object(journal_transaction, object)?;
-    settle(journal_transaction, calendar_id, &corresponding_uids, zone)
+    match corresponding_uid {
+        Some(uid) => settle(journal_transaction, calendar_id, &uid, zone),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -252,14 +255,10 @@ mod tests {
             .journal_transaction
         }
 
-        /// The recurrence IDs of the Combined Event Keys of the Server
-        /// Object holding [`MOVED`], as stored.
-        fn combined_event_keys(&self) -> Vec<Option<String>> {
-            let combined_event_keys = self.store.combined_event_keys(self.object).unwrap();
-            combined_event_keys
-                .into_iter()
-                .map(|(_, recurrence_id)| recurrence_id)
-                .collect()
+        /// Whether the Server Object holding [`MOVED`] holds the Event that
+        /// isn't an Exception, none if it is gone.
+        fn holds_non_exception(&self) -> Option<bool> {
+            self.store.holds_non_exception(self.object).unwrap()
         }
 
         /// The Calendar's Event Rows with the UID, each with its recurrence
@@ -345,15 +344,14 @@ mod tests {
             alone.event_rows(),
             [(alone.moved, Some(IN_NEW_YORK.to_owned()))]
         );
-        assert_eq!(alone.combined_event_keys(), [Some(IN_NEW_YORK.to_owned())]);
+        assert_eq!(alone.holds_non_exception(), Some(false));
         // An Event of its own, without a recurrence ID on its Occurrence.
         assert_eq!(alone.shown(), [("Moved".to_owned(), alone.moved, None)]);
     }
 
     /// ADR 0012: its Recurring Event arriving changes no stored recurrence
     /// ID; the Exception changes the Occurrence it names in another zone.
-    /// Should the server give it in another form, the Event Row takes that,
-    /// as the Combined Event Keys do.
+    /// Should the server give it in another form, the Event Row takes that.
     #[test]
     fn it_changes_its_occurrence_once_its_recurring_event_arrives_in_its_server_object() {
         for (moved, obtained) in [
@@ -372,10 +370,7 @@ mod tests {
                 alone.event_rows(),
                 [(alone.moved, Some(obtained.to_owned())), (weekly, None)]
             );
-            assert_eq!(
-                alone.combined_event_keys(),
-                [None, Some(obtained.to_owned())]
-            );
+            assert_eq!(alone.holds_non_exception(), Some(true));
             let second = Some("2026-10-12T08:00:00".to_owned());
             assert_eq!(alone.shown()[1], ("Moved".to_owned(), alone.moved, second));
             assert_eq!(alone.shown().len(), 3);
@@ -384,9 +379,9 @@ mod tests {
 
     /// ADR 0011: the Server Object holding the Recurring Event corresponds,
     /// whether it arrives in the same Incoming Sync or a later one; the
-    /// other keeps its Combined Event Keys as obtained.
+    /// other is mirrored without Event Rows.
     #[test]
-    fn in_another_server_object_its_combined_event_keys_stay_as_given() {
+    fn in_another_server_object_its_recurring_event_corresponds() {
         for same_incoming_sync in [false, true] {
             let alone = Alone::new();
             let weekly = fetched("/weekly.ics", WEEKLY);
@@ -402,13 +397,53 @@ mod tests {
 
             assert_eq!(alone.event_rows().len(), 1);
             assert_eq!(alone.event_rows()[0].1, None);
-            let obtained = if same_incoming_sync {
-                "2026-10-12T08:00:00[UTC]"
-            } else {
-                IN_NEW_YORK
-            };
-            assert_eq!(alone.combined_event_keys(), [Some(obtained.to_owned())]);
+            assert_eq!(alone.holds_non_exception(), Some(false));
+            assert_eq!(alone.store.corresponding_uid(alone.object).unwrap(), None);
         }
+    }
+
+    /// An Event of another UID, on 6 October.
+    const OTHER: &str = "BEGIN:VEVENT\r\nUID:other\r\nSUMMARY:Other\r\n\
+        DTSTART:20261006T080000Z\r\nDTEND:20261006T090000Z\r\nEND:VEVENT\r\n";
+
+    /// ADR 0013: a resource holding two UIDs, which RFC 4791 §4.1 forbids,
+    /// is mirrored with its first UID and without Event Rows, new or known.
+    #[test]
+    fn a_server_object_holding_two_uids_is_mirrored_without_event_rows() {
+        let alone = Alone::new();
+
+        alone.mirror_and_propagate(
+            TransactionOrigin::IncomingSync,
+            &[fetched("/two.ics", &format!("{OTHER}{WEEKLY}"))],
+        );
+
+        let two = alone
+            .store
+            .objects_at(alone.calendar_id, "/two.ics")
+            .unwrap();
+        assert_eq!(two.len(), 1);
+        assert_eq!(
+            alone.store.held_uid(two[0]).unwrap().as_deref(),
+            Some("other")
+        );
+        assert_eq!(
+            alone.store.holds_non_exception(two[0]).unwrap(),
+            Some(false)
+        );
+        assert_eq!(alone.shown(), [("Moved".to_owned(), alone.moved, None)]);
+
+        alone.mirror_and_propagate(
+            TransactionOrigin::IncomingSync,
+            &[fetched("/weekly-moved.ics", &format!("{WEEKLY}{OTHER}"))],
+        );
+
+        assert_eq!(
+            alone.store.held_uid(alone.object).unwrap().as_deref(),
+            Some("weekly")
+        );
+        assert_eq!(alone.holds_non_exception(), Some(false));
+        assert_eq!(alone.event_rows(), []);
+        assert_eq!(alone.shown(), []);
     }
 
     #[test]

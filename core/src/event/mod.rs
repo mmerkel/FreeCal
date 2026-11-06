@@ -679,79 +679,68 @@ fn with_uid_of<'a>(
     })
 }
 
-/// Makes `events`, the Events the Server Object `object` of the Calendar
-/// `calendar_id` holds now, the Event Rows of the UIDs it is the
-/// Corresponding Server Object of
+/// Makes `events`, the Events of the UID `uid` that the Server Object
+/// `object` of the Calendar `calendar_id` holds now, the UID's Event Rows if
+/// `object` is its Corresponding Server Object
 /// ([`JournalTransaction::corresponding_server_object`]), and changes no
-/// other Event Row (ADR 0011): of each such UID, each Event replaces the
-/// Event Row for the same Occurrence, or the one that isn't an Exception,
-/// or is added, and the UID's other Event Rows are deleted. Exceptions are
-/// paired by Occurrence against the Recurring Event `object` holds, or else
-/// the one the Event Rows hold (ADR 0012), and each Event Row takes its
-/// recurrence ID as `object` gives it, as its Combined Event Keys hold it.
-/// The Events of a UID whose
-/// Corresponding Server Object is another write nothing, as `object` is
-/// mirrored without Event Rows of it. Of several for one Occurrence, the
+/// other Event Row (ADR 0011): each Event replaces the Event Row for the
+/// same Occurrence, or the one that isn't an Exception, or is added, and
+/// the UID's other Event Rows are deleted, all of them when `events` is
+/// empty. Exceptions are paired by Occurrence against the Recurring Event
+/// `object` holds, or else the one the Event Rows hold (ADR 0012), and each
+/// Event Row takes its recurrence ID as `object` gives it. When the UID's
+/// Corresponding Server Object is another, nothing is written, as `object`
+/// is mirrored without Event Rows. Of several for one Occurrence, the
 /// latest is kept. ADR 0007's rules 2 and 3 apply.
 pub(crate) fn propagate_to_event_rows(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     object: ObjectId,
+    uid: &str,
     events: &[ImportedEvent],
 ) -> Result<()> {
-    let mut uids: Vec<&str> = Vec::new();
-    for event in events {
-        if !uids.contains(&event.uid.as_str()) {
-            uids.push(&event.uid);
+    if journal_transaction.corresponding_server_object(calendar_id, uid)? != Some(object) {
+        return Ok(());
+    }
+    let held = events
+        .iter()
+        .find(|event| event.original.is_none() && event.rule.is_some())
+        .map(|event| event.when);
+    let recurring = match held {
+        Some(when) => Some(when),
+        None => Loaded::of_uid(journal_transaction, calendar_id, uid)?.recurring_when(),
+    };
+    let occurrence = |obtained: Option<RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
+    let mut left = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
+    let latest = latest(
+        events
+            .iter()
+            .map(|event| (occurrence(event.recurrence_id()), event)),
+    );
+    for (key, incoming) in latest {
+        let same = key.as_ref().and_then(|key| {
+            left.iter().position(|event_row| {
+                occurrence(event_row.fields.recurrence_id.clone()).as_ref() == Some(key)
+            })
+        });
+        let event = |fields: EventFields| StoredEvent {
+            calendar_id,
+            fields,
+        };
+        match same.map(|index| left.remove(index)) {
+            Some(event_row) => journal_transaction.replace(
+                event_row.id,
+                &event(fields_over(
+                    incoming,
+                    &event_row.fields,
+                    incoming.recurrence_id(),
+                )),
+            )?,
+            None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
         }
     }
-    for uid in uids {
-        if journal_transaction.corresponding_server_object(calendar_id, uid)? != Some(object) {
-            continue;
-        }
-        let with_uid: Vec<&ImportedEvent> =
-            events.iter().filter(|event| event.uid == uid).collect();
-        let held = with_uid
-            .iter()
-            .find(|event| event.original.is_none() && event.rule.is_some())
-            .map(|event| event.when);
-        let recurring = match held {
-            Some(when) => Some(when),
-            None => Loaded::of_uid(journal_transaction, calendar_id, uid)?.recurring_when(),
-        };
-        let occurrence =
-            |obtained: Option<RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
-        let mut left = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
-        let with_uid = latest(
-            with_uid
-                .into_iter()
-                .map(|event| (occurrence(event.recurrence_id()), event)),
-        );
-        for (key, incoming) in with_uid {
-            let same = key.as_ref().and_then(|key| {
-                left.iter().position(|event_row| {
-                    occurrence(event_row.fields.recurrence_id.clone()).as_ref() == Some(key)
-                })
-            });
-            let event = |fields: EventFields| StoredEvent {
-                calendar_id,
-                fields,
-            };
-            match same.map(|index| left.remove(index)) {
-                Some(event_row) => journal_transaction.replace(
-                    event_row.id,
-                    &event(fields_over(
-                        incoming,
-                        &event_row.fields,
-                        incoming.recurrence_id(),
-                    )),
-                )?,
-                None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
-            }
-        }
-        for event_row in left {
-            journal_transaction.delete(event_row.id)?;
-        }
+    for event_row in left {
+        journal_transaction.delete(event_row.id)?;
     }
     Ok(())
 }

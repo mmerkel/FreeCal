@@ -537,7 +537,7 @@ fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
     synced.harness.arrange_local_store(&format!(
         "UPDATE calendar SET synced = 0, sync_token = NULL WHERE id = {0};
          DELETE FROM event WHERE calendar_id = {0} AND uid = 'review';
-         DELETE FROM server_object WHERE calendar_id = {0} AND href LIKE '%/review.ics';",
+         DELETE FROM caldav_server_object WHERE calendar_id = {0} AND href LIKE '%/review.ics';",
         synced.work.0
     ));
     assert_eq!(synced.titles(), ["Standup"]);
@@ -1015,7 +1015,7 @@ mod server_objects {
         // As if FreeCal couldn't read the version the server has, and held
         // an earlier one.
         synced.harness.arrange_local_store(&format!(
-            "UPDATE server_object SET unreadable = 1 WHERE calendar_id = {0};
+            "UPDATE caldav_server_object SET unreadable = 1 WHERE calendar_id = {0};
              UPDATE event SET title = 'Earlier' WHERE calendar_id = {0};",
             synced.work.0
         ));

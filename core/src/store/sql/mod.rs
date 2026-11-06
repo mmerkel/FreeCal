@@ -6,8 +6,8 @@
 //! the Change Journal's, [`mirror`] for the Sync Engine's, and [`unguarded`]
 //! for the Unguarded Writes.
 //!
-//! Writing the tables a Guard holds, `event`, `server_object`,
-//! `combined_event_key`, `unsent_change`, `journal_transaction` and
+//! Writing the tables a Guard holds, `event`, `caldav_server_object`,
+//! `unsent_change`, `journal_transaction` and
 //! `journal_event_modification`, takes that Guard's Write Permission
 //! ([`JournalWritePermission`], [`SyncEngineWritePermission`]), which only
 //! its module can make: so the compiler keeps everything else from writing
@@ -217,7 +217,7 @@ impl Store {
     /// gave it: the first at each, should it have several.
     pub fn server_objects(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
         let mut stmt = self.conn.prepare(
-            "SELECT href, etag, unreadable FROM server_object WHERE calendar_id = ?1 \
+            "SELECT href, etag, unreadable FROM caldav_server_object WHERE calendar_id = ?1 \
              ORDER BY id DESC",
         )?;
         let objects = readable(stmt.query_map([calendar_id.0], |row| {
@@ -236,7 +236,7 @@ impl Store {
     /// added.
     pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id FROM server_object WHERE calendar_id = ?1 AND href = ?2 ORDER BY id",
+            "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2 ORDER BY id",
         )?;
         let objects = stmt
             .query_map(params![calendar_id.0, href], |row| row.get(0).map(ObjectId))?
@@ -246,10 +246,11 @@ impl Store {
 
     /// The Corresponding Server Object of the UID `uid` in a Calendar, the
     /// one the Calendar's Event Rows with the UID belong to (ADR 0011); none
-    /// when no Server Object holds it. Of several holding it, the one
-    /// holding the Event that isn't an Exception, the Recurring Event when
-    /// it repeats, corresponds, otherwise the first mirrored. The others are
-    /// mirrored without Event Rows. This is the one place that decides it.
+    /// when no Server Object holds it. Of several CalDAV Server Objects
+    /// holding it, the one holding the Event that isn't an Exception, the
+    /// Recurring Event when it repeats, corresponds, otherwise the first
+    /// mirrored (ADR 0013). The others are mirrored without Event Rows. This
+    /// is the one place that decides it.
     pub fn corresponding_server_object(
         &self,
         calendar_id: CalendarId,
@@ -258,77 +259,66 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT server_object.id FROM combined_event_key \
-                 JOIN server_object ON server_object.id = combined_event_key.object_id \
-                 WHERE server_object.calendar_id = ?1 AND combined_event_key.uid = ?2 \
-                 GROUP BY server_object.id \
-                 ORDER BY MAX(combined_event_key.recurrence_id IS NULL) DESC, server_object.id \
-                 LIMIT 1",
+                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND uid = ?2 \
+                 ORDER BY holds_non_exception DESC, id LIMIT 1",
                 params![calendar_id.0, uid],
                 |row| row.get(0).map(ObjectId),
             )
             .optional()?)
     }
 
-    /// The UIDs whose Corresponding Server Object is `id`
-    /// ([`Store::corresponding_server_object`]), in the order its Combined
-    /// Event Keys were written.
-    pub fn corresponding_uids(&self, id: ObjectId) -> Result<Vec<String>> {
-        let Some(calendar_id) = self.object_calendar(id)? else {
-            return Ok(Vec::new());
+    /// The UID the Server Object `id` holds if it is its Corresponding
+    /// Server Object ([`Store::corresponding_server_object`]); none if it
+    /// isn't, or is gone.
+    pub fn corresponding_uid(&self, id: ObjectId) -> Result<Option<String>> {
+        let Some((calendar_id, uid)) = self.held(id)? else {
+            return Ok(None);
         };
-        let mut corresponding = Vec::new();
-        for uid in self.held_uids(id)? {
-            if self.corresponding_server_object(calendar_id, &uid)? == Some(id) {
-                corresponding.push(uid);
-            }
-        }
-        Ok(corresponding)
+        let corresponds = self.corresponding_server_object(calendar_id, &uid)? == Some(id);
+        Ok(corresponds.then_some(uid))
     }
 
-    /// The UIDs the Server Object `id` holds, whether it is their
-    /// Corresponding Server Object or not, in the order its Combined Event
-    /// Keys were written.
-    pub fn held_uids(&self, id: ObjectId) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT uid FROM combined_event_key WHERE object_id = ?1 \
-             GROUP BY uid ORDER BY MIN(rowid)",
-        )?;
-        readable(stmt.query_map([id.0], |row| row.get(0))?)
+    /// The UID the CalDAV Server Object `id` holds, whether it is its
+    /// Corresponding Server Object or not; none if it is gone.
+    pub fn held_uid(&self, id: ObjectId) -> Result<Option<String>> {
+        Ok(self.held(id)?.map(|(_, uid)| uid))
     }
 
-    /// The Calendar of the Server Object `id`, none if it is gone.
-    fn object_calendar(&self, id: ObjectId) -> Result<Option<CalendarId>> {
+    /// The Calendar of the CalDAV Server Object `id` and the UID it holds,
+    /// none if it is gone.
+    fn held(&self, id: ObjectId) -> Result<Option<(CalendarId, String)>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT calendar_id FROM server_object WHERE id = ?1",
+                "SELECT calendar_id, uid FROM caldav_server_object WHERE id = ?1",
                 [id.0],
-                |row| row.get(0).map(CalendarId),
+                |row| Ok((CalendarId(row.get(0)?), row.get(1)?)),
             )
             .optional()?)
     }
 
-    /// The Server Object the Event `id` belongs to, through the Combined
-    /// Event Keys: on CalDAV the Corresponding Server Object of its UID in
-    /// its Calendar. None for an Event no Server Object holds, such as one
-    /// not on a server yet.
+    /// Whether the CalDAV Server Object `id` holds the Event of its UID that
+    /// isn't an Exception, none if it is gone, for tests to compare.
+    #[cfg(test)]
+    pub fn holds_non_exception(&self, id: ObjectId) -> Result<Option<bool>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT holds_non_exception FROM caldav_server_object WHERE id = ?1",
+                [id.0],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The Server Object the Event `id` belongs to: the Corresponding Server
+    /// Object of its UID in its Calendar. None for an Event no Server Object
+    /// holds, such as one not on a server yet.
     pub fn object_of_event(&self, id: EventId) -> Result<Option<ObjectId>> {
         match self.event_and_uid(id)? {
             Some((uid, event)) => self.corresponding_server_object(event.calendar_id, &uid),
             None => Err(CoreError::EventNotFound(id)),
         }
-    }
-
-    /// The Combined Event Keys of the Server Object `id`, one per component,
-    /// in the order they were written, each its UID and recurrence ID as
-    /// stored, for tests to compare.
-    #[cfg(test)]
-    pub fn combined_event_keys(&self, id: ObjectId) -> Result<Vec<(String, Option<String>)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT uid, recurrence_id FROM combined_event_key WHERE object_id = ?1 ORDER BY rowid",
-        )?;
-        readable(stmt.query_map([id.0], |row| Ok((row.get(0)?, row.get(1)?)))?)
     }
 
     /// The Server Object `id` as the server last gave it, none if it is
@@ -337,7 +327,7 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT href, etag, data FROM server_object WHERE id = ?1",
+                "SELECT href, etag, data FROM caldav_server_object WHERE id = ?1",
                 [id.0],
                 |row| {
                     Ok(ServerObject {

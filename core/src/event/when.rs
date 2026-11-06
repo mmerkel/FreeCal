@@ -284,8 +284,8 @@ pub struct ObjectId(pub i64);
 /// resource. Its row mirrors the server's last known state of it (address,
 /// version tag, data as received), and only the Sync Engine changes it, by an
 /// Incoming Sync or a successful write to the server. A Calendar's Event Rows
-/// with one UID belong to the UID's Corresponding Server Object, found
-/// through the Server Objects' Combined Event Keys (ADR 0011). A read-only
+/// with one UID belong to the UID's Corresponding Server Object, found in
+/// its Provider's Mirror tables (ADR 0011, ADR 0013). A read-only
 /// feed has no Server Objects, because FreeCal never writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerObject {

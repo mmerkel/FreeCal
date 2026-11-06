@@ -82,7 +82,8 @@ impl DatabaseTransaction<'_> {
     ) -> Result<()> {
         let CombinedEventKey {
             calendar_id,
-            event_key,
+            uid,
+            recurrence_id,
         } = combined_event_key;
         self.tx.execute(
             "INSERT INTO unsent_change (calendar_id, uid, recurrence_id, since) \
@@ -90,11 +91,8 @@ impl DatabaseTransaction<'_> {
              ON CONFLICT DO NOTHING",
             params![
                 calendar_id.0,
-                event_key.uid,
-                event_key
-                    .recurrence_id
-                    .as_ref()
-                    .map(RecurrenceId::as_obtained),
+                uid,
+                recurrence_id.as_ref().map(RecurrenceId::as_obtained),
                 since
             ],
         )?;

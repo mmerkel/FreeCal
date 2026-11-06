@@ -26,14 +26,16 @@ const MIGRATIONS: &[&str] = &[
     // of its Recurring Event and the recurrence ID of the Occurrence it
     // changed.
     //
-    // Server Objects mirror the server, with their data as received in its
-    // `format`, and `unreadable` once FreeCal couldn't read the server's
+    // Each Provider has Mirror tables of its own (ADR 0013). A CalDAV
+    // Server Object mirrors one resource, with its iCalendar text as
+    // received, and `unreadable` once FreeCal couldn't read the server's
     // version, so that the Mirror holds the last version it could (ADR
-    // 0010). Each Server Object's Combined Event Keys are the UID and
-    // recurrence ID of each of its components, the recurrence ID as obtained:
-    // a Calendar's Event Rows with one UID find the Server Object they
-    // belong to through them (ADR 0011). Recurrence IDs everywhere are
-    // stored as obtained and compared by Occurrence, never in SQL (ADR 0012).
+    // 0010). It holds one UID, the first of a resource holding several, and
+    // `holds_non_exception` whether it holds the Event of that UID that
+    // isn't an Exception: a Calendar's Event Rows with one UID find their
+    // Corresponding Server Object by them (ADR 0011). Recurrence IDs
+    // everywhere are stored as obtained and compared by Occurrence, never in
+    // SQL (ADR 0012).
     //
     // An Unsent Change is the Combined Event Key of an Event in a server
     // Calendar that FreeCal changed since, to be sent: its UID and
@@ -72,23 +74,18 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX calendar_account ON calendar (account_id);
     CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
-    CREATE TABLE server_object (
+    CREATE TABLE caldav_server_object (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         href TEXT NOT NULL,
         etag TEXT,
         data TEXT NOT NULL,
-        format TEXT NOT NULL,
-        unreadable INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX server_object_calendar_href ON server_object (calendar_id, href);
-    CREATE TABLE combined_event_key (
-        object_id INTEGER NOT NULL REFERENCES server_object (id) ON DELETE CASCADE,
+        unreadable INTEGER NOT NULL DEFAULT 0,
         uid TEXT NOT NULL,
-        recurrence_id TEXT
+        holds_non_exception INTEGER NOT NULL
     );
-    CREATE INDEX combined_event_key_object ON combined_event_key (object_id);
-    CREATE INDEX combined_event_key_uid ON combined_event_key (uid);
+    CREATE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);
+    CREATE INDEX caldav_server_object_calendar_uid ON caldav_server_object (calendar_id, uid);
     CREATE TABLE unsent_change (
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         uid TEXT NOT NULL,

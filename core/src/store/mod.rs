@@ -51,30 +51,14 @@ pub enum Uid<'a> {
     In(CalendarId, &'a str),
 }
 
-/// An Event Key in Calendar: a Combined Event Key without its Calendar, for
-/// where something else gives the Calendar, as a Server Object gives it its
-/// Combined Event Keys (ADR 0011).
-#[derive(Debug, Clone)]
-pub struct EventKeyInCalendar {
-    pub uid: String,
-    /// As obtained (ADR 0012): compared by Occurrence, never as text.
-    pub recurrence_id: Option<RecurrenceId>,
-}
-
-impl EventKeyInCalendar {
-    pub fn new(uid: &str, recurrence_id: Option<&RecurrenceId>) -> Self {
-        Self {
-            uid: uid.to_owned(),
-            recurrence_id: recurrence_id.cloned(),
-        }
-    }
-}
-
-/// A Combined Event Key: a Calendar and an Event Key in Calendar (ADR 0011).
+/// A Combined Event Key: a Calendar, a UID and a recurrence ID as the Event
+/// Row holds it (ADR 0011), what an Unsent Change is about.
 #[derive(Debug, Clone)]
 pub struct CombinedEventKey {
     pub calendar_id: CalendarId,
-    pub event_key: EventKeyInCalendar,
+    pub uid: String,
+    /// As obtained (ADR 0012): compared by Occurrence, never as text.
+    pub recurrence_id: Option<RecurrenceId>,
 }
 
 /// An Event with its Calendar and UID.

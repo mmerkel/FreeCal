@@ -49,7 +49,7 @@ Skipped:
 - [ ] do `Loaded::join` inside the writers that create or replace a Recurring Event (`Loaded::take`, `propagate_to_event_rows`) instead of in import and sync
 - [ ] dedupe all Exceptions by `SEQUENCE` in `assemble`, joined ones too, and drop `latest` from `Loaded::take`
 - [ ] keep the "unreadable objects are fetched again" rule out of the CalDAV client (`Held.unreadable` in `caldav.rs`): sync passes the hrefs to fetch, so a future Remote (Google) needn't repeat it
-- [ ] unique index on `server_object (calendar_id, href)`, `objects_at` returning one object; unsure whether duplicates can arise
+- [ ] unique index on `caldav_server_object (calendar_id, href)`, `objects_at` returning one object; unsure whether duplicates can arise
 - [ ] fewer `Loaded::of_uid` loads in import (`run`, up to three per Event) and sync (`join` loads even when a Recurring Event is stored; `moved` re-queries removed objects for each new one)
 - [ ] drop `journal::hash_as` and call `hash_with(…, None)` directly
 - [ ] one helper for writing a `StoredEvent` with a given recurrence ID (`take_exception`, `propagate_to_event_rows`, `Loaded::join`)
