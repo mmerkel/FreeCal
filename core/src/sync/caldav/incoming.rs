@@ -26,7 +26,7 @@ pub(crate) fn incoming_sync(
         removed.extend(
             journal_transaction
                 .database_transaction()
-                .objects_at(calendar_id, href)?,
+                .object_at(calendar_id, href)?,
         );
     }
     mirror_and_propagate(
@@ -69,9 +69,7 @@ pub(crate) fn mirror_and_propagate(
     for one in fetched {
         let at = journal_transaction
             .database_transaction()
-            .objects_at(calendar_id, &one.object.href)?
-            .first()
-            .copied();
+            .object_at(calendar_id, &one.object.href)?;
         let (uid, events) = match &one.holds {
             Holds::Unreadable => {
                 unreadable(journal_transaction, calendar_id, &one.object.href)?;
@@ -218,8 +216,9 @@ mod tests {
             );
             let object = alone
                 .store
-                .objects_at(calendar_id, "/weekly-moved.ics")
-                .unwrap()[0];
+                .object_at(calendar_id, "/weekly-moved.ics")
+                .unwrap()
+                .unwrap();
             let moved = alone.event_rows()[0].0;
             Self {
                 object,
@@ -464,20 +463,20 @@ mod tests {
             assert_eq!(
                 alone
                     .store
-                    .objects_at(alone.calendar_id, "/two.ics")
+                    .object_at(alone.calendar_id, "/two.ics")
                     .unwrap(),
-                []
+                None
             );
             let other = alone
                 .store
-                .objects_at(alone.calendar_id, "/other.ics")
+                .object_at(alone.calendar_id, "/other.ics")
                 .unwrap();
             assert_eq!(
                 alone
                     .store
                     .corresponding_server_object(alone.calendar_id, "other")
                     .unwrap(),
-                Some(other[0])
+                other
             );
             let titles: Vec<String> = alone.shown().into_iter().map(|shown| shown.0).collect();
             assert_eq!(titles, ["Other alone", "Moved"]);
@@ -504,10 +503,11 @@ mod tests {
         );
         let weekly = alone
             .store
-            .objects_at(alone.calendar_id, "/weekly.ics")
+            .object_at(alone.calendar_id, "/weekly.ics")
+            .unwrap()
             .unwrap();
         assert_eq!(
-            alone.store.corresponding_uid(weekly[0]).unwrap().as_deref(),
+            alone.store.corresponding_uid(weekly).unwrap().as_deref(),
             Some("weekly")
         );
 
@@ -519,9 +519,9 @@ mod tests {
         assert_eq!(
             alone
                 .store
-                .objects_at(alone.calendar_id, "/weekly.ics")
+                .object_at(alone.calendar_id, "/weekly.ics")
                 .unwrap(),
-            []
+            None
         );
         assert_eq!(
             alone
@@ -543,9 +543,9 @@ mod tests {
         assert_eq!(
             alone
                 .store
-                .objects_at(alone.calendar_id, "/weekly-moved.ics")
+                .object_at(alone.calendar_id, "/weekly-moved.ics")
                 .unwrap(),
-            []
+            None
         );
         assert_eq!(alone.event_rows(), []);
         assert_eq!(alone.shown(), []);

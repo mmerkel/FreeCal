@@ -214,11 +214,10 @@ impl Store {
     }
 
     /// The Server Objects of a Calendar, by their address as the server
-    /// gave it: the first at each, should it have several.
+    /// gave it.
     pub fn server_objects(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
         let mut stmt = self.conn.prepare(
-            "SELECT href, etag, unreadable FROM caldav_server_object WHERE calendar_id = ?1 \
-             ORDER BY id DESC",
+            "SELECT href, etag, unreadable FROM caldav_server_object WHERE calendar_id = ?1",
         )?;
         let objects = readable(stmt.query_map([calendar_id.0], |row| {
             Ok((
@@ -232,16 +231,16 @@ impl Store {
         Ok(objects.into_iter().collect())
     }
 
-    /// The Server Objects of a Calendar at `href`, in the order they were
-    /// added.
-    pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2 ORDER BY id",
-        )?;
-        let objects = stmt
-            .query_map(params![calendar_id.0, href], |row| row.get(0).map(ObjectId))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(objects)
+    /// The Server Object of a Calendar at `href`, if there is one.
+    pub fn object_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<ObjectId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
+                params![calendar_id.0, href],
+                |row| row.get(0).map(ObjectId),
+            )
+            .optional()?)
     }
 
     /// The Corresponding Server Object of the UID `uid` in a Calendar, the

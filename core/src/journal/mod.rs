@@ -747,10 +747,52 @@ mod tests {
         assert_eq!(object(other), None);
     }
 
+    /// A CalDAV Server Object stands for one resource: the Local Store
+    /// refuses a second one at the address of another in its Calendar.
+    #[test]
+    fn a_second_server_object_at_one_address_fails() {
+        let pulled = Pulled::new();
+
+        let second = record(
+            &pulled.store,
+            TransactionOrigin::IncomingSync,
+            0,
+            |journal_transaction| {
+                sync::caldav::testing::mirror(
+                    journal_transaction,
+                    pulled.event.calendar_id,
+                    &dentist_object(),
+                    None,
+                    "dentist",
+                    false,
+                )
+            },
+        );
+
+        assert!(
+            matches!(
+                second,
+                Err(crate::CoreError::Store(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::ConstraintViolation,
+                        ..
+                    },
+                    _
+                )))
+            ),
+            "the unique index refuses it"
+        );
+        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
+    }
+
     #[test]
     fn of_two_server_objects_holding_a_uid_the_one_holding_the_recurring_event_corresponds() {
         let pulled = Pulled::new();
         let later = pulled.mirror("/user/work/copy.ics", false);
+        let copy = ServerObject {
+            href: "/user/work/copy.ics".to_owned(),
+            ..dentist_object()
+        };
 
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(pulled.store.corresponding_uid(later).unwrap(), None);
@@ -770,7 +812,7 @@ mod tests {
                 sync::caldav::testing::mirror(
                     journal_transaction,
                     pulled.event.calendar_id,
-                    &dentist_object(),
+                    &copy,
                     Some(later),
                     "dentist",
                     true,

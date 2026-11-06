@@ -145,8 +145,8 @@ fn mirror(
 }
 
 /// Records that FreeCal couldn't read what the server holds now at `href` in
-/// a Calendar: the Server Objects there keep the last version it could, and
-/// their Event Rows stay as they are.
+/// a Calendar: the Server Object there keeps the last version it could, and
+/// its Event Rows stay as they are.
 fn unreadable(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,

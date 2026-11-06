@@ -27,11 +27,11 @@ const MIGRATIONS: &[&str] = &[
     // changed.
     //
     // Each Provider has Mirror tables of its own (ADR 0013). A CalDAV
-    // Server Object mirrors one resource, with its iCalendar text as
-    // received, and `unreadable` once FreeCal couldn't read the server's
-    // version, so that the Mirror holds the last version it could (ADR
-    // 0010). It holds one UID, the first of a resource holding several, and
-    // `holds_non_exception` whether it holds the Event of that UID that
+    // Server Object mirrors one resource, the only one at its href in its
+    // Calendar, with its iCalendar text as received, and `unreadable` once
+    // FreeCal couldn't read the server's version, so that the Mirror holds
+    // the last version it could. It holds one UID, as a resource holding
+    // several isn't mirrored (ADR 0015), and `holds_non_exception` whether it holds the Event of that UID that
     // isn't an Exception: a Calendar's Event Rows with one UID find their
     // Corresponding Server Object by them (ADR 0011). Recurrence IDs
     // everywhere are stored as obtained and compared by Occurrence, never in
@@ -84,7 +84,7 @@ const MIGRATIONS: &[&str] = &[
         uid TEXT NOT NULL,
         holds_non_exception INTEGER NOT NULL
     );
-    CREATE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);
+    CREATE UNIQUE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);
     CREATE INDEX caldav_server_object_calendar_uid ON caldav_server_object (calendar_id, uid);
     CREATE TABLE unsent_change (
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,

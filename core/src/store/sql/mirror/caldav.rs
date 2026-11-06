@@ -61,7 +61,7 @@ impl DatabaseTransaction<'_> {
         }
     }
 
-    /// Marks the CalDAV Server Objects at `href` in a Calendar unreadable.
+    /// Marks the CalDAV Server Object at `href` in a Calendar unreadable.
     pub(crate) fn mark_unreadable(
         &self,
         _: &SyncEngineWritePermission,
