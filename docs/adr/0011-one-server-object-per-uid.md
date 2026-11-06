@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0015
+---
+
 # One Server Object per UID, and the Change Journal doesn't know Server Objects
 
 Two concerns are kept apart. A Recurring Event and its Exceptions belong together because they share a Calendar and a UID, for every Provider; the `event` table and the Change Journal hold that, and nothing about servers. How a server lays those Event Rows out in resources depends on the Provider, and only the Mirror and the Provider code hold it.

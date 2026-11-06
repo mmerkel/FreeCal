@@ -146,6 +146,10 @@ _Avoid_: Google event (on its own)
 FreeCal's copy of every Server Object as the server last had it, in tables of its Provider. Only the Sync Engine writes it, and it goes with its Calendar.
 _Avoid_: Cache, server copy
 
+**Ignored Resource**:
+A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs, remembered with its ETag so that it isn't fetched again until it changes. It is not part of the Mirror and has no Event Rows.
+_Avoid_: Skipped object, rejected resource
+
 **Combined Event Key**:
 A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
 _Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
@@ -159,7 +163,7 @@ The form of a recurrence ID that names its Occurrence against the Recurring Even
 _Avoid_: Normalised recurrence ID, canonical form
 
 **Corresponding Server Object**:
-The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, of the CalDAV Server Objects holding that UID, the one holding the Event that isn't an Exception, otherwise the first one mirrored; on Google, the Google Server Object holding that UID and Occurrence. Any other Server Object holding the UID has no Event Rows.
+The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, the one CalDAV Server Object holding that UID, as any other resource holding it is an Ignored Resource; on Google, the Google Server Object holding that UID and Occurrence.
 _Avoid_: Owner, primary object, home object
 
 **Propagate a Server Object**:

@@ -20,3 +20,7 @@
 - [ ] The file import still reads files holding many UIDs
 - [ ] `of_its_uid` is gone; `settle` doesn't build a list to read one Server Object
 - [ ] The Log is written to a file in the operating system's log directory
+
+## Comments
+
+- 2026-11-06: ADR 0015 consolidates ADRs 0010, 0011 and 0013 and supersedes them; cite it instead. Ticket 106 remembers the resources this ticket ignores as Ignored Resources, so that a server without sync tokens doesn't have them fetched and logged on every sync; this ticket needn't. Ticket 107 replaces `settle` with a takeover by Ignored Resources, so keep the change to `settle` here small.

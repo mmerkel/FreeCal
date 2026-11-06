@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0015
+---
+
 # One Mirror per Provider
 
 Each Provider has Mirror tables of its own, shaped for how its server stores Events, and only the Sync Engine writes and reads them. CalDAV's is `caldav_server_object`: the Calendar, href, ETag, the iCalendar text as received, the unreadable mark, the UID, and whether it holds the Event that isn't an Exception (the single Event or the Recurring Event). Google's, with ticket 26, holds one Google event resource per row with its UID, its recurrence ID as obtained, Google's link to its Recurring Event and the JSON as received. They replace `server_object`, whose `data` column held iCalendar or JSON by its `format` column, and `combined_event_key`, which made every Provider describe its Server Objects in one generic shape. This makes ADR 0011's first paragraph literal: how a server lays out Event Rows in resources is held only by the Mirror and the Provider code.

@@ -1,0 +1,46 @@
+# Server Objects, the Mirror and Unsent Changes
+
+This ADR consolidates ADRs 0010, 0011 and 0013, which it supersedes, with the decision of 2026-11-06 on CalDAV resources sharing a UID. ADRs 0012 (recurrence IDs) and 0014 (Conflicts) stay as they are. Tickets 102, 103, 106 and 107 bring the code to the CalDAV rules below; until then it keeps ADR 0011's handover between two Server Objects with one UID.
+
+**Server Objects and the Mirror.** A Server Object is what a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. The Mirror holds each one as the server last had it (address, version tag, data as received: iCalendar text for CalDAV, JSON for Google, since converting would lose the fields it is kept for), in tables of its Provider: `caldav_server_object` for CalDAV, and Google's own with ticket 26. Only an Incoming Sync and a successful Outgoing Sync change it. A Server Object FreeCal can no longer read keeps its last readable version and is marked unreadable, so that it is fetched again until it reads. A read-only feed has no Server Objects, as FreeCal never writes to it. Server Objects live apart from Event Rows because one is not always one Recurring Event: a CalDAV resource may hold only Exceptions (an invitation to one Occurrence), and Google keeps each Exception as a resource of its own.
+
+**Event Rows and their Corresponding Server Object.** A Recurring Event and its Exceptions belong together because they share a Calendar and a UID, for every Provider; the `event` table and the Change Journal hold that, and nothing about servers. How a server lays them out in resources is held only by the Mirror and the Provider's code. A UID's Event Rows belong to their Corresponding Server Object, found in the Mirror (on CalDAV by UID, on Google by UID and Occurrence) and not stored on the Event Row. An Incoming Sync matches Server Objects by href, and each one changes only the Event Rows it corresponds to (Propagate a Server Object, ADR 0014). A Server Object moved to another href in one Incoming Sync stays the same Server Object.
+
+**One CalDAV resource per href and per UID.** RFC 4791 §4.1 requires a UID to be unique in a calendar collection and each resource to hold one UID. FreeCal mirrors at most one resource per href (ticket 103) and per UID in a Calendar (ticket 107), and the Local Store enforces both with unique indexes on `caldav_server_object`. A fetched resource that breaks the rule is an Ignored Resource, remembered with its ETag in `caldav_ignored_resource` apart from the Mirror, written to the Log, and not fetched again until it changes:
+
+- A resource holding several UIDs (ticket 102). It never takes over a UID.
+- A resource holding a UID that a mirrored resource already holds (ticket 107). The mirrored one keeps the UID for as long as it holds it. Among several candidates fetched in one Incoming Sync, the first by a fixed order keeps it: the one holding the single Event or the Recurring Event, then the lowest href. Two devices that each saw only some copies may keep different ones.
+- When the resource keeping a UID is removed, changes its UID or comes to hold several UIDs or nothing, the Ignored Resources holding that UID are fetched again in the same Incoming Sync, and the first by the fixed order takes over. If none can be read, the UID's Event Rows go. A kept resource that becomes unreadable keeps the UID.
+
+FreeCal never writes to the server to repair such resources, and doesn't report them beyond the Log. UIDs are compared exactly, and one UID in two Calendars is two Events. `docs/research/caldav-duplicate-uids.md` holds the evidence: Radicale, Apple's Calendar Server, Cyrus, Stalwart, Xandikos, Bedework and Zimbra refuse both kinds; SabreDAV (and so Baïkal), DAViCal and Exchange through DavMail accept a duplicate UID, and Nextcloud lets one through when an update changes a UID. No server checked stores an Exception as a resource apart from its Recurring Event.
+
+**Unsent Changes.** What FreeCal has to send is a list of Combined Event Keys in `unsent_change` (Calendar, UID, recurrence ID as obtained, since when). Every change but an Incoming Sync adds one in a writable server Calendar, for the Event's previous Combined Event Key and its new one. The table is Provider-neutral, as Unsent Changes describe Events, including Events with no Server Object yet. The Sender compares each Combined Event Key's Event Rows with its Server Object: Event Rows and a Server Object is an update, Event Rows without one a create, a Server Object without Event Rows a delete. Each write is conditional on the version the Mirror holds.
+
+**The Change Journal and the Write Permissions.** The Change Journal records Event Rows only, never Server Objects. Event Versions and their hashes hold FreeCal's fields, so an Event Row getting a Server Object or moving to another is neither recorded nor in the way of an undo. Undo writes back FreeCal's fields and leaves the server's version, ETag included, to the Mirror. Two Write Permissions, each made only by its module, keep this so: the Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts (the Mirror goes with them by the schema's cascade); the Sync Engine's covers the Mirror and the Ignored Resources. Every write takes a Database Transaction; a Journal Transaction runs inside one, and an Incoming Sync's Mirror writes join it without being part of the Journal Transaction. The Sync Engine keeps each Provider's code in a module of its own (`core/src/sync/caldav/`), with what every Provider shares in `core/src/sync/mod.rs`, and the Mirror's SQL in `core/src/store/sql/mirror/`, one file per Provider.
+
+## Considered Options
+
+- **Server data on the Recurring Event's Event Row** (ticket 81): Server Objects holding only Exceptions had nowhere to live, and Google's per-Exception resources didn't fit.
+- **Server Objects journaled with each Event Version**: undo restored ETags the server no longer had, so the write after an undo failed as a false Conflict.
+- **The Server Object's ID on each Event Row**, journaled (ticket 86) or not: the Change Journal would have decided placement, or a stored link, a key table and placement rules would have stood side by side for two edge cases.
+- **Grouping Event Rows by an internal group ID instead of the UID**: the UID lookups move rather than go, and a group ID disagreeing with the UID is wrong in a way neither shows.
+- **Finding what to send by comparing Event Rows with Server Objects**: FreeCal changes what it stores (Pinned Zones, rules it can't expand), so unchanged Events would look changed.
+- **One `server_object` table for every Provider with a generic `combined_event_key` table** (ADRs 0010, 0011): one column held two formats, and CalDAV kept keys it never used.
+- **The Change Journal guarding the Mirror too**: the Mirror's writes sat behind a runtime check, and an Outgoing Sync would have needed a Journal Transaction.
+- **For a second resource with a UID already held:**
+  - *Mirroring it without Event Rows and handing the UID over from its mirrored text* (ADR 0011): no fetch on takeover, but a ranking rule and handover code in the Mirror, which couldn't enforce one resource per UID.
+  - *Ignoring it without remembering it*: on a server with sync tokens, the Event vanished for good when the kept copy went, and without sync tokens it was fetched and logged on every sync.
+  - *Ignoring it for good*, even once it changes: the same vanishing, and no way back once the conflict is repaired.
+  - *Giving it a new UID on the server*: both copies survive, but scheduling (RFC 6638) ties invitations to the UID, §5.3.2.1 forbids changing a resource's UID, and copies of one Event would show twice in every client.
+  - *Deleting it on the server*: loses data the user never saw, and two devices choosing differently delete both.
+  - *A new resource ranking higher pushing out the kept one*: every device would keep the same copy, at the price of the shown version switching without a user action and of Conflicts caused only by the duplicate.
+  - *Reporting it as a problem of its Calendar* (ADR 0011): new UI for a case only servers breaking RFC 4791 produce.
+- **Ignored Resources as flagged rows in `caldav_server_object`**: the Local Store would keep an href from being both mirrored and ignored, but every query of the Mirror would have to filter them out.
+
+## Consequences
+
+- Undo restores the fields FreeCal manages exactly; fields it doesn't understand keep the server's current values. Undoing a delete already sent creates the Event again under a new href.
+- Events in an Ignored Resource aren't shown, though DAVx5 and khal show both copies of a duplicate UID; Thunderbird and Evolution, like FreeCal, show one.
+- A takeover can cost an Incoming Sync a second request to the server.
+- Server Object IDs, like Event IDs, are never reused.
+- Each Provider's Mirror tables have their own migrations, and the rules reading the Mirror are written per Provider.

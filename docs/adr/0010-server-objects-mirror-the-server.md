@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0015
+---
+
 # Server Objects mirror the server
 
 A Server Object is what a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. Its row mirrors the server's last known state of it (address, version tag, data as received), and only a sync or a successful write to the server changes it. Event Rows refer to the Server Object they came from or will be written to. A read-only feed has no Server Objects, because FreeCal never writes to it.
