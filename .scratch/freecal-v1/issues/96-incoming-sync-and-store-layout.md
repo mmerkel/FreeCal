@@ -34,6 +34,6 @@ Until ticket 97, `Journaled` still guards every write. The new files only show t
     - `Core::sync_calendar` runs only an Incoming Sync today and could become `incoming_sync_calendar`. It keeps its name in case ticket 17 has it run both directions.
     - The Calendar's `synced` and `sync_token` columns and `JournalTransaction::synced` keep their names.
   - Terms from this ticket that are in neither section of `GLOSSARY.md`:
-    - (new term) **Guard**: the module that alone writes a set of tables, the Change Journal or the Sync Engine.
-    - (new term) **Unguarded write**: a write that no guard's Write Permission covers (`sql/unguarded.rs`).
+    - **Guard**: the module that alone writes a set of tables, the Change Journal or the Sync Engine. Approved and added to `GLOSSARY.md` Internals on 2026-11-06.
+    - **Unguarded Write**: a write that no Guard's Write Permission covers (`sql/unguarded.rs`). Approved and added to `GLOSSARY.md` Internals on 2026-11-06.
     - (new term) **Reader**: a Local Store query, in `sql/mod.rs`.

@@ -154,6 +154,14 @@ _Avoid_: Transaction (on its own), db transaction
 A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, deleting Calendars and accounts, and renormalising Combined Event Keys with their Event Rows; the Sync Engine's covers the Mirror's server data.
 _Avoid_: Token, Journaled, owner
 
+**Guard**:
+The module that alone writes a set of tables, by holding their Write Permission: the Change Journal or the Sync Engine. Not the Mass-Change Guard, which is user-facing.
+_Avoid_: Owner, gatekeeper
+
+**Unguarded Write**:
+A write to the Local Store that no Guard's Write Permission covers, such as to accounts, Calendars, settings, the sidebar, the view or the time zone rules. It still runs in a Database Transaction.
+_Avoid_: Free write, open write
+
 **Record a Journal Event Modification**:
 Store one Journal Event Modification in the Change Journal, starting the Journal Transaction with its first one.
 _Avoid_: Entry, add entry
