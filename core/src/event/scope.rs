@@ -359,6 +359,28 @@ impl Loaded {
         Ok(new)
     }
 
+    /// Writes `event` over `id`, one of these Events, with their UID. Moved
+    /// into a Calendar that already has an Event with the UID, it arrives
+    /// under a new UID instead, as a new Event, so that it joins none of
+    /// that Calendar's: a Calendar has one Event per UID (ticket 104).
+    /// Returns its ID and UID.
+    fn write_over(
+        &self,
+        journal_transaction: &mut JournalTransaction,
+        id: EventId,
+        event: &StoredEvent,
+    ) -> Result<(EventId, String)> {
+        let arrives = event.calendar_id != self.calendar_id;
+        if !(arrives && Loaded::of_uid(journal_transaction, event.calendar_id, &self.uid)?.exists())
+        {
+            journal_transaction.replace(id, event)?;
+            return Ok((id, self.uid.clone()));
+        }
+        let uid = new_uid();
+        journal_transaction.delete(id)?;
+        Ok((journal_transaction.create(&uid, event)?, uid))
+    }
+
     /// Whether `exception`, one of these Exceptions, is an Occurrence of the
     /// Recurring Event whose title, location, description or time differs
     /// from what the Recurring Event gives it.
@@ -485,7 +507,8 @@ fn all(
         None => String::new(),
     };
     let calendar_id = changes.calendar_id.unwrap_or(loaded.calendar_id);
-    journal_transaction.replace(
+    let (id, uid) = loaded.write_over(
+        journal_transaction,
         *id,
         &StoredEvent {
             calendar_id,
@@ -493,7 +516,7 @@ fn all(
         },
     )?;
     let moved = rule::moved_id(rid.as_str(), was, &fields.when).map(NormalForm::computed);
-    let new = became(calendar_id, loaded.uid.clone(), *id, fields);
+    let new = became(calendar_id, uid, id, fields);
     let kept = loaded.carry_exceptions(
         journal_transaction,
         |_| true,
@@ -780,10 +803,7 @@ fn alone(
             };
             // Only a Recurring Event gives an Occurrence that isn't stored.
             let id = match changing.stored {
-                Some(id) => {
-                    journal_transaction.replace(id, &event)?;
-                    id
-                }
+                Some(id) => loaded.write_over(journal_transaction, id, &event)?.0,
                 None => journal_transaction.create(&loaded.uid, &event)?,
             };
             // One without its Recurring Event, or changing none of its

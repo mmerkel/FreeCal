@@ -1170,3 +1170,148 @@ fn exceptions_too_keep_their_length_where_the_shift_would_end_them_before_they_s
         ]
     );
 }
+
+// Moving into a Calendar that already has the UID (ticket 104): the Event
+// arrives under a new UID, as a Calendar has one Event per UID.
+
+/// A weekly Yoga, four times from 5 October, whose 12 October is
+/// "Yoga outside".
+const YOGA_WITH_EXCEPTION: &str = "BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\n\
+     DTSTART;TZID=Europe/Berlin:20261005T180000\nDTEND;TZID=Europe/Berlin:20261005T190000\n\
+     RRULE:FREQ=WEEKLY;COUNT=4\nEND:VEVENT\n\
+     BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga outside\nRECURRENCE-ID;TZID=Europe/Berlin:20261012T180000\n\
+     DTSTART;TZID=Europe/Berlin:20261012T180000\nDTEND;TZID=Europe/Berlin:20261012T190000\n\
+     END:VEVENT\n";
+
+/// The titles of a Calendar's Occurrences in October and November, sorted.
+fn titles_in(core: &Core, calendar_id: CalendarId) -> Vec<String> {
+    let mut titles: Vec<_> = occurrences(core, "2026-10-01", "2026-12-01")
+        .into_iter()
+        .filter(|occurrence| occurrence.calendar_id == calendar_id)
+        .map(|occurrence| occurrence.title)
+        .collect();
+    titles.sort();
+    titles
+}
+
+#[test]
+fn an_event_moved_into_a_calendar_with_its_uid_gets_a_new_one() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let work = calendar(&core, "Work");
+    let dentist = "BEGIN:VEVENT\nUID:dentist\nSUMMARY:Dentist\n\
+         DTSTART;TZID=Europe/Berlin:20261005T090000\nDTEND;TZID=Europe/Berlin:20261005T100000\n\
+         END:VEVENT\n";
+    import(&core, home.id, dentist);
+    import(
+        &core,
+        work.id,
+        &dentist.replace("Dentist", "Dentist at work"),
+    );
+    let at_home = occurrences(&core, "2026-10-05", "2026-10-06")
+        .into_iter()
+        .find(|occurrence| occurrence.calendar_id == home.id)
+        .unwrap();
+
+    let moved = core
+        .edit_event(
+            at_home.event_id,
+            EventDraft {
+                calendar_id: work.id,
+                ..draft_of(&core, &at_home)
+            },
+        )
+        .unwrap();
+
+    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
+    assert_eq!(titles_in(&core, work.id), ["Dentist", "Dentist at work"]);
+    assert_eq!(moved.value.calendar_id, work.id);
+    assert_eq!(moved.value.title, "Dentist");
+
+    core.undo_journal_transaction(moved.journal_transaction.unwrap())
+        .unwrap();
+    assert_eq!(titles_in(&core, home.id), ["Dentist"]);
+    assert_eq!(titles_in(&core, work.id), ["Dentist at work"]);
+}
+
+#[test]
+fn a_recurring_event_moved_into_a_calendar_with_its_uid_takes_its_exceptions_to_a_new_one() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let work = calendar(&core, "Work");
+    import(&core, home.id, YOGA_WITH_EXCEPTION);
+    import(
+        &core,
+        work.id,
+        &YOGA_WITH_EXCEPTION.replace("Yoga", "Work yoga"),
+    );
+    let first = occurrences(&core, "2026-10-05", "2026-10-06")
+        .into_iter()
+        .find(|occurrence| occurrence.calendar_id == home.id)
+        .unwrap();
+
+    core.edit_occurrence(
+        first.event_id,
+        rid(&first),
+        Scope::All,
+        false,
+        EventDraft {
+            calendar_id: work.id,
+            ..draft_of(&core, &first)
+        },
+    )
+    .unwrap();
+
+    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
+    assert_eq!(
+        titles_in(&core, work.id),
+        [
+            "Work yoga",
+            "Work yoga",
+            "Work yoga",
+            "Work yoga outside",
+            "Yoga",
+            "Yoga",
+            "Yoga",
+            "Yoga outside"
+        ]
+    );
+}
+
+/// An Exception without its Recurring Event, moved into the Calendar that
+/// has it, stays an Event of its own instead of joining it.
+#[test]
+fn a_lone_exception_moved_into_a_calendar_with_its_uid_stays_an_event_of_its_own() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let work = calendar(&core, "Work");
+    let (recurring, exception) = YOGA_WITH_EXCEPTION.split_at(
+        YOGA_WITH_EXCEPTION
+            .find("BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga outside")
+            .unwrap(),
+    );
+    import(&core, home.id, exception);
+    import(&core, work.id, recurring);
+    let lone = occurrences(&core, "2026-10-12", "2026-10-13")
+        .into_iter()
+        .find(|occurrence| occurrence.calendar_id == home.id)
+        .unwrap();
+
+    core.edit_event(
+        lone.event_id,
+        EventDraft {
+            calendar_id: work.id,
+            ..draft_of(&core, &lone)
+        },
+    )
+    .unwrap();
+
+    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
+    assert_eq!(
+        titles_in(&core, work.id),
+        ["Yoga", "Yoga", "Yoga", "Yoga", "Yoga outside"]
+    );
+}
