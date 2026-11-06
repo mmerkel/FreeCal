@@ -17,22 +17,22 @@ STATUSES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human", 
 
 errors = []
 tickets = {}
-for f in sorted(glob.glob(os.path.join(ISSUES, "*.md"))):
+for f in sorted(glob.glob(os.path.join(ISSUES, "*.md")), key=lambda f: int(re.match(r"\d+", os.path.basename(f)).group())):
     t = open(f).read()
-    num = os.path.basename(f)[:2]
+    num = re.match(r"\d+", os.path.basename(f)).group()
     title = re.search(r"^# \d+: (.*)", t, re.M).group(1)
     b = re.search(r"\*\*Blocked by:\*\*\s*(.*)", t)
     s = re.search(r"\*\*Status:\*\*\s*(\S+)", t)
     sp = re.search(r"\*\*Split into:\*\*\s*(.*)", t)
     e = re.search(r"\*\*Effort:\*\*\s*(XL|S|M|L)\b", t)
-    blocked = re.findall(r"\b\d{2}\b", b.group(1)) if b else []
+    blocked = re.findall(r"\b\d{2,}\b", b.group(1)) if b else []
     if not b:
         errors.append(f"{f}: no **Blocked by:** line")
-    elif not re.fullmatch(r"none|\d{2}(, \d{2})*", b.group(1).strip()):
-        errors.append(f"{f}: **Blocked by:** must be `none` or two-digit ticket numbers like `08, 69`")
+    elif not re.fullmatch(r"none|\d{2,}(, \d{2,})*", b.group(1).strip()):
+        errors.append(f"{f}: **Blocked by:** must be `none` or ticket numbers of at least two digits like `08, 69, 100`")
     if not s or s.group(1) not in STATUSES:
         errors.append(f"{f}: **Status:** must be one of {', '.join(sorted(STATUSES))}")
-    split = re.findall(r"\d{2}", sp.group(1)) if sp else []
+    split = re.findall(r"\d{2,}", sp.group(1)) if sp else []
     tickets[num] = dict(
         num=num, title=title, blocked=blocked, status=s.group(1) if s else "?",
         split=split, effort=e.group(1) if e else "-", file=f,
@@ -66,7 +66,7 @@ def resolve(n):
     return [x for p in t["split"] for x in resolve(p)] if t["split"] else [n]
 
 for t in tickets.values():
-    t["deps"] = sorted({x for b in t["blocked"] for x in resolve(b)})
+    t["deps"] = sorted({x for b in t["blocked"] for x in resolve(b)}, key=int)
 active = {n: t for n, t in tickets.items() if not t["split"]}
 blocks = {n: [] for n in active}
 for n, t in active.items():
@@ -153,11 +153,11 @@ for n, t in tickets.items():
         continue
     blocked_txt = ", ".join(
         (f'<b>{d}</b>' if active[d]["status"] != "done" else d) for d in t["deps"]) or "–"
-    unblocks = ", ".join(sorted(blocks[n])) or "–"
+    unblocks = ", ".join(sorted(blocks[n], key=int)) or "–"
     cls = "dim" if t["status"] == "done" else ("crit" if n in crit_set else "")
     rows.append(f'<tr class="{cls}"><td>{n}</td><td>{html.escape(t["title"])}</td><td>{badge(t["status"])}</td><td>{eff(t["effort"])}</td><td>{blocked_txt}</td><td>{unblocks}</td></tr>')
 
-frontier = sorted((n for n, t in open_.items() if ready(t)), key=lambda n: (-len(downstream(n)), n))
+frontier = sorted((n for n, t in open_.items() if ready(t)), key=lambda n: (-len(downstream(n)), int(n)))
 front_rows = "".join(
     f'<tr class="{"crit" if n in crit_set else ""}"><td>{n}</td><td>{html.escape(open_[n]["title"])}</td><td>{badge(open_[n]["status"])}</td><td>{eff(open_[n]["effort"])}</td><td>{len(downstream(n))}</td></tr>'
     for n in frontier)
