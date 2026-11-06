@@ -8,10 +8,8 @@ use std::collections::HashMap;
 
 use chrono_tz::Tz;
 
-use crate::{
-    AvailableCalendar, CalDavLogin, ImportedEvent, Provider, Result, ServerLogin, ServerObject,
-    caldav,
-};
+use crate::import::Holds;
+use crate::{AvailableCalendar, CalDavLogin, Provider, Result, ServerLogin, ServerObject, caldav};
 
 /// The most Events a page of a Calendar's First Sync holds. Each page is
 /// committed on its own, so that Events appear as they load.
@@ -26,14 +24,13 @@ pub(crate) struct SyncPoint {
     pub token: Option<String>,
 }
 
-/// A Server Object as an Incoming Sync fetched it, with the Events FreeCal
-/// reads in it.
+/// A Server Object as an Incoming Sync fetched it, with what FreeCal reads
+/// in it.
 #[derive(Debug, Clone)]
 pub(crate) struct Fetched {
     pub object: ServerObject,
-    /// Its Events, Exceptions as Events of their own, not yet paired with
-    /// their Recurring Events; none if FreeCal can't read it.
-    pub events: Option<Vec<ImportedEvent>>,
+    /// What FreeCal reads in it.
+    pub holds: Holds,
 }
 
 /// A Server Object FreeCal holds, as an Incoming Sync asks for what

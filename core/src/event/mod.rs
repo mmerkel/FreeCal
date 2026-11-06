@@ -678,13 +678,12 @@ fn with_uid_of<'a>(
 }
 
 /// Makes `events`, the Events of the UID `uid` that the Server Object
-/// `object` of the Calendar `calendar_id` holds now, the UID's Event Rows if
-/// `object` is its Corresponding Server Object
+/// `object` of the Calendar `calendar_id` holds now (at least one), the
+/// UID's Event Rows if `object` is its Corresponding Server Object
 /// ([`JournalTransaction::corresponding_server_object`]), and changes no
-/// other Event Row (ADR 0011): each Event replaces the Event Row for the
+/// other Event Row (ADR 0015): each Event replaces the Event Row for the
 /// same Occurrence, or the one that isn't an Exception, or is added, and
-/// the UID's other Event Rows are deleted, all of them when `events` is
-/// empty. Exceptions are paired by Occurrence against the Recurring Event
+/// the UID's other Event Rows are deleted. Exceptions are paired by Occurrence against the Recurring Event
 /// `object` holds, or else the one the Event Rows hold (ADR 0012), and each
 /// Event Row takes its recurrence ID as `object` gives it. When the UID's
 /// Corresponding Server Object is another, nothing is written, as `object`

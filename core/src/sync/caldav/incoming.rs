@@ -5,8 +5,9 @@
 
 use chrono_tz::Tz;
 
-use super::{holds_non_exception, mirror, moved, of_its_uid, remove_object, settle, unreadable};
+use super::{holds_non_exception, log_ignored, mirror, moved, remove_object, settle, unreadable};
 use crate::event::{self, ObjectId};
+use crate::import::Holds;
 use crate::journal::JournalTransaction;
 use crate::remote::{Changes, Fetched};
 use crate::{CalendarId, Result};
@@ -43,14 +44,15 @@ pub(crate) fn incoming_sync(
 
 /// Mirrors and propagates the Server Objects `fetched` into the Calendar
 /// `calendar_id` in `journal_transaction`, their floating times pinned to
-/// `zone`. Each one FreeCal can read is mirrored with the UID it holds, and
-/// its Events of it ([`of_its_uid`]) become the UID's Event Rows if it is
-/// the UID's Corresponding Server Object, as
-/// [`event::propagate_to_event_rows`] writes them; a UID it was that of
-/// before and no longer is goes as [`settle`] gives it. A Server Object
-/// holding nothing FreeCal keeps goes from the Mirror, as [`remove`]
-/// removes it. One it can't read keeps its last readable version and its
-/// Event Rows, recorded as unreadable. A new Server Object that holds the
+/// `zone`. Each one holding one UID is mirrored with it, and its Events
+/// become the UID's Event Rows if it is the UID's Corresponding Server
+/// Object, as [`event::propagate_to_event_rows`] writes them; a UID it was
+/// that of before and no longer is goes as [`settle`] gives it. A Server
+/// Object holding nothing FreeCal keeps isn't mirrored, and goes from the
+/// Mirror if it was, as [`remove`] removes it; one holding several UIDs,
+/// which RFC 4791 §4.1 forbids, is also written to the Log (ADR 0015). One
+/// FreeCal can't read keeps its last readable version and its Event Rows,
+/// recorded as unreadable. A new Server Object that holds the
 /// UID that one of `moved_from`, the Server Objects removed in the same
 /// Incoming Sync, holds is that one moved to another address: it takes its
 /// place, which leaves `moved_from`. A Recurring Event that arrives joins
@@ -65,22 +67,27 @@ pub(crate) fn mirror_and_propagate(
 ) -> Result<()> {
     journal_transaction.writable(calendar_id)?;
     for one in fetched {
-        let Some(events) = &one.events else {
-            unreadable(journal_transaction, calendar_id, &one.object.href)?;
-            continue;
-        };
         let at = journal_transaction
             .database_transaction()
             .objects_at(calendar_id, &one.object.href)?
             .first()
             .copied();
-        if events.is_empty() {
-            if let Some(object) = at {
-                remove(journal_transaction, calendar_id, object, zone)?;
+        let (uid, events) = match &one.holds {
+            Holds::Unreadable => {
+                unreadable(journal_transaction, calendar_id, &one.object.href)?;
+                continue;
             }
-            continue;
-        }
-        let (uid, events) = of_its_uid(events);
+            Holds::Nothing { uids } => {
+                if !uids.is_empty() {
+                    log_ignored(calendar_id, &one.object.href, uids);
+                }
+                if let Some(object) = at {
+                    remove(journal_transaction, calendar_id, object, zone)?;
+                }
+                continue;
+            }
+            Holds::OneUid { uid, events } => (uid.as_str(), events.as_slice()),
+        };
         let object = match at {
             Some(object) => Some(object),
             None => moved(journal_transaction, uid, moved_from)?,
@@ -139,7 +146,7 @@ mod tests {
     use chrono::NaiveDate;
 
     use super::*;
-    use crate::import::{self, ExistingEvents, ImportFile, read_server_objects};
+    use crate::import::{self, ExistingEvents, ImportFile, read_caldav_resources};
     use crate::journal::{self, JournalTransactionId, TransactionOrigin, record};
     use crate::store::{Store, Uid};
     use crate::{EventId, ServerObject};
@@ -179,7 +186,7 @@ mod tests {
             etag: None,
             data: calendar(body),
         };
-        read_server_objects(vec![object], Tz::UTC).remove(0)
+        read_caldav_resources(vec![object], Tz::UTC).remove(0)
     }
 
     /// A Local Store with a writable server Calendar whose First Sync
@@ -391,42 +398,155 @@ mod tests {
     const OTHER: &str = "BEGIN:VEVENT\r\nUID:other\r\nSUMMARY:Other\r\n\
         DTSTART:20261006T080000Z\r\nDTEND:20261006T090000Z\r\nEND:VEVENT\r\n";
 
-    /// ADR 0013: a resource holding two UIDs, which RFC 4791 §4.1 forbids,
-    /// is mirrored with its first UID and without Event Rows, new or known.
+    /// The Log lines written on this thread.
+    mod captured_log {
+        use std::cell::RefCell;
+        use std::sync::Once;
+
+        thread_local! {
+            static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+
+        struct Capture;
+
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+
+            fn log(&self, record: &log::Record) {
+                LINES.with(|lines| lines.borrow_mut().push(record.args().to_string()));
+            }
+
+            fn flush(&self) {}
+        }
+
+        /// Starts capturing this thread's Log lines, forgetting earlier ones.
+        pub(super) fn start() {
+            static INSTALL: Once = Once::new();
+            INSTALL.call_once(|| {
+                log::set_logger(&Capture).unwrap();
+                log::set_max_level(log::LevelFilter::Trace);
+            });
+            LINES.with(|lines| lines.borrow_mut().clear());
+        }
+
+        /// The Log lines this thread wrote since [`start`].
+        pub(super) fn lines() -> Vec<String> {
+            LINES.with(|lines| lines.borrow().clone())
+        }
+    }
+
+    /// A CalDAV resource holding two UIDs, which RFC 4791 §4.1 forbids,
+    /// isn't mirrored and gives no Event Rows, in a First Sync and an
+    /// Incoming Sync, before or after another CalDAV resource holding one of
+    /// its UIDs, which is that UID's Corresponding Server Object (ADR 0015).
+    /// Each time it is written to the Log.
     #[test]
-    fn a_server_object_holding_two_uids_is_mirrored_without_event_rows() {
+    fn a_caldav_resource_holding_two_uids_is_ignored_and_logged() {
+        let origins = [
+            TransactionOrigin::FirstSync,
+            TransactionOrigin::IncomingSync,
+        ];
+        for (origin, two_first) in origins.into_iter().flat_map(|o| [(o, false), (o, true)]) {
+            let alone = Alone::new();
+            let two = fetched("/two.ics", &format!("{OTHER}{WEEKLY}"));
+            let other = fetched("/other.ics", &OTHER.replace("Other", "Other alone"));
+            captured_log::start();
+
+            let fetched = if two_first {
+                [two, other]
+            } else {
+                [other, two]
+            };
+            alone.mirror_and_propagate(origin, &fetched);
+
+            assert_eq!(
+                alone
+                    .store
+                    .objects_at(alone.calendar_id, "/two.ics")
+                    .unwrap(),
+                []
+            );
+            let other = alone
+                .store
+                .objects_at(alone.calendar_id, "/other.ics")
+                .unwrap();
+            assert_eq!(
+                alone
+                    .store
+                    .corresponding_server_object(alone.calendar_id, "other")
+                    .unwrap(),
+                Some(other[0])
+            );
+            let titles: Vec<String> = alone.shown().into_iter().map(|shown| shown.0).collect();
+            assert_eq!(titles, ["Other alone", "Moved"]);
+            assert_eq!(
+                captured_log::lines(),
+                [format!(
+                    "Ignored the CalDAV resource \"/two.ics\" of Calendar {}: it holds \
+                     several UIDs, which RFC 4791 §4.1 forbids: \"other\", \"weekly\"",
+                    alone.calendar_id.0
+                )]
+            );
+        }
+    }
+
+    /// A mirrored Server Object that comes to hold two UIDs goes from the
+    /// Mirror, as one gone from the server goes: its UID's Event Rows go to
+    /// the UID's next Corresponding Server Object, or are deleted.
+    #[test]
+    fn a_server_object_coming_to_hold_two_uids_goes() {
         let alone = Alone::new();
-
         alone.mirror_and_propagate(
             TransactionOrigin::IncomingSync,
-            &[fetched("/two.ics", &format!("{OTHER}{WEEKLY}"))],
+            &[fetched("/weekly.ics", WEEKLY)],
         );
-
-        let two = alone
+        let weekly = alone
             .store
-            .objects_at(alone.calendar_id, "/two.ics")
+            .objects_at(alone.calendar_id, "/weekly.ics")
             .unwrap();
-        assert_eq!(two.len(), 1);
         assert_eq!(
-            alone.store.held_uid(two[0]).unwrap().as_deref(),
-            Some("other")
-        );
-        assert_eq!(
-            alone.store.holds_non_exception(two[0]).unwrap(),
-            Some(false)
-        );
-        assert_eq!(alone.shown(), [("Moved".to_owned(), alone.moved, None)]);
-
-        alone.mirror_and_propagate(
-            TransactionOrigin::IncomingSync,
-            &[fetched("/weekly-moved.ics", &format!("{WEEKLY}{OTHER}"))],
-        );
-
-        assert_eq!(
-            alone.store.held_uid(alone.object).unwrap().as_deref(),
+            alone.store.corresponding_uid(weekly[0]).unwrap().as_deref(),
             Some("weekly")
         );
-        assert_eq!(alone.holds_non_exception(), Some(false));
+
+        alone.mirror_and_propagate(
+            TransactionOrigin::IncomingSync,
+            &[fetched("/weekly.ics", &format!("{WEEKLY}{OTHER}"))],
+        );
+
+        assert_eq!(
+            alone
+                .store
+                .objects_at(alone.calendar_id, "/weekly.ics")
+                .unwrap(),
+            []
+        );
+        assert_eq!(
+            alone
+                .store
+                .corresponding_uid(alone.object)
+                .unwrap()
+                .as_deref(),
+            Some("weekly")
+        );
+        assert_eq!(alone.event_rows()[0].1.as_deref(), Some(IN_NEW_YORK));
+        assert_eq!(alone.shown().len(), 1);
+        assert_eq!(alone.shown()[0].0, "Moved");
+
+        alone.mirror_and_propagate(
+            TransactionOrigin::IncomingSync,
+            &[fetched("/weekly-moved.ics", &format!("{MOVED}{OTHER}"))],
+        );
+
+        assert_eq!(
+            alone
+                .store
+                .objects_at(alone.calendar_id, "/weekly-moved.ics")
+                .unwrap(),
+            []
+        );
         assert_eq!(alone.event_rows(), []);
         assert_eq!(alone.shown(), []);
     }

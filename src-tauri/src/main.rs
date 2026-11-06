@@ -511,10 +511,30 @@ fn hand_off_or_serve(app: &tauri::App, data_dir: &std::path::Path) {
     }
 }
 
+/// The most the Log file grows to before it starts again, the old one gone.
+const MAX_LOG_SIZE: u128 = 1_000_000;
+
+/// Writes the Log, the core's `log` lines of warnings and errors, to a file in
+/// the operating system's log directory, e.g.
+/// ~/.local/share/io.github.mmerkel.FreeCal/logs/FreeCal.log on Linux or
+/// ~/Library/Logs/io.github.mmerkel.FreeCal on macOS. The window gets no
+/// permission to write it.
+fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{Builder, RotationStrategy, Target, TargetKind, log::LevelFilter};
+    Builder::new()
+        .targets([Target::new(TargetKind::LogDir { file_name: None })])
+        .level(LevelFilter::Off)
+        .level_for("freecal_core", LevelFilter::Warn)
+        .max_file_size(MAX_LOG_SIZE)
+        .rotation_strategy(RotationStrategy::KeepOne)
+        .build()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(log_plugin())
         .manage(PickedImport::default())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).

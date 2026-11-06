@@ -1,8 +1,9 @@
-//! The CalDAV part of the Sync Engine (ADR 0013): CalDAV's Incoming Sync
-//! ([`incoming`]), its writes of the Mirror, and the rules that read the
+//! The CalDAV part of the Sync Engine (ADR 0015): CalDAV's Incoming Sync
+//! ([`incoming`]), its writes of the Mirror, the rules that read the
 //! Mirror for it: handing a UID's Event Rows to its next Corresponding
 //! Server Object ([`settle`]) and recognising a Server Object that moved
-//! ([`moved`]).
+//! ([`moved`]), and the Log lines of the CalDAV resources it doesn't mirror
+//! ([`log_ignored`]).
 
 pub(crate) mod incoming;
 
@@ -10,27 +11,12 @@ use chrono_tz::Tz;
 
 use super::WRITE_PERMISSION;
 use crate::event::{self, Loaded, ObjectId, ServerObject};
-use crate::import::read_server_objects;
+use crate::import::{Holds, read_caldav_resource};
 use crate::journal::JournalTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
 
-/// What a CalDAV Server Object holding `events`, which are not empty, holds
-/// of its UID (ADR 0013): the UID, and its Events, which are none when the
-/// Server Object holds several UIDs, as RFC 4791 §4.1 forbids. Such a Server
-/// Object is mirrored with the UID of its first Event as
-/// [`read_server_objects`] lists them, Events that aren't Exceptions first,
-/// and its Events aren't shown.
-fn of_its_uid(events: &[ImportedEvent]) -> (&str, &[ImportedEvent]) {
-    let uid = events[0].uid.as_str();
-    if events.iter().all(|event| event.uid == uid) {
-        (uid, events)
-    } else {
-        (uid, &[])
-    }
-}
-
 /// Whether `events`, a CalDAV Server Object's Events of its UID
-/// ([`of_its_uid`]), hold the Event that isn't an Exception: the single
+/// ([`Holds::OneUid`]), hold the Event that isn't an Exception: the single
 /// Event or the Recurring Event.
 fn holds_non_exception(events: &[ImportedEvent]) -> bool {
     events.iter().any(|event| event.recurrence_id().is_none())
@@ -39,8 +25,8 @@ fn holds_non_exception(events: &[ImportedEvent]) -> bool {
 /// Gives the Event Rows of `uid`, a UID of the Calendar `calendar_id` whose
 /// Corresponding Server Object went, to its next Corresponding Server
 /// Object, which is propagated to them as [`event::propagate_to_event_rows`]
-/// writes them: its Events of the UID ([`of_its_uid`]), read from its
-/// mirrored data with floating times pinned to `zone`. A UID no Server
+/// writes them: its Events of the UID, read from its mirrored data by
+/// [`read_caldav_resource`] with floating times pinned to `zone`. A UID no Server
 /// Object holds any more loses its Event Rows. Should the mirrored data no
 /// longer read, the Event Rows stay as they are, as for a Server Object
 /// FreeCal can't read.
@@ -63,21 +49,53 @@ fn settle(
     else {
         return Ok(());
     };
-    let read = read_server_objects(vec![object], zone);
-    let Some(events) = read[0]
-        .events
-        .as_deref()
-        .filter(|events| !events.is_empty())
-    else {
-        return Ok(());
+    match read_caldav_resource(&object, zone) {
+        Holds::OneUid { events, .. } => event::propagate_to_event_rows(
+            journal_transaction,
+            calendar_id,
+            corresponding_server_object,
+            uid,
+            &events,
+        ),
+        Holds::Unreadable | Holds::Nothing { .. } => Ok(()),
+    }
+}
+
+/// The most UIDs a Log line of [`log_ignored`] lists.
+const LOGGED_UIDS: usize = 5;
+
+/// The most characters of each UID a Log line of [`log_ignored`] holds.
+const LOGGED_UID_LENGTH: usize = 200;
+
+/// Writes to the Log that the Sync Engine ignored the CalDAV resource at
+/// `href` of the Calendar `calendar_id`, which holds the several UIDs
+/// `uids`, as RFC 4791 §4.1 forbids (ADR 0015).
+fn log_ignored(calendar_id: CalendarId, href: &str, uids: &[String]) {
+    log::warn!("{}", ignored_line(calendar_id, href, uids));
+}
+
+/// The Log line of [`log_ignored`]. The address and the UIDs are untrusted,
+/// so each is escaped, which keeps a newline in them from starting another
+/// line, and the line is kept short: the first [`LOGGED_UIDS`] UIDs, each cut
+/// to [`LOGGED_UID_LENGTH`] characters, and a count of the others.
+fn ignored_line(calendar_id: CalendarId, href: &str, uids: &[String]) -> String {
+    let listed: Vec<String> = uids
+        .iter()
+        .take(LOGGED_UIDS)
+        .map(|uid| {
+            let cut: String = uid.chars().take(LOGGED_UID_LENGTH).collect();
+            format!("{cut:?}")
+        })
+        .collect();
+    let others = match uids.len().saturating_sub(LOGGED_UIDS) {
+        0 => String::new(),
+        others => format!(" and {others} more"),
     };
-    let (_, events) = of_its_uid(events);
-    event::propagate_to_event_rows(
-        journal_transaction,
-        calendar_id,
-        corresponding_server_object,
-        uid,
-        events,
+    format!(
+        "Ignored the CalDAV resource {href:?} of Calendar {}: it holds several UIDs, \
+         which RFC 4791 §4.1 forbids: {}{others}",
+        calendar_id.0,
+        listed.join(", "),
     )
 }
 
@@ -180,5 +198,32 @@ pub(crate) mod testing {
         id: ObjectId,
     ) -> Result<()> {
         super::remove_object(journal_transaction, id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_log_line_of_a_caldav_resource_holding_several_uids_escapes_and_cuts_what_the_server_gave()
+     {
+        let long = "x".repeat(LOGGED_UID_LENGTH + 1);
+        let uids: Vec<String> = ["a\nforged line", long.as_str(), "c", "d", "e", "f", "g"]
+            .map(str::to_owned)
+            .into();
+
+        let line = ignored_line(CalendarId(7), "/two\r\n.ics", &uids);
+
+        assert_eq!(
+            line,
+            format!(
+                "Ignored the CalDAV resource \"/two\\r\\n.ics\" of Calendar 7: it holds several \
+                 UIDs, which RFC 4791 §4.1 forbids: \"a\\nforged line\", \"{}\", \"c\", \"d\", \
+                 \"e\" and 2 more",
+                "x".repeat(LOGGED_UID_LENGTH)
+            )
+        );
+        assert!(!line.contains('\n') && !line.contains('\r'));
     }
 }

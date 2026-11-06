@@ -306,20 +306,55 @@ pub(crate) fn preview(
     })
 }
 
-/// iCalendar objects as a server holds them, each with its Events read as
-/// [`preview`] reads files, Exceptions as Events of their own, not yet
-/// paired with their Recurring Events; none for an object FreeCal can't
-/// read. Floating times are pinned to `zone`.
-pub(crate) fn read_server_objects(objects: Vec<ServerObject>, zone: Tz) -> Vec<Fetched> {
+/// What a CalDAV resource holds of what FreeCal keeps, as the CalDAV
+/// Incoming Sync reads it (ADR 0015). RFC 4791 §4.1 allows one UID per
+/// resource, so the Sync Engine never sees several, unlike the file import.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Holds {
+    /// FreeCal can't read it.
+    Unreadable,
+    /// Nothing FreeCal keeps: no Events, or Events of several UIDs. `uids`
+    /// are the UIDs it holds in the order of its Events, several for a
+    /// CalDAV resource that is ignored, none for one holding no Events.
+    Nothing { uids: Vec<String> },
+    /// The Events of one UID, never none, Exceptions as Events of their
+    /// own, not yet paired with their Recurring Events.
+    OneUid {
+        uid: String,
+        events: Vec<ImportedEvent>,
+    },
+}
+
+/// CalDAV resources as a server holds them, each with what it holds
+/// ([`read_caldav_resource`]).
+pub(crate) fn read_caldav_resources(objects: Vec<ServerObject>, zone: Tz) -> Vec<Fetched> {
     objects
         .into_iter()
         .map(|object| {
-            let events = read_events(&object.href, object.data.as_bytes(), zone)
-                .ok()
-                .map(|read| read.events.into_iter().chain(read.exceptions).collect());
-            Fetched { object, events }
+            let holds = read_caldav_resource(&object, zone);
+            Fetched { object, holds }
         })
         .collect()
+}
+
+/// What the CalDAV resource `object` holds, its Events read as [`preview`]
+/// reads files, those that aren't Exceptions first, with floating times
+/// pinned to `zone`.
+pub(crate) fn read_caldav_resource(object: &ServerObject, zone: Tz) -> Holds {
+    let Ok(read) = read_events(&object.href, object.data.as_bytes(), zone) else {
+        return Holds::Unreadable;
+    };
+    let events: Vec<ImportedEvent> = read.events.into_iter().chain(read.exceptions).collect();
+    let mut uids: Vec<String> = Vec::new();
+    for event in &events {
+        if !uids.contains(&event.uid) {
+            uids.push(event.uid.clone());
+        }
+    }
+    match <[String; 1]>::try_from(uids) {
+        Ok([uid]) => Holds::OneUid { uid, events },
+        Err(uids) => Holds::Nothing { uids },
+    }
 }
 
 /// The Events of `.ics` files read together, in order and each UID once.
@@ -788,6 +823,49 @@ mod tests {
         let uids = store.event_uids(calendar_id).unwrap();
         assert_eq!(uids.len(), 2);
         assert!(uids.contains("kept"));
+    }
+
+    /// RFC 4791 §4.1: a CalDAV resource holds the components of one UID, so
+    /// one holding several holds nothing FreeCal keeps, unlike a file to
+    /// import.
+    #[test]
+    fn a_caldav_resource_holds_one_uid_or_nothing() {
+        let holds = |body: &str| {
+            let object = ServerObject {
+                href: "/one.ics".to_owned(),
+                etag: None,
+                data: format!("BEGIN:VCALENDAR\r\n{body}END:VCALENDAR\r\n"),
+            };
+            read_caldav_resource(&object, Tz::UTC)
+        };
+        let event = |uid: &str, extra: &str| {
+            format!(
+                "BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTART:20261005T070000Z\r\n{extra}END:VEVENT\r\n"
+            )
+        };
+        let weekly = event("weekly", "RRULE:FREQ=WEEKLY\r\n");
+        let moved = event("weekly", "RECURRENCE-ID:20261012T070000Z\r\n");
+
+        let Holds::OneUid { uid, events } = holds(&format!("{moved}{weekly}")) else {
+            panic!("one UID");
+        };
+        assert_eq!(uid, "weekly");
+        assert_eq!(events.len(), 2);
+        assert!(events[0].original.is_none(), "the Recurring Event first");
+        assert_eq!(
+            holds(&format!("{moved}{}{weekly}", event("other", ""))),
+            Holds::Nothing {
+                uids: vec!["other".to_owned(), "weekly".to_owned()]
+            }
+        );
+        assert_eq!(
+            holds("BEGIN:VTODO\r\nUID:task\r\nEND:VTODO\r\n"),
+            Holds::Nothing { uids: Vec::new() }
+        );
+        assert_eq!(
+            holds("BEGIN:VEVENT\r\nUID:no-start\r\nEND:VEVENT\r\n"),
+            Holds::Unreadable
+        );
     }
 
     #[test]

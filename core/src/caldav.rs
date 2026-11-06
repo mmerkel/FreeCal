@@ -404,7 +404,7 @@ impl Client {
                 })
             })
             .collect();
-        Ok(import::read_server_objects(objects, zone))
+        Ok(import::read_caldav_resources(objects, zone))
     }
 
     /// The URL of the principal of the user who is logged in. Asking for it
