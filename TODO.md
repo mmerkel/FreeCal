@@ -1,7 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] start again from altitude findings
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
@@ -47,13 +46,13 @@ Possible bug, for `/code-review`:
 Skipped:
 
 - [ ] split `Loaded.exceptions` in `Loaded::sorted` into those paired with an Occurrence and Events of their own, so callers can't forget the check (ties into the possible bug; changes behaviour)
-- [ ] do `Loaded::join` inside the writers that create or replace a Recurring Event (`Loaded::take`, `take_object`) instead of in import and sync
+- [ ] do `Loaded::join` inside the writers that create or replace a Recurring Event (`Loaded::take`, `propagate_to_event_rows`) instead of in import and sync
 - [ ] dedupe all Exceptions by `SEQUENCE` in `assemble`, joined ones too, and drop `latest` from `Loaded::take`
 - [ ] keep the "unreadable objects are fetched again" rule out of the CalDAV client (`Held.unreadable` in `caldav.rs`): sync passes the hrefs to fetch, so a future Remote (Google) needn't repeat it
 - [ ] unique index on `server_object (calendar_id, href)`, `objects_at` returning one object; unsure whether duplicates can arise
 - [ ] fewer `Loaded::of_uid` loads in import (`run`, up to three per Event) and sync (`join` loads even when a Recurring Event is stored; `moved` re-queries removed objects for each new one)
 - [ ] drop `journal::hash_as` and call `hash_with(…, None)` directly
-- [ ] one helper for writing a `StoredEvent` with a given recurrence ID (`take_exception`, `take_object`, `Loaded::join`)
+- [ ] one helper for writing a `StoredEvent` with a given recurrence ID (`take_exception`, `propagate_to_event_rows`, `Loaded::join`)
 - [ ] `ReadFile` in import: one list of Events, split by `original` in `assemble`
 - [ ] old-row SQL test helper for the two migration tests in `journal.rs`
 - [ ] `reschedule` in `App.svelte`: avoid the `choice!` assertions
