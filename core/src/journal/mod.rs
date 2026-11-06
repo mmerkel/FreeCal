@@ -276,40 +276,6 @@ impl JournalTransaction<'_> {
         &self.database_transaction
     }
 
-    /// Renormalises the recurrence IDs of the Combined Event Keys with the
-    /// UID `uid` of a Calendar's Server Objects and Unsent Changes as
-    /// `rejoined` gives them, for the step that renormalises the Event
-    /// Rows' ([`Loaded::join`]); a Combined Event Key it gives none for
-    /// keeps its own.
-    ///
-    /// [`Loaded::join`]: crate::event::Loaded::join
-    pub fn rejoin_combined_event_keys(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-        rejoined: impl Fn(&str) -> Option<String>,
-    ) -> Result<()> {
-        let joined = |rows: Vec<(i64, Option<String>)>| {
-            rows.into_iter()
-                .filter_map(|(row, rid)| Some((row, rejoined(rid.as_deref()?)?)))
-        };
-        for (row, joined) in joined(
-            self.database_transaction
-                .combined_event_keys_with_uid(calendar_id, uid)?,
-        ) {
-            self.database_transaction
-                .set_combined_event_key_recurrence_id(WRITE_PERMISSION, row, &joined)?;
-        }
-        for (row, joined) in joined(
-            self.database_transaction
-                .unsent_with_uid(calendar_id, uid)?,
-        ) {
-            self.database_transaction
-                .set_unsent_recurrence_id(WRITE_PERMISSION, row, &joined)?;
-        }
-        Ok(())
-    }
-
     /// Records, with the Journal Transaction's changes, that an Incoming Sync
     /// of a Calendar finished with the sync token `token`.
     pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
@@ -420,7 +386,7 @@ impl JournalTransaction<'_> {
             if !self.origin.is_incoming_sync() {
                 let combined_event_key = CombinedEventKey {
                     calendar_id: event.calendar_id,
-                    event_key: EventKeyInCalendar::new(uid, event.fields.recurrence_id.as_deref()),
+                    event_key: EventKeyInCalendar::new(uid, event.fields.recurrence_id.as_ref()),
                 };
                 self.database_transaction.add_unsent_change(
                     WRITE_PERMISSION,
@@ -512,14 +478,17 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     item(&[fields.zone_pinned.into()]);
     item(&optional(&fields.rule));
     item(fields.exdates.as_bytes());
-    item(&optional(&fields.recurrence_id));
+    let recurrence_id = fields.recurrence_id.as_ref();
+    item(&optional(
+        &recurrence_id.map(|given| given.as_given().to_owned()),
+    ));
     hasher.finalize().to_vec()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{EventFields, StoredWhen};
+    use crate::event::{EventFields, RecurrenceId, StoredWhen};
     use crate::store::UnsentChange;
     use crate::sync;
 
@@ -573,7 +542,7 @@ mod tests {
     fn exception(event: &StoredEvent, rid: &str) -> StoredEvent {
         let mut exception = event.clone();
         exception.fields.rule = None;
-        exception.fields.recurrence_id = Some(rid.to_owned());
+        exception.fields.recurrence_id = Some(RecurrenceId::given(rid));
         exception
     }
 
@@ -714,7 +683,7 @@ mod tests {
         };
         let event_keys = [
             EventKeyInCalendar::new("dentist", None),
-            EventKeyInCalendar::new("dentist", Some(EXCEPTION)),
+            EventKeyInCalendar::new("dentist", Some(&RecurrenceId::given(EXCEPTION))),
         ];
 
         let mirrored = record(
@@ -744,7 +713,10 @@ mod tests {
         );
         assert_eq!(
             pulled.store.combined_event_keys(pulled.object).unwrap(),
-            event_keys
+            [
+                ("dentist".to_owned(), None),
+                ("dentist".to_owned(), Some(EXCEPTION.to_owned()))
+            ]
         );
     }
 
@@ -823,7 +795,10 @@ mod tests {
         let pulled = Pulled::new();
         let later = pulled.mirror(
             "/user/work/copy.ics",
-            &[EventKeyInCalendar::new("dentist", Some(EXCEPTION))],
+            &[EventKeyInCalendar::new(
+                "dentist",
+                Some(&RecurrenceId::given(EXCEPTION)),
+            )],
         );
 
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
@@ -841,7 +816,10 @@ mod tests {
                     pulled.event.calendar_id,
                     &dentist_object(),
                     Some(pulled.object),
-                    &[EventKeyInCalendar::new("dentist", Some(EXCEPTION))],
+                    &[EventKeyInCalendar::new(
+                        "dentist",
+                        Some(&RecurrenceId::given(EXCEPTION)),
+                    )],
                 )?;
                 sync::testing::mirror(
                     journal_transaction,
@@ -958,10 +936,9 @@ mod tests {
             since: i64,
         ) -> UnsentChange {
             UnsentChange {
-                combined_event_key: CombinedEventKey {
-                    calendar_id: self.server,
-                    event_key: EventKeyInCalendar::new(uid, recurrence_id),
-                },
+                calendar_id: self.server,
+                uid: uid.to_owned(),
+                recurrence_id: recurrence_id.map(str::to_owned),
                 since,
             }
         }
@@ -1102,51 +1079,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(on_server.unsent(), []);
-    }
-
-    /// As [`Loaded::join`] renormalises an Exception's recurrence ID when
-    /// its Recurring Event arrives: the Unsent Change goes with the Event
-    /// Row, and the earliest `since` stays.
-    ///
-    /// [`Loaded::join`]: crate::event::Loaded::join
-    #[test]
-    fn rejoining_combined_event_keys_renormalises_the_unsent_changes() {
-        let on_server = OnServer::new();
-        let zoned = "2026-10-19T09:00:00 Europe/Berlin";
-        let mut exception = exception(&on_server.event, zoned);
-        on_server.change(7, |journal_transaction| {
-            journal_transaction.create("dentist", &exception)
-        });
-        exception.fields.recurrence_id = Some(EXCEPTION.to_owned());
-        on_server.change(9, |journal_transaction| {
-            journal_transaction.create("dentist", &exception)
-        });
-        exception.fields.recurrence_id = Some("other".to_owned());
-        on_server.change(11, |journal_transaction| {
-            journal_transaction.create("dentist", &exception)
-        });
-
-        record(
-            &on_server.store,
-            TransactionOrigin::IncomingSync,
-            13,
-            |journal_transaction| {
-                journal_transaction.rejoin_combined_event_keys(
-                    on_server.server,
-                    "dentist",
-                    |text| (text == zoned).then(|| EXCEPTION.to_owned()),
-                )
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            on_server.unsent(),
-            [
-                on_server.unsent_change("dentist", Some(EXCEPTION), 7),
-                on_server.unsent_change("dentist", Some("other"), 11)
-            ]
-        );
     }
 
     #[test]

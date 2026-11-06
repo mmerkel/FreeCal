@@ -20,7 +20,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
-use crate::event::EventFields;
+use crate::event::{EventFields, RecurrenceId};
 use crate::{CalendarId, EventId, Result};
 
 pub struct Store {
@@ -54,24 +54,24 @@ pub enum Uid<'a> {
 /// An Event Key in Calendar: a Combined Event Key without its Calendar, for
 /// where something else gives the Calendar, as a Server Object gives it its
 /// Combined Event Keys (ADR 0011).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct EventKeyInCalendar {
     pub uid: String,
-    /// Normalised as the Event Rows hold it.
-    pub recurrence_id: Option<String>,
+    /// As given (ADR 0012): compared by Occurrence, never as text.
+    pub recurrence_id: Option<RecurrenceId>,
 }
 
 impl EventKeyInCalendar {
-    pub fn new(uid: &str, recurrence_id: Option<&str>) -> Self {
+    pub fn new(uid: &str, recurrence_id: Option<&RecurrenceId>) -> Self {
         Self {
             uid: uid.to_owned(),
-            recurrence_id: recurrence_id.map(str::to_owned),
+            recurrence_id: recurrence_id.cloned(),
         }
     }
 }
 
 /// A Combined Event Key: a Calendar and an Event Key in Calendar (ADR 0011).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CombinedEventKey {
     pub calendar_id: CalendarId,
     pub event_key: EventKeyInCalendar,

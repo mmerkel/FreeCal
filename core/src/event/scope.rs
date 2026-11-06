@@ -15,7 +15,8 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    EventDraft, EventFields, Exception, Loaded, Opened, Source, StoredWhen, new_uid, rule,
+    EventDraft, EventFields, Exception, Loaded, Opened, RecurrenceId, Source, StoredWhen, new_uid,
+    rule,
 };
 use crate::journal::JournalTransaction;
 use crate::store::StoredEvent;
@@ -55,9 +56,11 @@ pub(crate) fn exception_counts(
     id: EventId,
     recurrence_id: &str,
 ) -> Result<ExceptionCounts> {
-    let rid = rule::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
     let opened = Opened::load(source, id)?;
     let loaded = &opened.loaded;
+    let rid = loaded
+        .rid_of(recurrence_id)
+        .ok_or(CoreError::OccurrenceNotFound(id))?;
     let changing = match opened.exception() {
         // As for a change, an Exception gives only its own Occurrence.
         Some(own) if own.rid.as_ref() != Some(&rid) => {
@@ -117,8 +120,11 @@ pub(crate) fn edit_occurrence(
     exceptions_too: bool,
     change: Edit,
 ) -> Result<Edited> {
-    let rid = rule::recurrence_id(recurrence_id).ok_or(CoreError::OccurrenceNotFound(id))?;
     let opened = Opened::load(journal_transaction, id)?;
+    let rid = opened
+        .loaded
+        .rid_of(recurrence_id)
+        .ok_or(CoreError::OccurrenceNotFound(id))?;
     edit_opened(
         journal_transaction,
         zone,
@@ -130,7 +136,7 @@ pub(crate) fn edit_occurrence(
     )
 }
 
-/// Changes the Occurrence `rid`, normalised, of the Event `opened` in
+/// Changes the Occurrence `rid`, in the normal form, of the Event `opened` in
 /// `scope`, as [`edit_occurrence`] does.
 fn edit_opened(
     journal_transaction: &mut JournalTransaction,
@@ -274,7 +280,9 @@ impl Changing {
                 when,
                 rule: None,
                 exdates: String::new(),
-                recurrence_id: Some(rid),
+                // FreeCal writes the recurrence IDs it makes in the normal
+                // form (ADR 0012).
+                recurrence_id: Some(RecurrenceId::given(rid)),
                 ..recurring.clone()
             },
             slot,
@@ -422,7 +430,14 @@ impl Loaded {
                 }
                 exception
             };
-            exception.recurrence_id = Some(moved);
+            // Its recurrence ID stays as given while it names the same
+            // Occurrence of `new`; one whose Occurrence moved is written in
+            // the normal form (ADR 0012).
+            let recurring = new.recurring_when();
+            let as_given = fields.recurrence_id.clone().filter(|given| {
+                given.normal_form(recurring.as_ref()).as_deref() == Some(moved.as_str())
+            });
+            exception.recurrence_id = Some(as_given.unwrap_or_else(|| RecurrenceId::given(moved)));
             let written = self.write_exception(journal_transaction, Some(*id), new, exception)?;
             if Some(*id) == changing {
                 kept = Some(written);
@@ -572,7 +587,9 @@ fn now_at(
 ) -> Result<Edited> {
     if let Some(kept) = kept {
         let event = journal_transaction.find_event(kept)?;
-        let recurrence_id = event.fields.recurrence_id.clone();
+        let recurring = new.recurring_when();
+        let recurrence_id = event.fields.recurrence_id.as_ref();
+        let recurrence_id = recurrence_id.and_then(|given| given.normal_form(recurring.as_ref()));
         return Ok(edited(kept, event, recurrence_id));
     }
     let (id, fields) = new.recurring_event();
@@ -766,11 +783,8 @@ fn alone(
             };
             // One without its Recurring Event, or changing none of its
             // Occurrences, is an Event of its own.
-            let recurrence_id = event
-                .fields
-                .recurrence_id
-                .clone()
-                .filter(|_| recurring.is_some() && changing.slot.is_some());
+            let recurrence_id =
+                (recurring.is_some() && changing.slot.is_some()).then(|| rid.to_owned());
             Ok(edited(id, event, recurrence_id))
         }
     }

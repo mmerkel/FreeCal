@@ -4,6 +4,7 @@ use chrono::{
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
+use super::RecurrenceId;
 use crate::{CoreError, ImportedWhen, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
@@ -262,21 +263,14 @@ pub(crate) struct EventFields {
     /// A Recurring Event's cancelled Occurrences: their recurrence IDs,
     /// separated by commas.
     pub exdates: String,
-    /// For an Exception, the recurrence ID of the Occurrence it changed.
-    pub recurrence_id: Option<String>,
+    /// For an Exception, the recurrence ID of the Occurrence it changed, as
+    /// given (ADR 0012).
+    pub recurrence_id: Option<RecurrenceId>,
 }
 
 impl EventFields {
     pub fn description(&self) -> StructuredText {
         StructuredText::from_description(&self.description, self.description_html)
-    }
-
-    /// For an Exception, its recurrence ID normalised; none for every other
-    /// Event, and for a stored recurrence ID that isn't one.
-    pub fn rid(&self) -> Option<String> {
-        self.recurrence_id
-            .as_deref()
-            .and_then(super::rule::recurrence_id)
     }
 }
 

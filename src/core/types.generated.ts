@@ -118,7 +118,8 @@ repeat: Repeat | null,
 customRepeat: boolean,
 /**
  * For an Exception, the recurrence ID of the Occurrence of its Recurring
- * Event that it changed; none for every other Event.
+ * Event that it changed, in the normal form, or as stored when it isn't
+ * one; none for every other Event.
  */
 recurrenceId: string | null, };
 
@@ -193,8 +194,10 @@ export type Occurrence = {
  */
 eventId: EventId, calendarId: CalendarId, title: string, when: When,
 /**
- * Which Occurrence of a Recurring Event this is: its original start, as
- * text that only the core reads. None for a single Event, and for an
+ * Which Occurrence of a Recurring Event this is: its original start in
+ * the normal form (ADR 0012), as text that only the core reads. The
+ * commands that take it find the Occurrence's Exception by comparing
+ * by Occurrence. None for a single Event, and for an
  * Exception that is an Event of its own: without its Recurring Event,
  * or changing none of its Occurrences.
  */

@@ -1,13 +1,12 @@
 //! The Sync Engine's writes (ADR 0011): a Server Object's data in the Mirror
-//! (`server_object`) and its Combined Event Keys (`combined_event_key`).
-//! Renormalising Combined Event Keys with their Event Rows is the Change
-//! Journal's write, in [`journal`](super::journal). Each takes a
+//! (`server_object`) and its Combined Event Keys (`combined_event_key`),
+//! which hold its recurrence IDs as given (ADR 0012). Each takes a
 //! [`SyncEngineWritePermission`], which only [`crate::sync`] can make, and is
 //! a method of a [`DatabaseTransaction`].
 
 use rusqlite::params;
 
-use crate::event::{ObjectId, ServerObject};
+use crate::event::{ObjectId, RecurrenceId, ServerObject};
 use crate::store::{DatabaseTransaction, EventKeyInCalendar};
 use crate::sync::SyncEngineWritePermission;
 use crate::{CalendarId, Result};
@@ -37,23 +36,6 @@ impl DatabaseTransaction<'_> {
         Ok(id)
     }
 
-    /// Makes `event_keys`, all with the UID `uid`, the Server Object `id`'s
-    /// Combined Event Keys with that UID.
-    pub(crate) fn write_uid_combined_event_keys(
-        &self,
-        permission: &SyncEngineWritePermission,
-        id: ObjectId,
-        uid: &str,
-        event_keys: &[EventKeyInCalendar],
-    ) -> Result<()> {
-        debug_assert!(event_keys.iter().all(|event_key| event_key.uid == uid));
-        self.tx.execute(
-            "DELETE FROM combined_event_key WHERE object_id = ?1 AND uid = ?2",
-            params![id.0, uid],
-        )?;
-        self.insert_combined_event_keys(permission, id, event_keys)
-    }
-
     /// Adds `event_keys` to the Server Object `id`'s Combined Event Keys.
     fn insert_combined_event_keys(
         &self,
@@ -65,7 +47,11 @@ impl DatabaseTransaction<'_> {
             "INSERT INTO combined_event_key (object_id, uid, recurrence_id) VALUES (?1, ?2, ?3)",
         )?;
         for event_key in event_keys {
-            stmt.execute(params![id.0, event_key.uid, event_key.recurrence_id])?;
+            stmt.execute(params![
+                id.0,
+                event_key.uid,
+                event_key.recurrence_id.as_ref().map(RecurrenceId::as_given)
+            ])?;
         }
         Ok(())
     }

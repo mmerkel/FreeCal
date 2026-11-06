@@ -1,13 +1,14 @@
 //! The writes of the tables the Change Journal guards (ADR 0011): Event
 //! Rows (`event`), Journal Transactions and their Journal Event
-//! Modifications, Unsent Changes, deleting Calendars and accounts, and
-//! renormalising Combined Event Keys with their Event Rows. Each takes a
-//! [`JournalWritePermission`], which only [`crate::journal`] can make, and is
+//! Modifications, Unsent Changes, and deleting Calendars and accounts. Each
+//! takes a [`JournalWritePermission`], which only [`crate::journal`] can
+//! make, and is
 //! a method of a [`DatabaseTransaction`].
 
 use rusqlite::params;
 
 use super::EVENT_FIELDS;
+use crate::event::RecurrenceId;
 use crate::journal::{JournalTransactionId, JournalWritePermission};
 use crate::store::{CombinedEventKey, DatabaseTransaction, StoredEvent};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
@@ -58,7 +59,7 @@ impl DatabaseTransaction<'_> {
                 fields.zone_pinned,
                 fields.rule,
                 fields.exdates,
-                fields.recurrence_id,
+                fields.recurrence_id.as_ref().map(RecurrenceId::as_given),
             ],
         )?;
         Ok(id.unwrap_or(EventId(self.tx.last_insert_rowid())))
@@ -67,22 +68,6 @@ impl DatabaseTransaction<'_> {
     /// Deletes the Event Row `id`.
     pub(crate) fn delete_event(&self, _: &JournalWritePermission, id: EventId) -> Result<()> {
         self.tx.execute("DELETE FROM event WHERE id = ?1", [id.0])?;
-        Ok(())
-    }
-
-    /// Writes the recurrence ID of the Combined Event Key `row`, an ID
-    /// [`Store::combined_event_keys_with_uid`](crate::store::Store::combined_event_keys_with_uid)
-    /// gave.
-    pub(crate) fn set_combined_event_key_recurrence_id(
-        &self,
-        _: &JournalWritePermission,
-        row: i64,
-        recurrence_id: &str,
-    ) -> Result<()> {
-        self.tx.execute(
-            "UPDATE combined_event_key SET recurrence_id = ?2 WHERE rowid = ?1",
-            params![row, recurrence_id],
-        )?;
         Ok(())
     }
 
@@ -103,38 +88,13 @@ impl DatabaseTransaction<'_> {
             "INSERT INTO unsent_change (calendar_id, uid, recurrence_id, since) \
              SELECT id, ?2, ?3, ?4 FROM calendar WHERE id = ?1 AND url IS NOT NULL \
              ON CONFLICT DO NOTHING",
-            params![calendar_id.0, event_key.uid, event_key.recurrence_id, since],
+            params![
+                calendar_id.0,
+                event_key.uid,
+                event_key.recurrence_id.as_ref().map(RecurrenceId::as_given),
+                since
+            ],
         )?;
-        Ok(())
-    }
-
-    /// Writes the recurrence ID of the Unsent Change `row`, an ID
-    /// [`Store::unsent_with_uid`](crate::store::Store::unsent_with_uid) gave. Should its Calendar and UID have
-    /// that Combined Event Key already, the two become one, with the earlier
-    /// `since`.
-    pub(crate) fn set_unsent_recurrence_id(
-        &self,
-        _: &JournalWritePermission,
-        row: i64,
-        recurrence_id: &str,
-    ) -> Result<()> {
-        let merged = self.tx.execute(
-            "UPDATE unsent_change AS kept \
-             SET since = MIN(kept.since, (SELECT since FROM unsent_change WHERE rowid = ?1)) \
-             WHERE kept.rowid <> ?1 AND kept.recurrence_id = ?2 \
-               AND (kept.calendar_id, kept.uid) = \
-                 (SELECT calendar_id, uid FROM unsent_change WHERE rowid = ?1)",
-            params![row, recurrence_id],
-        )?;
-        if merged > 0 {
-            self.tx
-                .execute("DELETE FROM unsent_change WHERE rowid = ?1", [row])?;
-        } else {
-            self.tx.execute(
-                "UPDATE unsent_change SET recurrence_id = ?2 WHERE rowid = ?1",
-                params![row, recurrence_id],
-            )?;
-        }
         Ok(())
     }
 
@@ -192,7 +152,9 @@ impl DatabaseTransaction<'_> {
                 fields.map(|fields| fields.zone_pinned),
                 fields.and_then(|fields| fields.rule.as_ref()),
                 fields.map(|fields| &fields.exdates),
-                fields.and_then(|fields| fields.recurrence_id.as_ref()),
+                fields
+                    .and_then(|fields| fields.recurrence_id.as_ref())
+                    .map(RecurrenceId::as_given),
             ],
         )?;
         Ok(())

@@ -939,7 +939,7 @@ mod server_objects {
 
         /// ADR 0011: the Server Object holding the Recurring Event is the
         /// UID's Corresponding Server Object; the other keeps its Combined
-        /// Event Keys, renormalised with the Event Rows, and becomes it when
+        /// Event Keys, with recurrence IDs as given, and becomes it when
         /// that goes.
         #[test]
         fn hides_once_its_recurring_event_arrives_in_another_object_until_that_goes() {

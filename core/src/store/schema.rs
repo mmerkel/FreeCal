@@ -30,13 +30,14 @@ const MIGRATIONS: &[&str] = &[
     // `format`, and `unreadable` once FreeCal couldn't read the server's
     // version, so that the Mirror holds the last version it could (ADR
     // 0010). Each Server Object's Combined Event Keys are the UID and
-    // recurrence ID of each of its components, the recurrence ID normalised
-    // as the Event Rows hold it: a Calendar's Event Rows with one UID find
-    // the Server Object they belong to through them (ADR 0011).
+    // recurrence ID of each of its components, the recurrence ID as given:
+    // a Calendar's Event Rows with one UID find the Server Object they
+    // belong to through them (ADR 0011). Recurrence IDs everywhere are
+    // stored as given and compared by Occurrence, never in SQL (ADR 0012).
     //
     // An Unsent Change is the Combined Event Key of an Event in a server
     // Calendar that FreeCal changed since, to be sent: its UID and
-    // recurrence ID, as the Event Rows hold them, and `since` when it was
+    // recurrence ID, as the Event Row holds them, and `since` when it was
     // first changed (Unix seconds). Every change but an Incoming Sync adds the Event's
     // previous and new Combined Event Key; each is there once, the two
     // indexes keeping it so with and without a recurrence ID (ADR 0011).

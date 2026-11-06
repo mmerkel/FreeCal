@@ -2,7 +2,7 @@ mod support;
 
 use freecal_core::{
     CalendarId, Core, CoreError, EventDraft, EventId, ExistingEvents, Frequency, ImportFile,
-    Occurrence, Repeat, RepeatEnd, Signal, When,
+    Occurrence, Repeat, RepeatEnd, Scope, Signal, When,
 };
 use support::{Harness, all_day, calendar, date, draft, event, ics, timed};
 
@@ -819,6 +819,45 @@ mod exceptions_alone {
             invited.repeat,
             Some(repeat(Frequency::Weekly, 1, until("2026-11-02")))
         );
+    }
+
+    /// ADR 0012: the Occurrence's ID is in the normal form, and the commands
+    /// find the Exception by it, stored as given in New York's time.
+    #[test]
+    fn once_joined_it_moves_and_deletes_as_its_occurrence_by_the_id_it_shows() {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home");
+        import(&core, home.id, INVITATION, ExistingEvents::Update);
+        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
+        let invited = occurrences(&core, "2026-10-12", "2026-10-13").remove(0);
+        let rid = invited.recurrence_id.unwrap();
+        assert_eq!(
+            (invited.event_id, rid.as_str()),
+            (id, "2026-10-12T09:00:00")
+        );
+
+        let when = timed("2026-10-12T15:00:00", "2026-10-12T16:00:00");
+        core.reschedule_occurrence(id, &rid, Scope::This, false, when)
+            .unwrap();
+
+        let moved = occurrences(&core, "2026-10-12", "2026-10-13");
+        assert_eq!(
+            moved
+                .iter()
+                .map(|occurrence| (
+                    occurrence.event_id,
+                    occurrence.when,
+                    occurrence.recurrence_id.as_deref()
+                ))
+                .collect::<Vec<_>>(),
+            [(id, when, Some(rid.as_str()))]
+        );
+        assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
+        core.delete_occurrence(id, &rid).unwrap();
+        assert!(occurrences(&core, "2026-10-12", "2026-10-13").is_empty());
+        assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 3);
     }
 
     /// Ticket 87's rule: an Occurrence has one Exception.

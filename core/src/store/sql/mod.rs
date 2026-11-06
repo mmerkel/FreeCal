@@ -25,10 +25,8 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
-#[cfg(test)]
-use super::{CombinedEventKey, EventKeyInCalendar};
 use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
-use crate::event::{EventFields, ObjectId, ServerObject, StoredRange, StoredWhen};
+use crate::event::{EventFields, ObjectId, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::journal::{JournalEventModification, JournalTransactionId};
 use crate::remote::{Held, SyncPoint};
 use crate::{
@@ -71,7 +69,9 @@ fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
         zone_pinned: row.get(first + 9)?,
         rule: row.get(first + 10)?,
         exdates: row.get(first + 11)?,
-        recurrence_id: row.get(first + 12)?,
+        recurrence_id: row
+            .get::<_, Option<String>>(first + 12)?
+            .map(RecurrenceId::given),
     })
 }
 
@@ -318,21 +318,14 @@ impl Store {
     }
 
     /// The Combined Event Keys of the Server Object `id`, one per component,
-    /// in the order they were written.
+    /// in the order they were written, each its UID and recurrence ID as
+    /// stored, for tests to compare.
     #[cfg(test)]
-    pub fn combined_event_keys(&self, id: ObjectId) -> Result<Vec<EventKeyInCalendar>> {
+    pub fn combined_event_keys(&self, id: ObjectId) -> Result<Vec<(String, Option<String>)>> {
         let mut stmt = self.conn.prepare(
             "SELECT uid, recurrence_id FROM combined_event_key WHERE object_id = ?1 ORDER BY rowid",
         )?;
-        let combined_event_keys = stmt
-            .query_map([id.0], |row| {
-                Ok(EventKeyInCalendar {
-                    uid: row.get(0)?,
-                    recurrence_id: row.get(1)?,
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(combined_event_keys)
+        readable(stmt.query_map([id.0], |row| Ok((row.get(0)?, row.get(1)?)))?)
     }
 
     /// The Server Object `id` as the server last gave it, none if it is
@@ -502,41 +495,6 @@ impl Store {
             .optional()?)
     }
 
-    /// The ID and recurrence ID of each Combined Event Key of the Calendar's
-    /// Server Objects with the UID `uid`.
-    pub(crate) fn combined_event_keys_with_uid(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Vec<(i64, Option<String>)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT combined_event_key.rowid, combined_event_key.recurrence_id \
-             FROM combined_event_key \
-             JOIN server_object ON server_object.id = combined_event_key.object_id \
-             WHERE server_object.calendar_id = ?1 AND combined_event_key.uid = ?2 \
-             ORDER BY combined_event_key.rowid",
-        )?;
-        readable(stmt.query_map(params![calendar_id.0, uid], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?)
-    }
-
-    /// The ID and recurrence ID of each Unsent Change of a Calendar with the
-    /// UID `uid`.
-    pub(crate) fn unsent_with_uid(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Vec<(i64, Option<String>)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT rowid, recurrence_id FROM unsent_change \
-             WHERE calendar_id = ?1 AND uid = ?2 ORDER BY rowid",
-        )?;
-        readable(stmt.query_map(params![calendar_id.0, uid], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?)
-    }
-
     /// Every Unsent Change, in the order they were added.
     #[cfg(test)]
     pub fn unsent_changes(&self) -> Result<Vec<UnsentChange>> {
@@ -546,13 +504,9 @@ impl Store {
         let unsent = stmt
             .query_map([], |row| {
                 Ok(UnsentChange {
-                    combined_event_key: CombinedEventKey {
-                        calendar_id: CalendarId(row.get(0)?),
-                        event_key: EventKeyInCalendar {
-                            uid: row.get(1)?,
-                            recurrence_id: row.get(2)?,
-                        },
-                    },
+                    calendar_id: CalendarId(row.get(0)?),
+                    uid: row.get(1)?,
+                    recurrence_id: row.get(2)?,
                     since: row.get(3)?,
                 })
             })?
@@ -620,11 +574,14 @@ impl Store {
     }
 }
 
-/// A row of `unsent_change`, for tests to compare.
+/// A row of `unsent_change` as stored, its recurrence ID as text, for tests
+/// to compare.
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnsentChange {
-    pub combined_event_key: CombinedEventKey,
+    pub calendar_id: CalendarId,
+    pub uid: String,
+    pub recurrence_id: Option<String>,
     pub since: i64,
 }
 
