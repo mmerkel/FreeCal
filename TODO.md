@@ -2,6 +2,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] start from "simplifying" session - go through "skipped" items in grilling session
+- [ ] code architecture: are there any possible simplifications that offer themselves, e.g. new invariants inside of the code that appear when pusing rare cases to the edge?
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
