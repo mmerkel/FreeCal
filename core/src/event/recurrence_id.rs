@@ -15,9 +15,8 @@ use crate::import::{ImportedWhen, Time};
 /// A recurrence ID as obtained: from a file or a server, from FreeCal in the
 /// Normal Form for the Exceptions it makes, or read back from a stored field
 /// or from the window, untrusted. It has no `PartialEq`, so that no code
-/// compares recurrence IDs as text: its comparisons,
-/// [`RecurrenceId::same_occurrence`] and the [`NormalForm`] it rests on,
-/// take the Recurring Event, or its absence.
+/// compares recurrence IDs as text: they compare by their [`NormalForm`],
+/// which takes the Recurring Event, or its absence.
 #[derive(Debug, Clone)]
 pub(crate) struct RecurrenceId(String);
 
@@ -54,16 +53,6 @@ impl RecurrenceId {
             Some(recurring) => in_normal_form(&original, recurring),
             None => NormalForm(Self::of_original(&original).0),
         })
-    }
-
-    /// Whether it and `other` name the same Occurrence of a Recurring Event
-    /// at `recurring`, or, with none, the same original start as obtained.
-    /// One that isn't a recurrence ID names none.
-    pub fn same_occurrence(&self, other: &Self, recurring: Option<&ImportedWhen>) -> bool {
-        match (self.normal_form(recurring), other.normal_form(recurring)) {
-            (Some(one), Some(other)) => one == other,
-            _ => false,
-        }
     }
 }
 
@@ -140,9 +129,10 @@ mod tests {
     use chrono_tz::Europe::Berlin;
 
     use super::*;
+    use crate::event::when::WALL_TIME;
 
     fn wall(text: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S").unwrap()
+        NaiveDateTime::parse_from_str(text, WALL_TIME).unwrap()
     }
 
     /// A Recurring Event at 9:00 in Berlin on 12 October 2026.
@@ -160,6 +150,19 @@ mod tests {
         ImportedWhen::AllDay {
             start: date,
             end: date.succ_opt().unwrap(),
+        }
+    }
+
+    impl RecurrenceId {
+        /// Whether it and `other` name the same Occurrence of a Recurring
+        /// Event at `recurring`, or, with none, the same original start as
+        /// obtained, as the pairing of Exceptions compares them. One that
+        /// isn't a recurrence ID names none.
+        fn same_occurrence(&self, other: &Self, recurring: Option<&ImportedWhen>) -> bool {
+            match (self.normal_form(recurring), other.normal_form(recurring)) {
+                (Some(one), Some(other)) => one == other,
+                _ => false,
+            }
         }
     }
 

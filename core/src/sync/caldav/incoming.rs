@@ -20,10 +20,13 @@ pub(crate) fn incoming_sync(
     calendar_id: CalendarId,
     changes: &Changes,
 ) -> Result<()> {
-    journal_transaction.writable(calendar_id)?;
     let mut removed = Vec::new();
     for href in &changes.removed {
-        removed.extend(journal_transaction.objects_at(calendar_id, href)?);
+        removed.extend(
+            journal_transaction
+                .database_transaction()
+                .objects_at(calendar_id, href)?,
+        );
     }
     mirror_and_propagate(
         journal_transaction,
@@ -60,12 +63,14 @@ pub(crate) fn mirror_and_propagate(
     zone: Tz,
     moved_from: &mut Vec<ObjectId>,
 ) -> Result<()> {
+    journal_transaction.writable(calendar_id)?;
     for one in fetched {
         let Some(events) = &one.events else {
             unreadable(journal_transaction, calendar_id, &one.object.href)?;
             continue;
         };
         let at = journal_transaction
+            .database_transaction()
             .objects_at(calendar_id, &one.object.href)?
             .first()
             .copied();
@@ -81,7 +86,9 @@ pub(crate) fn mirror_and_propagate(
             None => moved(journal_transaction, uid, moved_from)?,
         };
         let corresponding_uid = match object {
-            Some(object) => journal_transaction.corresponding_uid(object)?,
+            Some(object) => journal_transaction
+                .database_transaction()
+                .corresponding_uid(object)?,
             None => None,
         };
         let object = mirror(
@@ -94,7 +101,11 @@ pub(crate) fn mirror_and_propagate(
         )?;
         event::propagate_to_event_rows(journal_transaction, calendar_id, object, uid, events)?;
         if let Some(lost) = corresponding_uid
-            && journal_transaction.corresponding_uid(object)?.as_ref() != Some(&lost)
+            && journal_transaction
+                .database_transaction()
+                .corresponding_uid(object)?
+                .as_ref()
+                != Some(&lost)
         {
             settle(journal_transaction, calendar_id, &lost, zone)?;
         }
@@ -111,7 +122,9 @@ fn remove(
     object: ObjectId,
     zone: Tz,
 ) -> Result<()> {
-    let corresponding_uid = journal_transaction.corresponding_uid(object)?;
+    let corresponding_uid = journal_transaction
+        .database_transaction()
+        .corresponding_uid(object)?;
     remove_object(journal_transaction, object)?;
     match corresponding_uid {
         Some(uid) => settle(journal_transaction, calendar_id, &uid, zone),
@@ -129,7 +142,7 @@ mod tests {
     use crate::import::{self, ExistingEvents, ImportFile, read_server_objects};
     use crate::journal::{self, JournalTransactionId, TransactionOrigin, record};
     use crate::store::{Store, Uid};
-    use crate::{AvailableCalendar, EventId, Provider, ServerLogin, ServerObject};
+    use crate::{EventId, ServerObject};
 
     /// A weekly Recurring Event with three Occurrences, from 5 October.
     const WEEKLY: &str = "BEGIN:VEVENT\r\nUID:weekly\r\nSUMMARY:Weekly\r\n\
@@ -184,35 +197,7 @@ mod tests {
         fn new() -> Self {
             let directory = tempfile::TempDir::new().unwrap();
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
-            let login = ServerLogin {
-                url: "https://dav.example/".to_owned(),
-                username: "anna".to_owned(),
-            };
-            let available = AvailableCalendar {
-                url: "/user/work/".to_owned(),
-                name: "Work".to_owned(),
-                colour: None,
-                read_only: false,
-            };
-            let calendar_id = store
-                .write(|database_transaction| {
-                    let account = database_transaction.insert_server_account(
-                        Provider::CalDav,
-                        &login,
-                        "key",
-                    )?;
-                    database_transaction.insert_server_calendar(account.id, &available)
-                })
-                .unwrap()
-                .id;
-            // A new server Calendar starts marked read-only.
-            store
-                .connection()
-                .execute(
-                    "UPDATE calendar SET read_only = 0 WHERE id = ?1",
-                    [calendar_id.0],
-                )
-                .unwrap();
+            let calendar_id = store.writable_server_calendar();
             let alone = Self {
                 _directory: directory,
                 calendar_id,

@@ -50,13 +50,17 @@ fn settle(
     uid: &str,
     zone: Tz,
 ) -> Result<()> {
-    let Some(corresponding_server_object) =
-        journal_transaction.corresponding_server_object(calendar_id, uid)?
+    let Some(corresponding_server_object) = journal_transaction
+        .database_transaction()
+        .corresponding_server_object(calendar_id, uid)?
     else {
         return Loaded::of_uid(journal_transaction, calendar_id, uid)?
             .delete_all(journal_transaction);
     };
-    let Some(object) = journal_transaction.server_object(corresponding_server_object)? else {
+    let Some(object) = journal_transaction
+        .database_transaction()
+        .server_object(corresponding_server_object)?
+    else {
         return Ok(());
     };
     let read = read_server_objects(vec![object], zone);
@@ -85,7 +89,12 @@ fn moved(
     moved_from: &mut Vec<ObjectId>,
 ) -> Result<Option<ObjectId>> {
     for (index, &object) in moved_from.iter().enumerate() {
-        if journal_transaction.held_uid(object)?.as_deref() == Some(uid) {
+        if journal_transaction
+            .database_transaction()
+            .held_uid(object)?
+            .as_deref()
+            == Some(uid)
+        {
             return Ok(Some(moved_from.remove(index)));
         }
     }
@@ -97,7 +106,8 @@ fn moved(
 /// one, and returns its ID. It holds the UID `uid`, and the Event of it
 /// that isn't an Exception when `holds_non_exception`. Written in the
 /// Database Transaction of the Incoming Sync's `journal_transaction`, as
-/// only an Incoming Sync knows what the server holds.
+/// only an Incoming Sync knows what the server holds, which checked that the
+/// Calendar is writable.
 fn mirror(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,
@@ -106,7 +116,6 @@ fn mirror(
     uid: &str,
     holds_non_exception: bool,
 ) -> Result<ObjectId> {
-    journal_transaction.writable(calendar_id)?;
     journal_transaction.database_transaction().write_object(
         WRITE_PERMISSION,
         calendar_id,

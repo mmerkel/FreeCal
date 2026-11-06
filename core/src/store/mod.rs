@@ -90,6 +90,39 @@ impl Store {
         &self.conn
     }
 
+    /// Adds a CalDAV Account with one server Calendar that isn't Read-only,
+    /// and returns the Calendar.
+    #[cfg(test)]
+    pub(crate) fn writable_server_calendar(&self) -> CalendarId {
+        use crate::{AvailableCalendar, Provider, ServerLogin};
+        let login = ServerLogin {
+            url: "https://dav.example/".to_owned(),
+            username: "anna".to_owned(),
+        };
+        let available = AvailableCalendar {
+            url: "/user/work/".to_owned(),
+            name: "Work".to_owned(),
+            colour: None,
+            read_only: false,
+        };
+        let calendar_id = self
+            .write(|database_transaction| {
+                let account =
+                    database_transaction.insert_server_account(Provider::CalDav, &login, "key")?;
+                database_transaction.insert_server_calendar(account.id, &available)
+            })
+            .unwrap()
+            .id;
+        // A new server Calendar starts marked read-only.
+        self.conn
+            .execute(
+                "UPDATE calendar SET read_only = 0 WHERE id = ?1",
+                [calendar_id.0],
+            )
+            .unwrap();
+        calendar_id
+    }
+
     /// Runs `write` in a Database Transaction of its own, and commits it
     /// once `write` succeeds: if it fails, nothing it wrote is kept. How
     /// code writes, but where something must hold the Database Transaction,

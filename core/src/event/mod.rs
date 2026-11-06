@@ -269,18 +269,16 @@ impl Loaded {
                 )?;
             }
         }
-        let mut left: Vec<_> = self.exceptions.iter().collect();
-        for (_, exception) in exceptions {
-            let same = exception.recurrence_id().and_then(|obtained| {
-                left.iter().position(|stored| {
-                    stored
-                        .fields
-                        .recurrence_id
-                        .as_ref()
-                        .is_some_and(|rid| rid.same_occurrence(&obtained, recurring))
-                })
-            });
-            let (previous, fields) = match same.map(|index| left.remove(index)) {
+        let mut left: Vec<_> = self
+            .exceptions
+            .iter()
+            .map(|stored| (normal_form(&stored.fields, recurring), stored))
+            .collect();
+        for (key, exception) in exceptions {
+            let same = key
+                .as_ref()
+                .and_then(|key| left.iter().position(|(rid, _)| rid.as_ref() == Some(key)));
+            let (previous, fields) = match same.map(|index| left.remove(index).1) {
                 Some(stored) => {
                     let kept = stored.fields.recurrence_id.clone();
                     (
@@ -292,7 +290,7 @@ impl Loaded {
             };
             self.write_exception(journal_transaction, previous, self, fields)?;
         }
-        for stored in left {
+        for (_, stored) in left {
             if !self.of_its_own(stored) {
                 journal_transaction.delete(stored.id)?;
             }
@@ -699,35 +697,52 @@ pub(crate) fn propagate_to_event_rows(
     uid: &str,
     events: &[ImportedEvent],
 ) -> Result<()> {
-    if journal_transaction.corresponding_server_object(calendar_id, uid)? != Some(object) {
+    if journal_transaction
+        .database_transaction()
+        .corresponding_server_object(calendar_id, uid)?
+        != Some(object)
+    {
         return Ok(());
     }
     let held = events
         .iter()
         .find(|event| event.original.is_none() && event.rule.is_some())
         .map(|event| event.when);
-    let recurring = match held {
-        Some(when) => Some(when),
-        None => Loaded::of_uid(journal_transaction, calendar_id, uid)?.recurring_when(),
-    };
-    let occurrence = |obtained: Option<RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
-    let mut left = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
+    let event_rows = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
+    // The Recurring Event of the Event Rows, chosen as `Loaded` chooses it:
+    // the first Event Row that isn't an Exception, if it repeats.
+    let recurring = held.or_else(|| {
+        event_rows
+            .iter()
+            .find(|event_row| event_row.fields.recurrence_id.is_none())
+            .filter(|event_row| event_row.fields.rule.is_some())
+            .and_then(|event_row| event_row.fields.when.to_imported().ok())
+    });
+    let occurrence = |obtained: Option<&RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
+    let mut left: Vec<_> = event_rows
+        .into_iter()
+        .map(|event_row| {
+            (
+                occurrence(event_row.fields.recurrence_id.as_ref()),
+                event_row,
+            )
+        })
+        .collect();
     let latest = latest(
         events
             .iter()
-            .map(|event| (occurrence(event.recurrence_id()), event)),
+            .map(|event| (occurrence(event.recurrence_id().as_ref()), event)),
     );
     for (key, incoming) in latest {
         let same = key.as_ref().and_then(|key| {
-            left.iter().position(|event_row| {
-                occurrence(event_row.fields.recurrence_id.clone()).as_ref() == Some(key)
-            })
+            left.iter()
+                .position(|(occurrence, _)| occurrence.as_ref() == Some(key))
         });
         let event = |fields: EventFields| StoredEvent {
             calendar_id,
             fields,
         };
-        match same.map(|index| left.remove(index)) {
+        match same.map(|index| left.remove(index).1) {
             Some(event_row) => journal_transaction.replace(
                 event_row.id,
                 &event(fields_over(
@@ -739,7 +754,7 @@ pub(crate) fn propagate_to_event_rows(
             None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
         }
     }
-    for event_row in left {
+    for (_, event_row) in left {
         journal_transaction.delete(event_row.id)?;
     }
     Ok(())
@@ -750,7 +765,7 @@ pub(crate) fn propagate_to_event_rows(
 /// an Exception, the Normal Form for an Exception, and none for a
 /// recurrence ID that isn't one, which pairs with nothing.
 fn occurrence_key(
-    obtained: Option<RecurrenceId>,
+    obtained: Option<&RecurrenceId>,
     recurring: Option<&ImportedWhen>,
 ) -> Option<Option<NormalForm>> {
     match obtained {

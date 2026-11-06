@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::event::{ObjectId, ServerObject, Source, rule};
+use crate::event::{Source, rule};
 use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Uid, UidEvent};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
@@ -230,47 +230,10 @@ pub(crate) struct JournalTransaction<'a> {
 }
 
 impl JournalTransaction<'_> {
-    pub fn find_event(&self, id: EventId) -> Result<StoredEvent> {
-        self.database_transaction.find_event(id)
-    }
-
-    /// The Server Objects of a Calendar at `href`, in the order they were
-    /// added.
-    pub fn objects_at(&self, calendar_id: CalendarId, href: &str) -> Result<Vec<ObjectId>> {
-        self.database_transaction.objects_at(calendar_id, href)
-    }
-
-    /// The Corresponding Server Object of the UID `uid` in a Calendar
-    /// ([`Store::corresponding_server_object`]).
-    pub fn corresponding_server_object(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Option<ObjectId>> {
-        self.database_transaction
-            .corresponding_server_object(calendar_id, uid)
-    }
-
-    /// The UID the Server Object `id` holds if it is its Corresponding
-    /// Server Object ([`Store::corresponding_uid`]).
-    pub fn corresponding_uid(&self, id: ObjectId) -> Result<Option<String>> {
-        self.database_transaction.corresponding_uid(id)
-    }
-
-    /// The UID the CalDAV Server Object `id` holds, whether it is its
-    /// Corresponding Server Object or not.
-    pub fn held_uid(&self, id: ObjectId) -> Result<Option<String>> {
-        self.database_transaction.held_uid(id)
-    }
-
-    /// The Server Object `id` as the Mirror holds it, none if it is gone.
-    pub fn server_object(&self, id: ObjectId) -> Result<Option<ServerObject>> {
-        self.database_transaction.server_object(id)
-    }
-
-    /// The Database Transaction it runs in, for writes outside the Journal
-    /// Transaction that commit with it, such as an Incoming Sync's to the
-    /// Mirror.
+    /// The Database Transaction it runs in: for reads of the Local Store
+    /// that see the Journal Transaction's writes, and for writes outside the
+    /// Journal Transaction that commit with it, such as an Incoming Sync's to
+    /// the Mirror.
     pub fn database_transaction(&self) -> &DatabaseTransaction<'_> {
         &self.database_transaction
     }
@@ -488,7 +451,7 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{EventFields, RecurrenceId, StoredWhen};
+    use crate::event::{EventFields, ObjectId, RecurrenceId, ServerObject, StoredWhen};
     use crate::store::UnsentChange;
     use crate::sync;
 
@@ -835,39 +798,10 @@ mod tests {
 
     impl OnServer {
         fn new() -> Self {
-            use crate::{AvailableCalendar, Provider, ServerLogin};
             let directory = tempfile::TempDir::new().unwrap();
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let local = store.list_calendars().unwrap()[0].id;
-            let login = ServerLogin {
-                url: "https://dav.example/".to_owned(),
-                username: "anna".to_owned(),
-            };
-            let available = AvailableCalendar {
-                url: "/user/work/".to_owned(),
-                name: "Work".to_owned(),
-                colour: None,
-                read_only: false,
-            };
-            let server = store
-                .write(|database_transaction| {
-                    let account = database_transaction.insert_server_account(
-                        Provider::CalDav,
-                        &login,
-                        "key",
-                    )?;
-                    database_transaction.insert_server_calendar(account.id, &available)
-                })
-                .unwrap()
-                .id;
-            // A new server Calendar starts marked read-only.
-            store
-                .connection()
-                .execute(
-                    "UPDATE calendar SET read_only = 0 WHERE id = ?1",
-                    [server.0],
-                )
-                .unwrap();
+            let server = store.writable_server_calendar();
             let mut event = dentist();
             event.calendar_id = server;
             let id = record(
@@ -1044,6 +978,7 @@ mod tests {
             7,
             |journal_transaction| {
                 let old = journal_transaction
+                    .database_transaction()
                     .corresponding_server_object(on_server.server, "dentist")?
                     .unwrap();
                 sync::caldav::testing::remove_object(journal_transaction, old)?;

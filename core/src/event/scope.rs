@@ -589,12 +589,12 @@ fn now_at(
     rid: Option<NormalForm>,
 ) -> Result<Edited> {
     if let Some(kept) = kept {
-        let event = journal_transaction.find_event(kept)?;
+        let event = journal_transaction
+            .database_transaction()
+            .find_event(kept)?;
         let recurring = new.recurring_when();
-        let recurrence_id = event.fields.recurrence_id.as_ref();
-        let recurrence_id = recurrence_id
-            .and_then(|obtained| obtained.normal_form(recurring.as_ref()))
-            .map(NormalForm::into_string);
+        let recurrence_id =
+            super::normal_form(&event.fields, recurring.as_ref()).map(NormalForm::into_string);
         return Ok(edited(kept, event, recurrence_id));
     }
     let (id, fields) = new.recurring_event();
