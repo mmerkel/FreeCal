@@ -279,13 +279,13 @@ impl EventFields {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectId(pub i64);
 
-/// A Server Object (ADR 0010): what a server stores as one piece and
+/// A Server Object (ADR 0015): what a server stores as one piece and
 /// FreeCal writes back, one CalDAV resource at its href, or one Google event
 /// resource. Its row mirrors the server's last known state of it (address,
 /// version tag, data as received), and only the Sync Engine changes it, by an
 /// Incoming Sync or a successful write to the server. A Calendar's Event Rows
 /// with one UID belong to the UID's Corresponding Server Object, found in
-/// its Provider's Mirror tables (ADR 0011, ADR 0013). A read-only
+/// its Provider's Mirror tables (ADR 0015). A read-only
 /// feed has no Server Objects, because FreeCal never writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerObject {

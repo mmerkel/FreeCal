@@ -14,6 +14,7 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
+use crate::import::Holds;
 use crate::remote::{Changes, FIRST_SYNC_PAGE, Fetched, Held, SyncPoint};
 use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
 
@@ -240,7 +241,9 @@ impl Client {
     /// Calendar with ETags and comparing with `known_server_resources`, the
     /// Known Server Resources, by their address as the server gave it. Objects whose ETag
     /// FreeCal holds are left out, unless FreeCal couldn't read them; the
-    /// others are fetched with `calendar-multiget`.
+    /// others are fetched with `calendar-multiget`. When a Server Object
+    /// stops keeping its UID, the Ignored Resources holding that UID are
+    /// fetched in a second request, for one to take over ([`takeover`]).
     pub fn changes(
         &self,
         calendar: &str,
@@ -318,6 +321,20 @@ impl Client {
         };
         let mut changed = Vec::new();
         for hrefs in fetch.chunks(FIRST_SYNC_PAGE) {
+            changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
+        }
+        let path =
+            |href: &str| follow_href(&listing.calendar, href).map(|url| url.path().to_owned());
+        let fetched: HashSet<String> = changed
+            .iter()
+            .filter_map(|fetched| path(&fetched.object.href))
+            .chain(fetch)
+            .collect();
+        let takeover: Vec<String> = takeover(known_server_resources, &removed, &changed, &path)
+            .into_iter()
+            .filter(|path| !fetched.contains(path))
+            .collect();
+        for hrefs in takeover.chunks(FIRST_SYNC_PAGE) {
             changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
         }
         Ok(Changes {
@@ -511,6 +528,56 @@ struct Listing {
     token: Option<String>,
     /// The time zone for its floating times; none when not asked for.
     zone: Option<Tz>,
+}
+
+/// The paths, as `path` gives them, of the Ignored Resources among
+/// `known_server_resources` to fetch again for a takeover (ADR 0015): those
+/// holding a UID whose Server Object stops keeping it in this Incoming
+/// Sync, as it is among `removed` or `changed` holds something else now,
+/// another UID, several or nothing. One FreeCal can't read keeps its UID.
+/// Ignored Resources removed too are left out.
+fn takeover(
+    known_server_resources: &HashMap<String, Held>,
+    removed: &[String],
+    changed: &[Fetched],
+    path: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let by_path: HashMap<String, &Held> = known_server_resources
+        .iter()
+        .filter_map(|(href, held)| Some((path(href)?, held)))
+        .collect();
+    let kept_uid = |path: &str| {
+        by_path
+            .get(path)
+            .filter(|held| !held.ignored)
+            .and_then(|held| held.uid.as_deref())
+    };
+    let removed: HashSet<String> = removed.iter().filter_map(|href| path(href)).collect();
+    let mut lost: HashSet<&str> = removed.iter().filter_map(|path| kept_uid(path)).collect();
+    for fetched in changed {
+        let Some(uid) = path(&fetched.object.href).and_then(|path| kept_uid(&path)) else {
+            continue;
+        };
+        let keeps = match &fetched.holds {
+            Holds::Unreadable => true,
+            Holds::Nothing { .. } => false,
+            Holds::OneUid { uid: holds, .. } => holds == uid,
+        };
+        if !keeps {
+            lost.insert(uid);
+        }
+    }
+    let mut paths: Vec<String> = by_path
+        .iter()
+        .filter(|(path, held)| {
+            held.ignored
+                && held.uid.as_deref().is_some_and(|uid| lost.contains(uid))
+                && !removed.contains(*path)
+        })
+        .map(|(path, _)| path.clone())
+        .collect();
+    paths.sort();
+    paths
 }
 
 /// A Calendar's address as FreeCal stores it, which is untrusted too.
@@ -1175,6 +1242,68 @@ mod tests {
         let prop = root.child(DAV, "prop").unwrap();
         assert_eq!(prop.children.len(), 1);
         assert!(prop.children[0].is(DAV, "getetag"));
+    }
+
+    /// ADR 0015: the Ignored Resources holding a UID are fetched again when
+    /// the Server Object keeping it is removed or comes to hold another UID,
+    /// several or nothing, not when FreeCal can't read it; removed ones
+    /// aren't.
+    #[test]
+    fn a_takeover_fetches_the_ignored_resources_of_a_uid_no_longer_kept() {
+        let held = |uid: Option<&str>, ignored| Held {
+            etag: None,
+            unreadable: false,
+            uid: uid.map(str::to_owned),
+            ignored,
+        };
+        let known: HashMap<String, Held> = [
+            ("/kept.ics", held(Some("a"), false)),
+            ("/copy.ics", held(Some("a"), true)),
+            ("/gone-copy.ics", held(Some("a"), true)),
+            ("/other.ics", held(Some("b"), true)),
+            ("/several.ics", held(None, true)),
+        ]
+        .into_iter()
+        .map(|(href, held)| (href.to_owned(), held))
+        .collect();
+        let path = |href: &str| Some(href.to_owned());
+        let at = |holds| Fetched {
+            object: ServerObject {
+                href: "/kept.ics".to_owned(),
+                etag: None,
+                data: String::new(),
+            },
+            holds,
+        };
+        let one_uid = |uid: &str| Holds::OneUid {
+            uid: uid.to_owned(),
+            events: Vec::new(),
+        };
+        let removed = ["/gone-copy.ics".to_owned()];
+        let fetched_again = vec!["/copy.ics".to_owned()];
+
+        let removed_kept = ["/kept.ics".to_owned(), "/gone-copy.ics".to_owned()];
+        assert_eq!(takeover(&known, &removed_kept, &[], &path), fetched_again);
+        for holds in [
+            one_uid("c"),
+            Holds::Nothing {
+                uids: vec!["a".to_owned(), "c".to_owned()],
+            },
+            Holds::Nothing { uids: Vec::new() },
+        ] {
+            assert_eq!(
+                takeover(&known, &removed, &[at(holds.clone())], &path),
+                fetched_again,
+                "{holds:?}"
+            );
+        }
+        for holds in [one_uid("a"), Holds::Unreadable] {
+            assert_eq!(
+                takeover(&known, &removed, &[at(holds.clone())], &path),
+                Vec::<String>::new(),
+                "{holds:?}"
+            );
+        }
     }
 
     #[test]

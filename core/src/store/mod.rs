@@ -1,6 +1,6 @@
 //! The Local Store: one SQLite database (ADR 0004).
 //!
-//! Journaling is one of its invariants (ADR 0011): code changes an Event only
+//! Journaling is one of its invariants (ADR 0015): code changes an Event only
 //! through a [`JournalTransaction`](crate::journal::JournalTransaction). All
 //! of the Local Store's SQL lives in this module: [`schema`] holds the schema
 //! and its migrations, [`sql`] every query and write. Every write is a method
@@ -52,7 +52,7 @@ pub enum Uid<'a> {
 }
 
 /// A Combined Event Key: a Calendar, a UID and a recurrence ID as the Event
-/// Row holds it (ADR 0011), what an Unsent Change is about.
+/// Row holds it (ADR 0015), what an Unsent Change is about.
 #[derive(Debug, Clone)]
 pub struct CombinedEventKey {
     pub calendar_id: CalendarId,
@@ -149,7 +149,7 @@ impl Store {
     }
 }
 
-/// A Database Transaction (ADR 0011): every write to the Local Store is one
+/// A Database Transaction (ADR 0015): every write to the Local Store is one
 /// of its methods, in [`sql`], so a write outside one doesn't compile. It
 /// writes nothing until [`DatabaseTransaction::commit`], and dropped without
 /// it, nothing it wrote is kept. It reads as the Local Store it is on.
@@ -196,7 +196,7 @@ mod tests {
 
     /// What a compile-fail doctest can't show here, as the crate's modules
     /// are private to it: a Write Permission's field stays private, so the
-    /// compiler lets only its Guard's module make one (ADR 0011). The Guard
+    /// compiler lets only its Guard's module make one (ADR 0015). The Guard
     /// mustn't hand one out either: no derive, and its one value, the
     /// `WRITE_PERMISSION` constant, stays private. This reads the source, so
     /// it catches the usual ways, not every way, such as a function the

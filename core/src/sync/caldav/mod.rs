@@ -1,65 +1,44 @@
 //! The CalDAV part of the Sync Engine (ADR 0015): CalDAV's Incoming Sync
-//! ([`incoming`]), its writes of the Mirror, the rules that read the
-//! Mirror for it: handing a UID's Event Rows to its next Corresponding
-//! Server Object ([`settle`]) and recognising a Server Object that moved
+//! ([`incoming`]), its writes of the Mirror, its rules for which
+//! resource keeps a UID: the fixed order among resources holding one UID
+//! ([`fixed_order`]) and recognising a Server Object that moved
 //! ([`moved`]), and the CalDAV resources it doesn't mirror, the Ignored
 //! Resources: remembering them ([`ignore`]) and their Log lines
 //! ([`log_ignored`]).
 
 pub(crate) mod incoming;
 
-use chrono_tz::Tz;
-
 use super::WRITE_PERMISSION;
-use crate::event::{self, Loaded, ObjectId, ServerObject};
-use crate::import::{Holds, read_caldav_resource};
+use crate::event::{Loaded, ObjectId, ServerObject};
 use crate::journal::JournalTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
 
-/// Whether `events`, a CalDAV Server Object's Events of its UID
-/// ([`Holds::OneUid`]), hold the Event that isn't an Exception: the single
-/// Event or the Recurring Event.
-fn holds_non_exception(events: &[ImportedEvent]) -> bool {
-    events.iter().any(|event| event.recurrence_id().is_none())
+/// Where a CalDAV resource holding `events`, the Events of one UID, stands
+/// in the fixed order among the resources of one Incoming Sync holding
+/// that UID (ADR 0015): the one holding the single Event or the Recurring
+/// Event first, then the lowest href, `href`, by byte comparison. The
+/// lowest key comes first.
+fn fixed_order<'a>(href: &'a str, events: &[ImportedEvent]) -> (bool, &'a str) {
+    let only_exceptions = events.iter().all(|event| event.recurrence_id().is_some());
+    (only_exceptions, href)
 }
 
-/// Gives the Event Rows of `uid`, a UID of the Calendar `calendar_id` whose
-/// Corresponding Server Object went, to its next Corresponding Server
-/// Object, which is propagated to them as [`event::propagate_to_event_rows`]
-/// writes them: its Events of the UID, read from its mirrored data by
-/// [`read_caldav_resource`] with floating times pinned to `zone`. A UID no Server
-/// Object holds any more loses its Event Rows. Should the mirrored data no
-/// longer read, the Event Rows stay as they are, as for a Server Object
-/// FreeCal can't read.
-fn settle(
+/// Deletes the Event Rows of `uid` in the Calendar `calendar_id` if no
+/// CalDAV Server Object holds it any more, as an Incoming Sync found the
+/// one keeping it gone and none taking over.
+fn delete_if_unkept(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     uid: &str,
-    zone: Tz,
 ) -> Result<()> {
-    let Some(corresponding_server_object) = journal_transaction
+    if journal_transaction
         .database_transaction()
         .corresponding_server_object(calendar_id, uid)?
-    else {
-        return Loaded::of_uid(journal_transaction, calendar_id, uid)?
-            .delete_all(journal_transaction);
-    };
-    let Some(object) = journal_transaction
-        .database_transaction()
-        .server_object(corresponding_server_object)?
-    else {
+        .is_some()
+    {
         return Ok(());
-    };
-    match read_caldav_resource(&object, zone) {
-        Holds::OneUid { events, .. } => event::propagate_to_event_rows(
-            journal_transaction,
-            calendar_id,
-            corresponding_server_object,
-            uid,
-            &events,
-        ),
-        Holds::Unreadable | Holds::Nothing { .. } => Ok(()),
     }
+    Loaded::of_uid(journal_transaction, calendar_id, uid)?.delete_all(journal_transaction)
 }
 
 /// The most UIDs a Log line of [`log_ignored`] lists.
@@ -68,62 +47,74 @@ const LOGGED_UIDS: usize = 5;
 /// The most characters of each UID a Log line of [`log_ignored`] holds.
 const LOGGED_UID_LENGTH: usize = 200;
 
-/// Writes to the Log that the Sync Engine ignored the CalDAV resource at
-/// `href` of the Calendar `calendar_id`, which holds the several UIDs
-/// `uids`, as RFC 4791 §4.1 forbids (ADR 0015).
-fn log_ignored(calendar_id: CalendarId, href: &str, uids: &[String]) {
-    log::warn!("{}", ignored_line(calendar_id, href, uids));
+/// Why the Sync Engine ignored a CalDAV resource (ADR 0015).
+#[derive(Debug, Clone, Copy)]
+enum Ignored<'a> {
+    /// It holds several UIDs, these.
+    SeveralUids(&'a [String]),
+    /// It holds the UID `uid`, which the CalDAV Server Object at `kept_by`
+    /// keeps.
+    UidKept { uid: &'a str, kept_by: &'a str },
 }
 
-/// The Log line of [`log_ignored`]. The address and the UIDs are untrusted,
-/// so each is escaped, which keeps a newline in them from starting another
-/// line, and the line is kept short: the first [`LOGGED_UIDS`] UIDs, each cut
-/// to [`LOGGED_UID_LENGTH`] characters, and a count of the others.
-fn ignored_line(calendar_id: CalendarId, href: &str, uids: &[String]) -> String {
-    let listed: Vec<String> = uids
-        .iter()
-        .take(LOGGED_UIDS)
-        .map(|uid| {
-            let cut: String = uid.chars().take(LOGGED_UID_LENGTH).collect();
-            format!("{cut:?}")
-        })
-        .collect();
-    let others = match uids.len().saturating_sub(LOGGED_UIDS) {
-        0 => String::new(),
-        others => format!(" and {others} more"),
+/// Writes to the Log that the Sync Engine ignored the CalDAV resource at
+/// `href` of the Calendar `calendar_id`, and `why`: RFC 4791 §4.1 forbids
+/// it (ADR 0015).
+fn log_ignored(calendar_id: CalendarId, href: &str, why: Ignored) {
+    log::warn!("{}", ignored_line(calendar_id, href, why));
+}
+
+/// The Log line of [`log_ignored`]. Addresses and UIDs are untrusted, so
+/// each is escaped, which keeps a newline in them from starting another
+/// line, and the line is kept short: the first [`LOGGED_UIDS`] UIDs, each
+/// cut to [`LOGGED_UID_LENGTH`] characters, and a count of the others.
+fn ignored_line(calendar_id: CalendarId, href: &str, why: Ignored) -> String {
+    let quoted = |uid: &str| {
+        let cut: String = uid.chars().take(LOGGED_UID_LENGTH).collect();
+        format!("{cut:?}")
+    };
+    let reason = match why {
+        Ignored::SeveralUids(uids) => {
+            let listed: Vec<String> = uids
+                .iter()
+                .take(LOGGED_UIDS)
+                .map(|uid| quoted(uid))
+                .collect();
+            let others = match uids.len().saturating_sub(LOGGED_UIDS) {
+                0 => String::new(),
+                others => format!(" and {others} more"),
+            };
+            format!(
+                "it holds several UIDs, which RFC 4791 §4.1 forbids: {}{others}",
+                listed.join(", ")
+            )
+        }
+        Ignored::UidKept { uid, kept_by } => format!(
+            "it holds the UID {} that the CalDAV resource {kept_by:?} holds, \
+             which RFC 4791 §4.1 forbids",
+            quoted(uid)
+        ),
     };
     format!(
-        "Ignored the CalDAV resource {href:?} of Calendar {}: it holds several UIDs, \
-         which RFC 4791 §4.1 forbids: {}{others}",
-        calendar_id.0,
-        listed.join(", "),
+        "Ignored the CalDAV resource {href:?} of Calendar {}: {reason}",
+        calendar_id.0
     )
 }
 
-/// The CalDAV Server Object of `moved_from` that holds `uid`, taken out of
-/// it; none if there is none.
-fn moved(
-    journal_transaction: &JournalTransaction,
-    uid: &str,
-    moved_from: &mut Vec<ObjectId>,
-) -> Result<Option<ObjectId>> {
-    for (index, &object) in moved_from.iter().enumerate() {
-        if journal_transaction
-            .database_transaction()
-            .held_uid(object)?
-            .as_deref()
-            == Some(uid)
-        {
-            return Ok(Some(moved_from.remove(index)));
-        }
-    }
-    Ok(None)
+/// Whether the CalDAV Server Object `object` is one of `moved_from`, the
+/// Server Objects removed in the same Incoming Sync, so that a new resource
+/// holding its UID is it moved to another address; taken out of
+/// `moved_from` if so.
+fn moved(object: ObjectId, moved_from: &mut Vec<ObjectId>) -> bool {
+    let before = moved_from.len();
+    moved_from.retain(|&removed| removed != object);
+    moved_from.len() != before
 }
 
 /// Makes `object`, as the server holds it now, the Mirror's version of the
 /// CalDAV Server Object `over` in a Calendar, address included, or of a new
-/// one, and returns its ID. It holds the UID `uid`, and the Event of it
-/// that isn't an Exception when `holds_non_exception`. An Ignored Resource
+/// one, and returns its ID. It holds the UID `uid`, which no other Server
+/// Object of the Calendar may hold. An Ignored Resource
 /// at its address is forgotten in the same Database Transaction. Written in the
 /// Database Transaction of the Incoming Sync's `journal_transaction`, as
 /// only an Incoming Sync knows what the server holds, which checked that the
@@ -134,7 +125,6 @@ fn mirror(
     object: &ServerObject,
     over: Option<ObjectId>,
     uid: &str,
-    holds_non_exception: bool,
 ) -> Result<ObjectId> {
     journal_transaction.database_transaction().write_object(
         WRITE_PERMISSION,
@@ -142,7 +132,6 @@ fn mirror(
         object,
         over,
         uid,
-        holds_non_exception,
     )
 }
 
@@ -160,9 +149,9 @@ fn unreadable(
 }
 
 /// Removes the Server Object `id` from the Mirror, as an Incoming Sync
-/// finds it gone from the server. The Event Rows of the UID it was the
-/// Corresponding Server Object of stay, for the Incoming Sync to give to
-/// their next Corresponding Server Object or delete.
+/// finds it gone from the server or no longer keeping its UID. The Event
+/// Rows of its UID stay, for the Incoming Sync to propagate the Server
+/// Object taking over to, or delete ([`delete_if_unkept`]).
 fn remove_object(journal_transaction: &JournalTransaction, id: ObjectId) -> Result<()> {
     journal_transaction
         .database_transaction()
@@ -171,17 +160,21 @@ fn remove_object(journal_transaction: &JournalTransaction, id: ObjectId) -> Resu
 
 /// Remembers `object`, a CalDAV resource of a Calendar that an Incoming
 /// Sync fetched and doesn't mirror, as an Ignored Resource with its ETag,
-/// so that it isn't fetched again until it changes. The Mirror holds
-/// nothing at its address any more.
+/// so that it isn't fetched again until it changes, and with `uid`, the
+/// UID it holds that a Server Object keeps, so that it is fetched again
+/// when that one stops keeping it; none if it holds several. The Mirror
+/// holds nothing at its address any more.
 fn ignore(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,
     object: &ServerObject,
+    uid: Option<&str>,
 ) -> Result<()> {
     journal_transaction.database_transaction().ignore_resource(
         WRITE_PERMISSION,
         calendar_id,
         object,
+        uid,
     )
 }
 
@@ -211,16 +204,8 @@ pub(crate) mod testing {
         object: &ServerObject,
         over: Option<ObjectId>,
         uid: &str,
-        holds_non_exception: bool,
     ) -> Result<ObjectId> {
-        super::mirror(
-            journal_transaction,
-            calendar_id,
-            object,
-            over,
-            uid,
-            holds_non_exception,
-        )
+        super::mirror(journal_transaction, calendar_id, object, over, uid)
     }
 
     /// [`remove_object`](super::remove_object).
@@ -244,7 +229,7 @@ mod tests {
             .map(str::to_owned)
             .into();
 
-        let line = ignored_line(CalendarId(7), "/two\r\n.ics", &uids);
+        let line = ignored_line(CalendarId(7), "/two\r\n.ics", Ignored::SeveralUids(&uids));
 
         assert_eq!(
             line,
@@ -256,5 +241,30 @@ mod tests {
             )
         );
         assert!(!line.contains('\n') && !line.contains('\r'));
+    }
+
+    #[test]
+    fn the_log_line_of_a_caldav_resource_holding_a_uid_kept_by_another_escapes_and_cuts() {
+        let long = format!("a\n{}", "x".repeat(LOGGED_UID_LENGTH));
+
+        let line = ignored_line(
+            CalendarId(7),
+            "/copy\n.ics",
+            Ignored::UidKept {
+                uid: &long,
+                kept_by: "/kept\n.ics",
+            },
+        );
+
+        assert_eq!(
+            line,
+            format!(
+                "Ignored the CalDAV resource \"/copy\\n.ics\" of Calendar 7: it holds the UID \
+                 \"a\\n{}\" that the CalDAV resource \"/kept\\n.ics\" holds, which RFC 4791 \
+                 §4.1 forbids",
+                "x".repeat(LOGGED_UID_LENGTH - 2)
+            )
+        );
+        assert!(!line.contains('\n'));
     }
 }

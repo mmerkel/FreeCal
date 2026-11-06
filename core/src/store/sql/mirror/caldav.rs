@@ -1,7 +1,7 @@
 //! The Sync Engine's writes of CalDAV's Mirror table, `caldav_server_object`
 //! (ADR 0015): a CalDAV Server Object's iCalendar text as
-//! received, with the one UID it holds and whether it holds the Event of
-//! that UID that isn't an Exception; and of the Ignored Resources,
+//! received, with the one UID it holds, which no other in its Calendar
+//! holds; and of the Ignored Resources,
 //! `caldav_ignored_resource`, which aren't part of the Mirror. Each takes a
 //! [`SyncEngineWritePermission`], which only [`crate::sync`] can make, and is
 //! a method of a [`DatabaseTransaction`].
@@ -16,8 +16,8 @@ use crate::{CalendarId, Result};
 impl DatabaseTransaction<'_> {
     /// Writes `object` over the CalDAV Server Object `over`, address
     /// included, or as a new one of a Calendar, holding the UID `uid`, and
-    /// the Event of it that isn't an Exception when `holds_non_exception`,
-    /// and returns its ID. An Ignored Resource at its address leaves
+    /// returns its ID. It fails if another Server Object of the Calendar
+    /// holds `uid` (ADR 0015). An Ignored Resource at its address leaves
     /// `caldav_ignored_resource`, as an href is never both mirrored and
     /// ignored.
     pub(crate) fn write_object(
@@ -27,38 +27,22 @@ impl DatabaseTransaction<'_> {
         object: &ServerObject,
         over: Option<ObjectId>,
         uid: &str,
-        holds_non_exception: bool,
     ) -> Result<ObjectId> {
         self.forget_ignored_resource(permission, calendar_id, &object.href)?;
         match over {
             Some(id) => {
                 self.tx.execute(
                     "UPDATE caldav_server_object SET href = ?2, etag = ?3, data = ?4, \
-                     unreadable = 0, uid = ?5, holds_non_exception = ?6 WHERE id = ?1",
-                    params![
-                        id.0,
-                        object.href,
-                        object.etag,
-                        object.data,
-                        uid,
-                        holds_non_exception
-                    ],
+                     unreadable = 0, uid = ?5 WHERE id = ?1",
+                    params![id.0, object.href, object.etag, object.data, uid],
                 )?;
                 Ok(id)
             }
             None => {
                 self.tx.execute(
                     "INSERT INTO caldav_server_object \
-                     (calendar_id, href, etag, data, uid, holds_non_exception) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        calendar_id.0,
-                        object.href,
-                        object.etag,
-                        object.data,
-                        uid,
-                        holds_non_exception
-                    ],
+                     (calendar_id, href, etag, data, uid) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![calendar_id.0, object.href, object.etag, object.data, uid],
                 )?;
                 Ok(ObjectId(self.tx.last_insert_rowid()))
             }
@@ -87,18 +71,21 @@ impl DatabaseTransaction<'_> {
     }
 
     /// Remembers the CalDAV resource `object` of a Calendar as an Ignored
-    /// Resource with its ETag, or updates the ETag of the one at its
-    /// address. The Mirror must hold nothing at its address.
+    /// Resource with its ETag and `uid`, the UID it holds that a Server
+    /// Object keeps, none if it holds several, or updates both of the one
+    /// at its address. The Mirror must hold nothing at its address.
     pub(crate) fn ignore_resource(
         &self,
         _: &SyncEngineWritePermission,
         calendar_id: CalendarId,
         object: &ServerObject,
+        uid: Option<&str>,
     ) -> Result<()> {
         self.tx.execute(
-            "INSERT INTO caldav_ignored_resource (calendar_id, href, etag) VALUES (?1, ?2, ?3) \
-             ON CONFLICT (calendar_id, href) DO UPDATE SET etag = excluded.etag",
-            params![calendar_id.0, object.href, object.etag],
+            "INSERT INTO caldav_ignored_resource (calendar_id, href, etag, uid) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT (calendar_id, href) DO UPDATE SET etag = excluded.etag, uid = excluded.uid",
+            params![calendar_id.0, object.href, object.etag, uid],
         )?;
         Ok(())
     }

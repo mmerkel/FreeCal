@@ -2,12 +2,12 @@
 //! here and nowhere else. This file holds the readers, methods of
 //! [`Store`]. Every write is a method of a
 //! [`DatabaseTransaction`](super::DatabaseTransaction), and sits in the file
-//! of the Guard whose Write Permission it takes (ADR 0011): [`journal`] for
+//! of the Guard whose Write Permission it takes (ADR 0015): [`journal`] for
 //! the Change Journal's, [`mirror`] for the Sync Engine's, and [`unguarded`]
 //! for the Unguarded Writes.
 //!
 //! Writing the tables a Guard holds, `event`, `caldav_server_object`,
-//! `unsent_change`, `journal_transaction` and
+//! `caldav_ignored_resource`, `unsent_change`, `journal_transaction` and
 //! `journal_event_modification`, takes that Guard's Write Permission
 //! ([`JournalWritePermission`], [`SyncEngineWritePermission`]), which only
 //! its module can make: so the compiler keeps everything else from writing
@@ -17,7 +17,7 @@
 //! [`SyncEngineWritePermission`]: crate::sync::SyncEngineWritePermission
 
 mod journal;
-/// The Sync Engine's writes of the Mirror, one file per Provider (ADR 0013).
+/// The Sync Engine's writes of the Mirror, one file per Provider (ADR 0015).
 mod mirror {
     mod caldav;
 }
@@ -214,10 +214,10 @@ impl Store {
     }
 
     /// The Server Objects of a Calendar, by their address as the server
-    /// gave it.
+    /// gave it, each with the UID it keeps.
     pub fn server_objects(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
         let mut stmt = self.conn.prepare(
-            "SELECT href, etag, unreadable FROM caldav_server_object WHERE calendar_id = ?1",
+            "SELECT href, etag, unreadable, uid FROM caldav_server_object WHERE calendar_id = ?1",
         )?;
         let objects = readable(stmt.query_map([calendar_id.0], |row| {
             Ok((
@@ -225,6 +225,8 @@ impl Store {
                 Held {
                     etag: row.get(1)?,
                     unreadable: row.get(2)?,
+                    uid: row.get(3)?,
+                    ignored: false,
                 },
             ))
         })?)?;
@@ -232,21 +234,36 @@ impl Store {
     }
 
     /// The Ignored Resources of a Calendar, by their address as the server
-    /// gave it, as an Incoming Sync knows them. Not a query of the Mirror.
+    /// gave it, as an Incoming Sync knows them, each with the UID it holds
+    /// that a Server Object keeps; none for one holding several. Not a
+    /// query of the Mirror.
     pub fn ignored_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT href, etag FROM caldav_ignored_resource WHERE calendar_id = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT href, etag, uid FROM caldav_ignored_resource WHERE calendar_id = ?1",
+        )?;
         let ignored = readable(stmt.query_map([calendar_id.0], |row| {
             Ok((
                 row.get(0)?,
                 Held {
                     etag: row.get(1)?,
                     unreadable: false,
+                    uid: row.get(2)?,
+                    ignored: true,
                 },
             ))
         })?)?;
         Ok(ignored.into_iter().collect())
+    }
+
+    /// Whether `href` in a Calendar is an Ignored Resource. Not a query of
+    /// the Mirror.
+    pub fn is_ignored(&self, calendar_id: CalendarId, href: &str) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM caldav_ignored_resource \
+             WHERE calendar_id = ?1 AND href = ?2)",
+            params![calendar_id.0, href],
+            |row| row.get(0),
+        )?)
     }
 
     /// The Server Object of a Calendar at `href`, if there is one.
@@ -262,12 +279,9 @@ impl Store {
     }
 
     /// The Corresponding Server Object of the UID `uid` in a Calendar, the
-    /// one the Calendar's Event Rows with the UID belong to (ADR 0011); none
-    /// when no Server Object holds it. Of several CalDAV Server Objects
-    /// holding it, the one holding the Event that isn't an Exception, the
-    /// Recurring Event when it repeats, corresponds, otherwise the first
-    /// mirrored (ADR 0013). The others are mirrored without Event Rows. This
-    /// is the one place that decides it.
+    /// one the Calendar's Event Rows with the UID belong to: the one CalDAV
+    /// Server Object holding it, as the Local Store keeps a UID to one
+    /// (ADR 0015); none when none holds it.
     pub fn corresponding_server_object(
         &self,
         calendar_id: CalendarId,
@@ -276,52 +290,20 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND uid = ?2 \
-                 ORDER BY holds_non_exception DESC, id LIMIT 1",
+                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND uid = ?2",
                 params![calendar_id.0, uid],
                 |row| row.get(0).map(ObjectId),
             )
             .optional()?)
     }
 
-    /// The UID the Server Object `id` holds if it is its Corresponding
-    /// Server Object ([`Store::corresponding_server_object`]); none if it
-    /// isn't, or is gone.
-    pub fn corresponding_uid(&self, id: ObjectId) -> Result<Option<String>> {
-        let Some((calendar_id, uid)) = self.held(id)? else {
-            return Ok(None);
-        };
-        let corresponds = self.corresponding_server_object(calendar_id, &uid)? == Some(id);
-        Ok(corresponds.then_some(uid))
-    }
-
-    /// The UID the CalDAV Server Object `id` holds, whether it is its
-    /// Corresponding Server Object or not; none if it is gone.
+    /// The UID the CalDAV Server Object `id` holds, of which it is the
+    /// Corresponding Server Object; none if it is gone.
     pub fn held_uid(&self, id: ObjectId) -> Result<Option<String>> {
-        Ok(self.held(id)?.map(|(_, uid)| uid))
-    }
-
-    /// The Calendar of the CalDAV Server Object `id` and the UID it holds,
-    /// none if it is gone.
-    fn held(&self, id: ObjectId) -> Result<Option<(CalendarId, String)>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT calendar_id, uid FROM caldav_server_object WHERE id = ?1",
-                [id.0],
-                |row| Ok((CalendarId(row.get(0)?), row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    /// Whether the CalDAV Server Object `id` holds the Event of its UID that
-    /// isn't an Exception, none if it is gone, for tests to compare.
-    #[cfg(test)]
-    pub fn holds_non_exception(&self, id: ObjectId) -> Result<Option<bool>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT holds_non_exception FROM caldav_server_object WHERE id = ?1",
+                "SELECT uid FROM caldav_server_object WHERE id = ?1",
                 [id.0],
                 |row| row.get(0),
             )

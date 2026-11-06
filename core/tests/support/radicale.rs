@@ -489,7 +489,10 @@ impl RewritingProxy {
         let recorded = bodies.clone();
         let (marker, replacement, proxy) = (marker.to_owned(), replacement.to_owned(), url.clone());
         std::thread::spawn(move || {
+            // A fresh connection for each request: Radicale may close an
+            // idle one, which a pooled request would fail on.
             let agent = ureq::Agent::config_builder()
+                .max_idle_connections(0)
                 .http_status_as_error(false)
                 .allow_non_standard_methods(true)
                 .max_redirects(0)

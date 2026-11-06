@@ -679,15 +679,13 @@ fn with_uid_of<'a>(
 
 /// Makes `events`, the Events of the UID `uid` that the Server Object
 /// `object` of the Calendar `calendar_id` holds now (at least one), the
-/// UID's Event Rows if `object` is its Corresponding Server Object
-/// ([`JournalTransaction::corresponding_server_object`]), and changes no
-/// other Event Row (ADR 0015): each Event replaces the Event Row for the
+/// UID's Event Rows, as `object` is its Corresponding Server Object, the
+/// one CalDAV Server Object holding it, and changes no other Event Row
+/// (ADR 0015): each Event replaces the Event Row for the
 /// same Occurrence, or the one that isn't an Exception, or is added, and
 /// the UID's other Event Rows are deleted. Exceptions are paired by Occurrence against the Recurring Event
 /// `object` holds, or else the one the Event Rows hold (ADR 0012), and each
-/// Event Row takes its recurrence ID as `object` gives it. When the UID's
-/// Corresponding Server Object is another, nothing is written, as `object`
-/// is mirrored without Event Rows. Of several for one Occurrence, the
+/// Event Row takes its recurrence ID as `object` gives it. Of several for one Occurrence, the
 /// latest is kept. ADR 0007's rules 2 and 3 apply.
 pub(crate) fn propagate_to_event_rows(
     journal_transaction: &mut JournalTransaction,
@@ -696,13 +694,12 @@ pub(crate) fn propagate_to_event_rows(
     uid: &str,
     events: &[ImportedEvent],
 ) -> Result<()> {
-    if journal_transaction
-        .database_transaction()
-        .corresponding_server_object(calendar_id, uid)?
-        != Some(object)
-    {
-        return Ok(());
-    }
+    debug_assert_eq!(
+        journal_transaction
+            .database_transaction()
+            .corresponding_server_object(calendar_id, uid)?,
+        Some(object)
+    );
     let held = events
         .iter()
         .find(|event| event.original.is_none() && event.rule.is_some())

@@ -3,10 +3,10 @@
 //! that changes the Mirror's server data: it is a Guard, and the Local
 //! Store's writes of the Mirror take a [`SyncEngineWritePermission`], which
 //! only this module can make. Each Provider's part lives in a module of its
-//! own, CalDAV's in [`caldav`] (ADR 0013); this module holds what every
+//! own, CalDAV's in [`caldav`] (ADR 0015); this module holds what every
 //! Provider and both directions share: the Write Permission. A Calendar's
 //! Event Rows with one UID belong to the UID's Corresponding Server Object,
-//! and only that Server Object writes them (ADR 0011).
+//! and only that Server Object writes them (ADR 0015).
 
 pub(crate) mod caldav;
 

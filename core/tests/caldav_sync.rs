@@ -379,7 +379,7 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
 mod undo {
     use super::*;
 
-    /// ADR 0010: the next write is conditional on what the server has now.
+    /// ADR 0015: the next write is conditional on what the server has now.
     #[test]
     fn restores_the_previous_event_version_and_leaves_the_object_as_the_server_has_it() {
         let synced = Synced::writable(&[("standup", standup("Standup"))]);
@@ -631,7 +631,7 @@ fn an_event_whose_object_moved_to_another_address_stays_the_same_event() {
     );
 }
 
-/// ADR 0010: sync matches Server Objects by address, and each one changes
+/// ADR 0015: sync matches Server Objects by address, and each one changes
 /// only its own Event Rows.
 mod server_objects {
     use super::*;
@@ -665,62 +665,54 @@ mod server_objects {
         ])
     }
 
-    /// ADR 0011: of two Server Objects alike, the first mirrored
-    /// corresponds, which depends on the order the server listed them.
+    /// ADR 0015: of two resources alike holding one UID, the First Sync
+    /// keeps the lower href; the other is an Ignored Resource, whose
+    /// changes change no Event Row.
     #[test]
-    fn of_two_objects_with_one_uid_the_first_corresponds_on_a_server_without_sync_tokens() {
-        let synced = Synced::with_files(&[
-            ("standup", standup("Standup")),
-            ("standup-copy", standup("Standup copy")),
-        ]);
-        synced.without_sync_tokens();
-        let shown = synced.titles();
-        assert_eq!(shown.len(), 1, "{shown:?}");
-        let (corresponding, other) = if shown[0] == "Standup" {
-            ("standup", "standup-copy")
-        } else {
-            ("standup-copy", "standup")
-        };
-        assert!(
-            synced
-                .href(&shown[0])
-                .ends_with(&format!("/{corresponding}.ics"))
-        );
+    fn of_two_objects_with_one_uid_a_first_sync_keeps_the_lower_href() {
+        for tokens in [true, false] {
+            let synced = Synced::with_files(&[
+                ("b-standup", standup("Standup B")),
+                ("a-standup", standup("Standup A")),
+            ]);
+            if !tokens {
+                synced.without_sync_tokens();
+            }
+            assert_eq!(synced.titles(), ["Standup A"]);
+            assert!(synced.href("Standup A").ends_with("/a-standup.ics"));
+            assert_eq!(synced.sync(), None);
 
-        assert_eq!(synced.sync(), None);
-        assert_eq!(synced.sync(), None);
+            synced.write("b-standup", standup("Standup elsewhere"));
+            assert_eq!(synced.sync(), None, "tokens: {tokens}");
+            assert_eq!(synced.titles(), ["Standup A"]);
 
-        synced.write(other, standup("Standup elsewhere"));
-        assert_eq!(
-            synced.sync(),
-            None,
-            "the other Server Object has no Event Rows"
-        );
-        assert_eq!(synced.titles(), shown);
-        synced.write(corresponding, standup("Standup moved"));
-        assert!(synced.sync().is_some());
-        assert_eq!(synced.titles(), ["Standup moved"]);
-    }
-
-    #[test]
-    fn the_object_holding_the_recurring_event_corresponds_whichever_came_first() {
-        let together = google_like();
-        let exception_first = Synced::with_files(&[("weekly-moved", ics(&moved("Moved")))]);
-        assert_eq!(exception_first.titles(), ["Moved"]);
-        exception_first.write("weekly", weekly("Weekly"));
-        exception_first.sync();
-        let recurring_first = Synced::with_files(&[("weekly", weekly("Weekly"))]);
-        recurring_first.write("weekly-moved", ics(&moved("Moved")));
-        assert_eq!(recurring_first.sync(), None);
-
-        for synced in [together, exception_first, recurring_first] {
-            assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
-            assert!(synced.href("Weekly").ends_with("/weekly.ics"));
+            synced.write("a-standup", standup("Standup moved"));
+            assert!(synced.sync().is_some());
+            assert_eq!(synced.titles(), ["Standup moved"]);
         }
     }
 
+    /// The one holding the Recurring Event comes first in one Incoming
+    /// Sync; one arriving later never pushes out the one keeping the UID.
     #[test]
-    fn an_object_that_corresponds_to_no_uid_changes_no_event_row() {
+    fn the_object_holding_the_recurring_event_keeps_the_uid_unless_it_came_later() {
+        let together = google_like();
+        let recurring_first = Synced::with_files(&[("weekly", weekly("Weekly"))]);
+        recurring_first.write("weekly-moved", ics(&moved("Moved")));
+        assert_eq!(recurring_first.sync(), None);
+        for synced in [together, recurring_first] {
+            assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+            assert!(synced.href("Weekly").ends_with("/weekly.ics"));
+        }
+
+        let exception_first = Synced::with_files(&[("weekly-moved", ics(&moved("Moved")))]);
+        exception_first.write("weekly", weekly("Weekly"));
+        assert_eq!(exception_first.sync(), None);
+        assert_eq!(exception_first.titles(), ["Moved"]);
+    }
+
+    #[test]
+    fn an_ignored_object_that_changes_changes_no_event_row() {
         let synced = google_like();
         synced.write("weekly-moved", ics(&moved("Moved again")));
 
@@ -729,11 +721,12 @@ mod server_objects {
         assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
     }
 
-    /// A removed Server Object goes from the Mirror; another holding its
-    /// UID becomes its Corresponding Server Object, its Event Rows read from
-    /// what FreeCal holds of it.
+    /// ADR 0015: the Ignored Resource holding the UID of a removed Server
+    /// Object is fetched again in the same Incoming Sync and takes over,
+    /// with or without a sync token; the Event stays shown, with its
+    /// content.
     #[test]
-    fn the_next_object_corresponds_when_the_corresponding_one_goes() {
+    fn an_ignored_object_takes_over_when_the_kept_one_goes() {
         for tokens in [true, false] {
             let synced = Synced::writable(&[]);
             synced.write("weekly", weekly("Weekly"));
@@ -748,6 +741,7 @@ mod server_objects {
 
             assert_eq!(synced.titles(), ["Moved"], "tokens: {tokens}");
             assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
+            assert_eq!(synced.sync(), None, "tokens: {tokens}");
             synced
                 .core
                 .undo_journal_transaction(journal_transaction)
@@ -756,27 +750,31 @@ mod server_objects {
         }
     }
 
-    /// It keeps its place in the order objects were mirrored.
+    /// The same for the kept one's UID changing, with or without a sync
+    /// token: the Event of the old UID stays, in the other object.
     #[test]
-    fn an_object_that_corresponds_to_no_uid_moved_to_another_address_stays_the_same_object() {
-        let synced = Synced::with_files(&[("standup", standup("Standup"))]);
-        synced.write("standup-b", standup("Standup B"));
-        synced.sync();
-        synced.write("standup-c", standup("Standup C"));
-        synced.sync();
-        synced.delete("standup-b");
-        synced.write("standup-b-moved", standup("Standup B"));
-        synced.sync();
+    fn an_ignored_object_takes_over_when_the_kept_ones_uid_changes() {
+        for tokens in [true, false] {
+            let synced = Synced::with_files(&[
+                ("a-standup", standup("Standup A")),
+                ("b-standup", standup("Standup B")),
+            ]);
+            if !tokens {
+                synced.without_sync_tokens();
+            }
+            let id = synced.event("Standup A").id;
+            synced.write("a-standup", titled("review", "Review", "20261006"));
 
-        synced.delete("standup");
-        synced.sync();
+            synced.sync();
 
-        assert_eq!(synced.titles(), ["Standup B"]);
-        assert!(synced.href("Standup B").ends_with("/standup-b-moved.ics"));
+            assert_eq!(synced.titles(), ["Standup B", "Review"], "tokens: {tokens}");
+            assert_eq!(synced.event("Standup B").id, id);
+            assert!(synced.href("Standup B").ends_with("/b-standup.ics"));
+        }
     }
 
     #[test]
-    fn a_removed_object_that_corresponds_to_no_uid_changes_no_event_row() {
+    fn a_removed_ignored_object_changes_no_event_row() {
         let synced = google_like();
         synced.delete("weekly-moved");
 
@@ -803,8 +801,9 @@ mod server_objects {
         assert_eq!(synced.titles(), ["Weekly", "Latest", "Weekly"]);
     }
 
-    /// When the Corresponding Server Object goes, the other's Exception
-    /// stays, an Event of its own as if it had come alone (ticket 88).
+    /// When the Server Object keeping the UID goes, the Ignored Resource's
+    /// Exception takes over, an Event of its own as if it had come alone
+    /// (ticket 88).
     #[test]
     fn of_two_objects_with_an_exception_for_one_occurrence_the_recurring_events_shows() {
         let synced = Synced::with_files(&[
@@ -822,7 +821,7 @@ mod server_objects {
         assert_eq!(synced.titles(), ["Moved elsewhere"]);
     }
 
-    /// ADR 0011: an Event Row the server doesn't have yet belongs to the
+    /// ADR 0015: an Event Row the server doesn't have yet belongs to the
     /// Server Object holding its UID.
     #[test]
     fn a_new_exception_not_yet_sent_belongs_to_the_object_of_its_recurring_event() {
@@ -845,24 +844,6 @@ mod server_objects {
         let held = synced.core.original_server_data(moved.event_id).unwrap();
         assert!(held.is_some());
         assert_eq!(held, synced.held("Weekly"));
-    }
-
-    /// Whichever of the two was the UID's Corresponding Server Object, its
-    /// Event stays the same.
-    #[test]
-    fn an_object_whose_uid_changed_leaves_its_old_uid_to_the_next_object_holding_it() {
-        let synced = Synced::with_files(&[
-            ("standup", standup("Standup")),
-            ("standup-copy", standup("Standup copy")),
-        ]);
-        let id = synced.event(&synced.titles()[0]).id;
-        synced.write("standup", titled("review", "Review", "20261006"));
-
-        synced.sync();
-
-        assert_eq!(synced.titles(), ["Standup copy", "Review"]);
-        assert_eq!(synced.event("Standup copy").id, id);
-        assert!(synced.href("Standup copy").ends_with("/standup-copy.ics"));
     }
 
     #[test]
@@ -943,15 +924,15 @@ mod server_objects {
             assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
         }
 
-        /// ADR 0011: the Server Object holding the Recurring Event is the
-        /// UID's Corresponding Server Object; the other keeps its Combined
-        /// Event Keys, with recurrence IDs as obtained, and becomes it when
-        /// that goes.
+        /// ADR 0015: in one Incoming Sync, the object holding the Recurring
+        /// Event keeps the UID and the other is ignored; once that goes, the
+        /// other takes over, its recurrence IDs as obtained.
         #[test]
-        fn hides_once_its_recurring_event_arrives_in_another_object_until_that_goes() {
-            let synced = Synced::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
-            synced.write("weekly", weekly("Weekly"));
-            synced.sync();
+        fn is_ignored_beside_its_recurring_event_in_another_object_until_that_goes() {
+            let synced = Synced::with_files(&[
+                ("weekly-moved", ics(&moved_in_new_york("Moved"))),
+                ("weekly", weekly("Weekly")),
+            ]);
             assert_eq!(shown(&synced), weekly_with("Weekly"));
 
             synced.delete("weekly");

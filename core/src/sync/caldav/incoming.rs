@@ -1,24 +1,26 @@
 //! The CalDAV Incoming Sync: what changed in a Calendar on its server,
 //! brought into its local copy in one Journal Transaction, with
 //! its Mirror writes in the same Database Transaction. Server Objects are
-//! matched by address.
+//! matched by address, and a UID is kept by one CalDAV Server Object at a
+//! time (ADR 0015).
 
 use chrono_tz::Tz;
 
 use super::{
-    forget_ignored, holds_non_exception, ignore, log_ignored, mirror, moved, remove_object, settle,
-    unreadable,
+    Ignored, delete_if_unkept, fixed_order, forget_ignored, ignore, log_ignored, mirror, moved,
+    remove_object, unreadable,
 };
-use crate::event::{self, ObjectId};
-use crate::import::Holds;
-use crate::journal::JournalTransaction;
+use crate::event::{self, ObjectId, ServerObject};
+use crate::import::{Holds, read_caldav_resource};
+use crate::journal::{JournalTransaction, TransactionOrigin};
 use crate::remote::{Changes, Fetched};
-use crate::{CalendarId, Result};
+use crate::{CalendarId, ImportedEvent, Result};
 
 /// Brings `changes` into the Calendar `calendar_id` in `journal_transaction`,
 /// and records its new sync state with them: the changed Server Objects are
-/// mirrored and propagated as [`mirror_and_propagate`] does it, and a removed
-/// one goes as [`remove`] removes it. A removed Ignored Resource is
+/// mirrored and propagated as [`mirror_and_propagate`] does it. A removed
+/// Server Object goes from the Mirror, and the Event Rows of its UID with
+/// it unless a resource takes over the UID; a removed Ignored Resource is
 /// forgotten.
 pub(crate) fn incoming_sync(
     journal_transaction: &mut JournalTransaction,
@@ -42,30 +44,48 @@ pub(crate) fn incoming_sync(
         &mut removed,
     )?;
     for object in removed {
-        remove(journal_transaction, calendar_id, object, changes.zone)?;
+        let uid = journal_transaction
+            .database_transaction()
+            .held_uid(object)?;
+        remove_object(journal_transaction, object)?;
+        if let Some(uid) = uid {
+            delete_if_unkept(journal_transaction, calendar_id, &uid)?;
+        }
     }
     journal_transaction.synced(calendar_id, changes.state.token.as_deref())
 }
 
+/// A fetched CalDAV resource holding the Events `events` of one UID: a
+/// candidate to keep it.
+#[derive(Clone, Copy)]
+struct Candidate<'a> {
+    object: &'a ServerObject,
+    events: &'a [ImportedEvent],
+}
+
+impl Candidate<'_> {
+    fn fixed_order(&self) -> (bool, &str) {
+        fixed_order(&self.object.href, self.events)
+    }
+}
+
 /// Mirrors and propagates the Server Objects `fetched` into the Calendar
 /// `calendar_id` in `journal_transaction`, their floating times pinned to
-/// `zone`. Each one holding one UID is mirrored with it, and its Events
-/// become the UID's Event Rows if it is the UID's Corresponding Server
-/// Object, as [`event::propagate_to_event_rows`] writes them; a UID it was
-/// that of before and no longer is goes as [`settle`] gives it. A Server
-/// Object holding nothing FreeCal keeps isn't mirrored, and goes from the
-/// Mirror if it was, as [`remove`] removes it; one holding several UIDs,
-/// which RFC 4791 §4.1 forbids, is also written to the Log and remembered
-/// as an Ignored Resource with its ETag (ADR 0015), and an Ignored Resource
-/// that now holds nothing is forgotten. One FreeCal can't read keeps its
-/// last readable version and its Event Rows, recorded as unreadable; an
-/// Ignored Resource keeps its ETag, so that it is fetched again. An Ignored
-/// Resource that now holds one UID is mirrored. A new Server Object that holds the
-/// UID that one of `moved_from`, the Server Objects removed in the same
-/// Incoming Sync, holds is that one moved to another address: it takes its
-/// place, which leaves `moved_from`. A Recurring Event that arrives joins
-/// the Calendar's Exceptions that had none without writing them, as they
-/// keep their recurrence IDs as obtained (ADR 0012).
+/// `zone`. The resources holding one UID compete to keep it as [`keep`]
+/// decides; the one keeping it is mirrored, and propagated to the UID's
+/// Event Rows as [`event::propagate_to_event_rows`] writes them, and the
+/// others are Ignored Resources. A Server Object that no longer holds the
+/// UID it kept goes from the Mirror, and the UID's Event Rows with it
+/// unless a resource takes over. A resource holding nothing FreeCal keeps
+/// isn't mirrored; one holding several UIDs, which RFC 4791 §4.1 forbids,
+/// is also written to the Log and remembered as an Ignored Resource with
+/// its ETag (ADR 0015), and an Ignored Resource that now holds nothing is
+/// forgotten. One FreeCal can't read keeps its last readable version, UID
+/// and Event Rows, recorded as unreadable; an Ignored Resource keeps its
+/// ETag, so that it is fetched again. `moved_from` are the Server Objects
+/// removed in the same Incoming Sync; one taken over leaves it. A Recurring
+/// Event that arrives joins the Calendar's Exceptions that had none without
+/// writing them, as they keep their recurrence IDs as obtained (ADR 0012).
 pub(crate) fn mirror_and_propagate(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -74,78 +94,195 @@ pub(crate) fn mirror_and_propagate(
     moved_from: &mut Vec<ObjectId>,
 ) -> Result<()> {
     journal_transaction.writable(calendar_id)?;
+    // First every Server Object that stops keeping its UID goes, so that
+    // the UID is free for another before any is mirrored.
+    let mut lost = Vec::new();
+    let mut by_uid: Vec<(&str, Vec<Candidate>)> = Vec::new();
     for one in fetched {
-        let at = journal_transaction
-            .database_transaction()
-            .object_at(calendar_id, &one.object.href)?;
-        let (uid, events) = match &one.holds {
-            Holds::Unreadable => {
-                unreadable(journal_transaction, calendar_id, &one.object.href)?;
-                continue;
-            }
-            Holds::Nothing { uids } => {
-                if let Some(object) = at {
-                    remove(journal_transaction, calendar_id, object, zone)?;
-                }
-                if uids.is_empty() {
-                    forget_ignored(journal_transaction, calendar_id, &one.object.href)?;
-                } else {
-                    log_ignored(calendar_id, &one.object.href, uids);
-                    ignore(journal_transaction, calendar_id, &one.object)?;
-                }
-                continue;
-            }
-            Holds::OneUid { uid, events } => (uid.as_str(), events.as_slice()),
-        };
-        let object = match at {
-            Some(object) => Some(object),
-            None => moved(journal_transaction, uid, moved_from)?,
-        };
-        let corresponding_uid = match object {
-            Some(object) => journal_transaction
-                .database_transaction()
-                .corresponding_uid(object)?,
+        let href = &one.object.href;
+        let database_transaction = journal_transaction.database_transaction();
+        let at = database_transaction.object_at(calendar_id, href)?;
+        let kept_uid = match at {
+            Some(object) => database_transaction.held_uid(object)?,
             None => None,
         };
-        let object = mirror(
+        let holds_another = match &one.holds {
+            Holds::Unreadable => {
+                unreadable(journal_transaction, calendar_id, href)?;
+                continue;
+            }
+            Holds::Nothing { .. } => true,
+            Holds::OneUid { uid, .. } => kept_uid.as_ref() != Some(uid),
+        };
+        if let Some(object) = at
+            && holds_another
+        {
+            remove_object(journal_transaction, object)?;
+            lost.extend(kept_uid);
+        }
+        match &one.holds {
+            Holds::Unreadable => unreachable!("an unreadable resource is skipped above"),
+            Holds::Nothing { uids } if uids.is_empty() => {
+                forget_ignored(journal_transaction, calendar_id, href)?;
+            }
+            Holds::Nothing { uids } => {
+                log_ignored(calendar_id, href, Ignored::SeveralUids(uids));
+                ignore(journal_transaction, calendar_id, &one.object, None)?;
+            }
+            Holds::OneUid { uid, events } => {
+                let candidate = Candidate {
+                    object: &one.object,
+                    events,
+                };
+                match by_uid.iter_mut().find(|(held, _)| held == uid) {
+                    Some((_, candidates)) => candidates.push(candidate),
+                    None => by_uid.push((uid, vec![candidate])),
+                }
+            }
+        }
+    }
+    for (uid, candidates) in by_uid {
+        keep(
             journal_transaction,
             calendar_id,
-            &one.object,
-            object,
             uid,
-            holds_non_exception(events),
+            &candidates,
+            zone,
+            moved_from,
         )?;
-        event::propagate_to_event_rows(journal_transaction, calendar_id, object, uid, events)?;
-        if let Some(lost) = corresponding_uid
-            && journal_transaction
-                .database_transaction()
-                .corresponding_uid(object)?
-                .as_ref()
-                != Some(&lost)
-        {
-            settle(journal_transaction, calendar_id, &lost, zone)?;
-        }
+    }
+    for uid in lost {
+        delete_if_unkept(journal_transaction, calendar_id, &uid)?;
     }
     Ok(())
 }
 
-/// Removes the Server Object `object` of the Calendar `calendar_id` from
-/// the Mirror, as gone from the server; the UID it was the Corresponding
-/// Server Object of goes as [`settle`] gives it.
-fn remove(
+/// Which resource keeps a UID, as [`keep`] decides it.
+enum Keeper {
+    /// The candidate at this index, mirrored over the Server Object given,
+    /// or as a new one.
+    Candidate(usize, Option<ObjectId>),
+    /// The Server Object keeping it now, at this address, which stays.
+    Stays(String),
+}
+
+/// Decides which of `candidates`, the fetched resources holding `uid` in
+/// the Calendar `calendar_id`, keeps the UID, mirrors it and propagates it
+/// to the UID's Event Rows, and makes the others Ignored Resources holding
+/// `uid`, each written to the Log (ADR 0015). The Server Object keeping
+/// `uid` keeps it as long as it holds it: when it is a candidate, it keeps
+/// it, and when it is unchanged, no candidate does. When it is one of
+/// `moved_from`, the first new resource by the [`fixed_order`] is it
+/// moved, and takes its place; with no new resource, it goes and the
+/// candidates take over. With no Server Object keeping `uid`, the first
+/// candidate by the fixed order keeps it. In a First Sync, every Server
+/// Object was mirrored in the same Incoming Sync, so the one keeping `uid`
+/// competes with the candidates by the fixed order, and becomes an Ignored
+/// Resource if one comes first.
+fn keep(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
-    object: ObjectId,
+    uid: &str,
+    candidates: &[Candidate],
     zone: Tz,
+    moved_from: &mut Vec<ObjectId>,
 ) -> Result<()> {
-    let corresponding_uid = journal_transaction
-        .database_transaction()
-        .corresponding_uid(object)?;
-    remove_object(journal_transaction, object)?;
-    match corresponding_uid {
-        Some(uid) => settle(journal_transaction, calendar_id, &uid, zone),
-        None => Ok(()),
+    let first = |candidates: &mut dyn Iterator<Item = (usize, &Candidate)>| {
+        candidates
+            .min_by(|(_, a), (_, b)| a.fixed_order().cmp(&b.fixed_order()))
+            .map(|(index, _)| index)
+    };
+    let database_transaction = journal_transaction.database_transaction();
+    let kept = match database_transaction.corresponding_server_object(calendar_id, uid)? {
+        Some(object) => database_transaction
+            .server_object(object)?
+            .map(|held| (object, held)),
+        None => None,
+    };
+    let keeper = match kept {
+        None => {
+            first(&mut candidates.iter().enumerate()).map(|index| Keeper::Candidate(index, None))
+        }
+        Some((object, held)) => {
+            if let Some(index) = candidates
+                .iter()
+                .position(|candidate| candidate.object.href == held.href)
+            {
+                Some(Keeper::Candidate(index, Some(object)))
+            } else if moved(object, moved_from) {
+                let mut new = Vec::new();
+                for (index, candidate) in candidates.iter().enumerate() {
+                    if !database_transaction.is_ignored(calendar_id, &candidate.object.href)? {
+                        new.push((index, candidate));
+                    }
+                }
+                match first(&mut new.into_iter()) {
+                    Some(index) => Some(Keeper::Candidate(index, Some(object))),
+                    None => {
+                        remove_object(journal_transaction, object)?;
+                        first(&mut candidates.iter().enumerate())
+                            .map(|index| Keeper::Candidate(index, None))
+                    }
+                }
+            } else if journal_transaction.origin() == TransactionOrigin::FirstSync {
+                let index = first(&mut candidates.iter().enumerate());
+                let comes_first = |events: &[ImportedEvent]| {
+                    let kept = fixed_order(&held.href, events);
+                    index.filter(|&index| candidates[index].fixed_order() < kept)
+                };
+                match read_caldav_resource(&held, zone) {
+                    Holds::OneUid { events, .. } => match comes_first(&events) {
+                        Some(index) => {
+                            remove_object(journal_transaction, object)?;
+                            let kept_by = &candidates[index].object.href;
+                            log_ignored(calendar_id, &held.href, Ignored::UidKept { uid, kept_by });
+                            ignore(journal_transaction, calendar_id, &held, Some(uid))?;
+                            Some(Keeper::Candidate(index, None))
+                        }
+                        None => Some(Keeper::Stays(held.href)),
+                    },
+                    Holds::Unreadable | Holds::Nothing { .. } => Some(Keeper::Stays(held.href)),
+                }
+            } else {
+                Some(Keeper::Stays(held.href))
+            }
+        }
+    };
+    let kept_by = match keeper {
+        None => return Ok(()),
+        Some(Keeper::Stays(href)) => href,
+        Some(Keeper::Candidate(index, over)) => {
+            let Candidate { object, events } = candidates[index];
+            let object_id = mirror(journal_transaction, calendar_id, object, over, uid)?;
+            event::propagate_to_event_rows(
+                journal_transaction,
+                calendar_id,
+                object_id,
+                uid,
+                events,
+            )?;
+            object.href.clone()
+        }
+    };
+    for candidate in candidates {
+        if candidate.object.href != kept_by {
+            log_ignored(
+                calendar_id,
+                &candidate.object.href,
+                Ignored::UidKept {
+                    uid,
+                    kept_by: &kept_by,
+                },
+            );
+            ignore(
+                journal_transaction,
+                calendar_id,
+                candidate.object,
+                Some(uid),
+            )?;
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -210,17 +347,24 @@ mod tests {
     }
 
     impl Alone {
-        fn new() -> Self {
+        /// A Local Store with a writable server Calendar whose First Sync
+        /// hasn't brought anything yet; `object` and `moved` aren't set.
+        fn empty() -> Self {
             let directory = tempfile::TempDir::new().unwrap();
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let calendar_id = store.writable_server_calendar();
-            let alone = Self {
+            Self {
                 _directory: directory,
                 calendar_id,
                 object: ObjectId(0),
                 moved: EventId(0),
                 store,
-            };
+            }
+        }
+
+        fn new() -> Self {
+            let alone = Self::empty();
+            let calendar_id = alone.calendar_id;
             alone.mirror_and_propagate(
                 TransactionOrigin::FirstSync,
                 &[fetched("/weekly-moved.ics", MOVED)],
@@ -255,12 +399,6 @@ mod tests {
             })
             .unwrap()
             .journal_transaction
-        }
-
-        /// Whether the Server Object holding [`MOVED`] holds the Event that
-        /// isn't an Exception, none if it is gone.
-        fn holds_non_exception(&self) -> Option<bool> {
-            self.store.holds_non_exception(self.object).unwrap()
         }
 
         /// The Calendar's Event Rows with the UID, each with its recurrence
@@ -346,7 +484,6 @@ mod tests {
             alone.event_rows(),
             [(alone.moved, Some(IN_NEW_YORK.to_owned()))]
         );
-        assert_eq!(alone.holds_non_exception(), Some(false));
         // An Event of its own, without a recurrence ID on its Occurrence.
         assert_eq!(alone.shown(), [("Moved".to_owned(), alone.moved, None)]);
     }
@@ -372,35 +509,16 @@ mod tests {
                 alone.event_rows(),
                 [(alone.moved, Some(obtained.to_owned())), (weekly, None)]
             );
-            assert_eq!(alone.holds_non_exception(), Some(true));
+            assert_eq!(
+                alone
+                    .store
+                    .object_at(alone.calendar_id, "/weekly-moved.ics")
+                    .unwrap(),
+                Some(alone.object)
+            );
             let second = Some("2026-10-12T08:00:00".to_owned());
             assert_eq!(alone.shown()[1], ("Moved".to_owned(), alone.moved, second));
             assert_eq!(alone.shown().len(), 3);
-        }
-    }
-
-    /// ADR 0011: the Server Object holding the Recurring Event corresponds,
-    /// whether it arrives in the same Incoming Sync or a later one; the
-    /// other is mirrored without Event Rows.
-    #[test]
-    fn in_another_server_object_its_recurring_event_corresponds() {
-        for same_incoming_sync in [false, true] {
-            let alone = Alone::new();
-            let weekly = fetched("/weekly.ics", WEEKLY);
-            if same_incoming_sync {
-                let moved = fetched(
-                    "/weekly-moved.ics",
-                    &moved_in_utc().replace("Moved", "Moved again"),
-                );
-                alone.mirror_and_propagate(TransactionOrigin::IncomingSync, &[moved, weekly]);
-            } else {
-                alone.mirror_and_propagate(TransactionOrigin::IncomingSync, &[weekly]);
-            }
-
-            assert_eq!(alone.event_rows().len(), 1);
-            assert_eq!(alone.event_rows()[0].1, None);
-            assert_eq!(alone.holds_non_exception(), Some(false));
-            assert_eq!(alone.store.corresponding_uid(alone.object).unwrap(), None);
         }
     }
 
@@ -500,66 +618,6 @@ mod tests {
                 )]
             );
         }
-    }
-
-    /// A mirrored Server Object that comes to hold two UIDs goes from the
-    /// Mirror, as one gone from the server goes: its UID's Event Rows go to
-    /// the UID's next Corresponding Server Object, or are deleted.
-    #[test]
-    fn a_server_object_coming_to_hold_two_uids_goes() {
-        let alone = Alone::new();
-        alone.mirror_and_propagate(
-            TransactionOrigin::IncomingSync,
-            &[fetched("/weekly.ics", WEEKLY)],
-        );
-        let weekly = alone
-            .store
-            .object_at(alone.calendar_id, "/weekly.ics")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            alone.store.corresponding_uid(weekly).unwrap().as_deref(),
-            Some("weekly")
-        );
-
-        alone.mirror_and_propagate(
-            TransactionOrigin::IncomingSync,
-            &[fetched("/weekly.ics", &format!("{WEEKLY}{OTHER}"))],
-        );
-
-        assert_eq!(
-            alone
-                .store
-                .object_at(alone.calendar_id, "/weekly.ics")
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            alone
-                .store
-                .corresponding_uid(alone.object)
-                .unwrap()
-                .as_deref(),
-            Some("weekly")
-        );
-        assert_eq!(alone.event_rows()[0].1.as_deref(), Some(IN_NEW_YORK));
-        assert_eq!(alone.shown().len(), 1);
-        assert_eq!(alone.shown()[0].0, "Moved");
-
-        alone.mirror_and_propagate(
-            TransactionOrigin::IncomingSync,
-            &[fetched("/weekly-moved.ics", &format!("{MOVED}{OTHER}"))],
-        );
-
-        assert_eq!(
-            alone
-                .store
-                .object_at(alone.calendar_id, "/weekly-moved.ics")
-                .unwrap(),
-            None
-        );
-        assert_eq!(alone.event_rows(), []);
-        assert_eq!(alone.shown(), []);
     }
 
     /// [`fetched`], with the ETag `etag`.
@@ -805,6 +863,359 @@ mod tests {
                 (alone.moved, Some(IN_NEW_YORK.to_owned()))
             );
             alone.assert_unsent_as_the_event_rows_hold_them();
+        }
+    }
+
+    /// ADR 0015: one CalDAV Server Object keeps a UID in its Calendar; the
+    /// other resources holding it are Ignored Resources, until the one
+    /// keeping it stops holding it.
+    mod one_server_object_per_uid {
+        use super::*;
+
+        impl Alone {
+            /// The titles of the Occurrences in October 2026.
+            fn titles(&self) -> Vec<String> {
+                self.shown().into_iter().map(|shown| shown.0).collect()
+            }
+
+            /// The Server Object at `href`, if any.
+            fn mirrored(&self, href: &str) -> Option<ObjectId> {
+                self.store.object_at(self.calendar_id, href).unwrap()
+            }
+
+            /// The Calendar's Ignored Resources, each with its ETag and the
+            /// UID it holds that a Server Object keeps, by address.
+            fn ignored_uids(&self) -> Vec<(String, Option<String>, Option<String>)> {
+                let mut ignored: Vec<_> = self
+                    .store
+                    .ignored_resources(self.calendar_id)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(href, held)| (href, held.etag, held.uid))
+                    .collect();
+                ignored.sort();
+                ignored
+            }
+        }
+
+        /// The Ignored Resource at `href` with the ETag `etag`, holding the
+        /// UID `uid`, as [`Alone::ignored_uids`] lists it.
+        fn ignored(
+            href: &str,
+            etag: Option<&str>,
+            uid: &str,
+        ) -> (String, Option<String>, Option<String>) {
+            (
+                href.to_owned(),
+                etag.map(str::to_owned),
+                Some(uid.to_owned()),
+            )
+        }
+
+        /// The Log line for the resource at `href` ignored as it holds
+        /// `uid`, which the one at `kept_by` keeps.
+        fn kept_line(alone: &Alone, href: &str, uid: &str, kept_by: &str) -> String {
+            format!(
+                "Ignored the CalDAV resource {href:?} of Calendar {}: it holds the UID {uid:?} \
+                 that the CalDAV resource {kept_by:?} holds, which RFC 4791 §4.1 forbids",
+                alone.calendar_id.0
+            )
+        }
+
+        /// [`OTHER`] titled `title`.
+        fn other(title: &str) -> String {
+            OTHER.replace("Other", title)
+        }
+
+        /// [`fetched_with_etag`] of [`other`].
+        fn other_at(href: &str, title: &str, etag: &str) -> Fetched {
+            fetched_with_etag(href, &other(title), etag)
+        }
+
+        /// A resource at `href` FreeCal can't read, with the ETag `etag`.
+        fn unreadable_at(href: &str, etag: &str) -> Fetched {
+            Fetched {
+                object: ServerObject {
+                    href: href.to_owned(),
+                    etag: Some(etag.to_owned()),
+                    data: "not iCalendar".to_owned(),
+                },
+                holds: Holds::Unreadable,
+            }
+        }
+
+        #[test]
+        fn a_first_sync_keeps_the_one_holding_the_recurring_event_else_the_lowest_href() {
+            let weekly = ["Weekly", "Weekly", "Weekly"].as_slice();
+            let a = ["A"].as_slice();
+            // The pages of the First Sync, the kept resource, the ignored one
+            // and the UID, and the titles shown.
+            let cases = [
+                (
+                    vec![vec![fetched("/a.ics", MOVED), fetched("/z.ics", WEEKLY)]],
+                    ("/z.ics", "/a.ics", "weekly"),
+                    weekly,
+                ),
+                (
+                    vec![
+                        vec![fetched("/a.ics", MOVED)],
+                        vec![fetched("/z.ics", WEEKLY)],
+                    ],
+                    ("/z.ics", "/a.ics", "weekly"),
+                    weekly,
+                ),
+                (
+                    vec![
+                        vec![fetched("/z.ics", WEEKLY)],
+                        vec![fetched("/a.ics", MOVED)],
+                    ],
+                    ("/z.ics", "/a.ics", "weekly"),
+                    weekly,
+                ),
+                (
+                    vec![vec![
+                        fetched("/b.ics", &other("B")),
+                        fetched("/a.ics", &other("A")),
+                    ]],
+                    ("/a.ics", "/b.ics", "other"),
+                    a,
+                ),
+                (
+                    vec![
+                        vec![fetched("/b.ics", &other("B"))],
+                        vec![fetched("/a.ics", &other("A"))],
+                    ],
+                    ("/a.ics", "/b.ics", "other"),
+                    a,
+                ),
+                (
+                    vec![
+                        vec![fetched("/a.ics", &other("A"))],
+                        vec![fetched("/b.ics", &other("B"))],
+                    ],
+                    ("/a.ics", "/b.ics", "other"),
+                    a,
+                ),
+            ];
+            for (pages, (kept, ignored_href, uid), titles) in cases {
+                let alone = Alone::empty();
+                captured_log::start();
+
+                for page in &pages {
+                    alone.mirror_and_propagate(TransactionOrigin::FirstSync, page);
+                }
+
+                assert!(alone.mirrored(kept).is_some(), "{pages:?}");
+                assert_eq!(alone.mirrored(ignored_href), None);
+                assert_eq!(alone.ignored_uids(), [ignored(ignored_href, None, uid)]);
+                assert_eq!(alone.titles(), titles);
+                assert_eq!(
+                    captured_log::lines(),
+                    [kept_line(&alone, ignored_href, uid, kept)]
+                );
+            }
+        }
+
+        /// It never pushes out the one keeping the UID, which keeps it
+        /// changed in the same Incoming Sync too.
+        #[test]
+        fn one_arriving_later_with_a_kept_uid_is_ignored_even_if_it_comes_first() {
+            let alone = Alone::new();
+            let before = alone.shown();
+            captured_log::start();
+
+            let journal_transaction = alone.mirror_and_propagate(
+                TransactionOrigin::IncomingSync,
+                &[fetched_with_etag("/a.ics", WEEKLY, "1")],
+            );
+
+            assert_eq!(journal_transaction, None, "no Event Row changed");
+            assert_eq!(alone.shown(), before);
+            assert_eq!(alone.mirrored("/weekly-moved.ics"), Some(alone.object));
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/a.ics", Some("1"), "weekly")]
+            );
+            assert_eq!(
+                captured_log::lines(),
+                [kept_line(&alone, "/a.ics", "weekly", "/weekly-moved.ics")]
+            );
+
+            alone.mirror_and_propagate(
+                TransactionOrigin::IncomingSync,
+                &[
+                    fetched_with_etag("/a.ics", WEEKLY, "2"),
+                    fetched("/weekly-moved.ics", &MOVED.replace("Moved", "Moved again")),
+                ],
+            );
+
+            assert_eq!(alone.titles(), ["Moved again"]);
+            assert_eq!(alone.shown()[0].1, alone.moved);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/a.ics", Some("2"), "weekly")]
+            );
+        }
+
+        /// [`Alone`] with the Event "A" of [`OTHER`]'s UID kept at `/a.ics`,
+        /// and an Ignored Resource holding it at `/b.ics`, titled "B", with
+        /// the ETag "1". Returns the Event Row of "A".
+        fn kept_and_ignored() -> (Alone, EventId) {
+            let alone = Alone::new();
+            alone.incoming_sync(vec![other_at("/a.ics", "A", "1")], &[]);
+            alone.incoming_sync(vec![other_at("/b.ics", "B", "1")], &[]);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/b.ics", Some("1"), "other")]
+            );
+            let id = alone.shown()[0].1;
+            (alone, id)
+        }
+
+        /// The Ignored Resource, fetched again as the remote layer does
+        /// when the one keeping the UID stops, takes it over in the same
+        /// Incoming Sync: the Event stays, with its content.
+        #[test]
+        fn an_ignored_resource_takes_over_once_the_kept_one_is_removed() {
+            let (alone, id) = kept_and_ignored();
+
+            alone.incoming_sync(vec![other_at("/b.ics", "B", "1")], &["/a.ics"]);
+
+            assert_eq!(alone.titles(), ["B", "Moved"]);
+            assert_eq!(alone.shown()[0].1, id);
+            assert_eq!(alone.mirrored("/a.ics"), None);
+            assert!(alone.mirrored("/b.ics").is_some());
+            assert_eq!(alone.ignored_uids(), []);
+        }
+
+        /// The kept one coming to hold another UID, several or nothing
+        /// FreeCal keeps.
+        #[test]
+        fn an_ignored_resource_takes_over_once_the_kept_one_holds_something_else() {
+            let review = "BEGIN:VEVENT\r\nUID:review\r\nSUMMARY:Review\r\n\
+                DTSTART:20261020T080000Z\r\nDTEND:20261020T090000Z\r\nEND:VEVENT\r\n";
+            let todo = "BEGIN:VTODO\r\nUID:todo\r\nSUMMARY:Todo\r\nEND:VTODO\r\n";
+            let cases = [
+                (review.to_owned(), vec!["B", "Moved", "Review"], vec![]),
+                (
+                    format!("{}{review}", other("A")),
+                    vec!["B", "Moved"],
+                    vec![("/a.ics".to_owned(), Some("2".to_owned()), None)],
+                ),
+                (todo.to_owned(), vec!["B", "Moved"], vec![]),
+            ];
+            for (holds, titles, ignored_after) in cases {
+                let (alone, id) = kept_and_ignored();
+
+                alone.incoming_sync(
+                    vec![
+                        fetched_with_etag("/a.ics", &holds, "2"),
+                        other_at("/b.ics", "B", "1"),
+                    ],
+                    &[],
+                );
+
+                assert_eq!(alone.titles(), titles, "{holds}");
+                assert_eq!(alone.shown()[0].1, id);
+                assert!(alone.mirrored("/b.ics").is_some());
+                assert_eq!(alone.ignored_uids(), ignored_after);
+            }
+        }
+
+        /// The one holding the Recurring Event first, else the lowest href;
+        /// the others stay ignored with their new ETags.
+        #[test]
+        fn of_several_ignored_resources_taking_over_the_fixed_order_decides() {
+            let (alone, _) = kept_and_ignored();
+            alone.incoming_sync(vec![other_at("/c.ics", "C", "1")], &[]);
+
+            alone.incoming_sync(
+                vec![other_at("/c.ics", "C", "2"), other_at("/b.ics", "B", "2")],
+                &["/a.ics"],
+            );
+
+            assert_eq!(alone.titles(), ["B", "Moved"]);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/c.ics", Some("2"), "other")]
+            );
+
+            let alone = Alone::new();
+            alone.incoming_sync(vec![fetched_with_etag("/z.ics", WEEKLY, "1")], &[]);
+            let moved_again = MOVED.replace("Moved", "Moved again");
+            alone.incoming_sync(vec![fetched_with_etag("/a.ics", &moved_again, "1")], &[]);
+
+            alone.incoming_sync(
+                vec![
+                    fetched_with_etag("/a.ics", &moved_again, "1"),
+                    fetched_with_etag("/z.ics", WEEKLY, "1"),
+                ],
+                &["/weekly-moved.ics"],
+            );
+
+            assert_eq!(alone.titles(), ["Weekly", "Weekly", "Weekly"]);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/a.ics", Some("1"), "weekly")]
+            );
+        }
+
+        /// The Ignored Resource keeps its ETag, so that it is fetched again.
+        #[test]
+        fn with_no_ignored_resource_readable_on_takeover_the_event_rows_are_deleted() {
+            let (alone, _) = kept_and_ignored();
+
+            alone.incoming_sync(vec![unreadable_at("/b.ics", "2")], &["/a.ics"]);
+
+            assert_eq!(alone.titles(), ["Moved"]);
+            assert_eq!(alone.mirrored("/a.ics"), None);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/b.ics", Some("1"), "other")]
+            );
+        }
+
+        #[test]
+        fn a_kept_resource_that_becomes_unreadable_keeps_the_uid_and_its_event_rows() {
+            let (alone, id) = kept_and_ignored();
+            let kept = alone.mirrored("/a.ics");
+
+            alone.incoming_sync(
+                vec![unreadable_at("/a.ics", "2"), other_at("/b.ics", "B", "2")],
+                &[],
+            );
+
+            assert_eq!(alone.titles(), ["A", "Moved"]);
+            assert_eq!(alone.shown()[0].1, id);
+            assert_eq!(alone.mirrored("/a.ics"), kept);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/b.ics", Some("2"), "other")]
+            );
+        }
+
+        /// A new resource holding its UID in the Incoming Sync that removed
+        /// it is it moved, before Ignored Resources by the fixed order.
+        #[test]
+        fn a_kept_resource_moved_to_another_href_keeps_its_event_rows() {
+            let (alone, id) = kept_and_ignored();
+            let kept = alone.mirrored("/a.ics");
+
+            alone.incoming_sync(
+                vec![
+                    other_at("/z-moved.ics", "A moved", "1"),
+                    other_at("/b.ics", "B", "1"),
+                ],
+                &["/a.ics"],
+            );
+
+            assert_eq!(alone.titles(), ["A moved", "Moved"]);
+            assert_eq!(alone.shown()[0].1, id);
+            assert_eq!(alone.mirrored("/z-moved.ics"), kept);
+            assert_eq!(
+                alone.ignored_uids(),
+                [ignored("/b.ics", Some("1"), "other")]
+            );
         }
     }
 }

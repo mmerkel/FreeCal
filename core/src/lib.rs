@@ -545,7 +545,7 @@ impl Core {
         Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
     }
 
-    /// The Server Object an Event belongs to (ADR 0011), as the server last
+    /// The Server Object an Event belongs to (ADR 0015), as the server last
     /// gave it: the object holding its UID in its Calendar, for an
     /// Exception too. None for an Event no object holds, such as one not on
     /// a server yet.

@@ -1,4 +1,4 @@
-//! The writes of the tables the Change Journal guards (ADR 0011): Event
+//! The writes of the tables the Change Journal guards (ADR 0015): Event
 //! Rows (`event`), Journal Transactions and their Journal Event
 //! Modifications, Unsent Changes, and deleting Calendars and accounts. Each
 //! takes a [`JournalWritePermission`], which only [`crate::journal`] can

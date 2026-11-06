@@ -42,6 +42,12 @@ pub(crate) struct Held {
     /// Whether FreeCal couldn't read the server's version, so that it holds
     /// an earlier one.
     pub unreadable: bool,
+    /// The UID it holds as FreeCal last read it: the one a Server Object
+    /// keeps, or the one an Ignored Resource holds that a Server Object
+    /// keeps; none for an Ignored Resource holding several.
+    pub uid: Option<String>,
+    /// Whether it is an Ignored Resource.
+    pub ignored: bool,
 }
 
 /// What changed in a Calendar on its server.
@@ -84,7 +90,10 @@ pub(crate) trait Remote {
     /// it remembers, by address. An object whose ETag FreeCal holds already
     /// isn't fetched again, unless FreeCal couldn't read it, so that it is
     /// fetched on each Incoming Sync until it reads. A Known Server Resource
-    /// that is gone is among the removed. Floating times are pinned as
+    /// that is gone is among the removed. When a Server Object stops
+    /// keeping its UID, removed or holding something else now, the Ignored
+    /// Resources holding that UID are fetched too, in a second request, for
+    /// one to take over (ADR 0015). Floating times are pinned as
     /// [`Remote::all_events`] pins them.
     fn changes(
         &self,

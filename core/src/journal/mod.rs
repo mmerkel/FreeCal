@@ -3,7 +3,7 @@
 //! keeps the Event's previous Event Version and a hash of its new one, so
 //! that no change can skip the Journal. Changes made together, such as an
 //! import, are one Journal Transaction, which runs inside one Database
-//! Transaction. The Journal doesn't record Server Objects (ADR 0010, 0011):
+//! Transaction. The Journal doesn't record Server Objects (ADR 0015):
 //! an Event Version holds FreeCal's fields only, and Event Rows find their
 //! Corresponding Server Object in the Mirror by their UID. An Incoming Sync
 //! writes the Mirror in the Journal Transaction's Database Transaction,
@@ -22,7 +22,7 @@ use crate::event::{Source, rule};
 use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Uid, UidEvent};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
-/// The Change Journal's Write Permission (ADR 0011), which the writes of
+/// The Change Journal's Write Permission (ADR 0015), which the writes of
 /// the tables it guards take. Its field is private to this module, so that
 /// nothing else can make one.
 pub(crate) struct JournalWritePermission(());
@@ -238,6 +238,11 @@ impl JournalTransaction<'_> {
         &self.database_transaction
     }
 
+    /// Its Transaction Origin.
+    pub fn origin(&self) -> TransactionOrigin {
+        self.origin
+    }
+
     /// Records, with the Journal Transaction's changes, that an Incoming Sync
     /// of a Calendar finished with the sync token `token`.
     pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
@@ -332,7 +337,7 @@ impl JournalTransaction<'_> {
     ///
     /// Every Transaction Origin but an Incoming Sync also adds both Event
     /// Versions' Combined Event Keys to the Unsent Changes, in a server
-    /// Calendar (ADR 0011): a write into a Read-only one was refused already.
+    /// Calendar (ADR 0015): a write into a Read-only one was refused already.
     /// An Incoming Sync's changes are what the server holds.
     fn record_journal_event_modification(
         &mut self,
@@ -407,7 +412,7 @@ const HASH_FORMAT: u8 = 2;
 /// The SHA-256 hash of an Event Version: its Calendar, UID and fields, as
 /// a list of items each prefixed with its length, after [`HASH_FORMAT`].
 /// FreeCal's fields only: which Server Object holds the Event isn't part of
-/// it (ADR 0011). Format 1 covered the Server Object too.
+/// it (ADR 0015). Format 1 covered the Server Object too.
 ///
 /// A field added to Events joins the list. Before the first release it goes
 /// into the baseline schema; after it, it bumps [`HASH_FORMAT`], and its
@@ -578,7 +583,6 @@ mod tests {
                         &dentist_object(),
                         None,
                         "dentist",
-                        true,
                     )?;
                     let mut event = dentist();
                     event.calendar_id = calendar_id;
@@ -600,9 +604,9 @@ mod tests {
             }
         }
 
-        /// Mirrors another Server Object holding the UID of [`dentist`] at
-        /// `href`, holding its Recurring Event when `holds_non_exception`.
-        fn mirror(&self, href: &str, holds_non_exception: bool) -> ObjectId {
+        /// Mirrors another Server Object at `href` in `calendar_id`, holding
+        /// `uid`.
+        fn mirror(&self, calendar_id: CalendarId, href: &str, uid: &str) -> Result<ObjectId> {
             let object = ServerObject {
                 href: href.to_owned(),
                 ..dentist_object()
@@ -614,16 +618,14 @@ mod tests {
                 |journal_transaction| {
                     sync::caldav::testing::mirror(
                         journal_transaction,
-                        self.event.calendar_id,
+                        calendar_id,
                         &object,
                         None,
-                        "dentist",
-                        holds_non_exception,
+                        uid,
                     )
                 },
             )
-            .unwrap()
-            .value
+            .map(|recorded| recorded.value)
         }
 
         fn corresponding_server_object(&self) -> Option<ObjectId> {
@@ -652,7 +654,6 @@ mod tests {
                     &again,
                     Some(pulled.object),
                     "dentist",
-                    false,
                 )
             },
         )
@@ -671,13 +672,9 @@ mod tests {
             pulled.store.held_uid(pulled.object).unwrap().as_deref(),
             Some("dentist")
         );
-        assert_eq!(
-            pulled.store.holds_non_exception(pulled.object).unwrap(),
-            Some(false)
-        );
     }
 
-    /// ADR 0011: an Event Row isn't linked to its Server Object, so no
+    /// ADR 0015: an Event Row isn't linked to its Server Object, so no
     /// Transaction Origin's change moves it to another, and none is in the
     /// way of an undo.
     #[test]
@@ -764,7 +761,6 @@ mod tests {
                     &dentist_object(),
                     None,
                     "dentist",
-                    false,
                 )
             },
         );
@@ -785,45 +781,59 @@ mod tests {
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
     }
 
+    /// ADR 0015: a CalDAV Server Object keeps its UID alone in its
+    /// Calendar: the Local Store refuses a second one holding it, at another
+    /// address or by being written over. UIDs are compared exactly, and one
+    /// UID in another Calendar is another Event's.
     #[test]
-    fn of_two_server_objects_holding_a_uid_the_one_holding_the_recurring_event_corresponds() {
+    fn a_second_server_object_with_one_uid_in_a_calendar_fails() {
         let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", false);
-        let copy = ServerObject {
-            href: "/user/work/copy.ics".to_owned(),
-            ..dentist_object()
-        };
+        let calendar_id = pulled.event.calendar_id;
+        let other_calendar = pulled.store.list_calendars().unwrap()[1].id;
 
-        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
-        assert_eq!(pulled.store.corresponding_uid(later).unwrap(), None);
-        record(
+        assert!(
+            pulled
+                .mirror(calendar_id, "/user/work/copy.ics", "dentist")
+                .is_err(),
+            "the unique index refuses it"
+        );
+        let other = pulled
+            .mirror(calendar_id, "/user/work/other.ics", "other")
+            .unwrap();
+        let over = record(
             &pulled.store,
             TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| {
+                let object = ServerObject {
+                    href: "/user/work/other.ics".to_owned(),
+                    ..dentist_object()
+                };
                 sync::caldav::testing::mirror(
                     journal_transaction,
-                    pulled.event.calendar_id,
-                    &dentist_object(),
-                    Some(pulled.object),
+                    calendar_id,
+                    &object,
+                    Some(other),
                     "dentist",
-                    false,
-                )?;
-                sync::caldav::testing::mirror(
-                    journal_transaction,
-                    pulled.event.calendar_id,
-                    &copy,
-                    Some(later),
-                    "dentist",
-                    true,
                 )
             },
-        )
-        .unwrap();
+        );
+        assert!(over.is_err(), "written over, it is refused too");
+
+        assert!(
+            pulled
+                .mirror(calendar_id, "/user/work/upper.ics", "DENTIST")
+                .is_ok()
+        );
+        assert!(
+            pulled
+                .mirror(other_calendar, "/user/home/dentist.ics", "dentist")
+                .is_ok()
+        );
+        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
         assert_eq!(
-            pulled.corresponding_server_object(),
-            Some(later),
-            "whichever came first"
+            pulled.store.held_uid(other).unwrap().as_deref(),
+            Some("other")
         );
     }
 
@@ -857,7 +867,6 @@ mod tests {
                         &dentist_object(),
                         None,
                         "dentist",
-                        true,
                     )?;
                     journal_transaction.create("dentist", &event)
                 },
@@ -1034,7 +1043,6 @@ mod tests {
                     &moved,
                     None,
                     "dentist",
-                    true,
                 )?;
                 journal_transaction.replace(on_server.id, &renamed)
             },
@@ -1042,34 +1050,5 @@ mod tests {
         .unwrap();
 
         assert_eq!(on_server.unsent(), []);
-    }
-
-    #[test]
-    fn of_two_server_objects_holding_a_uid_alike_the_first_mirrored_corresponds_until_it_goes() {
-        let pulled = Pulled::new();
-        let later = pulled.mirror("/user/work/copy.ics", true);
-        assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));
-        assert_eq!(pulled.store.corresponding_uid(later).unwrap(), None);
-
-        record(
-            &pulled.store,
-            TransactionOrigin::IncomingSync,
-            0,
-            |journal_transaction| {
-                sync::caldav::testing::remove_object(journal_transaction, pulled.object)
-            },
-        )
-        .unwrap();
-
-        assert_eq!(pulled.corresponding_server_object(), Some(later));
-        assert_eq!(pulled.store.held_uid(pulled.object).unwrap(), None);
-        assert_eq!(
-            pulled.store.corresponding_uid(later).unwrap().as_deref(),
-            Some("dentist")
-        );
-        assert_eq!(
-            pulled.store.object_of_event(pulled.id).unwrap(),
-            Some(later)
-        );
     }
 }

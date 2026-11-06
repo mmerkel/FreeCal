@@ -26,14 +26,14 @@ const MIGRATIONS: &[&str] = &[
     // of its Recurring Event and the recurrence ID of the Occurrence it
     // changed.
     //
-    // Each Provider has Mirror tables of its own (ADR 0013). A CalDAV
+    // Each Provider has Mirror tables of its own (ADR 0015). A CalDAV
     // Server Object mirrors one resource, the only one at its href in its
     // Calendar, with its iCalendar text as received, and `unreadable` once
     // FreeCal couldn't read the server's version, so that the Mirror holds
-    // the last version it could. It holds one UID, as a resource holding
-    // several isn't mirrored (ADR 0015), and `holds_non_exception` whether it holds the Event of that UID that
-    // isn't an Exception: a Calendar's Event Rows with one UID find their
-    // Corresponding Server Object by them (ADR 0011). An Ignored Resource
+    // the last version it could. It holds one UID, the only one holding it
+    // in its Calendar, as a resource holding several, or a UID another
+    // already holds, isn't mirrored (ADR 0015): a Calendar's Event Rows with
+    // one UID find their Corresponding Server Object by it. An Ignored Resource
     // is a CalDAV resource the Sync Engine fetched and doesn't mirror, with
     // the ETag it had, so that it isn't fetched again until it changes, and
     // the UID that a mirrored resource already holds; none for one holding
@@ -47,7 +47,7 @@ const MIGRATIONS: &[&str] = &[
     // recurrence ID, as the Event Row holds them, and `since` when it was
     // first changed (Unix seconds). Every change but an Incoming Sync adds the Event's
     // previous and new Combined Event Key; each is there once, the two
-    // indexes keeping it so with and without a recurrence ID (ADR 0011).
+    // indexes keeping it so with and without a recurrence ID (ADR 0015).
     //
     // A Journal Transaction records its Transaction Origin. A Journal Event
     // Modification holds the Event's previous Event Version with its Calendar,
@@ -86,11 +86,10 @@ const MIGRATIONS: &[&str] = &[
         etag TEXT,
         data TEXT NOT NULL,
         unreadable INTEGER NOT NULL DEFAULT 0,
-        uid TEXT NOT NULL,
-        holds_non_exception INTEGER NOT NULL
+        uid TEXT NOT NULL
     );
     CREATE UNIQUE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);
-    CREATE INDEX caldav_server_object_calendar_uid ON caldav_server_object (calendar_id, uid);
+    CREATE UNIQUE INDEX caldav_server_object_calendar_uid ON caldav_server_object (calendar_id, uid);
     CREATE TABLE caldav_ignored_resource (
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         href TEXT NOT NULL,
@@ -243,16 +242,16 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
         conn.execute_batch(
-            "INSERT INTO caldav_server_object (calendar_id, href, data, uid, holds_non_exception) \
-             VALUES (1, '/mirrored.ics', '', 'mirrored', 1);
+            "INSERT INTO caldav_server_object (calendar_id, href, data, uid) \
+             VALUES (1, '/mirrored.ics', '', 'mirrored');
              INSERT INTO caldav_ignored_resource (calendar_id, href) VALUES (1, '/ignored.ics');",
         )
         .unwrap();
 
         for refused in [
             "INSERT INTO caldav_ignored_resource (calendar_id, href) VALUES (1, '/mirrored.ics')",
-            "INSERT INTO caldav_server_object (calendar_id, href, data, uid, holds_non_exception) \
-             VALUES (1, '/ignored.ics', '', 'ignored', 1)",
+            "INSERT INTO caldav_server_object (calendar_id, href, data, uid) \
+             VALUES (1, '/ignored.ics', '', 'ignored')",
             "UPDATE caldav_server_object SET href = '/ignored.ics'",
         ] {
             assert!(conn.execute(refused, []).is_err(), "{refused}");
