@@ -288,11 +288,11 @@ pub struct ObjectId(pub i64);
 /// A Server Object (ADR 0010): what a server stores as one piece and
 /// FreeCal writes back, one CalDAV resource at its href, or one Google event
 /// resource. Its row mirrors the server's last known state of it (address,
-/// version tag, data as received), and only a sync or a successful write to
-/// the server changes it. A Calendar's Event Rows with one UID belong to the
-/// UID's Corresponding Server Object, found through the Server Objects'
-/// Combined Event Keys (ADR 0011). A read-only feed has no Server Objects,
-/// because FreeCal never writes to it.
+/// version tag, data as received), and only the Sync Engine changes it, by an
+/// Incoming Sync or a successful write to the server. A Calendar's Event Rows
+/// with one UID belong to the UID's Corresponding Server Object, found
+/// through the Server Objects' Combined Event Keys (ADR 0011). A read-only
+/// feed has no Server Objects, because FreeCal never writes to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerObject {
     /// The object's address on the server, as the server gave it.

@@ -24,8 +24,8 @@ use icalendar::{
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Loaded, ServerObject, StoredWhen, instant, latest, new_uid, rule, wall_text};
+use crate::journal::{JournalTransaction, JournalTransactionId};
 use crate::remote::Fetched;
-use crate::store::{JournalTransaction, JournalTransactionId};
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -804,7 +804,8 @@ fn looks_like_html(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{self, Store, TransactionOrigin};
+    use crate::journal::{self, TransactionOrigin};
+    use crate::store::Store;
 
     /// UIDs aren't part of the core interface, so this looks at the Local
     /// Store itself.
@@ -822,7 +823,7 @@ mod tests {
         let preview = preview(&file, calendar_id, &HashSet::new(), Tz::UTC).unwrap();
 
         for _ in 0..2 {
-            store::record(
+            journal::record(
                 &store,
                 TransactionOrigin::Import,
                 0,

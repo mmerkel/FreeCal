@@ -21,7 +21,8 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use crate::import::rejoined_id;
-use crate::store::{JournalTransaction, RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::journal::JournalTransaction;
+use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub use rule::{Frequency, Repeat, RepeatEnd};
@@ -151,8 +152,8 @@ pub(crate) struct Loaded {
 }
 
 impl Loaded {
-    /// The Events of a Calendar with the UID `uid`, as a sync or an import
-    /// finds them.
+    /// The Events of a Calendar with the UID `uid`, as an Incoming Sync or an
+    /// import finds them.
     pub fn of_uid(source: &impl Source, calendar_id: CalendarId, uid: &str) -> Result<Self> {
         let events = source.events_with_uid(Uid::In(calendar_id, uid))?;
         Ok(Self::sorted(calendar_id, uid.to_owned(), events, None))

@@ -1,7 +1,7 @@
-//! The Provider interface (spec: "Provider interface"): what the sync
-//! engine asks of a server Account's server, whatever its Provider. CalDAV
+//! The Provider interface (spec: "Provider interface"): what the Sync
+//! Engine asks of a server Account's server, whatever its Provider. CalDAV
 //! is the first; Google, Microsoft Graph and ICS feeds implement it too, and
-//! the sync engine doesn't change for them. It is internal and not a test
+//! the Sync Engine doesn't change for them. It is internal and not a test
 //! seam: tests run against real servers, or fakes of them.
 
 use std::collections::HashMap;
@@ -13,21 +13,21 @@ use crate::{
     caldav,
 };
 
-/// The most Events a page of a Calendar's first sync holds. Each page is
+/// The most Events a page of a Calendar's First Sync holds. Each page is
 /// committed on its own, so that Events appear as they load.
 pub const FIRST_SYNC_PAGE: usize = 50;
 
-/// How far a Calendar whose first sync finished is synced.
+/// How far a Calendar whose First Sync finished is synced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyncPoint {
     /// What its server gave to ask for the changes since, such as a CalDAV
-    /// sync token (RFC 6578); none if it gives none, so that each sync
-    /// lists the whole Calendar.
+    /// sync token (RFC 6578); none if it gives none, so that each
+    /// Incoming Sync lists the whole Calendar.
     pub token: Option<String>,
 }
 
-/// A Server Object as a sync fetched it, with the Events FreeCal reads in
-/// it.
+/// A Server Object as an Incoming Sync fetched it, with the Events FreeCal
+/// reads in it.
 #[derive(Debug, Clone)]
 pub(crate) struct Fetched {
     pub object: ServerObject,
@@ -36,7 +36,8 @@ pub(crate) struct Fetched {
     pub events: Option<Vec<ImportedEvent>>,
 }
 
-/// A Server Object FreeCal holds, as a sync asks for what changed.
+/// A Server Object FreeCal holds, as an Incoming Sync asks for what
+/// changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Held {
     /// The ETag of the version FreeCal holds; none if the server gave none.
@@ -72,7 +73,7 @@ pub(crate) trait Remote {
     /// Calendar's own time zone if the server gives one, otherwise to
     /// `display` (ADR 0007), the zone `page` gets with them. Returns the
     /// Calendar's sync state as of before it was listed, so that a change
-    /// made meanwhile comes with the next sync.
+    /// made meanwhile comes with the next Incoming Sync.
     fn all_events(
         &self,
         url: &str,
@@ -84,7 +85,7 @@ pub(crate) trait Remote {
     /// last held `known` without one: the Server Objects FreeCal holds, by
     /// address. An object whose ETag FreeCal holds already isn't fetched
     /// again, unless FreeCal couldn't read it, so that it is fetched on each
-    /// sync until it reads. Floating times are pinned as
+    /// Incoming Sync until it reads. Floating times are pinned as
     /// [`Remote::all_events`] pins them.
     fn changes(
         &self,

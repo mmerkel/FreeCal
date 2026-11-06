@@ -15,8 +15,8 @@ const MIGRATIONS: &[&str] = &[
     // A Calendar's `read_only` is the user's mark, `server_read_only` whether
     // its server doesn't allow changing it. A server Account's Calendar has
     // the `url` it lives at, which names its Available Calendar; whether its
-    // first sync finished; and the sync token (RFC 6578) its server gave for
-    // the last sync, if it gives them. A CalDAV Account's password lives in
+    // First Sync finished; and the sync token (RFC 6578) its server gave for
+    // the last Incoming Sync, if it gives them. A CalDAV Account's password lives in
     // the keyring under `keyring_key`.
     //
     // An Event keeps wall times with an Event Time Zone each for start and
@@ -37,7 +37,7 @@ const MIGRATIONS: &[&str] = &[
     // An Unsent Change is the Combined Event Key of an Event in a server
     // Calendar that FreeCal changed since, to be sent: its UID and
     // recurrence ID, as the Event Rows hold them, and `since` when it was
-    // first changed (Unix seconds). Every change but a sync adds the Event's
+    // first changed (Unix seconds). Every change but an Incoming Sync adds the Event's
     // previous and new Combined Event Key; each is there once, the two
     // indexes keeping it so with and without a recurrence ID (ADR 0011).
     //

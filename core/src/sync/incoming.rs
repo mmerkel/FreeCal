@@ -1,18 +1,14 @@
-//! The sync engine's incoming half: what changed in a Calendar on its
-//! server, whatever its Provider, applied to its local copy in one Journal
-//! Transaction. Server Objects are matched by address. A Calendar's Event
-//! Rows with one UID belong to the UID's Corresponding Server Object, and
-//! only that Server Object writes them (ADR 0011).
-
-use std::collections::HashMap;
+//! The Incoming Sync: what changed in a Calendar on its server, whatever
+//! its Provider, applied to its local copy in one Journal Transaction.
+//! Server Objects are matched by address.
 
 use chrono_tz::Tz;
 
+use super::{event_keys_in_calendar, object_events, recurring_of, settle};
 use crate::event::{self, Loaded, ObjectEvent, ObjectId};
-use crate::import::read_server_objects;
+use crate::journal::JournalTransaction;
 use crate::remote::{Changes, Fetched};
-use crate::store::{EventKeyInCalendar, JournalTransaction};
-use crate::{CalendarId, ImportedEvent, ImportedWhen, Result};
+use crate::{CalendarId, Result};
 
 /// Applies `changes` to the Calendar `calendar_id` in
 /// `journal_transaction`, and records its new sync state with them: the
@@ -51,9 +47,9 @@ pub(crate) fn apply(
 /// it can't read keeps its last readable version, its Combined Event Keys
 /// and its Event Rows, recorded as unreadable. A new Server Object that
 /// holds a UID that one of `moved_from`, the Server Objects removed in the
-/// same sync, holds is that one moved to another address: it takes its
-/// place, which leaves `moved_from`. A Recurring Event joins the Calendar's
-/// Exceptions that had none ([`Loaded::join`]).
+/// same Incoming Sync, holds is that one moved to another address: it takes
+/// its place, which leaves `moved_from`. A Recurring Event joins the
+/// Calendar's Exceptions that had none ([`Loaded::join`]).
 pub(crate) fn take(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -127,105 +123,6 @@ fn remove(
     settle(journal_transaction, calendar_id, &corresponding_uids, zone)
 }
 
-/// Gives the Event Rows of each of `uids`, UIDs of the Calendar
-/// `calendar_id` whose Corresponding Server Object went, to their next
-/// Corresponding Server Object: its Events of the UID, read from its
-/// mirrored data with floating times pinned to `zone`, take the Event Rows'
-/// place as [`event::take_object`] writes them. Their recurrence IDs are
-/// normalised against the Recurring Event it holds, or are in the zone they
-/// were given in if it holds none, as if it had come alone: the Event Rows
-/// of the Server Object that went don't count, and its Combined Event Keys
-/// of the UID are written again to match. A UID no Server Object holds any
-/// more loses its Event Rows. Should the mirrored data no longer read, the
-/// Event Rows stay as they are, as for a Server Object FreeCal can't
-/// read.
-fn settle(
-    journal_transaction: &mut JournalTransaction,
-    calendar_id: CalendarId,
-    uids: &[String],
-    zone: Tz,
-) -> Result<()> {
-    for uid in uids {
-        let Some(corresponding_server_object) =
-            journal_transaction.corresponding_server_object(calendar_id, uid)?
-        else {
-            Loaded::of_uid(journal_transaction, calendar_id, uid)?
-                .delete_all(journal_transaction)?;
-            continue;
-        };
-        let Some(object) = journal_transaction.server_object(corresponding_server_object)? else {
-            continue;
-        };
-        let read = read_server_objects(vec![object], zone);
-        let Some(events) = &read[0].events else {
-            continue;
-        };
-        let recurring = recurring_of(&read);
-        let mut events = object_events(events, |uid| Ok(recurring.get(uid).copied()))?;
-        events.retain(|event| event.uid == uid);
-        journal_transaction.rewrite_combined_event_keys(
-            corresponding_server_object,
-            uid,
-            &event_keys_in_calendar(&events),
-        )?;
-        event::take_object(
-            journal_transaction,
-            calendar_id,
-            corresponding_server_object,
-            &events,
-        )?;
-    }
-    Ok(())
-}
-
-/// The time of the first Recurring Event in `fetched` with each UID.
-fn recurring_of(fetched: &[Fetched]) -> HashMap<&str, ImportedWhen> {
-    let mut recurring = HashMap::new();
-    for event in fetched
-        .iter()
-        .filter_map(|one| one.events.as_deref())
-        .flatten()
-    {
-        if event.original.is_none() && event.rule.is_some() {
-            recurring.entry(event.uid.as_str()).or_insert(event.when);
-        }
-    }
-    recurring
-}
-
-/// `events`, those of a Server Object, as it holds them: an Exception
-/// with the recurrence ID of the Occurrence it changed of its Recurring
-/// Event, the one `recurring` gives for its UID. One without its Recurring
-/// Event is an Event of its own, its recurrence ID in the zone it was given
-/// in (ticket 88).
-fn object_events<'a>(
-    events: &'a [ImportedEvent],
-    recurring: impl Fn(&str) -> Result<Option<ImportedWhen>>,
-) -> Result<Vec<ObjectEvent<'a>>> {
-    let mut kept = Vec::new();
-    for event in events {
-        let rid = match event.original {
-            None => None,
-            Some(_) => event.recurrence_id_in(recurring(&event.uid)?.as_ref()),
-        };
-        kept.push(ObjectEvent {
-            uid: &event.uid,
-            rid,
-            incoming: event,
-        });
-    }
-    Ok(kept)
-}
-
-/// The Combined Event Key of each of `events`, in the Calendar of the Server
-/// Object holding them (ADR 0011).
-fn event_keys_in_calendar(events: &[ObjectEvent]) -> Vec<EventKeyInCalendar> {
-    events
-        .iter()
-        .map(|event| EventKeyInCalendar::new(event.uid, event.rid.as_deref()))
-        .collect()
-}
-
 /// The Server Object of `moved_from` that holds a UID of `events`, by its
 /// Combined Event Keys, taken out of it; none if there is none.
 fn moved(
@@ -249,7 +146,9 @@ fn moved(
 mod tests {
     use super::*;
     use crate::ServerObject;
-    use crate::store::{Store, TransactionOrigin, Uid, record};
+    use crate::import::read_server_objects;
+    use crate::journal::{TransactionOrigin, record};
+    use crate::store::{Store, Uid};
 
     /// A weekly Recurring Event with three Occurrences, from 5 October.
     const WEEKLY: &str = "BEGIN:VEVENT\r\nUID:weekly\r\nSUMMARY:Weekly\r\n\
@@ -262,7 +161,8 @@ mod tests {
         RECURRENCE-ID;TZID=America/New_York:20261012T040000\r\n\
         DTSTART:20261012T090000Z\r\nDTEND:20261012T100000Z\r\nEND:VEVENT\r\n";
 
-    /// The Server Object at `href` holding `body`, as a sync fetches it.
+    /// The Server Object at `href` holding `body`, as an Incoming Sync
+    /// fetches it.
     fn fetched(href: &str, body: &str) -> Fetched {
         let data = format!(
             "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{body}END:VCALENDAR\r\n"
@@ -306,7 +206,7 @@ mod tests {
         fn take(&self, one: Fetched) {
             record(
                 &self.store,
-                TransactionOrigin::Sync,
+                TransactionOrigin::IncomingSync,
                 0,
                 |journal_transaction| {
                     take(

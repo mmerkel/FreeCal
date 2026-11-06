@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     EventDraft, EventFields, Exception, Loaded, Opened, Source, StoredWhen, new_uid, rule,
 };
-use crate::store::{JournalTransaction, StoredEvent};
+use crate::journal::JournalTransaction;
+use crate::store::StoredEvent;
 use crate::{CalendarId, CoreError, EventId, Repeat, Result, When};
 
 /// Which Occurrences of a Recurring Event a change to one of them changes.

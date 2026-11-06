@@ -10,6 +10,7 @@ mod clock;
 mod error;
 mod event;
 mod import;
+mod journal;
 mod keyring;
 mod remote;
 mod settings;
@@ -41,19 +42,20 @@ pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
+pub use journal::{Changed, JournalTransactionId};
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
 pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
-pub use store::{Changed, JournalTransactionId};
 pub use structured_text::{Piece, StructuredText, link_allowed};
 pub use view::View;
 
 use calendar::calendar_name;
 use event::{Edit, Opened};
+use journal::{JournalTransaction, TransactionOrigin};
 use remote::{Remote, SyncPoint};
-use store::{JournalTransaction, Store, TransactionOrigin};
+use store::Store;
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -69,7 +71,7 @@ pub struct Core {
     keyring: Arc<dyn Keyring>,
     /// The local date as [`Core::check_date`] last saw it.
     date: Mutex<NaiveDate>,
-    /// The Calendars whose first sync is running. Locked inside the Store
+    /// The Calendars whose First Sync is running. Locked inside the Store
     /// lock, never around it.
     first_syncs: Mutex<HashSet<CalendarId>>,
 }
@@ -206,7 +208,7 @@ impl Core {
     /// While it runs, the Calendar says so ([`Calendar::first_sync`]), with
     /// "Calendars changed" as it starts and ends, and it commits page by page,
     /// with "Occurrences changed" for each page. A Calendar removed meanwhile
-    /// stops its first sync. Should one fail, the Calendars stay added, the
+    /// stops its First Sync. Should one fail, the Calendars stay added, the
     /// Events it pulled so far stay too, and the error is returned.
     pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
         let remote = self.remote(account_id)?;
@@ -252,12 +254,12 @@ impl Core {
     }
 
     /// Pulls every Event of the Calendar `id` at `url` on the server, page by
-    /// page, as a first sync. A Calendar removed meanwhile ends it.
+    /// page, as a First Sync. A Calendar removed meanwhile ends it.
     fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
         let pulled = remote
             .all_events(url, self.clock.time_zone(), &mut |fetched, zone| {
                 self.record(TransactionOrigin::FirstSync, |journal_transaction| {
-                    sync::take(journal_transaction, id, &fetched, zone, &mut Vec::new())
+                    sync::incoming::take(journal_transaction, id, &fetched, zone, &mut Vec::new())
                 })
                 .map(drop)
             })
@@ -270,14 +272,14 @@ impl Core {
 
     /// Syncs a server Account on demand: each of its Calendars gets what
     /// changed on its server since its last sync, fetching only that where
-    /// the server can tell (see [`Remote::changes`]). Each Calendar's sync
-    /// is one Journal Transaction with the Transaction Origin sync, in
-    /// Read-only Calendars too, and sends one "Occurrences changed" once
-    /// committed; a sync that changes nothing records no Journal
-    /// Transaction. A Calendar whose First Sync didn't finish gets the rest
-    /// of its First Sync, unrecorded like the rest, while the
+    /// the server can tell (see [`Remote::changes`]). Each Calendar's
+    /// Incoming Sync is one Journal Transaction with the Transaction Origin
+    /// Incoming Sync, in Read-only Calendars too, and sends one "Occurrences
+    /// changed" once committed; an Incoming Sync that changes nothing records
+    /// no Journal Transaction. A Calendar whose First Sync didn't finish gets
+    /// the rest of its First Sync, unrecorded like the rest, while the
     /// Calendar says so as [`Core::add_calendars`] does. A Calendar on its
-    /// first sync now, or removed meanwhile, is left out.
+    /// First Sync now, or removed meanwhile, is left out.
     ///
     /// Should a Calendar's sync fail, the others still sync, and the first
     /// error is returned. Returns each Calendar synced, with its Journal
@@ -298,9 +300,9 @@ impl Core {
         failed.map_or(Ok(synced), Err)
     }
 
-    /// Syncs the Calendar `id` at `url` on the server from `state`, a first
-    /// sync's rest without one. Returns the Calendar with its Journal
-    /// Transaction, none when it is left out.
+    /// Runs the Incoming Sync of the Calendar `id` at `url` on the server from
+    /// `state`, a First Sync's rest without one. Returns the Calendar with its
+    /// Journal Transaction, none when it is left out.
     fn sync_calendar(
         &self,
         remote: &dyn Remote,
@@ -329,10 +331,10 @@ impl Core {
             let origin = if first {
                 TransactionOrigin::FirstSync
             } else {
-                TransactionOrigin::Sync
+                TransactionOrigin::IncomingSync
             };
             self.record(origin, |journal_transaction| {
-                sync::apply(journal_transaction, id, &changes)
+                sync::incoming::apply(journal_transaction, id, &changes)
             })
         })();
         if first {
@@ -396,7 +398,7 @@ impl Core {
                 .delete(&key)
                 .map_err(CoreError::KeyringUnavailable)?;
         }
-        store::delete_account(&self.store(), id)?;
+        journal::delete_account(&self.store(), id)?;
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
@@ -479,7 +481,7 @@ impl Core {
                 (Provider::Local, true) => return Err(CoreError::NotServerCalendar(id)),
                 (Provider::CalDav, false) => return Err(CoreError::NotLocalCalendar(id)),
             }
-            store::delete_calendar(&store, id)?;
+            journal::delete_calendar(&store, id)?;
         }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
@@ -703,7 +705,7 @@ impl Core {
     /// undo is a Journal Transaction itself, and undoing it redoes the
     /// change.
     pub fn undo_journal_transaction(&self, id: JournalTransactionId) -> Result<Changed<()>> {
-        let undone = store::undo(&self.store(), id, self.clock.now().timestamp())?;
+        let undone = journal::undo(&self.store(), id, self.clock.now().timestamp())?;
         Ok(self.signal(undone))
     }
 
@@ -714,13 +716,14 @@ impl Core {
         origin: TransactionOrigin,
         change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
     ) -> Result<Changed<T>> {
-        let recorded = store::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
+        let recorded =
+            journal::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
         Ok(self.signal(recorded))
     }
 
     /// Sends "Occurrences changed" for a recorded Journal Transaction's
     /// Calendars, once the Store lock is released.
-    fn signal<T>(&self, recorded: store::Recorded<T>) -> Changed<T> {
+    fn signal<T>(&self, recorded: journal::Recorded<T>) -> Changed<T> {
         if !recorded.calendars.is_empty() {
             self.signals.send(Signal::OccurrencesChanged {
                 calendar_ids: recorded.calendars,

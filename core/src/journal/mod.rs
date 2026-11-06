@@ -6,25 +6,26 @@
 //! Server Objects and their Combined Event Keys too (ADR 0010, 0011), which
 //! the Journal doesn't record: an Event Version holds FreeCal's fields only,
 //! and Event Rows find their Server Object through the Combined Event Keys.
-//! Every Journal Transaction but a sync's adds the Combined Event Keys of the
-//! Events it changes to the Unsent Changes, what FreeCal has to send.
+//! Every Journal Transaction but an Incoming Sync's adds the Combined Event
+//! Keys of the Events it changes to the Unsent Changes, what FreeCal has to
+//! send.
 //!
-//! This file holds what the Journal decides and no SQL: it reads and writes
-//! through [`sql`](super::sql), whose writes to the tables it guards take a
-//! [`Journaled`], which only this file can make.
+//! This module holds what the Journal decides and no SQL: it reads and
+//! writes through the Local Store's SQL, whose writes to the tables it guards
+//! take a [`Journaled`], which only this module can make.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{CombinedEventKey, EventKeyInCalendar, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{ObjectId, ServerObject, Source, rule};
+use crate::store::{CombinedEventKey, EventKeyInCalendar, Store, StoredEvent, Uid, UidEvent};
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// Leave to write the tables the Change Journal guards. Its field is private
-/// to this file, so that nothing else can make one.
-pub(super) struct Journaled(());
+/// to this module, so that nothing else can make one.
+pub(crate) struct Journaled(());
 
-/// The [`Journaled`] this file's writes pass.
+/// The [`Journaled`] this module's writes pass.
 const JOURNALED: &Journaled = &Journaled(());
 
 /// The time zone rules FreeCal was built with, which the derived UTC columns
@@ -35,7 +36,7 @@ const TIME_ZONE_RULES: &str = chrono_tz::IANA_TZDB_VERSION;
 /// computed with other time zone rules than this build's, while it opens. The
 /// Journal doesn't record them, so this writes outside any Journal
 /// Transaction. An Event Row whose time can't be read keeps what it had.
-pub(super) fn recompute_instants(store: &Store) -> Result<()> {
+pub(crate) fn recompute_instants(store: &Store) -> Result<()> {
     if store.time_zone_rules()? == TIME_ZONE_RULES {
         return Ok(());
     }
@@ -79,8 +80,9 @@ pub(crate) enum TransactionOrigin {
     /// records nothing (ADR 0009), so its Journal Transaction is never
     /// stored.
     FirstSync,
-    /// An incremental sync of one Calendar, what its server changed.
-    Sync,
+    /// An Incoming Sync of one Calendar after its First Sync, what its
+    /// server changed.
+    IncomingSync,
 }
 
 impl TransactionOrigin {
@@ -91,15 +93,18 @@ impl TransactionOrigin {
             TransactionOrigin::UserAction => Some("user"),
             TransactionOrigin::Import => Some("import"),
             TransactionOrigin::Undo => Some("undo"),
-            TransactionOrigin::Sync => Some("sync"),
+            TransactionOrigin::IncomingSync => Some("incoming_sync"),
             TransactionOrigin::FirstSync => None,
         }
     }
 
-    /// Whether it is a sync, whose changes come from the server: only a sync
-    /// writes the Mirror.
-    fn is_sync(self) -> bool {
-        matches!(self, TransactionOrigin::FirstSync | TransactionOrigin::Sync)
+    /// Whether it is an Incoming Sync, whose changes come from the server:
+    /// only an Incoming Sync writes the Mirror.
+    fn is_incoming_sync(self) -> bool {
+        matches!(
+            self,
+            TransactionOrigin::FirstSync | TransactionOrigin::IncomingSync
+        )
     }
 }
 
@@ -251,8 +256,8 @@ impl JournalTransaction<'_> {
     /// the Server Object `over` in a Calendar, address included, or of a
     /// new one, and returns its ID. Its Combined Event Keys become
     /// `event_keys`, one per component, in the Calendar the Server Object is
-    /// in. Only a sync writes the Mirror, as only it knows what the server
-    /// holds.
+    /// in. Only an Incoming Sync writes the Mirror, as only it knows what the
+    /// server holds.
     pub fn mirror(
         &self,
         calendar_id: CalendarId,
@@ -260,7 +265,7 @@ impl JournalTransaction<'_> {
         over: Option<ObjectId>,
         event_keys: &[EventKeyInCalendar],
     ) -> Result<ObjectId> {
-        debug_assert!(self.origin.is_sync());
+        debug_assert!(self.origin.is_incoming_sync());
         self.writable(calendar_id)?;
         self.store
             .write_object(JOURNALED, calendar_id, object, over, event_keys)
@@ -277,7 +282,7 @@ impl JournalTransaction<'_> {
         uid: &str,
         event_keys: &[EventKeyInCalendar],
     ) -> Result<()> {
-        debug_assert!(self.origin.is_sync());
+        debug_assert!(self.origin.is_incoming_sync());
         self.store
             .write_uid_combined_event_keys(JOURNALED, id, uid, event_keys)
     }
@@ -315,21 +320,22 @@ impl JournalTransaction<'_> {
     /// it could with their Combined Event Keys, and their Event Rows stay as
     /// they are.
     pub fn unreadable(&self, calendar_id: CalendarId, href: &str) -> Result<()> {
-        debug_assert!(self.origin.is_sync());
+        debug_assert!(self.origin.is_incoming_sync());
         self.store.mark_unreadable(JOURNALED, calendar_id, href)
     }
 
     /// Removes the Server Object `id` from the Mirror with its Combined Event
-    /// Keys, as a sync finds it gone from the server. The Event Rows of the
-    /// UIDs it was the Corresponding Server Object of stay, for the sync to
-    /// give to their next Corresponding Server Object or delete.
+    /// Keys, as an Incoming Sync finds it gone from the server. The Event Rows
+    /// of the UIDs it was the Corresponding Server Object of stay, for the
+    /// Incoming Sync to give to their next Corresponding Server Object or
+    /// delete.
     pub fn remove_object(&self, id: ObjectId) -> Result<()> {
-        debug_assert!(self.origin.is_sync());
+        debug_assert!(self.origin.is_incoming_sync());
         self.store.delete_object(JOURNALED, id)
     }
 
-    /// Records, with the Journal Transaction's changes, that a sync of a
-    /// Calendar finished with the sync token `token`.
+    /// Records, with the Journal Transaction's changes, that an Incoming Sync
+    /// of a Calendar finished with the sync token `token`.
     pub fn synced(&self, calendar_id: CalendarId, token: Option<&str>) -> Result<()> {
         self.store.set_synced(calendar_id, token)
     }
@@ -389,10 +395,10 @@ impl JournalTransaction<'_> {
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
-    /// every Transaction Origin but a sync, which loads what the server has.
-    /// Every write checks this itself; a change that targets a Calendar, such
-    /// as an import, checks it first, so that it is refused even when it
-    /// would write nothing.
+    /// every Transaction Origin but an Incoming Sync, which loads what the
+    /// server has. Every write checks this itself; a change that targets a
+    /// Calendar, such as an import, checks it first, so that it is refused
+    /// even when it would write nothing.
     pub fn writable(&self, id: CalendarId) -> Result<()> {
         let read_only = self.store.find_calendar(id)?.read_only;
         match self.origin {
@@ -410,10 +416,10 @@ impl JournalTransaction<'_> {
     /// Journal Transaction with its first one. A Transaction Origin that isn't
     /// recorded only notes the Calendars.
     ///
-    /// Every Transaction Origin but a sync also adds both Event Versions'
-    /// Combined Event Keys to the Unsent Changes, in a server Calendar (ADR
-    /// 0011): a write into a Read-only one was refused already. A sync's
-    /// changes are what the server holds.
+    /// Every Transaction Origin but an Incoming Sync also adds both Event
+    /// Versions' Combined Event Keys to the Unsent Changes, in a server
+    /// Calendar (ADR 0011): a write into a Read-only one was refused already.
+    /// An Incoming Sync's changes are what the server holds.
     fn record_journal_event_modification(
         &mut self,
         id: EventId,
@@ -425,7 +431,7 @@ impl JournalTransaction<'_> {
             if !self.calendars.contains(&event.calendar_id) {
                 self.calendars.push(event.calendar_id);
             }
-            if !self.origin.is_sync() {
+            if !self.origin.is_incoming_sync() {
                 let combined_event_key = CombinedEventKey {
                     calendar_id: event.calendar_id,
                     event_key: EventKeyInCalendar::new(uid, event.fields.recurrence_id.as_deref()),
@@ -463,7 +469,7 @@ impl Source for JournalTransaction<'_> {
 }
 
 /// One Event's change in a Journal Transaction, as the Change Journal holds it.
-pub(super) struct JournalEventModification {
+pub(crate) struct JournalEventModification {
     pub event_id: EventId,
     /// The Event's UID, which its hashes cover.
     pub uid: String,
@@ -523,7 +529,7 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::event::{EventFields, StoredWhen};
-    use crate::store::sql::UnsentChange;
+    use crate::store::UnsentChange;
 
     fn dentist() -> StoredEvent {
         StoredEvent {
@@ -593,7 +599,7 @@ mod tests {
         );
     }
 
-    /// A first sync writes, into a Read-only Calendar too, and records
+    /// A First Sync writes, into a Read-only Calendar too, and records
     /// nothing.
     #[test]
     fn a_first_sync_writes_without_recording() {
@@ -627,7 +633,7 @@ mod tests {
         assert_eq!(count("SELECT COUNT(*) FROM journal_event_modification"), 0);
     }
 
-    /// A Local Store with [`dentist`] pulled by a sync into its first
+    /// A Local Store with [`dentist`] pulled by an Incoming Sync into its first
     /// Calendar, in its Server Object.
     struct Pulled {
         _directory: tempfile::TempDir,
@@ -642,8 +648,11 @@ mod tests {
             let directory = tempfile::TempDir::new().unwrap();
             let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
             let calendar_id = store.list_calendars().unwrap()[0].id;
-            let (object, id, event) =
-                record(&store, TransactionOrigin::Sync, 0, |journal_transaction| {
+            let (object, id, event) = record(
+                &store,
+                TransactionOrigin::IncomingSync,
+                0,
+                |journal_transaction| {
                     let object = journal_transaction.mirror(
                         calendar_id,
                         &dentist_object(),
@@ -657,9 +666,10 @@ mod tests {
                         journal_transaction.create("dentist", &event)?,
                         event,
                     ))
-                })
-                .unwrap()
-                .value;
+                },
+            )
+            .unwrap()
+            .value;
             Self {
                 _directory: directory,
                 store,
@@ -678,7 +688,7 @@ mod tests {
             };
             record(
                 &self.store,
-                TransactionOrigin::Sync,
+                TransactionOrigin::IncomingSync,
                 0,
                 |journal_transaction| {
                     journal_transaction.mirror(self.event.calendar_id, &object, None, event_keys)
@@ -696,7 +706,8 @@ mod tests {
     }
 
     #[test]
-    fn a_sync_mirrors_the_server_object_with_its_combined_event_keys_and_records_neither() {
+    fn an_incoming_sync_mirrors_the_server_object_with_its_combined_event_keys_and_records_neither()
+    {
         let pulled = Pulled::new();
         let again = ServerObject {
             etag: Some("\"2\"".to_owned()),
@@ -709,7 +720,7 @@ mod tests {
 
         let mirrored = record(
             &pulled.store,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| {
                 journal_transaction.mirror(
@@ -745,7 +756,7 @@ mod tests {
         for origin in [
             TransactionOrigin::UserAction,
             TransactionOrigin::Import,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
         ] {
             let pulled = Pulled::new();
             let renamed = renamed(&pulled.event);
@@ -822,7 +833,7 @@ mod tests {
         );
         record(
             &pulled.store,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| {
                 journal_transaction.mirror(
@@ -848,7 +859,7 @@ mod tests {
     }
 
     /// A Local Store with a writable server Calendar holding [`dentist`],
-    /// pulled by a sync into its Server Object, and a Local Calendar.
+    /// pulled by an Incoming Sync into its Server Object, and a Local Calendar.
     struct OnServer {
         _directory: tempfile::TempDir,
         store: Store,
@@ -891,15 +902,20 @@ mod tests {
                 .unwrap();
             let mut event = dentist();
             event.calendar_id = server;
-            let id = record(&store, TransactionOrigin::Sync, 0, |journal_transaction| {
-                journal_transaction.mirror(
-                    server,
-                    &dentist_object(),
-                    None,
-                    &dentist_event_keys(),
-                )?;
-                journal_transaction.create("dentist", &event)
-            })
+            let id = record(
+                &store,
+                TransactionOrigin::IncomingSync,
+                0,
+                |journal_transaction| {
+                    journal_transaction.mirror(
+                        server,
+                        &dentist_object(),
+                        None,
+                        &dentist_event_keys(),
+                    )?;
+                    journal_transaction.create("dentist", &event)
+                },
+            )
             .unwrap()
             .value;
             Self {
@@ -945,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sync_leaves_nothing_unsent() {
+    fn an_incoming_sync_leaves_nothing_unsent() {
         let on_server = OnServer::new();
 
         assert_eq!(on_server.unsent(), []);
@@ -1049,13 +1065,13 @@ mod tests {
     /// The Server Object holding the Event Row changes; the Event doesn't,
     /// and the server already holds it.
     #[test]
-    fn a_sync_that_moves_an_event_row_to_another_server_object_leaves_nothing_unsent() {
+    fn an_incoming_sync_that_moves_an_event_row_to_another_server_object_leaves_nothing_unsent() {
         let on_server = OnServer::new();
         let renamed = renamed(&on_server.event);
 
         record(
             &on_server.store,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
             7,
             |journal_transaction| {
                 let old = journal_transaction
@@ -1104,7 +1120,7 @@ mod tests {
 
         record(
             &on_server.store,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
             13,
             |journal_transaction| {
                 journal_transaction.rejoin_combined_event_keys(
@@ -1137,7 +1153,7 @@ mod tests {
 
         record(
             &pulled.store,
-            TransactionOrigin::Sync,
+            TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| journal_transaction.remove_object(pulled.object),
         )

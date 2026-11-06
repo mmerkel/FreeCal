@@ -1,20 +1,17 @@
 //! The Local Store: one SQLite database (ADR 0004).
 //!
-//! Journaling is one of its invariants (ADR 0011): code outside this module
-//! changes an Event only through a [`JournalTransaction`]. Its SQL
-//! lives in two places: [`schema`] holds the schema and its migrations,
-//! [`sql`] every query and write. [`journal`] holds the Change Journal and no
-//! SQL; it makes the [`Journaled`](journal::Journaled) that writing the
-//! tables it guards takes, so that nothing else can.
+//! Journaling is one of its invariants (ADR 0011): code changes an Event only
+//! through a [`JournalTransaction`](crate::journal::JournalTransaction). All
+//! of the Local Store's SQL lives in this module: [`schema`] holds the schema
+//! and its migrations, [`sql`] every query and write. The guards that alone
+//! write a set of tables, the Change Journal ([`crate::journal`]) and the
+//! Sync Engine ([`crate::sync`]), hold no SQL.
 
-mod journal;
 mod schema;
 mod sql;
 
-pub use journal::{Changed, JournalTransactionId};
-pub(crate) use journal::{
-    JournalTransaction, Recorded, TransactionOrigin, delete_account, delete_calendar, record, undo,
-};
+#[cfg(test)]
+pub use sql::UnsentChange;
 
 use std::path::Path;
 
@@ -95,14 +92,14 @@ impl Store {
         // version 0 and both try to create the schema.
         let tx = Transaction::new_unchecked(&store.conn, TransactionBehavior::Immediate)?;
         schema::migrate(&tx)?;
-        journal::recompute_instants(&store)?;
+        crate::journal::recompute_instants(&store)?;
         tx.commit()?;
         Ok(store)
     }
 
     /// The connection, for tests that set rows up or look at them directly.
     #[cfg(test)]
-    fn connection(&self) -> &Connection {
+    pub(crate) fn connection(&self) -> &Connection {
         &self.conn
     }
 

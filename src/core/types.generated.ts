@@ -65,7 +65,7 @@ readOnly: boolean,
  */
 serverReadOnly: boolean,
 /**
- * Whether its first sync is running, so that its Events are still
+ * Whether its First Sync is running, so that its Events are still
  * loading; the sidebar says so. Sync Status may take this over (ticket
  * 15).
  */
