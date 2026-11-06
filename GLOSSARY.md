@@ -150,6 +150,10 @@ _Avoid_: Cache, server copy
 A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs, remembered with its ETag so that it isn't fetched again until it changes. It is not part of the Mirror and has no Event Rows.
 _Avoid_: Skipped object, rejected resource
 
+**Holds**:
+What a fetched CalDAV resource holds of what FreeCal keeps, as the CalDAV reading step reads it (`import::Holds`): it can't be read, it holds nothing FreeCal keeps (no Events, or several UIDs), or it holds one UID with its Events. The Sync Engine mirrors only the last.
+_Avoid_: Content, parse result
+
 **Combined Event Key**:
 A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
 _Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
