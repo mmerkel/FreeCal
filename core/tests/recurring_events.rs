@@ -821,8 +821,8 @@ mod exceptions_alone {
         );
     }
 
-    /// ADR 0012: the Occurrence's ID is in the normal form, and the commands
-    /// find the Exception by it, stored as given in New York's time.
+    /// ADR 0012: the Occurrence's ID is in the Normal Form, and the commands
+    /// find the Exception by it, stored as obtained in New York's time.
     #[test]
     fn once_joined_it_moves_and_deletes_as_its_occurrence_by_the_id_it_shows() {
         let harness = Harness::new();

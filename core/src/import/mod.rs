@@ -168,7 +168,7 @@ impl ImportedEvent {
     }
 
     /// For an Exception, the recurrence ID of the Occurrence it changed, as
-    /// given (ADR 0012); none for every other Event.
+    /// obtained (ADR 0012); none for every other Event.
     pub(crate) fn recurrence_id(&self) -> Option<RecurrenceId> {
         self.original.as_ref().map(RecurrenceId::of_original)
     }
@@ -326,8 +326,8 @@ pub(crate) fn read_server_objects(objects: Vec<ServerObject>, zone: Tz) -> Vec<F
 /// An Exception joins its Recurring Event; several for one Occurrence all
 /// join, for [`Loaded`] to keep the latest. Those without it in the files
 /// follow, each an Event of its own (ticket 88), the latest of several for
-/// one Occurrence, their recurrence IDs counting as given. Recurrence IDs
-/// stay as given (ADR 0012).
+/// one Occurrence, their recurrence IDs counting as obtained. Recurrence IDs
+/// stay as obtained (ADR 0012).
 fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
     let mut seen = HashMap::new();
     let mut events: Vec<ImportedEvent> = Vec::new();
@@ -353,8 +353,8 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         }
     }
     let alone = latest(without_recurring.iter().map(|exception| {
-        let given = exception.recurrence_id();
-        let rid = given.and_then(|given| given.normal_form(None));
+        let obtained = exception.recurrence_id();
+        let rid = obtained.and_then(|obtained| obtained.normal_form(None));
         ((exception.uid.as_str(), rid), exception)
     }));
     events.extend(alone.into_iter().map(|(_, exception)| exception.clone()));
@@ -447,7 +447,7 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                 .flatten()
                 .flat_map(single_values)
                 .filter_map(|exdate| DatePerhapsTime::from_property(&exdate))
-                .map(|exdate| in_normal_form(&zones.time(exdate), &when));
+                .map(|exdate| in_normal_form(&zones.time(exdate), &when).into_string());
             // A rule FreeCal can't expand leaves the Event as its first
             // Occurrence.
             let (rule, exdates) = rule::imported(

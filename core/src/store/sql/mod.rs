@@ -71,7 +71,7 @@ fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
         exdates: row.get(first + 11)?,
         recurrence_id: row
             .get::<_, Option<String>>(first + 12)?
-            .map(RecurrenceId::given),
+            .map(RecurrenceId::obtained),
     })
 }
 

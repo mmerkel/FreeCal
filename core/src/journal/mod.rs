@@ -480,7 +480,7 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
     item(fields.exdates.as_bytes());
     let recurrence_id = fields.recurrence_id.as_ref();
     item(&optional(
-        &recurrence_id.map(|given| given.as_given().to_owned()),
+        &recurrence_id.map(|obtained| obtained.as_obtained().to_owned()),
     ));
     hasher.finalize().to_vec()
 }
@@ -542,7 +542,7 @@ mod tests {
     fn exception(event: &StoredEvent, rid: &str) -> StoredEvent {
         let mut exception = event.clone();
         exception.fields.rule = None;
-        exception.fields.recurrence_id = Some(RecurrenceId::given(rid));
+        exception.fields.recurrence_id = Some(RecurrenceId::obtained(rid));
         exception
     }
 
@@ -683,7 +683,7 @@ mod tests {
         };
         let event_keys = [
             EventKeyInCalendar::new("dentist", None),
-            EventKeyInCalendar::new("dentist", Some(&RecurrenceId::given(EXCEPTION))),
+            EventKeyInCalendar::new("dentist", Some(&RecurrenceId::obtained(EXCEPTION))),
         ];
 
         let mirrored = record(
@@ -797,7 +797,7 @@ mod tests {
             "/user/work/copy.ics",
             &[EventKeyInCalendar::new(
                 "dentist",
-                Some(&RecurrenceId::given(EXCEPTION)),
+                Some(&RecurrenceId::obtained(EXCEPTION)),
             )],
         );
 
@@ -818,7 +818,7 @@ mod tests {
                     Some(pulled.object),
                     &[EventKeyInCalendar::new(
                         "dentist",
-                        Some(&RecurrenceId::given(EXCEPTION)),
+                        Some(&RecurrenceId::obtained(EXCEPTION)),
                     )],
                 )?;
                 sync::testing::mirror(

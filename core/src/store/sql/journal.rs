@@ -59,7 +59,7 @@ impl DatabaseTransaction<'_> {
                 fields.zone_pinned,
                 fields.rule,
                 fields.exdates,
-                fields.recurrence_id.as_ref().map(RecurrenceId::as_given),
+                fields.recurrence_id.as_ref().map(RecurrenceId::as_obtained),
             ],
         )?;
         Ok(id.unwrap_or(EventId(self.tx.last_insert_rowid())))
@@ -91,7 +91,10 @@ impl DatabaseTransaction<'_> {
             params![
                 calendar_id.0,
                 event_key.uid,
-                event_key.recurrence_id.as_ref().map(RecurrenceId::as_given),
+                event_key
+                    .recurrence_id
+                    .as_ref()
+                    .map(RecurrenceId::as_obtained),
                 since
             ],
         )?;
@@ -154,7 +157,7 @@ impl DatabaseTransaction<'_> {
                 fields.map(|fields| &fields.exdates),
                 fields
                     .and_then(|fields| fields.recurrence_id.as_ref())
-                    .map(RecurrenceId::as_given),
+                    .map(RecurrenceId::as_obtained),
             ],
         )?;
         Ok(())

@@ -264,7 +264,7 @@ pub(crate) struct EventFields {
     /// separated by commas.
     pub exdates: String,
     /// For an Exception, the recurrence ID of the Occurrence it changed, as
-    /// given (ADR 0012).
+    /// obtained (ADR 0012).
     pub recurrence_id: Option<RecurrenceId>,
 }
 

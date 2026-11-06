@@ -57,7 +57,7 @@ pub enum Uid<'a> {
 #[derive(Debug, Clone)]
 pub struct EventKeyInCalendar {
     pub uid: String,
-    /// As given (ADR 0012): compared by Occurrence, never as text.
+    /// As obtained (ADR 0012): compared by Occurrence, never as text.
     pub recurrence_id: Option<RecurrenceId>,
 }
 

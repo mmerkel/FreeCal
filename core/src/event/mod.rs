@@ -26,7 +26,7 @@ use crate::journal::JournalTransaction;
 use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
-pub(crate) use recurrence_id::{RecurrenceId, in_normal_form};
+pub(crate) use recurrence_id::{NormalForm, RecurrenceId, in_normal_form};
 pub use rule::{Frequency, Repeat, RepeatEnd};
 pub(crate) use scope::{Edit, edit_event, edit_occurrence, exception_counts};
 pub use scope::{ExceptionCounts, Scope};
@@ -72,7 +72,7 @@ pub struct Event {
     /// weekdays of a weekly rule. Those are kept while the frequency stays.
     pub custom_repeat: bool,
     /// For an Exception, the recurrence ID of the Occurrence of its Recurring
-    /// Event that it changed, in the normal form, or as stored when it isn't
+    /// Event that it changed, in the Normal Form, or as stored when it isn't
     /// one; none for every other Event.
     pub recurrence_id: Option<String>,
 }
@@ -90,7 +90,7 @@ pub struct Occurrence {
     pub title: String,
     pub when: When,
     /// Which Occurrence of a Recurring Event this is: its original start in
-    /// the normal form (ADR 0012), as text that only the core reads. The
+    /// the Normal Form (ADR 0012), as text that only the core reads. The
     /// commands that take it find the Occurrence's Exception by comparing
     /// by Occurrence. None for a single Event, and for an
     /// Exception that is an Event of its own: without its Recurring Event,
@@ -133,14 +133,14 @@ impl Source for Store {
 /// A stored Event: its ID and fields.
 type Stored = (EventId, EventFields);
 
-/// A stored Exception: its ID, the normal form of the recurrence ID of the
+/// A stored Exception: its ID, the Normal Form of the recurrence ID of the
 /// Occurrence it changed, computed once against the Recurring Event it is
 /// loaded with (ADR 0012), and its fields, which hold the recurrence ID as
-/// given. A stored recurrence ID that isn't one gets none, and so pairs
+/// obtained. A stored recurrence ID that isn't one gets none, and so pairs
 /// with no Occurrence.
 struct Exception {
     id: EventId,
-    rid: Option<String>,
+    rid: Option<NormalForm>,
     fields: EventFields,
 }
 
@@ -201,10 +201,10 @@ impl Loaded {
         loaded
     }
 
-    /// The normal form of the recurrence ID `given`, as the window gives an
+    /// The Normal Form of the recurrence ID `text`, as the window gives an
     /// Occurrence's, against the Recurring Event; none when it isn't one.
-    fn rid_of(&self, given: &str) -> Option<String> {
-        RecurrenceId::given(given).normal_form(self.recurring_when().as_ref())
+    fn rid_of(&self, text: &str) -> Option<NormalForm> {
+        RecurrenceId::obtained(text).normal_form(self.recurring_when().as_ref())
     }
 
     /// Whether the Calendar has an Event with the UID, an Exception without
@@ -236,7 +236,7 @@ impl Loaded {
     /// `incoming` has replace them or are added, the latest of several for
     /// one Occurrence. The others are deleted, but for Events of their own
     /// ([`Loaded::of_its_own`]), which stay and join `incoming` without being
-    /// written, as their recurrence IDs stay as given (ADR 0012). ADR 0007's
+    /// written, as their recurrence IDs stay as obtained (ADR 0012). ADR 0007's
     /// rules 2 and 3 apply.
     pub fn take(
         &self,
@@ -245,9 +245,9 @@ impl Loaded {
     ) -> Result<()> {
         let recurring = incoming.rule.as_ref().map(|_| &incoming.when);
         let exceptions = latest(incoming.exceptions.iter().map(|exception| {
-            let given = exception.recurrence_id();
+            let obtained = exception.recurrence_id();
             (
-                given.and_then(|given| given.normal_form(recurring)),
+                obtained.and_then(|obtained| obtained.normal_form(recurring)),
                 exception,
             )
         }));
@@ -271,13 +271,13 @@ impl Loaded {
         }
         let mut left: Vec<_> = self.exceptions.iter().collect();
         for (_, exception) in exceptions {
-            let same = exception.recurrence_id().and_then(|given| {
+            let same = exception.recurrence_id().and_then(|obtained| {
                 left.iter().position(|stored| {
                     stored
                         .fields
                         .recurrence_id
                         .as_ref()
-                        .is_some_and(|rid| rid.same_occurrence(&given, recurring))
+                        .is_some_and(|rid| rid.same_occurrence(&obtained, recurring))
                 })
             });
             let (previous, fields) = match same.map(|index| left.remove(index)) {
@@ -306,8 +306,8 @@ impl Loaded {
     ) -> Result<()> {
         let rid = incoming
             .recurrence_id()
-            .and_then(|given| given.normal_form(self.recurring_when().as_ref()));
-        match rid.as_deref().and_then(|rid| self.exception_at(rid)) {
+            .and_then(|obtained| obtained.normal_form(self.recurring_when().as_ref()));
+        match rid.as_ref().and_then(|rid| self.exception_at(rid)) {
             Some(stored) => journal_transaction.replace(
                 stored.id,
                 &StoredEvent {
@@ -375,24 +375,24 @@ impl Loaded {
         let (Some((_, recurring)), Some(rid)) = (self.recurring(), &exception.rid) else {
             return Ok(None);
         };
-        Ok(rule::occurrence_at(recurring, rid)?.map(|slot| (recurring, slot)))
+        Ok(rule::occurrence_at(recurring, rid.as_str())?.map(|slot| (recurring, slot)))
     }
 
-    /// The Exception that changed the Occurrence `rid`, in the normal form,
+    /// The Exception that changed the Occurrence `rid`, in the Normal Form,
     /// if there is one: of several, the first by ID.
-    fn exception_at(&self, rid: &str) -> Option<&Exception> {
+    fn exception_at(&self, rid: &NormalForm) -> Option<&Exception> {
         self.exceptions
             .iter()
-            .find(|exception| exception.rid.as_deref() == Some(rid))
+            .find(|exception| exception.rid.as_ref() == Some(rid))
     }
 
-    /// Cancels the Occurrence `rid`, in the normal form, of the Recurring Event,
+    /// Cancels the Occurrence `rid`, in the Normal Form, of the Recurring Event,
     /// which it must have: the Occurrence becomes a cancelled Exception, and
     /// an Exception that changed it is deleted.
-    fn cancel(&self, journal_transaction: &mut JournalTransaction, rid: &str) -> Result<()> {
+    fn cancel(&self, journal_transaction: &mut JournalTransaction, rid: &NormalForm) -> Result<()> {
         let (id, fields) = self.recurring_event();
         for exception in &self.exceptions {
-            if exception.rid.as_deref() == Some(rid) {
+            if exception.rid.as_ref() == Some(rid) {
                 journal_transaction.delete(exception.id)?;
             }
         }
@@ -401,7 +401,7 @@ impl Loaded {
             &StoredEvent {
                 calendar_id: self.calendar_id,
                 fields: EventFields {
-                    exdates: rule::with_exdate(&fields.exdates, rid),
+                    exdates: rule::with_exdate(&fields.exdates, rid.as_str()),
                     ..fields.clone()
                 },
             },
@@ -510,10 +510,14 @@ impl Opened {
             repeat,
             custom_repeat,
             recurrence_id: self.exception().and_then(|exception| {
-                exception.rid.clone().or_else(|| {
-                    let given = exception.fields.recurrence_id.as_ref();
-                    given.map(|given| given.as_given().to_owned())
-                })
+                exception
+                    .rid
+                    .clone()
+                    .map(NormalForm::into_string)
+                    .or_else(|| {
+                        let obtained = exception.fields.recurrence_id.as_ref();
+                        obtained.map(|obtained| obtained.as_obtained().to_owned())
+                    })
             }),
         })
     }
@@ -586,7 +590,7 @@ pub(crate) fn create_event(
 /// Zone, and their Exceptions stand in for the Occurrences they changed:
 /// of several for one Occurrence, as another program may have written, the
 /// first by ID, paired by Occurrence. An Occurrence's recurrence ID is in the
-/// normal form; an Exception that is an Event of its own
+/// Normal Form; an Exception that is an Event of its own
 /// ([`Loaded::of_its_own`]) has none.
 pub(crate) fn occurrences(
     store: &Store,
@@ -607,22 +611,19 @@ pub(crate) fn occurrences(
                 .iter()
                 .find(|exception| exception.id == event.id);
             if let Some(own) = own {
-                let first = own
-                    .rid
-                    .as_deref()
-                    .and_then(|rid| with_uid.exception_at(rid));
+                let first = own.rid.as_ref().and_then(|rid| with_uid.exception_at(rid));
                 if first.is_some_and(|first| first.id != own.id) {
                     continue;
                 }
                 if !with_uid.of_its_own(own) {
-                    recurrence_id.clone_from(&own.rid);
+                    recurrence_id = own.rid.clone().map(NormalForm::into_string);
                 }
             }
         }
         let expanded = match event.fields.rule {
             None => None,
             Some(_) => {
-                let changed: Vec<String> = with_uid_of(&mut loaded, store, &event)?
+                let changed: Vec<NormalForm> = with_uid_of(&mut loaded, store, &event)?
                     .exceptions
                     .iter()
                     .filter_map(|exception| exception.rid.clone())
@@ -708,7 +709,8 @@ pub(crate) fn take_object(
             Some(when) => Some(when),
             None => Loaded::of_uid(journal_transaction, calendar_id, uid)?.recurring_when(),
         };
-        let occurrence = |given: Option<RecurrenceId>| occurrence_key(given, recurring.as_ref());
+        let occurrence =
+            |obtained: Option<RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
         let mut left = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
         let with_uid = latest(
             with_uid
@@ -743,24 +745,24 @@ pub(crate) fn take_object(
     Ok(())
 }
 
-/// Which Occurrence an Event with the recurrence ID `given` stands for, of
-/// a Recurring Event at `recurring`: `Some(None)` for an Event that isn't
-/// an Exception, the normal form for an Exception, and none for a recurrence
-/// ID that isn't one, which pairs with nothing.
+/// Which Occurrence an Event with the recurrence ID `obtained` stands for,
+/// of a Recurring Event at `recurring`: `Some(None)` for an Event that isn't
+/// an Exception, the Normal Form for an Exception, and none for a
+/// recurrence ID that isn't one, which pairs with nothing.
 fn occurrence_key(
-    given: Option<RecurrenceId>,
+    obtained: Option<RecurrenceId>,
     recurring: Option<&ImportedWhen>,
-) -> Option<Option<String>> {
-    match given {
+) -> Option<Option<NormalForm>> {
+    match obtained {
         None => Some(None),
-        Some(given) => given.normal_form(recurring).map(Some),
+        Some(obtained) => obtained.normal_form(recurring).map(Some),
     }
 }
 
-/// The normal form of the recurrence ID of an Exception with `fields`
+/// The Normal Form of the recurrence ID of an Exception with `fields`
 /// against a Recurring Event at `recurring`; none for an Event that isn't
 /// an Exception, and for a recurrence ID that isn't one.
-fn normal_form(fields: &EventFields, recurring: Option<&ImportedWhen>) -> Option<String> {
+fn normal_form(fields: &EventFields, recurring: Option<&ImportedWhen>) -> Option<NormalForm> {
     fields.recurrence_id.as_ref()?.normal_form(recurring)
 }
 

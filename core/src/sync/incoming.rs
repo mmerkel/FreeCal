@@ -52,7 +52,7 @@ pub(crate) fn apply(
 /// same Incoming Sync, holds is that one moved to another address: it takes
 /// its place, which leaves `moved_from`. A Recurring Event that arrives
 /// joins the Calendar's Exceptions that had none without writing them, as
-/// they keep their recurrence IDs as given (ADR 0012).
+/// they keep their recurrence IDs as obtained (ADR 0012).
 pub(crate) fn take(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -155,7 +155,7 @@ mod tests {
         RECURRENCE-ID;TZID=America/New_York:20261012T040000\r\n\
         DTSTART:20261012T090000Z\r\nDTEND:20261012T100000Z\r\nEND:VEVENT\r\n";
 
-    /// [`MOVED`]'s recurrence ID as given, as the Local Store keeps it.
+    /// [`MOVED`]'s recurrence ID as obtained, as the Local Store keeps it.
     const IN_NEW_YORK: &str = "2026-10-12T04:00:00[America/New_York]";
 
     /// [`MOVED`] with its recurrence ID given in UTC, as [`WEEKLY`]'s own
@@ -289,7 +289,7 @@ mod tests {
                 .into_iter()
                 .map(|event_row| {
                     let recurrence_id = event_row.fields.recurrence_id;
-                    let text = recurrence_id.map(|given| given.as_given().to_owned());
+                    let text = recurrence_id.map(|obtained| obtained.as_obtained().to_owned());
                     (event_row.id, text)
                 })
                 .collect()
@@ -372,7 +372,7 @@ mod tests {
     /// as the Combined Event Keys do.
     #[test]
     fn it_changes_its_occurrence_once_its_recurring_event_arrives_in_its_server_object() {
-        for (moved, given) in [
+        for (moved, obtained) in [
             (MOVED.to_owned(), IN_NEW_YORK),
             (moved_in_utc(), "2026-10-12T08:00:00[UTC]"),
         ] {
@@ -386,9 +386,12 @@ mod tests {
             let weekly = alone.event_rows()[1].0;
             assert_eq!(
                 alone.event_rows(),
-                [(alone.moved, Some(given.to_owned())), (weekly, None)]
+                [(alone.moved, Some(obtained.to_owned())), (weekly, None)]
             );
-            assert_eq!(alone.combined_event_keys(), [None, Some(given.to_owned())]);
+            assert_eq!(
+                alone.combined_event_keys(),
+                [None, Some(obtained.to_owned())]
+            );
             let second = Some("2026-10-12T08:00:00".to_owned());
             assert_eq!(alone.shown()[1], ("Moved".to_owned(), alone.moved, second));
             assert_eq!(alone.shown().len(), 3);
@@ -397,7 +400,7 @@ mod tests {
 
     /// ADR 0011: the Server Object holding the Recurring Event corresponds,
     /// whether it arrives in the same Incoming Sync or a later one; the
-    /// other keeps its Combined Event Keys as given.
+    /// other keeps its Combined Event Keys as obtained.
     #[test]
     fn in_another_server_object_its_combined_event_keys_stay_as_given() {
         for same_incoming_sync in [false, true] {
@@ -415,12 +418,12 @@ mod tests {
 
             assert_eq!(alone.event_rows().len(), 1);
             assert_eq!(alone.event_rows()[0].1, None);
-            let given = if same_incoming_sync {
+            let obtained = if same_incoming_sync {
                 "2026-10-12T08:00:00[UTC]"
             } else {
                 IN_NEW_YORK
             };
-            assert_eq!(alone.combined_event_keys(), [Some(given.to_owned())]);
+            assert_eq!(alone.combined_event_keys(), [Some(obtained.to_owned())]);
         }
     }
 
@@ -446,13 +449,13 @@ mod tests {
     }
 
     /// ADR 0012: changing the whole Recurring Event without moving it
-    /// leaves its Exceptions' recurrence IDs as given; moving it rewrites
+    /// leaves its Exceptions' recurrence IDs as obtained; moving it rewrites
     /// them.
     #[test]
     fn changing_its_recurring_event_rewrites_its_recurrence_id_only_when_it_moves() {
         use crate::When;
         use crate::event::{Edit, EventDraft, Opened, Scope, edit_occurrence};
-        for (shift, given) in [(0, IN_NEW_YORK), (1, "2026-10-12T09:00:00")] {
+        for (shift, obtained) in [(0, IN_NEW_YORK), (1, "2026-10-12T09:00:00")] {
             let alone = Alone::new();
             alone.import(WEEKLY);
             let weekly = alone.event_rows()[1].0;
@@ -494,7 +497,10 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(alone.event_rows()[0], (alone.moved, Some(given.to_owned())));
+            assert_eq!(
+                alone.event_rows()[0],
+                (alone.moved, Some(obtained.to_owned()))
+            );
             assert_eq!(alone.shown()[1].1, alone.moved);
             if shift == 0 {
                 alone.assert_unsent_as_the_event_rows_hold_them();

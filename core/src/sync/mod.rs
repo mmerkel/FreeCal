@@ -117,7 +117,7 @@ fn settle(
 }
 
 /// The Combined Event Key of each of `events`, in the Calendar of the Server
-/// Object holding them (ADR 0011), its recurrence ID as given (ADR 0012).
+/// Object holding them (ADR 0011), its recurrence ID as obtained (ADR 0012).
 fn event_keys_in_calendar(events: &[ImportedEvent]) -> Vec<EventKeyInCalendar> {
     events
         .iter()

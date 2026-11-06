@@ -1,6 +1,6 @@
 //! The Sync Engine's writes (ADR 0011): a Server Object's data in the Mirror
 //! (`server_object`) and its Combined Event Keys (`combined_event_key`),
-//! which hold its recurrence IDs as given (ADR 0012). Each takes a
+//! which hold its recurrence IDs as obtained (ADR 0012). Each takes a
 //! [`SyncEngineWritePermission`], which only [`crate::sync`] can make, and is
 //! a method of a [`DatabaseTransaction`].
 
@@ -50,7 +50,10 @@ impl DatabaseTransaction<'_> {
             stmt.execute(params![
                 id.0,
                 event_key.uid,
-                event_key.recurrence_id.as_ref().map(RecurrenceId::as_given)
+                event_key
+                    .recurrence_id
+                    .as_ref()
+                    .map(RecurrenceId::as_obtained)
             ])?;
         }
         Ok(())

@@ -146,6 +146,14 @@ _Avoid_: Cache, server copy
 A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
 _Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
 
+**Recurrence ID as obtained**:
+An Exception's recurrence ID in the text it arrived in, from a file, a server or FreeCal: a date, a wall time with no zone, or a wall time with the zone it came in. Event Rows, Unsent Changes and Server Objects store it so, and code compares it only by Occurrence, through its Normal Form (ADR 0012).
+_Avoid_: Recurrence ID as given, raw recurrence ID, normalised recurrence ID
+
+**Normal Form**:
+The form of a recurrence ID that names its Occurrence against the Recurring Event: the Occurrence's wall time in the Recurring Event's Event Time Zone, or its date when the Recurring Event is all-day; without a Recurring Event, the recurrence ID as obtained. It exists only in memory, and the window gets an Occurrence's as its ID.
+_Avoid_: Normalised recurrence ID, canonical form
+
 **Corresponding Server Object**:
 The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, of the CalDAV Server Objects holding that UID, the one holding the Event that isn't an Exception, otherwise the first one mirrored; on Google, the Google Server Object holding that UID and Occurrence. Any other Server Object holding the UID has no Event Rows.
 _Avoid_: Owner, primary object, home object

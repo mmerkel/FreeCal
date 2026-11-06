@@ -12,7 +12,7 @@
 //! Occurrence only.
 //!
 //! A leaf of the Event module: outside it, only [`span`] and [`imported`]
-//! are open. Recurrence IDs here are in the normal form
+//! are open. Recurrence IDs here are in the Normal Form
 //! ([`super::recurrence_id`]).
 
 use std::str::FromStr;
@@ -22,6 +22,7 @@ use chrono_tz::Tz;
 use rrule::{RRule, RRuleSet, Unvalidated};
 use serde::{Deserialize, Serialize};
 
+use super::NormalForm;
 use super::when::{
     EventFields, StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text,
 };
@@ -162,7 +163,7 @@ pub(super) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -
 }
 
 /// A rule from a file with the recurrence IDs of its `EXDATE`s, as FreeCal
-/// stores them: the rule as given, but with an `UNTIL` in the form RFC 5545
+/// stores them: the rule as obtained, but with an `UNTIL` in the form RFC 5545
 /// asks for the Event at `when`, where one without a zone is read in the
 /// Event Time Zone; the recurrence IDs sorted, each once. No rule and no
 /// recurrence IDs when there is no rule or FreeCal can't expand it.
@@ -229,14 +230,14 @@ const MAX_COUNTED: usize = 50_000;
 /// Events of their own. None for an Event that doesn't repeat.
 pub(super) fn occurrences_in(
     fields: &EventFields,
-    exceptions: &[String],
+    exceptions: &[NormalForm],
     range: &StoredRange,
 ) -> Result<Option<Vec<(String, StoredWhen)>>> {
     let Some(starts) = OccurrenceStarts::of(fields) else {
         return Ok(None);
     };
     let skipped: Vec<NaiveDateTime> = split_ids(&fields.exdates)
-        .chain(exceptions.iter().map(String::as_str))
+        .chain(exceptions.iter().map(NormalForm::as_str))
         .filter_map(start_of_id)
         .collect();
     let last_day = range.to_day_seconds + TimeDelta::days(2).num_seconds();
@@ -495,7 +496,7 @@ fn split_ids(text: &str) -> impl Iterator<Item = &str> {
     text.split(',').map(str::trim).filter(|id| !id.is_empty())
 }
 
-/// The start a recurrence ID in the normal form names, midnight for a
+/// The start a recurrence ID in the Normal Form names, midnight for a
 /// date.
 pub(super) fn start_of_id(id: &str) -> Option<NaiveDateTime> {
     NaiveDateTime::parse_from_str(id, WALL_TIME)

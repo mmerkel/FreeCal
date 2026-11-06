@@ -15,7 +15,7 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    EventDraft, EventFields, Exception, Loaded, Opened, RecurrenceId, Source, StoredWhen, new_uid,
+    EventDraft, EventFields, Exception, Loaded, NormalForm, Opened, Source, StoredWhen, new_uid,
     rule,
 };
 use crate::journal::JournalTransaction;
@@ -80,8 +80,8 @@ pub(crate) fn exception_counts(
         counts.all += 1;
         if exception
             .rid
-            .as_deref()
-            .is_some_and(|own| rule::is_from(own, &rid))
+            .as_ref()
+            .is_some_and(|own| rule::is_from(own.as_str(), rid.as_str()))
         {
             counts.this_and_following += 1;
         }
@@ -136,13 +136,13 @@ pub(crate) fn edit_occurrence(
     )
 }
 
-/// Changes the Occurrence `rid`, in the normal form, of the Event `opened` in
-/// `scope`, as [`edit_occurrence`] does.
+/// Changes the Occurrence `rid` of the Event `opened` in `scope`, as
+/// [`edit_occurrence`] does.
 fn edit_opened(
     journal_transaction: &mut JournalTransaction,
     zone: Tz,
     opened: &Opened,
-    rid: String,
+    rid: NormalForm,
     scope: Scope,
     exceptions_too: bool,
     change: Edit,
@@ -165,7 +165,7 @@ fn edit_opened(
         };
         return alone(journal_transaction, zone, loaded, &changing, &rid, change);
     };
-    let slot = rule::occurrence_at(fields, &rid)?;
+    let slot = rule::occurrence_at(fields, rid.as_str())?;
     let changing = match exception {
         Some((id, fields)) => Changing {
             stored: Some(id),
@@ -222,7 +222,9 @@ pub(crate) fn edit_event(
         );
     }
     let fields = opened.fields();
-    let start = fields.when.start.clone();
+    // A Recurring Event's start is its first Occurrence's, in the Normal
+    // Form.
+    let start = NormalForm::computed(fields.when.start.clone());
     let changing = match opened.loaded.recurring() {
         // An Event that doesn't repeat is changed as its start's Occurrence
         // alone would be.
@@ -270,7 +272,7 @@ impl Changing {
     /// as the fields an Exception for it would start with.
     fn occurrence(
         recurring: &EventFields,
-        rid: String,
+        rid: NormalForm,
         when: StoredWhen,
         slot: Option<StoredWhen>,
     ) -> Self {
@@ -282,7 +284,7 @@ impl Changing {
                 exdates: String::new(),
                 // FreeCal writes the recurrence IDs it makes in the normal
                 // form (ADR 0012).
-                recurrence_id: Some(RecurrenceId::given(rid)),
+                recurrence_id: Some(rid.to_recurrence_id()),
                 ..recurring.clone()
             },
             slot,
@@ -389,17 +391,18 @@ impl Loaded {
         let mut kept = None;
         for exception in &self.exceptions {
             let Exception { id, rid, fields } = exception;
-            if !carried(rid.as_deref()) {
+            if !carried(rid.as_ref().map(NormalForm::as_str)) {
                 continue;
             }
             let moved = rid
-                .as_deref()
-                .and_then(|rid| rule::moved_id(rid, first, &now.when));
+                .as_ref()
+                .and_then(|rid| rule::moved_id(rid.as_str(), first, &now.when))
+                .map(NormalForm::computed);
             // The Exception's new place, none when it is gone, and `Some(None)`
             // when it can't be told.
             let slot = match (&now.rule, &moved) {
                 (Some(_), Some(moved)) if rule::readable(now) => {
-                    rule::occurrence_at(now, moved)?.map(Some)
+                    rule::occurrence_at(now, moved.as_str())?.map(Some)
                 }
                 (Some(_), Some(_)) => Some(None),
                 _ => None,
@@ -430,14 +433,14 @@ impl Loaded {
                 }
                 exception
             };
-            // Its recurrence ID stays as given while it names the same
+            // Its recurrence ID stays as obtained while it names the same
             // Occurrence of `new`; one whose Occurrence moved is written in
-            // the normal form (ADR 0012).
+            // the Normal Form (ADR 0012).
             let recurring = new.recurring_when();
-            let as_given = fields.recurrence_id.clone().filter(|given| {
-                given.normal_form(recurring.as_ref()).as_deref() == Some(moved.as_str())
+            let as_obtained = fields.recurrence_id.clone().filter(|obtained| {
+                obtained.normal_form(recurring.as_ref()).as_ref() == Some(&moved)
             });
-            exception.recurrence_id = Some(as_given.unwrap_or_else(|| RecurrenceId::given(moved)));
+            exception.recurrence_id = Some(as_obtained.unwrap_or_else(|| moved.to_recurrence_id()));
             let written = self.write_exception(journal_transaction, Some(*id), new, exception)?;
             if Some(*id) == changing {
                 kept = Some(written);
@@ -465,7 +468,7 @@ fn all(
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
-    rid: &str,
+    rid: &NormalForm,
     exceptions_too: bool,
     change: Edit,
 ) -> Result<Edited> {
@@ -489,7 +492,7 @@ fn all(
             fields: fields.clone(),
         },
     )?;
-    let moved = rule::moved_id(rid, was, &fields.when);
+    let moved = rule::moved_id(rid.as_str(), was, &fields.when).map(NormalForm::computed);
     let new = became(calendar_id, loaded.uid.clone(), *id, fields);
     let kept = loaded.carry_exceptions(
         journal_transaction,
@@ -511,14 +514,14 @@ fn following(
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
-    rid: &str,
+    rid: &NormalForm,
     exceptions_too: bool,
     change: Edit,
 ) -> Result<Edited> {
     let (id, recurring) = loaded.recurring_event();
     let not_found = || CoreError::OccurrenceNotFound(*id);
     let slot = changing.slot.as_ref().ok_or_else(not_found)?;
-    let Some(ended) = rule::rule_until(recurring, rid) else {
+    let Some(ended) = rule::rule_until(recurring, rid.as_str()) else {
         return all(
             journal_transaction,
             zone,
@@ -530,8 +533,8 @@ fn following(
         );
     };
     let changes = loaded.changes(change, changing, zone, exceptions_too)?;
-    let carried = |id: &str| rule::is_from(id, rid);
-    let mut fields = loaded.changed(&changes, slot, rule::rule_from(recurring, rid))?;
+    let carried = |id: &str| rule::is_from(id, rid.as_str());
+    let mut fields = loaded.changed(&changes, slot, rule::rule_from(recurring, rid.as_str()))?;
     fields.exdates = match fields.rule {
         Some(_) => rule::exdates_where(&recurring.exdates, carried, |id| {
             rule::moved_id(id, slot, &fields.when)
@@ -562,7 +565,7 @@ fn following(
             fields: fields.clone(),
         },
     )?;
-    let moved = rule::moved_id(rid, slot, &fields.when);
+    let moved = rule::moved_id(rid.as_str(), slot, &fields.when).map(NormalForm::computed);
     let new = became(calendar_id, uid, id, fields);
     let carried = |id: Option<&str>| id.is_some_and(carried);
     let kept = loaded.carry_exceptions(
@@ -583,22 +586,24 @@ fn now_at(
     journal_transaction: &JournalTransaction,
     new: &Loaded,
     kept: Option<EventId>,
-    rid: Option<String>,
+    rid: Option<NormalForm>,
 ) -> Result<Edited> {
     if let Some(kept) = kept {
         let event = journal_transaction.find_event(kept)?;
         let recurring = new.recurring_when();
         let recurrence_id = event.fields.recurrence_id.as_ref();
-        let recurrence_id = recurrence_id.and_then(|given| given.normal_form(recurring.as_ref()));
+        let recurrence_id = recurrence_id
+            .and_then(|obtained| obtained.normal_form(recurring.as_ref()))
+            .map(NormalForm::into_string);
         return Ok(edited(kept, event, recurrence_id));
     }
     let (id, fields) = new.recurring_event();
     let slot = match (&fields.rule, &rid) {
-        (Some(_), Some(rid)) => rule::occurrence_at(fields, rid)?,
+        (Some(_), Some(rid)) => rule::occurrence_at(fields, rid.as_str())?,
         _ => None,
     };
     let recurrence_id = match &slot {
-        Some(_) => rid,
+        Some(_) => rid.map(NormalForm::into_string),
         None if fields.rule.is_some() => {
             rule::occurrence_at(fields, &fields.when.start)?.map(|_| fields.when.start.clone())
         }
@@ -726,7 +731,7 @@ fn alone(
     zone: Tz,
     loaded: &Loaded,
     changing: &Changing,
-    rid: &str,
+    rid: &NormalForm,
     change: Edit,
 ) -> Result<Edited> {
     let calendar_id = loaded.calendar_id;
@@ -765,7 +770,7 @@ fn alone(
                         ..recurring.clone()
                     },
                 },
-                Some(rid.to_owned()),
+                Some(rid.clone().into_string()),
             ))
         }
         (_, target) => {
@@ -784,7 +789,7 @@ fn alone(
             // One without its Recurring Event, or changing none of its
             // Occurrences, is an Event of its own.
             let recurrence_id =
-                (recurring.is_some() && changing.slot.is_some()).then(|| rid.to_owned());
+                (recurring.is_some() && changing.slot.is_some()).then(|| rid.clone().into_string());
             Ok(edited(id, event, recurrence_id))
         }
     }

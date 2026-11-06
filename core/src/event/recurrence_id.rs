@@ -1,12 +1,10 @@
-//! Recurrence IDs as given (ADR 0012). Every Event Row, Unsent Change and
-//! Server Object keeps the recurrence ID of an Exception as it was given:
-//! a date, a wall time with no zone, or a wall time in the zone it was given
-//! in. Whether two of them name the same Occurrence depends on the Recurring
-//! Event, so it is worked out when comparing, against the Recurring Event,
-//! through the normal form, which exists only in memory: the Occurrence's
-//! wall time in the Recurring Event's Event Time Zone, or its date when the
-//! Recurring Event is all-day. Without a Recurring Event, a recurrence ID
-//! counts as given (ticket 88).
+//! Recurrence IDs as obtained (ADR 0012). Every Event Row, Unsent Change
+//! and Server Object keeps the recurrence ID of an Exception as it was
+//! obtained: a date, a wall time with no zone, or a wall time in the zone it
+//! was obtained in. Whether two of them name the same Occurrence depends on
+//! the Recurring Event, so it is worked out when comparing, against the
+//! Recurring Event, through their Normal Forms, which exist only in memory.
+//! Without a Recurring Event, a recurrence ID counts as obtained (ticket 88).
 
 use chrono_tz::Tz;
 
@@ -14,18 +12,18 @@ use super::rule::start_of_id;
 use super::when::{instant, wall_text};
 use crate::import::{ImportedWhen, Time};
 
-/// A recurrence ID as it was given: by a file or a server, by FreeCal in
-/// the normal form for the Exceptions it makes, or read back from a stored
-/// field or from the window, untrusted. It has no `PartialEq`, so that no
-/// code compares recurrence IDs as text: its one comparison,
-/// [`RecurrenceId::same_occurrence`], and the normal form it rests on take
-/// the Recurring Event, or its absence.
+/// A recurrence ID as obtained: from a file or a server, from FreeCal in the
+/// Normal Form for the Exceptions it makes, or read back from a stored field
+/// or from the window, untrusted. It has no `PartialEq`, so that no code
+/// compares recurrence IDs as text: its comparisons,
+/// [`RecurrenceId::same_occurrence`] and the [`NormalForm`] it rests on,
+/// take the Recurring Event, or its absence.
 #[derive(Debug, Clone)]
 pub(crate) struct RecurrenceId(String);
 
 impl RecurrenceId {
     /// The recurrence ID `text`, as a stored field or the window gives it.
-    pub fn given(text: impl Into<String>) -> Self {
+    pub fn obtained(text: impl Into<String>) -> Self {
         Self(text.into())
     }
 
@@ -41,28 +39,26 @@ impl RecurrenceId {
         })
     }
 
-    /// The text as given, which the Local Store writes.
-    pub fn as_given(&self) -> &str {
+    /// The text as obtained, which the Local Store writes.
+    pub fn as_obtained(&self) -> &str {
         &self.0
     }
 
-    /// The normal form of the Occurrence it names of a Recurring Event at
-    /// `recurring`: its wall time in the Event Time Zone of the Recurring
-    /// Event's start, or its date when that is all-day. With no Recurring
-    /// Event, the recurrence ID as given, written as [`Self::of_original`]
-    /// writes it. None when it isn't a recurrence ID, such as one with a zone
-    /// FreeCal doesn't know.
-    pub fn normal_form(&self, recurring: Option<&ImportedWhen>) -> Option<String> {
+    /// The Normal Form of the Occurrence it names of a Recurring Event at
+    /// `recurring`. With no Recurring Event, the recurrence ID as obtained,
+    /// written as [`Self::of_original`] writes it. None when it isn't a
+    /// recurrence ID, such as one with a zone FreeCal doesn't know.
+    pub fn normal_form(&self, recurring: Option<&ImportedWhen>) -> Option<NormalForm> {
         let original = original_of(&self.0)?;
         Some(match recurring {
             Some(recurring) => in_normal_form(&original, recurring),
-            None => Self::of_original(&original).0,
+            None => NormalForm(Self::of_original(&original).0),
         })
     }
 
     /// Whether it and `other` name the same Occurrence of a Recurring Event
-    /// at `recurring`, or, with none, the same original start as given. One
-    /// that isn't a recurrence ID names none.
+    /// at `recurring`, or, with none, the same original start as obtained.
+    /// One that isn't a recurrence ID names none.
     pub fn same_occurrence(&self, other: &Self, recurring: Option<&ImportedWhen>) -> bool {
         match (self.normal_form(recurring), other.normal_form(recurring)) {
             (Some(one), Some(other)) => one == other,
@@ -71,12 +67,43 @@ impl RecurrenceId {
     }
 }
 
-/// The normal form of the Occurrence of a Recurring Event at `recurring`
-/// that starts at `original`: a wall time in the Event Time Zone of its
-/// start, or a date for an all-day Event. A time without a zone is taken as
-/// given there; a date for a timed Event means the Occurrence on that date.
-pub(crate) fn in_normal_form(original: &Time, recurring: &ImportedWhen) -> String {
-    match (*recurring, original) {
+/// A recurrence ID in the Normal Form (ADR 0012): the Occurrence's wall time
+/// in the Event Time Zone of its Recurring Event's start, or its date when
+/// that is all-day. It exists only in memory, computed against one
+/// Recurring Event, so two compare by Occurrence when they were computed
+/// against the same one. FreeCal writes the recurrence IDs of the
+/// Exceptions it makes in it, and the window gets an Occurrence's as its ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NormalForm(String);
+
+impl NormalForm {
+    /// `text` that the Event module computed in the Normal Form, such as a
+    /// start the repeat rule gives.
+    pub(super) fn computed(text: String) -> Self {
+        Self(text)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The text, as the window gets it.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+
+    /// The recurrence ID to store for it, as FreeCal writes those it makes.
+    pub fn to_recurrence_id(&self) -> RecurrenceId {
+        RecurrenceId(self.0.clone())
+    }
+}
+
+/// The Normal Form of the Occurrence of a Recurring Event at `recurring`
+/// that starts at `original`. A time without a zone is taken as given in
+/// the Event Time Zone; a date for a timed Event means the Occurrence on
+/// that date.
+pub(crate) fn in_normal_form(original: &Time, recurring: &ImportedWhen) -> NormalForm {
+    NormalForm(match (*recurring, original) {
         (ImportedWhen::AllDay { .. }, Time::Date(date)) => date.to_string(),
         (ImportedWhen::AllDay { .. }, Time::Wall(wall, _)) => wall.date().to_string(),
         (ImportedWhen::Timed { start, .. }, Time::Date(date)) => {
@@ -88,7 +115,7 @@ pub(crate) fn in_normal_form(original: &Time, recurring: &ImportedWhen) -> Strin
             wall_text(instant(wall, zone).with_timezone(&start_zone).naive_local())
         }
         (ImportedWhen::Timed { .. }, Time::Wall(wall, _)) => wall_text(*wall),
-    }
+    })
 }
 
 /// The original start the recurrence ID `text`, as
@@ -137,7 +164,8 @@ mod tests {
     }
 
     fn normal_form(text: &str, recurring: Option<&ImportedWhen>) -> Option<String> {
-        RecurrenceId::given(text).normal_form(recurring)
+        let normal_form = RecurrenceId::obtained(text).normal_form(recurring);
+        normal_form.map(NormalForm::into_string)
     }
 
     /// A stored field is untrusted: only a zone FreeCal knows reads.
@@ -202,32 +230,32 @@ mod tests {
             ("2026-10-12T09:00:00", "2026-10-12", all_day()),
         ];
         for (one, other, recurring) in pairs {
-            let (one, other) = (RecurrenceId::given(one), RecurrenceId::given(other));
+            let (one, other) = (RecurrenceId::obtained(one), RecurrenceId::obtained(other));
             assert!(
                 one.same_occurrence(&other, Some(&recurring)),
                 "{one:?} {other:?}"
             );
         }
-        let in_new_york = RecurrenceId::given("2026-10-12T03:00:00[America/New_York]");
-        assert!(
-            !in_new_york
-                .same_occurrence(&RecurrenceId::given("2026-10-12T03:00:00"), Some(&timed()))
-        );
+        let in_new_york = RecurrenceId::obtained("2026-10-12T03:00:00[America/New_York]");
+        assert!(!in_new_york.same_occurrence(
+            &RecurrenceId::obtained("2026-10-12T03:00:00"),
+            Some(&timed())
+        ));
     }
 
-    /// Without their Recurring Event, two recurrence IDs given in different
-    /// forms pair only when they are written alike.
+    /// Without their Recurring Event, two recurrence IDs obtained in
+    /// different forms pair only when they are written alike.
     #[test]
-    fn without_a_recurring_event_counts_as_given() {
-        let in_new_york = RecurrenceId::given("2026-10-12T03:00:00[America/New_York]");
-        let in_berlin = RecurrenceId::given("2026-10-12T09:00:00[Europe/Berlin]");
+    fn without_a_recurring_event_counts_as_obtained() {
+        let in_new_york = RecurrenceId::obtained("2026-10-12T03:00:00[America/New_York]");
+        let in_berlin = RecurrenceId::obtained("2026-10-12T09:00:00[Europe/Berlin]");
         assert!(!in_new_york.same_occurrence(&in_berlin, None));
         assert!(in_new_york.same_occurrence(
-            &RecurrenceId::given("2026-10-12T3:0:0[America/New_York]"),
+            &RecurrenceId::obtained("2026-10-12T3:0:0[America/New_York]"),
             None
         ));
         assert!(in_new_york.same_occurrence(&in_berlin, Some(&timed())));
-        let unreadable = RecurrenceId::given("<b>");
+        let unreadable = RecurrenceId::obtained("<b>");
         assert!(!unreadable.same_occurrence(&unreadable, None));
     }
 }
