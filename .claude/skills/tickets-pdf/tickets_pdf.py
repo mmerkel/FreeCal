@@ -102,6 +102,7 @@ def downstream(n, seen=None):
 # Graph
 COL = {
     "done": ("#e7e7e7", "#9a9a9a", "#8a8a8a"),
+    "wontfix": ("#f5f5f5", "#c4c4c4", "#a8a8a8"),
     "ready-for-agent": ("#dbeafe", "#2563eb", "#111"),
     "ready-for-human": ("#fde7c7", "#d97706", "#111"),
     "needs-triage": ("#f3e8ff", "#9333ea", "#111"),
@@ -140,21 +141,21 @@ svg = svg[svg.index("<svg"):]
 svg = re.sub(r'width="[\d.]+pt" height="[\d.]+pt"', 'width="100%" height="100%" preserveAspectRatio="xMidYMid meet"', svg, count=1)
 
 # Tables
-STATUS_LABEL = {"done": "done", "ready-for-agent": "agent", "ready-for-human": "human", "needs-triage": "triage", "wontfix": "split"}
-def badge(s):
-    return f'<span class="b {s}">{STATUS_LABEL.get(s, s)}</span>'
+STATUS_LABEL = {"done": "done", "ready-for-agent": "agent", "ready-for-human": "human", "needs-triage": "triage", "wontfix": "wontfix"}
+def badge(s, label=None):
+    return f'<span class="b {s}">{label or STATUS_LABEL.get(s, s)}</span>'
 def eff(e):
     return f'<span class="e e{e}">{e}</span>' if e != "-" else "–"
 
 rows = []
 for n, t in tickets.items():
     if t["split"]:
-        rows.append(f'<tr class="dim"><td>{n}</td><td>{html.escape(t["title"])}<div class="note">Split into {", ".join(t["split"])}</div></td><td>{badge("wontfix")}</td><td>–</td><td>{", ".join(t["blocked"]) or "–"}</td><td>–</td></tr>')
+        rows.append(f'<tr class="dim"><td>{n}</td><td>{html.escape(t["title"])}<div class="note">Split into {", ".join(t["split"])}</div></td><td>{badge("wontfix", "split")}</td><td>–</td><td>{", ".join(t["blocked"]) or "–"}</td><td>–</td></tr>')
         continue
     blocked_txt = ", ".join(
         (f'<b>{d}</b>' if active[d]["status"] != "done" else d) for d in t["deps"]) or "–"
     unblocks = ", ".join(sorted(blocks[n], key=int)) or "–"
-    cls = "dim" if t["status"] == "done" else ("crit" if n in crit_set else "")
+    cls = "dim" if t["status"] in ("done", "wontfix") else ("crit" if n in crit_set else "")
     rows.append(f'<tr class="{cls}"><td>{n}</td><td>{html.escape(t["title"])}</td><td>{badge(t["status"])}</td><td>{eff(t["effort"])}</td><td>{blocked_txt}</td><td>{unblocks}</td></tr>')
 
 frontier = sorted((n for n, t in open_.items() if ready(t)), key=lambda n: (-len(downstream(n)), int(n)))
@@ -203,7 +204,7 @@ tr.dim td {{ color: #8a8a8a; }} tr.crit td:first-child {{ color: #dc2626; }}
 .legend i {{ display: inline-block; width: 14pt; height: 9pt; border-radius: 3pt; vertical-align: middle; margin: 0 3pt 0 10pt; border: 1.2px solid; }}
 .iso {{ font-size: 8pt; line-height: 1.9; margin-top: 4pt; }}
 .chip {{ display: inline-block; border: 1px solid #ccc; border-radius: 4pt; padding: 0 4pt; margin-right: 3pt; white-space: nowrap; line-height: 1.5; }}
-.chip.done {{ color: #888; background: #f0f0f0; }} .chip.ready-for-agent {{ background: #dbeafe; border-color: #2563eb; }}
+.chip.done {{ color: #888; background: #f0f0f0; }} .chip.wontfix {{ color: #a8a8a8; background: #f5f5f5; border-color: #c4c4c4; }} .chip.ready-for-agent {{ background: #dbeafe; border-color: #2563eb; }}
 .chip.ready-for-human {{ background: #fde7c7; border-color: #d97706; }} .chip.needs-triage {{ background: #f3e8ff; border-color: #9333ea; }}
 .crittxt {{ background: #fef2f2; border-left: 3px solid #dc2626; padding: 6pt 9pt; font-size: 9pt; }}
 </style></head><body>
@@ -223,7 +224,7 @@ tr.dim td {{ color: #8a8a8a; }} tr.crit td:first-child {{ color: #dc2626; }}
 <table><tr><th>#</th><th>Ticket</th><th>Status</th><th>Effort</th><th>Unblocks (transitively)</th></tr>{front_rows}</table>
 
 <div class="graph"><h2 style="margin-top:0">Dependency graph</h2>
-<div class="legend">Arrow = "must come before".<i style="background:#e7e7e7;border-color:#9a9a9a"></i>done<i style="background:#dbeafe;border-color:#2563eb"></i>ready for agent<i style="background:#fde7c7;border-color:#d97706"></i>ready for human<i style="background:#f3e8ff;border-color:#9333ea"></i>needs triage<i style="background:#fff;border-color:#555;border-style:dashed"></i>open but blocked<i style="background:#fff;border-color:#dc2626;border-width:2.5px"></i>critical path · [S/M/L/XL] effort</div>
+<div class="legend">Arrow = "must come before".<i style="background:#e7e7e7;border-color:#9a9a9a"></i>done<i style="background:#f5f5f5;border-color:#c4c4c4"></i>wontfix<i style="background:#dbeafe;border-color:#2563eb"></i>ready for agent<i style="background:#fde7c7;border-color:#d97706"></i>ready for human<i style="background:#f3e8ff;border-color:#9333ea"></i>needs triage<i style="background:#fff;border-color:#555;border-style:dashed"></i>open but blocked<i style="background:#fff;border-color:#dc2626;border-width:2.5px"></i>critical path · [S/M/L/XL] effort</div>
 <div class="svg">{svg}</div>
 <div class="iso"><b>No dependencies either way:</b> {iso_html}</div></div>
 
