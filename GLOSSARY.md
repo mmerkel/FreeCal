@@ -150,6 +150,14 @@ _Avoid_: Cache, server copy
 A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs, remembered with its ETag so that it isn't fetched again until it changes. It is not part of the Mirror and has no Event Rows.
 _Avoid_: Skipped object, rejected resource
 
+**Forget an Ignored Resource**:
+Remove an Ignored Resource from the Sync Engine's memory, as an Incoming Sync finds it gone from the server, mirrored now, or holding nothing FreeCal keeps.
+_Avoid_: Unignore, release
+
+**Known Server Resources**:
+The Server Objects FreeCal holds and the Ignored Resources it remembers in a Calendar, by address, with their versions: what an Incoming Sync compares the server's listing with, so that it fetches only what changed and finds what went.
+_Avoid_: Known set, known objects
+
 **Combined Event Key**:
 A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
 _Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
