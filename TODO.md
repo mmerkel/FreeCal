@@ -1,6 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
+- [ ] start from "simplifying" session - go through "skipped" items in grilling session
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
