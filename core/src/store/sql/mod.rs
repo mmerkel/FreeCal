@@ -17,7 +17,10 @@
 //! [`SyncEngineWritePermission`]: crate::sync::SyncEngineWritePermission
 
 mod journal;
-mod mirror;
+/// The Sync Engine's writes of the Mirror, one file per Provider (ADR 0013).
+mod mirror {
+    mod caldav;
+}
 mod unguarded;
 
 use std::collections::{HashMap, HashSet};

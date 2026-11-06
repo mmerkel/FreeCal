@@ -614,7 +614,7 @@ mod tests {
                 TransactionOrigin::IncomingSync,
                 0,
                 |journal_transaction| {
-                    let object = sync::testing::mirror(
+                    let object = sync::caldav::testing::mirror(
                         journal_transaction,
                         calendar_id,
                         &dentist_object(),
@@ -653,7 +653,7 @@ mod tests {
                 TransactionOrigin::IncomingSync,
                 0,
                 |journal_transaction| {
-                    sync::testing::mirror(
+                    sync::caldav::testing::mirror(
                         journal_transaction,
                         self.event.calendar_id,
                         &object,
@@ -691,7 +691,7 @@ mod tests {
             TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| {
-                sync::testing::mirror(
+                sync::caldav::testing::mirror(
                     journal_transaction,
                     pulled.event.calendar_id,
                     &again,
@@ -811,7 +811,7 @@ mod tests {
             TransactionOrigin::IncomingSync,
             0,
             |journal_transaction| {
-                sync::testing::mirror(
+                sync::caldav::testing::mirror(
                     journal_transaction,
                     pulled.event.calendar_id,
                     &dentist_object(),
@@ -821,7 +821,7 @@ mod tests {
                         Some(&RecurrenceId::obtained(EXCEPTION)),
                     )],
                 )?;
-                sync::testing::mirror(
+                sync::caldav::testing::mirror(
                     journal_transaction,
                     pulled.event.calendar_id,
                     &dentist_object(),
@@ -891,7 +891,7 @@ mod tests {
                 TransactionOrigin::IncomingSync,
                 0,
                 |journal_transaction| {
-                    sync::testing::mirror(
+                    sync::caldav::testing::mirror(
                         journal_transaction,
                         server,
                         &dentist_object(),
@@ -1061,12 +1061,12 @@ mod tests {
                 let old = journal_transaction
                     .corresponding_server_object(on_server.server, "dentist")?
                     .unwrap();
-                sync::testing::remove_object(journal_transaction, old)?;
+                sync::caldav::testing::remove_object(journal_transaction, old)?;
                 let moved = ServerObject {
                     href: "/user/work/moved.ics".to_owned(),
                     ..dentist_object()
                 };
-                sync::testing::mirror(
+                sync::caldav::testing::mirror(
                     journal_transaction,
                     on_server.server,
                     &moved,
@@ -1095,7 +1095,9 @@ mod tests {
             &pulled.store,
             TransactionOrigin::IncomingSync,
             0,
-            |journal_transaction| sync::testing::remove_object(journal_transaction, pulled.object),
+            |journal_transaction| {
+                sync::caldav::testing::remove_object(journal_transaction, pulled.object)
+            },
         )
         .unwrap();
 

@@ -1,22 +1,21 @@
-//! The Incoming Sync: what changed in a Calendar on its server, whatever
-//! its Provider, applied to its local copy in one Journal Transaction, with
+//! The CalDAV Incoming Sync: what changed in a Calendar on its server,
+//! brought into its local copy in one Journal Transaction, with
 //! its Mirror writes in the same Database Transaction. Server Objects are
 //! matched by address.
 
 use chrono_tz::Tz;
 
-use super::{event_keys_in_calendar, mirror, remove_object, settle, unreadable};
-use crate::ImportedEvent;
+use super::{event_keys_in_calendar, mirror, moved, remove_object, settle, unreadable};
 use crate::event::{self, ObjectId};
 use crate::journal::JournalTransaction;
 use crate::remote::{Changes, Fetched};
 use crate::{CalendarId, Result};
 
-/// Applies `changes` to the Calendar `calendar_id` in
-/// `journal_transaction`, and records its new sync state with them: the
-/// changed Server Objects are taken as [`take`] takes them, and a removed
+/// Brings `changes` into the Calendar `calendar_id` in `journal_transaction`,
+/// and records its new sync state with them: the changed Server Objects are
+/// mirrored and propagated as [`mirror_and_propagate`] does it, and a removed
 /// one goes as [`remove`] removes it.
-pub(crate) fn apply(
+pub(crate) fn incoming_sync(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     changes: &Changes,
@@ -26,7 +25,7 @@ pub(crate) fn apply(
     for href in &changes.removed {
         removed.extend(journal_transaction.objects_at(calendar_id, href)?);
     }
-    take(
+    mirror_and_propagate(
         journal_transaction,
         calendar_id,
         &changes.changed,
@@ -39,21 +38,22 @@ pub(crate) fn apply(
     journal_transaction.synced(calendar_id, changes.state.token.as_deref())
 }
 
-/// Takes the Server Objects `fetched` into the Calendar `calendar_id` in
-/// `journal_transaction`, their floating times pinned to `zone`. Each one
-/// FreeCal can read is mirrored with its Combined Event Keys, and its Events
-/// become the Event Rows of the UIDs it is the Corresponding Server Object
-/// of, as [`event::take_object`] writes them; a UID it was that of before
-/// and no longer is goes as [`settle`] gives it. A Server Object holding
-/// nothing FreeCal keeps goes from the Mirror, as [`remove`] removes it. One
-/// it can't read keeps its last readable version, its Combined Event Keys
-/// and its Event Rows, recorded as unreadable. A new Server Object that
-/// holds a UID that one of `moved_from`, the Server Objects removed in the
-/// same Incoming Sync, holds is that one moved to another address: it takes
-/// its place, which leaves `moved_from`. A Recurring Event that arrives
-/// joins the Calendar's Exceptions that had none without writing them, as
-/// they keep their recurrence IDs as obtained (ADR 0012).
-pub(crate) fn take(
+/// Mirrors and propagates the Server Objects `fetched` into the Calendar
+/// `calendar_id` in `journal_transaction`, their floating times pinned to
+/// `zone`. Each one FreeCal can read is mirrored with its Combined Event
+/// Keys, and its Events become the Event Rows of the UIDs it is the
+/// Corresponding Server Object of, as [`event::propagate_to_event_rows`]
+/// writes them; a UID it was that of before and no longer is goes as
+/// [`settle`] gives it. A Server Object holding nothing FreeCal keeps goes
+/// from the Mirror, as [`remove`] removes it. One it can't read keeps its
+/// last readable version, its Combined Event Keys and its Event Rows,
+/// recorded as unreadable. A new Server Object that holds a UID that one of
+/// `moved_from`, the Server Objects removed in the same Incoming Sync, holds
+/// is that one moved to another address: it takes its place, which leaves
+/// `moved_from`. A Recurring Event that arrives joins the Calendar's
+/// Exceptions that had none without writing them, as they keep their
+/// recurrence IDs as obtained (ADR 0012).
+pub(crate) fn mirror_and_propagate(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     fetched: &[Fetched],
@@ -89,7 +89,7 @@ pub(crate) fn take(
             object,
             &event_keys_in_calendar(events),
         )?;
-        event::take_object(journal_transaction, calendar_id, object, events)?;
+        event::propagate_to_event_rows(journal_transaction, calendar_id, object, events)?;
         if !corresponding_uids.is_empty() {
             let now = journal_transaction.corresponding_uids(object)?;
             let lost: Vec<String> = corresponding_uids
@@ -114,22 +114,6 @@ fn remove(
     let corresponding_uids = journal_transaction.corresponding_uids(object)?;
     remove_object(journal_transaction, object)?;
     settle(journal_transaction, calendar_id, &corresponding_uids, zone)
-}
-
-/// The Server Object of `moved_from` that holds a UID of `events`, by its
-/// Combined Event Keys, taken out of it; none if there is none.
-fn moved(
-    journal_transaction: &JournalTransaction,
-    events: &[ImportedEvent],
-    moved_from: &mut Vec<ObjectId>,
-) -> Result<Option<ObjectId>> {
-    for (index, &object) in moved_from.iter().enumerate() {
-        let held = journal_transaction.held_uids(object)?;
-        if events.iter().any(|event| held.contains(&event.uid)) {
-            return Ok(Some(moved_from.remove(index)));
-        }
-    }
-    Ok(None)
 }
 
 #[cfg(test)]
@@ -233,7 +217,7 @@ mod tests {
                 moved: EventId(0),
                 store,
             };
-            alone.take(
+            alone.mirror_and_propagate(
                 TransactionOrigin::FirstSync,
                 &[fetched("/weekly-moved.ics", MOVED)],
             );
@@ -249,14 +233,14 @@ mod tests {
             }
         }
 
-        /// Takes `fetched` as one Incoming Sync of `origin`.
-        fn take(
+        /// Mirrors and propagates `fetched` as one Incoming Sync of `origin`.
+        fn mirror_and_propagate(
             &self,
             origin: TransactionOrigin,
             fetched: &[Fetched],
         ) -> Option<JournalTransactionId> {
             record(&self.store, origin, 0, |journal_transaction| {
-                take(
+                mirror_and_propagate(
                     journal_transaction,
                     self.calendar_id,
                     fetched,
@@ -378,7 +362,7 @@ mod tests {
         ] {
             let alone = Alone::new();
 
-            alone.take(
+            alone.mirror_and_propagate(
                 TransactionOrigin::IncomingSync,
                 &[fetched("/weekly-moved.ics", &format!("{WEEKLY}{moved}"))],
             );
@@ -411,9 +395,9 @@ mod tests {
                     "/weekly-moved.ics",
                     &moved_in_utc().replace("Moved", "Moved again"),
                 );
-                alone.take(TransactionOrigin::IncomingSync, &[moved, weekly]);
+                alone.mirror_and_propagate(TransactionOrigin::IncomingSync, &[moved, weekly]);
             } else {
-                alone.take(TransactionOrigin::IncomingSync, &[weekly]);
+                alone.mirror_and_propagate(TransactionOrigin::IncomingSync, &[weekly]);
             }
 
             assert_eq!(alone.event_rows().len(), 1);
@@ -431,7 +415,7 @@ mod tests {
     fn undoing_the_incoming_sync_that_brought_its_recurring_event_leaves_it_an_event_of_its_own() {
         let alone = Alone::new();
         let journal_transaction = alone
-            .take(
+            .mirror_and_propagate(
                 TransactionOrigin::IncomingSync,
                 &[fetched("/weekly-moved.ics", &format!("{WEEKLY}{MOVED}"))],
             )

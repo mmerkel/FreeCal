@@ -264,7 +264,13 @@ impl Core {
         let pulled = remote
             .all_events(url, self.clock.time_zone(), &mut |fetched, zone| {
                 self.record(TransactionOrigin::FirstSync, |journal_transaction| {
-                    sync::incoming::take(journal_transaction, id, &fetched, zone, &mut Vec::new())
+                    sync::caldav::incoming::mirror_and_propagate(
+                        journal_transaction,
+                        id,
+                        &fetched,
+                        zone,
+                        &mut Vec::new(),
+                    )
                 })
                 .map(drop)
             })
@@ -343,7 +349,7 @@ impl Core {
                 TransactionOrigin::IncomingSync
             };
             self.record(origin, |journal_transaction| {
-                sync::incoming::apply(journal_transaction, id, &changes)
+                sync::caldav::incoming::incoming_sync(journal_transaction, id, &changes)
             })
         })();
         if first {

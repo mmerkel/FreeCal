@@ -9,13 +9,28 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** S
 
-- [ ] `core/src/sync/caldav/` holds the CalDAV Incoming Sync, `settle` and `moved`; `sync/mod.rs` holds only what every Provider shares
-- [ ] The Mirror's SQL is in `core/src/store/sql/mirror/caldav.rs`
-- [ ] `propagate_to_event_rows` and `incoming_sync` replace `take_object`, `take` and `sync::apply`; no identifier or comment says "take" for propagating
-- [ ] Moves keep git history (`git mv` before editing)
-- [ ] `CODING_STANDARDS.md` "Local Store" names the new files
-- [ ] Every existing test passes unchanged apart from paths and names
+- [x] `core/src/sync/caldav/` holds the CalDAV Incoming Sync, `settle` and `moved`; `sync/mod.rs` holds only what every Provider shares
+- [x] The Mirror's SQL is in `core/src/store/sql/mirror/caldav.rs`
+- [x] `propagate_to_event_rows` and `incoming_sync` replace `take_object`, `take` and `sync::apply`; no identifier or comment says "take" for propagating
+- [x] Moves keep git history (`git mv` before editing)
+- [x] `CODING_STANDARDS.md` "Local Store" names the new files
+- [x] Every existing test passes unchanged apart from paths and names
+
+## Comments
+
+- 2026-11-06: Done.
+  - **Layout.** `core/src/sync/caldav/mod.rs` holds `settle`, `moved` and the Sync Engine's Mirror writes (`mirror`, `unreadable`, `remove_object`, `event_keys_in_calendar`, and the `testing` module the Change Journal's tests use). `sync/caldav/incoming.rs` holds CalDAV's Incoming Sync. `sync/mod.rs` keeps only the Write Permission.
+  - **Beyond the ticket's list.** The ticket named only `settle` and `moved`. Both reviewers pointed out that the Mirror writes wrap SQL that is now in `mirror/caldav.rs`, and `unreadable` works by href. So they moved too: one rule, that whatever reads or writes CalDAV's Mirror is in `sync/caldav/`. Trade-off: Google (ticket 26) will need writes of its own rather than reusing these. That is what ADR 0013 expects anyway.
+  - **Store side.** `store/sql/mod.rs` declares the Mirror as `mod mirror { mod caldav; }`, so there is no near-empty `mirror/mod.rs`.
+  - **Renames.**
+    - `event::take_object` → `propagate_to_event_rows`.
+    - `sync::incoming::apply` → `sync::caldav::incoming::incoming_sync`.
+    - The loop `take` → `mirror_and_propagate`. It is not folded into `incoming_sync`, because the First Sync calls it directly, one page at a time. Its name says mirroring, since it also mirrors each Server Object, removes empty ones and recognises moved ones.
+    - The test helper `Alone::take` → `Alone::mirror_and_propagate`.
+  - **What still says "take".** `Loaded::take` and `take_exception` are the import's writers, not Propagate, so they keep their names. `TODO.md` lines 49 and 55 still say `take_object`; they were left for the user to edit.
+  - **No new terms.**
+

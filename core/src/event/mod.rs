@@ -693,7 +693,7 @@ fn with_uid_of<'a>(
 /// Corresponding Server Object is another write nothing, as `object` is
 /// mirrored without Event Rows of it. Of several for one Occurrence, the
 /// latest is kept. ADR 0007's rules 2 and 3 apply.
-pub(crate) fn take_object(
+pub(crate) fn propagate_to_event_rows(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     object: ObjectId,
@@ -818,11 +818,11 @@ fn fields(incoming: &ImportedEvent) -> EventFields {
 /// An incoming version's fields as the new version of an Event that has
 /// `previous`, for the same Occurrence, with the recurrence ID
 /// `recurrence_id`: the form its Server Object holds (ADR 0012). An import
-/// passes the stored one, so that a file giving it in another form leaves
-/// no Unsent Change in a form the Server Object doesn't hold; Propagate
-/// ([`take_object`]) passes the Server Object's. One floating end takes the
-/// zone of the other (ADR 0007, rule 3), so only a version floating at both
-/// keeps the zone pinned before (rule 2).
+/// passes the stored one, so that a file giving it in another form leaves no
+/// Unsent Change in a form the Server Object doesn't hold; Propagate
+/// ([`propagate_to_event_rows`]) passes the Server Object's. One floating end
+/// takes the zone of the other (ADR 0007, rule 3), so only a version floating
+/// at both keeps the zone pinned before (rule 2).
 fn fields_over(
     incoming: &ImportedEvent,
     previous: &EventFields,
