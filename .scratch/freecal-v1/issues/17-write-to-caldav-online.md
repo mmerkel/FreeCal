@@ -2,7 +2,7 @@
 
 **What to build:** The user can switch a CalDAV Calendar from read-only to writable, and mark any Calendar read-only. In a writable CalDAV Calendar, creating, editing, moving and deleting Events (including recurrence scopes) is sent to the server. Every change sent is recorded in the Change Journal. Details FreeCal doesn't show are never lost, and Events with other attendees can't be edited.
 
-**Blocked by:** 08, 15, 56, 69, 91, 92
+**Blocked by:** 08, 15, 56, 69, 91, 92, 97
 
 **Status:** ready-for-agent
 
@@ -27,3 +27,4 @@
 - 2026-10-25 (from 86): the comment from 81 is outdated. Rows refer to a `server_object` (`EventFields.object_id`), and an undo leaves the mirror's ETag as the server gave it. User actions, imports and undos set `server_object.pending`. A new Exception made by a user action joins its Recurring Event's object (`Unit::placed`); a new row of a new UID has no object.
 - 2026-10-25 (grilling, ADR 0011): blocked by 91. The comments of 2026-10-24 and from 86 above are outdated: Event Rows have no Server Object ID and `Unit::placed` is gone. An Event Row's Corresponding Server Object is the one holding its Calendar and UID in `combined_event_key`. What to send is `unsent_change`: for each Combined Event Key, Event Rows with a Server Object is a PUT with `If-Match` on the Mirror's ETag, Event Rows without one a create, a Server Object without Event Rows a DELETE; CalDAV sends one resource per UID. A success updates the Mirror and removes the Combined Event Key. Decide here what an Event shows when its send fails ("Not yet synced: <reason>"); the table has no reason column yet.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.
+- 2026-11-04 (grilling, altitude findings of 90–92): when a send's DELETE removes a UID's Corresponding Server Object and another Server Object of the Calendar still holds that UID, that one becomes the Corresponding Server Object and its Events take the Event Rows' place, as after a sync (ADR 0011): the Event comes back, as it does in other clients. The Sender does not delete the other Server Object. So a send hands UIDs on to their next Corresponding Server Object like a sync does.

@@ -123,7 +123,7 @@ What a server stores as one piece and FreeCal writes back: one CalDAV resource a
 _Avoid_: Resource (on its own), remote event, original server data
 
 **Mirror**:
-FreeCal's copy of every Server Object as the server last had it. Only a sync or a successful send changes it.
+FreeCal's copy of every Server Object as the server last had it. Only the Sync Engine changes its server data; its Combined Event Keys are renormalised together with the Event Rows, and it goes with its Calendar.
 _Avoid_: Cache, server copy
 
 **Combined Event Key**:
@@ -146,20 +146,40 @@ _Avoid_: Owned UIDs
 Replace a Server Object's Combined Event Keys of one UID, its data unchanged, for when its Event Rows come to hold their recurrence IDs otherwise.
 _Avoid_: Rekey
 
+**Database Transaction**:
+One SQLite transaction on the Local Store, committed all or nothing. Every write takes one; a Journal Transaction runs inside one, and so do the Mirror's writes of an Incoming Sync.
+_Avoid_: Transaction (on its own), db transaction
+
+**Write Permission**:
+A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, deleting Calendars and accounts, and renormalising Combined Event Keys with their Event Rows; the Sync Engine's covers the Mirror's server data.
+_Avoid_: Token, Journaled, owner
+
 **Record a Journal Event Modification**:
 Store one Journal Event Modification in the Change Journal, starting the Journal Transaction with its first one.
 _Avoid_: Entry, add entry
+
+**Sync Engine**:
+The code that exchanges a Calendar's changes with its server, by Incoming Syncs and Outgoing Syncs. It is the only code that changes the Mirror's server data.
+_Avoid_: Syncer, sync module, server code
+
+**Incoming Sync**:
+The Sync Engine bringing in what the server changed in one Calendar, as one Journal Transaction. A First Sync is a Calendar's first Incoming Sync. "Sync" on its own means both directions, as the user sees it.
+_Avoid_: Sync (on its own, for this direction), pull, fetch
+
+**Outgoing Sync**:
+The Sync Engine sending a Calendar's Unsent Changes through its Sender; each one that succeeds changes the Mirror.
+_Avoid_: Send (on its own), push, upload
 
 **Sender**:
 The code that sends the Unsent Changes, comparing each Combined Event Key's Event Rows with its Server Object to decide between create, update and delete.
 _Avoid_: Uploader, pusher, outbox
 
 **Transaction Origin**:
-Where a Journal Transaction's changes came from: a user action, an import, an undo, a first sync or a sync.
+Where a Journal Transaction's changes came from: a user action, an import, an undo, a First Sync or an Incoming Sync.
 _Avoid_: Origin (on its own), source, cause
 
 **First Sync**:
-A Calendar's first sync, which the Change Journal doesn't record because undoing it would delete the whole Calendar.
+A Calendar's first Incoming Sync, which the Change Journal doesn't record because undoing it would delete the whole Calendar.
 _Avoid_: Baseline (that word is the squashed schema migration, ADR 0008), initial import
 
 **Dangerous Undo**:

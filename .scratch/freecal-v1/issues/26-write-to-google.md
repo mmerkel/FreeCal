@@ -2,7 +2,7 @@
 
 **What to build:** Writable Google Calendars get the same editing, offline replay, Change Journal, Conflict and Mass-Change Guard behaviour as CalDAV. When the Google login expires, the user is asked to log in again and sync resumes. Exports keep Google-only details, so a Google Event can be restored completely.
 
-**Blocked by:** 09, 18, 25, 91
+**Blocked by:** 09, 18, 25, 91, 97
 
 **Status:** ready-for-agent
 
