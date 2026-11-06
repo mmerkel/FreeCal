@@ -32,3 +32,5 @@ The compile-fail doctest couldn't work: every module of the crate is private, so
 New terms, for approval:
 - **`sync::testing`** (new term): test-only module through which other modules' tests write the Mirror with the Sync Engine's Write Permission.
 - **Mirror writes** (new term, in comments): the Sync Engine's writes of the Mirror's server data.
+
+**2026-11-06, after review.** As the user asked, `Store::write` runs a closure in a Database Transaction of its own and commits it once the closure succeeds. The Unguarded Writes in `core/src/lib.rs`, deleting Calendars and accounts, and the tests' setup write through it. `Store::begin` stays only for what must hold its Database Transaction: `record`'s Journal Transaction. `CODING_STANDARDS.md` "Local Store" says so.

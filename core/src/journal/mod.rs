@@ -197,20 +197,18 @@ pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Res
 /// deleted, with that Event's earlier Journal Event Modifications, which are
 /// undone only through them; its later Journal Event Modifications stay.
 pub(crate) fn delete_calendar(store: &Store, id: CalendarId) -> Result<()> {
-    let database_transaction = store.begin()?;
-    delete_calendar_within(&database_transaction, id)?;
-    database_transaction.commit()
+    store.write(|database_transaction| delete_calendar_within(database_transaction, id))
 }
 
 /// Deletes a server Account with its Calendars, each as
 /// [`delete_calendar`] does, all or none.
 pub(crate) fn delete_account(store: &Store, id: AccountId) -> Result<()> {
-    let database_transaction = store.begin()?;
-    for calendar in database_transaction.account_calendars(id)? {
-        delete_calendar_within(&database_transaction, calendar)?;
-    }
-    database_transaction.delete_account_row(WRITE_PERMISSION, id)?;
-    database_transaction.commit()
+    store.write(|database_transaction| {
+        for calendar in database_transaction.account_calendars(id)? {
+            delete_calendar_within(database_transaction, calendar)?;
+        }
+        database_transaction.delete_account_row(WRITE_PERMISSION, id)
+    })
 }
 
 /// [`delete_calendar`] in the Database Transaction `database_transaction`.
@@ -883,21 +881,23 @@ mod tests {
                 url: "https://dav.example/".to_owned(),
                 username: "anna".to_owned(),
             };
-            let database_transaction = store.begin().unwrap();
-            let account = database_transaction
-                .insert_server_account(Provider::CalDav, &login, "key")
-                .unwrap();
             let available = AvailableCalendar {
                 url: "/user/work/".to_owned(),
                 name: "Work".to_owned(),
                 colour: None,
                 read_only: false,
             };
-            let server = database_transaction
-                .insert_server_calendar(account.id, &available)
+            let server = store
+                .write(|database_transaction| {
+                    let account = database_transaction.insert_server_account(
+                        Provider::CalDav,
+                        &login,
+                        "key",
+                    )?;
+                    database_transaction.insert_server_calendar(account.id, &available)
+                })
                 .unwrap()
                 .id;
-            database_transaction.commit().unwrap();
             // A new server Calendar starts marked read-only.
             store
                 .connection()

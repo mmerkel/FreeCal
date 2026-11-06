@@ -106,8 +106,20 @@ impl Store {
         &self.conn
     }
 
+    /// Runs `write` in a Database Transaction of its own, and commits it
+    /// once `write` succeeds: if it fails, nothing it wrote is kept. How
+    /// code writes, but where something must hold the Database Transaction,
+    /// as a Journal Transaction holds its own ([`Store::begin`]).
+    pub fn write<T>(&self, write: impl FnOnce(&DatabaseTransaction) -> Result<T>) -> Result<T> {
+        let database_transaction = self.begin()?;
+        let written = write(&database_transaction)?;
+        database_transaction.commit()?;
+        Ok(written)
+    }
+
     /// Begins a Database Transaction, which writes nothing unless it is
-    /// committed.
+    /// committed, for what must hold it; everything else writes through
+    /// [`Store::write`].
     pub fn begin(&self) -> Result<DatabaseTransaction<'_>> {
         self.begin_with(TransactionBehavior::Deferred)
     }

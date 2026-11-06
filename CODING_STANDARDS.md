@@ -26,7 +26,7 @@ Every stored field is untrusted, whatever its origin (spec: "Untrusted content" 
 
 - SQL lives only in `core/src/store/`: `schema.rs` holds the schema and its migrations, and `sql/` every query and write. The guards (the Change Journal in `core/src/journal/`, the Sync Engine in `core/src/sync/`) hold no SQL.
 - In `sql/`, each write sits in the file of the guard whose Write Permission covers it: `mod.rs` holds the readers; `journal.rs` the Change Journal's writes (Event Rows, Journal Transactions and Journal Event Modifications, Unsent Changes, deleting Calendars and accounts, renormalising Combined Event Keys with their Event Rows); `mirror.rs` the Sync Engine's (a Server Object's data and its Combined Event Keys in the Mirror); `unguarded.rs` the writes no guard holds (accounts, Calendars, settings, sidebar, view, time zone rules).
-- Every write is a method of `DatabaseTransaction`, so none runs outside a Database Transaction; reads are methods of `Store` (ADR 0011).
+- Every write is a method of `DatabaseTransaction`, so none runs outside a Database Transaction; reads are methods of `Store` (ADR 0011). Code writes through `Store::write`, which commits once its closure succeeds; only what must hold a Database Transaction, as a Journal Transaction does, calls `Store::begin`.
 - Every statement that writes a guarded table (`event`, `server_object`, `combined_event_key`, `unsent_change`, `journal_transaction`, `journal_event_modification`) is in a function that takes its Guard's Write Permission: `&JournalWritePermission` in `journal.rs`, `&SyncEngineWritePermission` in `mirror.rs` (ADR 0011). Unguarded Writes in `unguarded.rs` take none.
 - A Write Permission's field stays private, so that only its Guard's module can make one.
 
