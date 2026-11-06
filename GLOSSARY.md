@@ -62,6 +62,10 @@ _Avoid_: Original time zone, floating time (FreeCal has none)
 The one place on this computer where FreeCal keeps everything it knows: the local copy of every Calendar, the changes not yet sent, the Change Journal and the settings.
 _Avoid_: Database, cache, local copy
 
+**Log**:
+A text file in which FreeCal notes, for troubleshooting, what it skipped or couldn't do, such as a server resource it ignored. Nothing in FreeCal reads it back, and it is not the Change Journal.
+_Avoid_: Diagnostic log, debug log
+
 ## Sync
 
 **Conflict**:
@@ -92,7 +96,7 @@ _Avoid_: Connection state, health
 
 **Change Journal**:
 The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Journal Event Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin.
-_Avoid_: History, log, audit trail, undo stack
+_Avoid_: History, audit trail, undo stack
 
 **Journal Transaction**:
 Changes recorded together in the Change Journal, such as one user action, an import or one sync of a Calendar, with their Transaction Origin. It runs as one database transaction, and all writes to Event Rows go through one.

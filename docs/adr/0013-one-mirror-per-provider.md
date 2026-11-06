@@ -18,3 +18,7 @@ Unsent Changes stay one Provider-neutral table, `unsent_change`, guarded by the 
 - Each Provider's tables have their own migrations.
 - Events in a CalDAV resource holding several UIDs aren't shown, though some other clients show them.
 - Combined Event Keys are no longer stored in the Mirror; the term names what an Unsent Change is about and what the Sender finds a Server Object by.
+
+## Amendments
+
+- 2026-11-06, ticket 102: a CalDAV resource holding several UIDs is no longer mirrored or reported as a problem of its Calendar. The CalDAV reading step treats it as holding nothing FreeCal keeps and writes it to the Log, as DAVx5 skips such resources. A mirrored Server Object that comes to hold several goes from the Mirror as one that now holds nothing does.
