@@ -153,8 +153,10 @@ pub(crate) fn record<T>(
 
 /// Undoes the Journal Transaction `id` whole, as a Journal Transaction with
 /// the Transaction Origin undo: every Event gets its previous Event Version
-/// back under the same identity. Refused while an Event changed since, and
-/// for a Journal Transaction undone already.
+/// back under the same identity. Refused while an Event changed since, while
+/// an Event Version that isn't an Exception would join another with its UID
+/// in its Calendar, such as one an Incoming Sync added since (ticket 104),
+/// and for a Journal Transaction undone already.
 pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Result<Recorded<()>> {
     record(
         store,
@@ -175,6 +177,7 @@ pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Res
                 match &modification.previous {
                     None => journal_transaction.delete(modification.event_id)?,
                     Some(previous) => journal_transaction.put_back(
+                        id,
                         modification.event_id,
                         &modification.uid,
                         previous,
@@ -290,11 +293,29 @@ impl JournalTransaction<'_> {
         self.record_journal_event_modification(id, &uid, Some(&previous), None)
     }
 
-    /// Writes an earlier Event Version back under its own ID: over the Event
-    /// `id` while it is the one with the UID `uid`, otherwise as a new Event.
-    /// No other Event has that ID, as IDs are never given out again (ticket
-    /// 85).
-    fn put_back(&mut self, id: EventId, uid: &str, event: &StoredEvent) -> Result<()> {
+    /// Writes an earlier Event Version back under its own ID, as undoing the
+    /// Journal Transaction `undone`: over the Event `id` while it is the one
+    /// with the UID `uid`, otherwise as a new Event. No other Event has that
+    /// ID, as IDs are never given out again (ticket 85). An Event Version
+    /// that isn't an Exception is refused while its Calendar has another
+    /// Event Row with the UID that isn't one, as the Local Store keeps it to
+    /// one (ticket 104).
+    fn put_back(
+        &mut self,
+        undone: JournalTransactionId,
+        id: EventId,
+        uid: &str,
+        event: &StoredEvent,
+    ) -> Result<()> {
+        if event.fields.recurrence_id.is_none() {
+            let event_rows = self.events_with_uid(Uid::In(event.calendar_id, uid))?;
+            if event_rows
+                .iter()
+                .any(|event_row| event_row.id != id && event_row.fields.recurrence_id.is_none())
+            {
+                return Err(CoreError::ChangedSinceJournalTransaction(undone));
+            }
+        }
         if self.database_transaction.current_event(id, uid)?.is_some() {
             return self.replace(id, event);
         }
@@ -1050,5 +1071,154 @@ mod tests {
         .unwrap();
 
         assert_eq!(on_server.unsent(), []);
+    }
+
+    /// The IDs of the Event Rows of the server Calendar with the UID
+    /// `dentist`.
+    fn dentist_ids(on_server: &OnServer) -> Vec<EventId> {
+        let event_rows = on_server
+            .store
+            .events_with_uid(Uid::In(on_server.server, "dentist"))
+            .unwrap();
+        event_rows.iter().map(|event_row| event_row.id).collect()
+    }
+
+    /// Ticket 104: a Calendar has at most one Event Row per UID that isn't
+    /// an Exception, and the Local Store refuses a second, created or moved
+    /// in. Exceptions with the UID, and the UID in another Calendar, are
+    /// other Event Rows.
+    #[test]
+    fn a_second_event_row_with_one_uid_that_isnt_an_exception_fails() {
+        let on_server = OnServer::new();
+        let mut elsewhere = on_server.event.clone();
+        elsewhere.calendar_id = on_server.local;
+
+        let second = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            7,
+            |journal_transaction| journal_transaction.create("dentist", &on_server.event),
+        );
+        let other = on_server.change(8, |journal_transaction| {
+            journal_transaction.create("dentist", &elsewhere)
+        });
+        let moved_in = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            9,
+            |journal_transaction| journal_transaction.replace(other, &on_server.event),
+        );
+        let exception = on_server.change(10, |journal_transaction| {
+            journal_transaction.create("dentist", &exception(&on_server.event, EXCEPTION))
+        });
+
+        assert!(
+            matches!(
+                second,
+                Err(CoreError::Store(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error {
+                        code: rusqlite::ErrorCode::ConstraintViolation,
+                        ..
+                    },
+                    _
+                )))
+            ),
+            "the unique index refuses it"
+        );
+        assert!(moved_in.is_err(), "moved in, it is refused too");
+        assert_eq!(dentist_ids(&on_server), [on_server.id, exception]);
+    }
+
+    /// Undoing a delete puts the Event Version back under its ID. While an
+    /// Incoming Sync has since added an Event Row with the UID that isn't an
+    /// Exception, that would be a second, so the undo is refused as for an
+    /// Event changed since.
+    #[test]
+    fn undoing_a_delete_after_an_incoming_sync_added_the_uid_is_refused() {
+        let on_server = OnServer::new();
+        let deleted = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            7,
+            |journal_transaction| journal_transaction.delete(on_server.id),
+        )
+        .unwrap()
+        .journal_transaction
+        .unwrap();
+        let added = record(
+            &on_server.store,
+            TransactionOrigin::IncomingSync,
+            8,
+            |journal_transaction| journal_transaction.create("dentist", &on_server.event),
+        )
+        .unwrap()
+        .value;
+
+        let undone = undo(&on_server.store, deleted, 9);
+
+        assert!(
+            matches!(undone, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == deleted),
+            "{:?}",
+            undone.map(|_| ())
+        );
+        assert_eq!(dentist_ids(&on_server), [added]);
+    }
+
+    /// So is undoing a move out of a Calendar that an Incoming Sync has
+    /// since added an Event Row with the UID to.
+    #[test]
+    fn undoing_a_move_after_an_incoming_sync_added_the_uid_is_refused() {
+        let on_server = OnServer::new();
+        let mut moved = on_server.event.clone();
+        moved.calendar_id = on_server.local;
+        let move_out = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            7,
+            |journal_transaction| journal_transaction.replace(on_server.id, &moved),
+        )
+        .unwrap()
+        .journal_transaction
+        .unwrap();
+        let added = record(
+            &on_server.store,
+            TransactionOrigin::IncomingSync,
+            8,
+            |journal_transaction| journal_transaction.create("dentist", &on_server.event),
+        )
+        .unwrap()
+        .value;
+
+        let undone = undo(&on_server.store, move_out, 9);
+
+        assert!(
+            matches!(undone, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == move_out),
+            "{:?}",
+            undone.map(|_| ())
+        );
+        assert_eq!(dentist_ids(&on_server), [added]);
+    }
+
+    /// An undo that deletes the added Event Row first puts the earlier one
+    /// back, as the Calendar then has no other.
+    #[test]
+    fn undoing_a_delete_and_a_create_with_one_uid_together_puts_the_earlier_back() {
+        let on_server = OnServer::new();
+        let both = record(
+            &on_server.store,
+            TransactionOrigin::UserAction,
+            7,
+            |journal_transaction| {
+                journal_transaction.delete(on_server.id)?;
+                journal_transaction.create("dentist", &renamed(&on_server.event))
+            },
+        )
+        .unwrap()
+        .journal_transaction
+        .unwrap();
+
+        undo(&on_server.store, both, 9).unwrap();
+
+        assert_eq!(dentist_ids(&on_server), [on_server.id]);
     }
 }

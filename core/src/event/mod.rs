@@ -151,11 +151,39 @@ struct Exception {
 pub(crate) struct Loaded {
     calendar_id: CalendarId,
     uid: String,
-    /// The Event that isn't an Exception: the one the window gave, otherwise
-    /// the first by ID, should the Calendar have several with the UID.
+    /// The Event that isn't an Exception, the only one with the UID in its
+    /// Calendar, as the Local Store keeps it (ticket 104).
     event: Option<Stored>,
     /// Every Exception with the UID, in the order they were added.
     exceptions: Vec<Exception>,
+}
+
+/// An incoming Event with the stored Event it is paired with, if any: its
+/// ID and fields.
+type Paired<'a, 'b> = (&'b ImportedEvent, Option<(EventId, &'a EventFields)>);
+
+/// Incoming Events paired with the stored Events with their UID
+/// ([`Loaded::pair`]).
+struct Pairing<'a, 'b> {
+    /// Each incoming Event, the latest of several for one Occurrence, with
+    /// the stored Event for the same Occurrence.
+    paired: Vec<Paired<'a, 'b>>,
+    /// The stored Event that isn't an Exception, when no incoming Event
+    /// paired with it.
+    event_left: Option<EventId>,
+    /// The stored Exceptions no incoming Event paired with.
+    exceptions_left: Vec<&'a Exception>,
+}
+
+/// Which recurrence ID an incoming Event written over a stored one keeps:
+/// the form its Server Object holds (ADR 0012). An import keeps the stored
+/// one, so that a file giving it in another form leaves no Unsent Change in
+/// a form the Server Object doesn't hold; Propagate takes the Server
+/// Object's, the incoming one.
+#[derive(Clone, Copy)]
+enum Kept {
+    Stored,
+    Incoming,
 }
 
 impl Loaded {
@@ -163,26 +191,17 @@ impl Loaded {
     /// import finds them.
     pub fn of_uid(source: &impl Source, calendar_id: CalendarId, uid: &str) -> Result<Self> {
         let events = source.events_with_uid(Uid::In(calendar_id, uid))?;
-        Ok(Self::sorted(calendar_id, uid.to_owned(), events, None))
+        Ok(Self::sorted(calendar_id, uid.to_owned(), events))
     }
 
-    /// `events` sorted, with `opened`, if it isn't an Exception, as the
-    /// Event.
-    fn sorted(
-        calendar_id: CalendarId,
-        uid: String,
-        events: Vec<UidEvent>,
-        opened: Option<EventId>,
-    ) -> Self {
+    /// `events`, those of a Calendar with one UID, sorted.
+    fn sorted(calendar_id: CalendarId, uid: String, events: Vec<UidEvent>) -> Self {
         let (exceptions, mut events): (Vec<_>, Vec<_>) = events
             .into_iter()
             .map(|event| (event.id, event.fields))
             .partition(|(_, fields)| fields.recurrence_id.is_some());
-        let event = events
-            .iter()
-            .position(|(id, _)| Some(*id) == opened)
-            .or((!events.is_empty()).then_some(0))
-            .map(|index| events.swap_remove(index));
+        let event = events.pop();
+        debug_assert!(events.is_empty(), "one Event that isn't an Exception");
         let mut loaded = Self {
             calendar_id,
             uid,
@@ -232,65 +251,24 @@ impl Loaded {
 
     /// Makes `incoming`, a new version from a file with its Exceptions, the
     /// Events with the UID, adding it if the Calendar has none. Exceptions
-    /// are paired by Occurrence, against `incoming`'s Recurring Event: those
-    /// `incoming` has replace them or are added, the latest of several for
-    /// one Occurrence. The others are deleted, but for Events of their own
-    /// ([`Loaded::of_its_own`]), which stay and join `incoming` without being
-    /// written, as their recurrence IDs stay as obtained (ADR 0012). ADR 0007's
-    /// rules 2 and 3 apply.
+    /// are paired by Occurrence, against `incoming`'s Recurring Event
+    /// ([`Loaded::pair`]): those `incoming` has replace them, keeping their
+    /// recurrence IDs as stored, or are added. The others are deleted, but
+    /// for Events of their own ([`Loaded::of_its_own`]), which stay and join
+    /// `incoming` without being written, as their recurrence IDs stay as
+    /// obtained (ADR 0012).
     pub fn take(
         &self,
         journal_transaction: &mut JournalTransaction,
         incoming: &ImportedEvent,
     ) -> Result<()> {
         let recurring = incoming.rule.as_ref().map(|_| &incoming.when);
-        let exceptions = latest(incoming.exceptions.iter().map(|exception| {
-            let obtained = exception.recurrence_id.as_ref();
-            (
-                obtained.and_then(|obtained| obtained.normal_form(recurring)),
-                exception,
-            )
-        }));
-        match &self.event {
-            Some((id, previous)) => journal_transaction.replace(
-                *id,
-                &StoredEvent {
-                    calendar_id: self.calendar_id,
-                    fields: fields_over(incoming, previous, previous.recurrence_id.clone()),
-                },
-            )?,
-            None => {
-                journal_transaction.create(
-                    &self.uid,
-                    &StoredEvent {
-                        calendar_id: self.calendar_id,
-                        fields: fields(incoming),
-                    },
-                )?;
-            }
-        }
-        let mut left: Vec<_> = self
-            .exceptions
-            .iter()
-            .map(|stored| (normal_form(&stored.fields, recurring), stored))
-            .collect();
-        for (key, exception) in exceptions {
-            let same = key
-                .as_ref()
-                .and_then(|key| left.iter().position(|(rid, _)| rid.as_ref() == Some(key)));
-            let (previous, fields) = match same.map(|index| left.remove(index).1) {
-                Some(stored) => {
-                    let kept = stored.fields.recurrence_id.clone();
-                    (
-                        Some(stored.id),
-                        fields_over(exception, &stored.fields, kept),
-                    )
-                }
-                None => (None, fields(exception)),
-            };
-            self.write_exception(journal_transaction, previous, self, fields)?;
-        }
-        for (_, stored) in left {
+        let pairing = self.pair(
+            std::iter::once(incoming).chain(&incoming.exceptions),
+            recurring,
+        );
+        self.write_paired(journal_transaction, &pairing.paired, Kept::Stored)?;
+        for stored in pairing.exceptions_left {
             if !self.of_its_own(stored) {
                 journal_transaction.delete(stored.id)?;
             }
@@ -301,39 +279,90 @@ impl Loaded {
     /// Makes `incoming`, an Exception from a file without its Recurring
     /// Event, one of the Events with the UID: an Exception of their
     /// Recurring Event if they have one, otherwise an Event of its own
-    /// (ticket 88). It replaces the Exception for the same Occurrence or is
-    /// added, and the others stay. ADR 0007's rules 2 and 3 apply.
+    /// (ticket 88). It replaces the Exception for the same Occurrence
+    /// ([`Loaded::pair`]), keeping its recurrence ID as stored, or is added,
+    /// and the others stay.
     pub fn take_exception(
         &self,
         journal_transaction: &mut JournalTransaction,
         incoming: &ImportedEvent,
     ) -> Result<()> {
-        let rid = incoming
-            .recurrence_id
-            .as_ref()
-            .and_then(|obtained| obtained.normal_form(self.recurring_when().as_ref()));
-        match rid.as_ref().and_then(|rid| self.exception_at(rid)) {
-            Some(stored) => journal_transaction.replace(
-                stored.id,
-                &StoredEvent {
-                    calendar_id: self.calendar_id,
-                    fields: fields_over(
-                        incoming,
-                        &stored.fields,
-                        stored.fields.recurrence_id.clone(),
-                    ),
-                },
-            ),
-            None => journal_transaction
-                .create(
-                    &self.uid,
-                    &StoredEvent {
-                        calendar_id: self.calendar_id,
-                        fields: fields(incoming),
-                    },
-                )
-                .map(|_| ()),
+        let pairing = self.pair([incoming], self.recurring_when().as_ref());
+        self.write_paired(journal_transaction, &pairing.paired, Kept::Stored)
+    }
+
+    /// Pairs `incoming`, new versions of Events with the UID, with the
+    /// stored ones by Occurrence, against the Recurring Event at `recurring`
+    /// (ADR 0012): an Event that isn't an Exception with the stored one, an
+    /// Exception with the stored Exception for the same Occurrence, the
+    /// first by ID of several. Of several incoming for one Occurrence, the
+    /// latest is kept ([`latest`]); a recurrence ID that isn't one pairs with
+    /// nothing. Each Normal Form is computed once.
+    fn pair<'a, 'b>(
+        &'a self,
+        incoming: impl IntoIterator<Item = &'b ImportedEvent>,
+        recurring: Option<&ImportedWhen>,
+    ) -> Pairing<'a, 'b> {
+        let mut event = self.event.as_ref();
+        let mut exceptions: Vec<_> = self
+            .exceptions
+            .iter()
+            .map(|stored| (normal_form(&stored.fields, recurring), stored))
+            .collect();
+        let incoming = incoming.into_iter().map(|incoming| {
+            (
+                occurrence_key(incoming.recurrence_id.as_ref(), recurring),
+                incoming,
+            )
+        });
+        let paired = latest(incoming)
+            .into_iter()
+            .map(|(occurrence, incoming)| {
+                let stored = match occurrence {
+                    Some(None) => event.take().map(|(id, fields)| (*id, fields)),
+                    Some(Some(rid)) => exceptions
+                        .iter()
+                        .position(|(stored, _)| stored.as_ref() == Some(&rid))
+                        .map(|index| exceptions.remove(index).1)
+                        .map(|stored| (stored.id, &stored.fields)),
+                    None => None,
+                };
+                (incoming, stored)
+            })
+            .collect();
+        Pairing {
+            paired,
+            event_left: event.map(|(id, _)| *id),
+            exceptions_left: exceptions.into_iter().map(|(_, stored)| stored).collect(),
         }
+    }
+
+    /// Writes each of `paired`'s incoming Events over the stored Event it
+    /// is paired with, keeping the recurrence ID `kept` (ADR 0012), or adds
+    /// it. ADR 0007's rules 2 and 3 apply.
+    fn write_paired(
+        &self,
+        journal_transaction: &mut JournalTransaction,
+        paired: &[Paired<'_, '_>],
+        kept: Kept,
+    ) -> Result<()> {
+        let event = |fields| StoredEvent {
+            calendar_id: self.calendar_id,
+            fields,
+        };
+        for (incoming, stored) in paired {
+            match stored {
+                Some((id, stored)) => {
+                    let rid = match kept {
+                        Kept::Stored => stored.recurrence_id.clone(),
+                        Kept::Incoming => incoming.recurrence_id.clone(),
+                    };
+                    journal_transaction.replace(*id, &event(fields_over(incoming, stored, rid)))?
+                }
+                None => _ = journal_transaction.create(&self.uid, &event(fields(incoming)))?,
+            }
+        }
+        Ok(())
     }
 
     /// The Recurring Event's time, none when the Event doesn't repeat, is
@@ -448,7 +477,7 @@ impl Opened {
             .find(|event| event.id == id)
             .ok_or(CoreError::EventNotFound(id))?;
         let (calendar_id, uid) = (opened.calendar_id, opened.uid.clone());
-        let loaded = Loaded::sorted(calendar_id, uid, events, Some(id));
+        let loaded = Loaded::sorted(calendar_id, uid, events);
         let exception = loaded
             .exceptions
             .iter()
@@ -682,12 +711,10 @@ fn with_uid_of<'a>(
 /// `object` of the Calendar `calendar_id` holds now (at least one), the
 /// UID's Event Rows, as `object` is its Corresponding Server Object, the
 /// one CalDAV Server Object holding it, and changes no other Event Row
-/// (ADR 0015): each Event replaces the Event Row for the
-/// same Occurrence, or the one that isn't an Exception, or is added, and
-/// the UID's other Event Rows are deleted. Exceptions are paired by Occurrence against the Recurring Event
-/// `object` holds, or else the one the Event Rows hold (ADR 0012), and each
-/// Event Row takes its recurrence ID as `object` gives it. Of several for one Occurrence, the
-/// latest is kept. ADR 0007's rules 2 and 3 apply.
+/// (ADR 0015). Each Event replaces the Event Row for the same Occurrence
+/// ([`Loaded::pair`]), against the Recurring Event `object` holds, or else
+/// the one the Event Rows hold (ADR 0012), taking its recurrence ID as
+/// `object` gives it, or is added; the UID's other Event Rows are deleted.
 pub(crate) fn propagate_to_event_rows(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -701,58 +728,17 @@ pub(crate) fn propagate_to_event_rows(
             .corresponding_server_object(calendar_id, uid)?,
         Some(object)
     );
+    let loaded = Loaded::of_uid(journal_transaction, calendar_id, uid)?;
     let held = events
         .iter()
         .find(|event| event.recurrence_id.is_none() && event.rule.is_some())
         .map(|event| event.when);
-    let event_rows = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
-    // The Recurring Event of the Event Rows, chosen as `Loaded` chooses it:
-    // the first Event Row that isn't an Exception, if it repeats.
-    let recurring = held.or_else(|| {
-        event_rows
-            .iter()
-            .find(|event_row| event_row.fields.recurrence_id.is_none())
-            .filter(|event_row| event_row.fields.rule.is_some())
-            .and_then(|event_row| event_row.fields.when.to_imported().ok())
-    });
-    let occurrence = |obtained: Option<&RecurrenceId>| occurrence_key(obtained, recurring.as_ref());
-    let mut left: Vec<_> = event_rows
-        .into_iter()
-        .map(|event_row| {
-            (
-                occurrence(event_row.fields.recurrence_id.as_ref()),
-                event_row,
-            )
-        })
-        .collect();
-    let latest = latest(
-        events
-            .iter()
-            .map(|event| (occurrence(event.recurrence_id.as_ref()), event)),
-    );
-    for (key, incoming) in latest {
-        let same = key.as_ref().and_then(|key| {
-            left.iter()
-                .position(|(occurrence, _)| occurrence.as_ref() == Some(key))
-        });
-        let event = |fields: EventFields| StoredEvent {
-            calendar_id,
-            fields,
-        };
-        match same.map(|index| left.remove(index).1) {
-            Some(event_row) => journal_transaction.replace(
-                event_row.id,
-                &event(fields_over(
-                    incoming,
-                    &event_row.fields,
-                    incoming.recurrence_id.clone(),
-                )),
-            )?,
-            None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
-        }
-    }
-    for (_, event_row) in left {
-        journal_transaction.delete(event_row.id)?;
+    let recurring = held.or_else(|| loaded.recurring_when());
+    let pairing = loaded.pair(events, recurring.as_ref());
+    loaded.write_paired(journal_transaction, &pairing.paired, Kept::Incoming)?;
+    let exceptions_left = pairing.exceptions_left.iter().map(|stored| stored.id);
+    for id in pairing.event_left.into_iter().chain(exceptions_left) {
+        journal_transaction.delete(id)?;
     }
     Ok(())
 }

@@ -9,11 +9,25 @@
 
 **Blocked by:** 105
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] Writing a second Event Row with one UID that isn't an Exception in a Calendar fails in the Local Store
-- [ ] Undoing a delete after an Incoming Sync added an Event Row with the UID is refused, as an undo of an Event changed since is
-- [ ] Import, lone-Exception import and Propagate pair Exceptions through one method on `Loaded`
-- [ ] Each stored Exception's Normal Form is computed once per pairing
+- [x] Writing a second Event Row with one UID that isn't an Exception in a Calendar fails in the Local Store
+- [x] Undoing a delete after an Incoming Sync added an Event Row with the UID is refused, as an undo of an Event changed since is
+- [x] Import, lone-Exception import and Propagate pair Exceptions through one method on `Loaded`
+- [x] Each stored Exception's Normal Form is computed once per pairing
+
+## Comments
+
+2026-11-06, implemented:
+
+- The baseline schema has the unique index `event_calendar_uid_not_exception` on `event (calendar_id, uid) WHERE recurrence_id IS NULL` (`core/src/store/schema.rs`).
+- Undo refuses to put back an Event Version that isn't an Exception while its Calendar has another Event Row with the UID that isn't one, with `ChangedSinceJournalTransaction` (`JournalTransaction::put_back`, `core/src/journal/mod.rs`). This covers undoing a delete, and also undoing a move out of a Calendar that has since gained the UID. Undo runs latest first, so a Journal Transaction that deleted one Event Row and created another with the UID still undoes.
+- `Loaded::pair` (`core/src/event/mod.rs`) pairs incoming Events with the stored ones by Occurrence, against a given Recurring Event. It keeps the latest of several incoming Events for one Occurrence, and computes each Normal Form once per pairing. It returns `Pairing`: each incoming Event with its stored Event, if any, and the stored Event and Exceptions left over. `Loaded::write_paired` writes the pairs, and `Kept` says which recurrence ID is kept. `take` and `take_exception` keep the stored one; Propagate takes the incoming one and works on a `Loaded`. Each caller does its own thing with the leftovers.
+- `Loaded` no longer picks "the first by ID" of several Events that aren't Exceptions; a `debug_assert!` relies on the index.
+- Left open, not in this ticket:
+  - Moving an Event into a Calendar that already has an Event Row with its UID that isn't an Exception (the "all" and "alone" scopes, `core/src/event/scope.rs`), for example after importing one file into two Calendars. Before this ticket, the move silently made a second Event Row. Now the Local Store refuses it with a raw store error. What the user should see needs deciding.
+  - `occurrence_key` still returns `Option<Option<NormalForm>>`. A small enum would name its three cases.
+
+New terms: **Pairing** (new term), incoming Events paired by Occurrence with the stored Events with their UID (`Pairing`, `Paired`, `Loaded::pair`, `Loaded::write_paired`). **Kept** (new term), which recurrence ID an Event Row keeps when an incoming Event is written over it.

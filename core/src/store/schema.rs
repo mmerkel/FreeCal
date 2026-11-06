@@ -24,7 +24,9 @@ const MIGRATIONS: &[&str] = &[
     // Event's ID from being given out again, so that the Change Journal
     // never takes two Events for one. An Exception is an Event with the UID
     // of its Recurring Event and the recurrence ID of the Occurrence it
-    // changed.
+    // changed. A Calendar has at most one Event with a UID that isn't an
+    // Exception (ticket 104), so that Exceptions pair with one Recurring
+    // Event.
     //
     // Each Provider has Mirror tables of its own (ADR 0015). A CalDAV
     // Server Object mirrors one resource, the only one at its href in its
@@ -147,6 +149,8 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX event_calendar_start ON event (calendar_id, start_utc);
     CREATE INDEX event_calendar_uid ON event (calendar_id, uid);
+    CREATE UNIQUE INDEX event_calendar_uid_not_exception ON event (calendar_id, uid)
+        WHERE recurrence_id IS NULL;
     CREATE TABLE journal_transaction (
         id INTEGER PRIMARY KEY,
         origin TEXT NOT NULL,
