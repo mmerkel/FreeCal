@@ -19,7 +19,7 @@ use crate::{CalendarId, ImportedEvent, Result};
 /// Event first, then the lowest href, `href`, by byte comparison. The
 /// lowest key comes first.
 fn fixed_order<'a>(href: &'a str, events: &[ImportedEvent]) -> (bool, &'a str) {
-    let only_exceptions = events.iter().all(|event| event.recurrence_id().is_some());
+    let only_exceptions = events.iter().all(|event| event.recurrence_id.is_some());
     (only_exceptions, href)
 }
 

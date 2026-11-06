@@ -79,7 +79,7 @@ impl ImportFile {
 }
 
 /// What importing a file into a Calendar would do.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ImportPreview {
     pub calendar_id: CalendarId,
     /// How many Events have a UID the Calendar doesn't have.
@@ -126,7 +126,7 @@ pub struct PinnedZone {
 
 /// An Event as read from a file to import. Its fields are kept as the file
 /// has them, after iCalendar's unescaping.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ImportedEvent {
     pub uid: String,
     pub title: String,
@@ -153,9 +153,9 @@ pub struct ImportedEvent {
     pub sequence: i64,
     /// A Recurring Event's Exceptions, which share its UID.
     pub exceptions: Vec<ImportedEvent>,
-    /// For an Exception, the original start of the Occurrence it changed, as
-    /// the file gives it.
-    pub(crate) original: Option<Time>,
+    /// For an Exception, the recurrence ID of the Occurrence it changed, as
+    /// obtained (ADR 0012); none for every other Event.
+    pub(crate) recurrence_id: Option<RecurrenceId>,
 }
 
 impl ImportedEvent {
@@ -165,12 +165,6 @@ impl ImportedEvent {
 
     pub fn location(&self) -> StructuredText {
         StructuredText::from_plain_text(&self.location)
-    }
-
-    /// For an Exception, the recurrence ID of the Occurrence it changed, as
-    /// obtained (ADR 0012); none for every other Event.
-    pub(crate) fn recurrence_id(&self) -> Option<RecurrenceId> {
-        self.original.as_ref().map(RecurrenceId::of_original)
     }
 }
 
@@ -262,7 +256,7 @@ pub(crate) fn run(
             outcome.imported += 1;
         }
         let loaded = Loaded::of_uid(journal_transaction, calendar_id, &uid)?;
-        match event.original {
+        match event.recurrence_id {
             None => loaded.take(journal_transaction, event)?,
             Some(_) => loaded.take_exception(journal_transaction, event)?,
         }
@@ -309,7 +303,7 @@ pub(crate) fn preview(
 /// What a CalDAV resource holds of what FreeCal keeps, as the CalDAV
 /// Incoming Sync reads it (ADR 0015). RFC 4791 §4.1 allows one UID per
 /// resource, so the Sync Engine never sees several, unlike the file import.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum Holds {
     /// FreeCal can't read it.
     Unreadable,
@@ -388,7 +382,7 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
         }
     }
     let alone = latest(without_recurring.iter().map(|exception| {
-        let obtained = exception.recurrence_id();
+        let obtained = exception.recurrence_id.as_ref();
         let rid = obtained.and_then(|obtained| obtained.normal_form(None));
         ((exception.uid.as_str(), rid), exception)
     }));
@@ -474,7 +468,9 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
             let duration = event.property_value("DURATION").and_then(duration);
             let (when, zone_pinned, all_floating) = zones.when(start, end, duration, display);
             let description = event.get_description().unwrap_or_default();
-            let original = event.get_recurrence_id().map(|time| zones.time(time));
+            let recurrence_id = event
+                .get_recurrence_id()
+                .map(|time| RecurrenceId::of_original(zones.time(time)));
             let exdates = event
                 .multi_properties()
                 .get("EXDATE")
@@ -486,7 +482,9 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
             // A rule FreeCal can't expand leaves the Event as its first
             // Occurrence.
             let (rule, exdates) = rule::imported(
-                event.property_value("RRULE").filter(|_| original.is_none()),
+                event
+                    .property_value("RRULE")
+                    .filter(|_| recurrence_id.is_none()),
                 exdates,
                 &StoredWhen::imported(&when),
             );
@@ -510,9 +508,9 @@ fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
                     .and_then(|sequence| sequence.trim().parse().ok())
                     .unwrap_or(0),
                 exceptions: Vec::new(),
-                original,
+                recurrence_id,
             };
-            match imported.original {
+            match imported.recurrence_id {
                 None => read.events.push(imported),
                 Some(_) => read.exceptions.push(imported),
             }
@@ -851,21 +849,22 @@ mod tests {
         };
         assert_eq!(uid, "weekly");
         assert_eq!(events.len(), 2);
-        assert!(events[0].original.is_none(), "the Recurring Event first");
-        assert_eq!(
+        assert!(
+            events[0].recurrence_id.is_none(),
+            "the Recurring Event first"
+        );
+        assert!(matches!(
             holds(&format!("{moved}{}{weekly}", event("other", ""))),
-            Holds::Nothing {
-                uids: vec!["other".to_owned(), "weekly".to_owned()]
-            }
-        );
-        assert_eq!(
+            Holds::Nothing { uids } if uids == ["other", "weekly"]
+        ));
+        assert!(matches!(
             holds("BEGIN:VTODO\r\nUID:task\r\nEND:VTODO\r\n"),
-            Holds::Nothing { uids: Vec::new() }
-        );
-        assert_eq!(
+            Holds::Nothing { uids } if uids.is_empty()
+        ));
+        assert!(matches!(
             holds("BEGIN:VEVENT\r\nUID:no-start\r\nEND:VEVENT\r\n"),
             Holds::Unreadable
-        );
+        ));
     }
 
     #[test]

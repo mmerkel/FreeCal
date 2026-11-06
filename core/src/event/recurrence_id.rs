@@ -14,45 +14,65 @@ use crate::import::{ImportedWhen, Time};
 
 /// A recurrence ID as obtained: from a file or a server, from FreeCal in the
 /// Normal Form for the Exceptions it makes, or read back from a stored field
-/// or from the window, untrusted. It has no `PartialEq`, so that no code
-/// compares recurrence IDs as text: they compare by their [`NormalForm`],
-/// which takes the Recurring Event, or its absence.
+/// or from the window, untrusted. It is read once, when FreeCal obtains it
+/// (ticket 105). It has no `PartialEq`, so that no code compares recurrence
+/// IDs as text: they compare by their [`NormalForm`], which takes the
+/// Recurring Event, or its absence.
 #[derive(Debug, Clone)]
-pub(crate) struct RecurrenceId(String);
+pub(crate) struct RecurrenceId {
+    /// The text as obtained, which the Local Store writes.
+    obtained: String,
+    /// The original start of the Occurrence it names; none when the text
+    /// can't be read, such as one with a zone FreeCal doesn't know, and then
+    /// it pairs with nothing.
+    parsed: Option<Time>,
+}
 
 impl RecurrenceId {
-    /// The recurrence ID `text`, as a stored field or the window gives it.
+    /// The recurrence ID `text`, as a stored field or the window gives it,
+    /// read here once.
     pub fn obtained(text: impl Into<String>) -> Self {
-        Self(text.into())
+        let obtained = text.into();
+        let parsed = original_of(&obtained);
+        Self { obtained, parsed }
     }
 
     /// The recurrence ID that names `original`, the original start of an
     /// Occurrence as a file or a server gives it: a date, a wall time with
     /// no zone, or one in the zone it was given in, written after it as
     /// `2026-10-12T03:00:00[America/New_York]`.
-    pub fn of_original(original: &Time) -> Self {
-        Self(match original {
-            Time::Date(date) => date.to_string(),
-            Time::Wall(wall, None) => wall_text(*wall),
-            Time::Wall(wall, Some(zone)) => format!("{}[{}]", wall_text(*wall), zone.name()),
-        })
+    pub fn of_original(original: Time) -> Self {
+        Self {
+            obtained: recurrence_id_text(&original),
+            parsed: Some(original),
+        }
     }
 
     /// The text as obtained, which the Local Store writes.
     pub fn as_obtained(&self) -> &str {
-        &self.0
+        &self.obtained
     }
 
     /// The Normal Form of the Occurrence it names of a Recurring Event at
     /// `recurring`. With no Recurring Event, the recurrence ID as obtained,
-    /// written as [`Self::of_original`] writes it. None when it isn't a
-    /// recurrence ID, such as one with a zone FreeCal doesn't know.
+    /// written as [`Self::of_original`] writes it. None when it can't be
+    /// read.
     pub fn normal_form(&self, recurring: Option<&ImportedWhen>) -> Option<NormalForm> {
-        let original = original_of(&self.0)?;
+        let original = self.parsed.as_ref()?;
         Some(match recurring {
-            Some(recurring) => in_normal_form(&original, recurring),
-            None => NormalForm(Self::of_original(&original).0),
+            Some(recurring) => in_normal_form(original, recurring),
+            None => NormalForm(recurrence_id_text(original)),
         })
+    }
+}
+
+/// The text of a recurrence ID naming `original`, as
+/// [`RecurrenceId::of_original`] writes it.
+fn recurrence_id_text(original: &Time) -> String {
+    match original {
+        Time::Date(date) => date.to_string(),
+        Time::Wall(wall, None) => wall_text(*wall),
+        Time::Wall(wall, Some(zone)) => format!("{}[{}]", wall_text(*wall), zone.name()),
     }
 }
 
@@ -83,7 +103,7 @@ impl NormalForm {
 
     /// The recurrence ID to store for it, as FreeCal writes those it makes.
     pub fn to_recurrence_id(&self) -> RecurrenceId {
-        RecurrenceId(self.0.clone())
+        RecurrenceId::obtained(self.0.clone())
     }
 }
 
@@ -180,8 +200,9 @@ mod tests {
             Time::Wall(wall, None),
             Time::Wall(wall, Some(New_York)),
         ] {
-            let text = RecurrenceId::of_original(&original).0;
-            assert_eq!(original_of(&text), Some(original), "{text}");
+            let text = RecurrenceId::of_original(original.clone()).obtained;
+            let read = RecurrenceId::obtained(text.as_str());
+            assert_eq!(read.parsed, Some(original), "{text}");
         }
         assert_eq!(
             normal_form("2026-10-12T3:0:0[America/New_York]", None).as_deref(),
@@ -194,6 +215,7 @@ mod tests {
             "2026-10-12T03:00:00[America/New_York",
             "<b>",
         ] {
+            assert_eq!(RecurrenceId::obtained(unreadable).parsed, None);
             assert_eq!(
                 normal_form(unreadable, Some(&timed())),
                 None,

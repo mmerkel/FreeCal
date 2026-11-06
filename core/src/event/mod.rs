@@ -245,7 +245,7 @@ impl Loaded {
     ) -> Result<()> {
         let recurring = incoming.rule.as_ref().map(|_| &incoming.when);
         let exceptions = latest(incoming.exceptions.iter().map(|exception| {
-            let obtained = exception.recurrence_id();
+            let obtained = exception.recurrence_id.as_ref();
             (
                 obtained.and_then(|obtained| obtained.normal_form(recurring)),
                 exception,
@@ -309,7 +309,8 @@ impl Loaded {
         incoming: &ImportedEvent,
     ) -> Result<()> {
         let rid = incoming
-            .recurrence_id()
+            .recurrence_id
+            .as_ref()
             .and_then(|obtained| obtained.normal_form(self.recurring_when().as_ref()));
         match rid.as_ref().and_then(|rid| self.exception_at(rid)) {
             Some(stored) => journal_transaction.replace(
@@ -702,7 +703,7 @@ pub(crate) fn propagate_to_event_rows(
     );
     let held = events
         .iter()
-        .find(|event| event.original.is_none() && event.rule.is_some())
+        .find(|event| event.recurrence_id.is_none() && event.rule.is_some())
         .map(|event| event.when);
     let event_rows = journal_transaction.events_with_uid(Uid::In(calendar_id, uid))?;
     // The Recurring Event of the Event Rows, chosen as `Loaded` chooses it:
@@ -727,7 +728,7 @@ pub(crate) fn propagate_to_event_rows(
     let latest = latest(
         events
             .iter()
-            .map(|event| (occurrence(event.recurrence_id().as_ref()), event)),
+            .map(|event| (occurrence(event.recurrence_id.as_ref()), event)),
     );
     for (key, incoming) in latest {
         let same = key.as_ref().and_then(|key| {
@@ -744,7 +745,7 @@ pub(crate) fn propagate_to_event_rows(
                 &event(fields_over(
                     incoming,
                     &event_row.fields,
-                    incoming.recurrence_id(),
+                    incoming.recurrence_id.clone(),
                 )),
             )?,
             None => _ = journal_transaction.create(uid, &event(fields(incoming)))?,
@@ -811,7 +812,7 @@ fn fields(incoming: &ImportedEvent) -> EventFields {
         zone_pinned: incoming.zone_pinned,
         rule: incoming.rule.clone(),
         exdates: incoming.exdates.clone(),
-        recurrence_id: incoming.recurrence_id(),
+        recurrence_id: incoming.recurrence_id.clone(),
     }
 }
 
