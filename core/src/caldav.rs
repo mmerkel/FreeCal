@@ -238,7 +238,7 @@ impl Client {
     /// What changed in the Calendar at `calendar` since `token`, asked with
     /// `sync-collection` (RFC 6578), or else found by listing the whole
     /// Calendar with ETags and comparing with `known`: the objects FreeCal
-    /// holds, by their address as the server gave it. Objects whose ETag
+    /// holds or ignores, by their address as the server gave it. Objects whose ETag
     /// FreeCal holds are left out, unless FreeCal couldn't read them; the
     /// others are fetched with `calendar-multiget`.
     pub fn changes(

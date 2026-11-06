@@ -231,6 +231,24 @@ impl Store {
         Ok(objects.into_iter().collect())
     }
 
+    /// The Ignored Resources of a Calendar, by their address as the server
+    /// gave it, as an Incoming Sync knows them. Not a query of the Mirror.
+    pub fn ignored_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT href, etag FROM caldav_ignored_resource WHERE calendar_id = ?1")?;
+        let ignored = readable(stmt.query_map([calendar_id.0], |row| {
+            Ok((
+                row.get(0)?,
+                Held {
+                    etag: row.get(1)?,
+                    unreadable: false,
+                },
+            ))
+        })?)?;
+        Ok(ignored.into_iter().collect())
+    }
+
     /// The Server Object of a Calendar at `href`, if there is one.
     pub fn object_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<ObjectId>> {
         Ok(self

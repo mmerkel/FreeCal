@@ -33,7 +33,12 @@ const MIGRATIONS: &[&str] = &[
     // the last version it could. It holds one UID, as a resource holding
     // several isn't mirrored (ADR 0015), and `holds_non_exception` whether it holds the Event of that UID that
     // isn't an Exception: a Calendar's Event Rows with one UID find their
-    // Corresponding Server Object by them (ADR 0011). Recurrence IDs
+    // Corresponding Server Object by them (ADR 0011). An Ignored Resource
+    // is a CalDAV resource the Sync Engine fetched and doesn't mirror, with
+    // the ETag it had, so that it isn't fetched again until it changes, and
+    // the UID that a mirrored resource already holds; none for one holding
+    // several UIDs (ADR 0015). It isn't part of the Mirror, and an href is
+    // never both mirrored and ignored, which the triggers enforce. Recurrence IDs
     // everywhere are stored as obtained and compared by Occurrence, never in
     // SQL (ADR 0012).
     //
@@ -86,6 +91,29 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE UNIQUE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);
     CREATE INDEX caldav_server_object_calendar_uid ON caldav_server_object (calendar_id, uid);
+    CREATE TABLE caldav_ignored_resource (
+        calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
+        href TEXT NOT NULL,
+        etag TEXT,
+        uid TEXT
+    );
+    CREATE UNIQUE INDEX caldav_ignored_resource_calendar_href
+        ON caldav_ignored_resource (calendar_id, href);
+    CREATE TRIGGER caldav_ignored_resource_not_mirrored
+        BEFORE INSERT ON caldav_ignored_resource
+        WHEN EXISTS (SELECT 1 FROM caldav_server_object
+            WHERE calendar_id = NEW.calendar_id AND href = NEW.href)
+        BEGIN SELECT RAISE(ABORT, 'an href is mirrored and ignored'); END;
+    CREATE TRIGGER caldav_server_object_not_ignored
+        BEFORE INSERT ON caldav_server_object
+        WHEN EXISTS (SELECT 1 FROM caldav_ignored_resource
+            WHERE calendar_id = NEW.calendar_id AND href = NEW.href)
+        BEGIN SELECT RAISE(ABORT, 'an href is mirrored and ignored'); END;
+    CREATE TRIGGER caldav_server_object_moved_not_ignored
+        BEFORE UPDATE OF href ON caldav_server_object
+        WHEN EXISTS (SELECT 1 FROM caldav_ignored_resource
+            WHERE calendar_id = NEW.calendar_id AND href = NEW.href)
+        BEGIN SELECT RAISE(ABORT, 'an href is mirrored and ignored'); END;
     CREATE TABLE unsent_change (
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         uid TEXT NOT NULL,
@@ -201,4 +229,38 @@ pub(super) fn migrate(conn: &Connection) -> Result<()> {
         add_starting_calendars(conn)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ADR 0015: the Local Store refuses an href both mirrored and ignored,
+    /// whether the Ignored Resource or the Server Object comes second, or
+    /// a Server Object moves to it.
+    #[test]
+    fn an_href_is_never_both_mirrored_and_ignored() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO caldav_server_object (calendar_id, href, data, uid, holds_non_exception) \
+             VALUES (1, '/mirrored.ics', '', 'mirrored', 1);
+             INSERT INTO caldav_ignored_resource (calendar_id, href) VALUES (1, '/ignored.ics');",
+        )
+        .unwrap();
+
+        for refused in [
+            "INSERT INTO caldav_ignored_resource (calendar_id, href) VALUES (1, '/mirrored.ics')",
+            "INSERT INTO caldav_server_object (calendar_id, href, data, uid, holds_non_exception) \
+             VALUES (1, '/ignored.ics', '', 'ignored', 1)",
+            "UPDATE caldav_server_object SET href = '/ignored.ics'",
+        ] {
+            assert!(conn.execute(refused, []).is_err(), "{refused}");
+        }
+        conn.execute(
+            "INSERT INTO caldav_ignored_resource (calendar_id, href) VALUES (2, '/mirrored.ics')",
+            [],
+        )
+        .unwrap();
+    }
 }

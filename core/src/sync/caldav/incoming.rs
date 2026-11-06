@@ -5,7 +5,10 @@
 
 use chrono_tz::Tz;
 
-use super::{holds_non_exception, log_ignored, mirror, moved, remove_object, settle, unreadable};
+use super::{
+    forget_ignored, holds_non_exception, ignore, log_ignored, mirror, moved, remove_object, settle,
+    unreadable,
+};
 use crate::event::{self, ObjectId};
 use crate::import::Holds;
 use crate::journal::JournalTransaction;
@@ -15,7 +18,8 @@ use crate::{CalendarId, Result};
 /// Brings `changes` into the Calendar `calendar_id` in `journal_transaction`,
 /// and records its new sync state with them: the changed Server Objects are
 /// mirrored and propagated as [`mirror_and_propagate`] does it, and a removed
-/// one goes as [`remove`] removes it.
+/// one goes as [`remove`] removes it. A removed Ignored Resource is
+/// forgotten.
 pub(crate) fn incoming_sync(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
@@ -23,6 +27,7 @@ pub(crate) fn incoming_sync(
 ) -> Result<()> {
     let mut removed = Vec::new();
     for href in &changes.removed {
+        forget_ignored(journal_transaction, calendar_id, href)?;
         removed.extend(
             journal_transaction
                 .database_transaction()
@@ -50,9 +55,12 @@ pub(crate) fn incoming_sync(
 /// that of before and no longer is goes as [`settle`] gives it. A Server
 /// Object holding nothing FreeCal keeps isn't mirrored, and goes from the
 /// Mirror if it was, as [`remove`] removes it; one holding several UIDs,
-/// which RFC 4791 §4.1 forbids, is also written to the Log (ADR 0015). One
-/// FreeCal can't read keeps its last readable version and its Event Rows,
-/// recorded as unreadable. A new Server Object that holds the
+/// which RFC 4791 §4.1 forbids, is also written to the Log and remembered
+/// as an Ignored Resource with its ETag (ADR 0015), and an Ignored Resource
+/// that now holds nothing is forgotten. One FreeCal can't read keeps its
+/// last readable version and its Event Rows, recorded as unreadable; an
+/// Ignored Resource keeps its ETag, so that it is fetched again. An Ignored
+/// Resource that now holds one UID is mirrored. A new Server Object that holds the
 /// UID that one of `moved_from`, the Server Objects removed in the same
 /// Incoming Sync, holds is that one moved to another address: it takes its
 /// place, which leaves `moved_from`. A Recurring Event that arrives joins
@@ -76,11 +84,14 @@ pub(crate) fn mirror_and_propagate(
                 continue;
             }
             Holds::Nothing { uids } => {
-                if !uids.is_empty() {
-                    log_ignored(calendar_id, &one.object.href, uids);
-                }
                 if let Some(object) = at {
                     remove(journal_transaction, calendar_id, object, zone)?;
+                }
+                if uids.is_empty() {
+                    forget_ignored(journal_transaction, calendar_id, &one.object.href)?;
+                } else {
+                    log_ignored(calendar_id, &one.object.href, uids);
+                    ignore(journal_transaction, calendar_id, &one.object)?;
                 }
                 continue;
             }
@@ -549,6 +560,152 @@ mod tests {
         );
         assert_eq!(alone.event_rows(), []);
         assert_eq!(alone.shown(), []);
+    }
+
+    /// [`fetched`], with the ETag `etag`.
+    fn fetched_with_etag(href: &str, body: &str, etag: &str) -> Fetched {
+        let mut fetched = fetched(href, body);
+        fetched.object.etag = Some(etag.to_owned());
+        read_caldav_resources(vec![fetched.object], Tz::UTC).remove(0)
+    }
+
+    impl Alone {
+        /// The Calendar's Ignored Resources, each with its ETag, by address.
+        fn ignored(&self) -> Vec<(String, Option<String>)> {
+            let mut ignored: Vec<(String, Option<String>)> = self
+                .store
+                .ignored_resources(self.calendar_id)
+                .unwrap()
+                .into_iter()
+                .map(|(href, held)| (href, held.etag))
+                .collect();
+            ignored.sort();
+            ignored
+        }
+
+        /// Brings `changed` and `removed` into the Calendar as one Incoming
+        /// Sync.
+        fn incoming_sync(&self, changed: Vec<Fetched>, removed: &[&str]) {
+            let changes = Changes {
+                changed,
+                removed: removed.iter().map(|href| (*href).to_owned()).collect(),
+                state: crate::remote::SyncPoint { token: None },
+                zone: Tz::UTC,
+            };
+            record(
+                &self.store,
+                TransactionOrigin::IncomingSync,
+                0,
+                |journal_transaction| {
+                    incoming_sync(journal_transaction, self.calendar_id, &changes)
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    /// ADR 0015: a CalDAV resource holding several UIDs is remembered with
+    /// its ETag, which follows it while it holds several. Once it holds one
+    /// UID, it is mirrored instead; coming to hold several again, it leaves
+    /// the Mirror for the Ignored Resources. Holding nothing, or gone from
+    /// the server, it is forgotten.
+    #[test]
+    fn a_caldav_resource_holding_two_uids_is_an_ignored_resource_until_it_holds_one() {
+        let alone = Alone::new();
+        let two = |etag| fetched_with_etag("/two.ics", &format!("{OTHER}{WEEKLY}"), etag);
+        let ignored = |etag: &str| [("/two.ics".to_owned(), Some(etag.to_owned()))];
+
+        alone.incoming_sync(vec![two("1")], &[]);
+        assert_eq!(alone.ignored(), ignored("1"));
+
+        alone.incoming_sync(vec![two("2")], &[]);
+        assert_eq!(alone.ignored(), ignored("2"));
+        assert_eq!(
+            alone
+                .store
+                .object_at(alone.calendar_id, "/two.ics")
+                .unwrap(),
+            None
+        );
+
+        alone.incoming_sync(vec![fetched_with_etag("/two.ics", OTHER, "3")], &[]);
+        assert_eq!(alone.ignored(), []);
+        assert!(
+            alone
+                .store
+                .object_at(alone.calendar_id, "/two.ics")
+                .unwrap()
+                .is_some()
+        );
+        let titles: Vec<String> = alone.shown().into_iter().map(|shown| shown.0).collect();
+        assert_eq!(titles, ["Other", "Moved"]);
+
+        alone.incoming_sync(vec![two("4")], &[]);
+        assert_eq!(alone.ignored(), ignored("4"));
+        assert_eq!(
+            alone
+                .store
+                .object_at(alone.calendar_id, "/two.ics")
+                .unwrap(),
+            None
+        );
+        assert_eq!(alone.shown().len(), 1);
+
+        alone.incoming_sync(vec![], &["/two.ics"]);
+        assert_eq!(alone.ignored(), []);
+
+        alone.incoming_sync(vec![two("5")], &[]);
+        let todo = "BEGIN:VTODO\r\nUID:todo\r\nSUMMARY:Todo\r\nEND:VTODO\r\n";
+        alone.incoming_sync(vec![fetched_with_etag("/two.ics", todo, "6")], &[]);
+        assert_eq!(alone.ignored(), []);
+    }
+
+    /// An Ignored Resource that FreeCal can no longer read keeps the ETag
+    /// it had, so that it is fetched again.
+    #[test]
+    fn an_ignored_resource_freecal_cant_read_keeps_its_etag() {
+        let alone = Alone::new();
+        alone.incoming_sync(
+            vec![fetched_with_etag(
+                "/two.ics",
+                &format!("{OTHER}{WEEKLY}"),
+                "1",
+            )],
+            &[],
+        );
+        let unreadable = Fetched {
+            object: ServerObject {
+                href: "/two.ics".to_owned(),
+                etag: Some("2".to_owned()),
+                data: "not iCalendar".to_owned(),
+            },
+            holds: Holds::Unreadable,
+        };
+
+        alone.incoming_sync(vec![unreadable], &[]);
+
+        assert_eq!(
+            alone.ignored(),
+            [("/two.ics".to_owned(), Some("1".to_owned()))]
+        );
+    }
+
+    /// Deleting a Calendar deletes its Ignored Resources.
+    #[test]
+    fn deleting_its_calendar_deletes_an_ignored_resource() {
+        let alone = Alone::new();
+        alone.incoming_sync(
+            vec![fetched_with_etag(
+                "/two.ics",
+                &format!("{OTHER}{WEEKLY}"),
+                "1",
+            )],
+            &[],
+        );
+
+        journal::delete_calendar(&alone.store, alone.calendar_id).unwrap();
+
+        assert_eq!(alone.ignored(), []);
     }
 
     #[test]

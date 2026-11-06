@@ -3,7 +3,7 @@ mod support;
 use freecal_core::{
     AccountId, CalDavLogin, CalendarId, Changed, Core, Event, ServerObject, Signal,
 };
-use support::radicale::{NewCalendar, Radicale, User};
+use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
 use support::{Harness, date, event, ics, make_writable};
 
 /// A user on Radicale with a Calendar "Work", and a new Core with the
@@ -35,7 +35,7 @@ impl Synced {
     }
 
     fn with_calendar(calendar: NewCalendar, events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(calendar, |radicale, user, url| {
+        Self::arranged(calendar, None, |radicale, user, url| {
             for (name, ics) in events {
                 radicale.put_event(user, url, name, ics.clone());
             }
@@ -45,7 +45,7 @@ impl Synced {
     /// Like [`Synced::with`], with `files` written straight into the
     /// server's storage (see [`Radicale::write_event_file`]).
     fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(NewCalendar::default(), |radicale, _, url| {
+        Self::arranged(NewCalendar::default(), None, |radicale, _, url| {
             for (name, ics) in files {
                 radicale.write_event_file(url, name, ics.clone());
             }
@@ -53,8 +53,13 @@ impl Synced {
     }
 
     /// A new Core with the Calendar `calendar` added once `arrange` put
-    /// what it holds on the server.
-    fn arranged(calendar: NewCalendar, arrange: impl FnOnce(&Radicale, &User, &str)) -> Self {
+    /// what it holds on the server, which FreeCal reaches through the proxy
+    /// at `through` if given.
+    fn arranged(
+        calendar: NewCalendar,
+        through: Option<&str>,
+        arrange: impl FnOnce(&Radicale, &User, &str),
+    ) -> Self {
         let radicale = Radicale::shared();
         let user = radicale.user();
         let url = radicale.create_calendar(
@@ -67,9 +72,10 @@ impl Synced {
         arrange(radicale, &user, &url);
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
+        let server = through.map_or_else(|| radicale.url(), str::to_owned);
         let account = core
             .add_caldav_account(&CalDavLogin {
-                url: radicale.url(),
+                url: server.clone(),
                 username: user.name.clone(),
                 password: user.password.clone(),
             })
@@ -77,7 +83,7 @@ impl Synced {
             .account
             .id;
         let work = core
-            .add_calendars(account, std::slice::from_ref(&url))
+            .add_calendars(account, &[url.replace(&radicale.url(), &server)])
             .unwrap()[0]
             .id;
         harness.signals.clear();
@@ -1024,5 +1030,145 @@ mod server_objects {
 
         assert_eq!(synced.titles(), ["Standup"]);
         assert_eq!(synced.sync(), None, "it read, so it isn't fetched again");
+    }
+}
+
+/// ADR 0015: a CalDAV resource holding several UIDs, which RFC 4791 §4.1
+/// forbids, is an Ignored Resource, fetched and written to the Log again
+/// only when it changes. Each fetch of it writes one Log line, which is how
+/// these tests count them.
+mod ignored_resources {
+    use super::*;
+
+    /// The Log lines this thread wrote about Ignored Resources.
+    mod captured_log {
+        use std::cell::RefCell;
+        use std::sync::Once;
+
+        thread_local! {
+            static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+
+        struct Capture;
+
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+
+            fn log(&self, record: &log::Record) {
+                let line = record.args().to_string();
+                if line.starts_with("Ignored the CalDAV resource") {
+                    LINES.with(|lines| lines.borrow_mut().push(line));
+                }
+            }
+
+            fn flush(&self) {}
+        }
+
+        /// Starts capturing this thread's Log lines, forgetting earlier ones.
+        pub(super) fn start() {
+            static INSTALL: Once = Once::new();
+            INSTALL.call_once(|| {
+                log::set_logger(&Capture).unwrap();
+                log::set_max_level(log::LevelFilter::Warn);
+            });
+            LINES.with(|lines| lines.borrow_mut().clear());
+        }
+
+        /// How many Log lines about Ignored Resources this thread wrote
+        /// since [`start`].
+        pub(super) fn count() -> usize {
+            LINES.with(|lines| lines.borrow().len())
+        }
+    }
+
+    /// The line that [`SECOND_UID`] replaces in what the server answers.
+    const MARKER: &str = "X-TEST-SECOND-UID:b";
+
+    /// What the proxy puts in place of [`MARKER`]: the end of its Event and
+    /// the start of another, with the UID `b`.
+    const SECOND_UID: &str = "X-TEST-SPLIT:1\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\n\
+        SUMMARY:B\r\nDTSTART:20261007T070000Z\r\nDTEND:20261007T080000Z";
+
+    /// The Event `a` titled `title`, which the proxy shows as a resource
+    /// holding the UIDs `a` and `b`.
+    fn two_uids(title: &str) -> Vec<u8> {
+        ics(&format!(
+            "BEGIN:VEVENT\nUID:a\nSUMMARY:{title}\nDTSTART:20261006T070000Z\n\
+             DTEND:20261006T080000Z\n{MARKER}\nEND:VEVENT\n"
+        ))
+    }
+
+    /// A Calendar holding the Event "Standup", synced through a proxy that
+    /// shows [`two_uids`] as holding two UIDs.
+    fn through_proxy() -> (Synced, RewritingProxy) {
+        let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
+        let synced = Synced::arranged(
+            NewCalendar::default(),
+            Some(&proxy.url),
+            |radicale, user, url| {
+                radicale.put_event(user, url, "standup", standup("Standup"));
+            },
+        );
+        (synced, proxy)
+    }
+
+    /// Syncs, without a sync token unless `tokens`, and returns how many
+    /// times it fetched the resource `two` and how many Log lines about
+    /// Ignored Resources it wrote.
+    fn sync_and_count(synced: &Synced, proxy: &RewritingProxy, tokens: bool) -> (usize, usize) {
+        if !tokens {
+            synced.without_sync_tokens();
+        }
+        let fetched = proxy.requests_holding("two.ics");
+        captured_log::start();
+        synced.sync();
+        (
+            proxy.requests_holding("two.ics") - fetched,
+            captured_log::count(),
+        )
+    }
+
+    #[test]
+    fn is_fetched_and_logged_once_until_it_changes_and_mirrored_once_it_holds_one_uid() {
+        for tokens in [false, true] {
+            let (synced, proxy) = through_proxy();
+            let sync = || sync_and_count(&synced, &proxy, tokens);
+            synced.put("two", two_uids("A"));
+
+            assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+            assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+            assert_eq!(synced.titles(), ["Standup"]);
+
+            synced.put("two", two_uids("A changed"));
+            assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+            assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+
+            synced.put("two", titled("a", "A alone", "20261006"));
+            assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+            assert_eq!(synced.titles(), ["Standup", "A alone"]);
+            assert!(synced.href("A alone").ends_with("/two.ics"));
+            assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+        }
+    }
+
+    /// Once removed from the server, it is forgotten: put back as it was,
+    /// it is fetched and logged again.
+    #[test]
+    fn is_forgotten_once_removed_from_the_server() {
+        for tokens in [false, true] {
+            let (synced, proxy) = through_proxy();
+            let sync = || sync_and_count(&synced, &proxy, tokens);
+            synced.put("two", two_uids("A"));
+            assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+
+            synced.delete("two");
+            assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+            assert_eq!(synced.titles(), ["Standup"]);
+
+            synced.put("two", two_uids("A"));
+            assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+        }
     }
 }

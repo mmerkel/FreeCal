@@ -33,8 +33,8 @@ pub(crate) struct Fetched {
     pub holds: Holds,
 }
 
-/// A Server Object FreeCal holds, as an Incoming Sync asks for what
-/// changed.
+/// A Server Object FreeCal holds, or an Ignored Resource it remembers, as
+/// an Incoming Sync asks for what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Held {
     /// The ETag of the version FreeCal holds; none if the server gave none.
@@ -79,10 +79,11 @@ pub(crate) trait Remote {
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
-    /// last held `known` without one: the Server Objects FreeCal holds, by
-    /// address. An object whose ETag FreeCal holds already isn't fetched
-    /// again, unless FreeCal couldn't read it, so that it is fetched on each
-    /// Incoming Sync until it reads. Floating times are pinned as
+    /// last held `known` without one: the Server Objects FreeCal holds and
+    /// the Ignored Resources it remembers, by address. An object whose ETag
+    /// FreeCal holds already isn't fetched again, unless FreeCal couldn't
+    /// read it, so that it is fetched on each Incoming Sync until it reads.
+    /// A known one that is gone is among the removed. Floating times are pinned as
     /// [`Remote::all_events`] pins them.
     fn changes(
         &self,

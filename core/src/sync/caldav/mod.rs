@@ -2,7 +2,8 @@
 //! ([`incoming`]), its writes of the Mirror, the rules that read the
 //! Mirror for it: handing a UID's Event Rows to its next Corresponding
 //! Server Object ([`settle`]) and recognising a Server Object that moved
-//! ([`moved`]), and the Log lines of the CalDAV resources it doesn't mirror
+//! ([`moved`]), and the CalDAV resources it doesn't mirror, the Ignored
+//! Resources: remembering them ([`ignore`]) and their Log lines
 //! ([`log_ignored`]).
 
 pub(crate) mod incoming;
@@ -122,7 +123,8 @@ fn moved(
 /// Makes `object`, as the server holds it now, the Mirror's version of the
 /// CalDAV Server Object `over` in a Calendar, address included, or of a new
 /// one, and returns its ID. It holds the UID `uid`, and the Event of it
-/// that isn't an Exception when `holds_non_exception`. Written in the
+/// that isn't an Exception when `holds_non_exception`. An Ignored Resource
+/// at its address is forgotten in the same Database Transaction. Written in the
 /// Database Transaction of the Incoming Sync's `journal_transaction`, as
 /// only an Incoming Sync knows what the server holds, which checked that the
 /// Calendar is writable.
@@ -165,6 +167,35 @@ fn remove_object(journal_transaction: &JournalTransaction, id: ObjectId) -> Resu
     journal_transaction
         .database_transaction()
         .delete_object(WRITE_PERMISSION, id)
+}
+
+/// Remembers `object`, a CalDAV resource of a Calendar that an Incoming
+/// Sync fetched and doesn't mirror, as an Ignored Resource with its ETag,
+/// so that it isn't fetched again until it changes. The Mirror holds
+/// nothing at its address any more.
+fn ignore(
+    journal_transaction: &JournalTransaction,
+    calendar_id: CalendarId,
+    object: &ServerObject,
+) -> Result<()> {
+    journal_transaction.database_transaction().ignore_resource(
+        WRITE_PERMISSION,
+        calendar_id,
+        object,
+    )
+}
+
+/// Forgets the Ignored Resource at `href` in a Calendar, if there is one,
+/// as an Incoming Sync finds it gone from the server or no longer breaking
+/// a rule. Mirroring a resource forgets it too ([`mirror`]).
+fn forget_ignored(
+    journal_transaction: &JournalTransaction,
+    calendar_id: CalendarId,
+    href: &str,
+) -> Result<()> {
+    journal_transaction
+        .database_transaction()
+        .forget_ignored_resource(WRITE_PERMISSION, calendar_id, href)
 }
 
 /// The Sync Engine's Mirror writes, for other modules' tests to set the

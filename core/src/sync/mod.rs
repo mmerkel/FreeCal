@@ -10,8 +10,8 @@
 
 pub(crate) mod caldav;
 
-/// The Sync Engine's Write Permission (ADR 0011), which the writes of the
-/// Mirror's server data take. Its field is private to this module, so that
+/// The Sync Engine's Write Permission (ADR 0015), which the writes of the
+/// Mirror's server data and of the Ignored Resources take. Its field is private to this module, so that
 /// nothing else can make one.
 pub(crate) struct SyncEngineWritePermission(());
 

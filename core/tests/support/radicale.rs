@@ -469,3 +469,104 @@ pub fn closed_port_url() -> String {
     drop(listener);
     url
 }
+
+/// A stand-in for a server that keeps what Radicale refuses, such as a
+/// resource holding several UIDs: a proxy in front of Radicale that passes
+/// each request through and the answer back, with every `marker` in an
+/// answer replaced by `replacement`. It records the bodies of the requests
+/// it gets.
+pub struct RewritingProxy {
+    pub url: String,
+    bodies: Arc<Mutex<Vec<String>>>,
+}
+
+impl RewritingProxy {
+    pub fn new(radicale: &Radicale, marker: &str, replacement: &str) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let target = radicale.url();
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let recorded = bodies.clone();
+        let (marker, replacement, proxy) = (marker.to_owned(), replacement.to_owned(), url.clone());
+        std::thread::spawn(move || {
+            let agent = ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .allow_non_standard_methods(true)
+                .max_redirects(0)
+                .build()
+                .new_agent();
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let (request_line, headers, body) = read_whole_request(&mut stream);
+                recorded
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&body).into_owned());
+                let mut parts = request_line.split(' ');
+                let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
+                let mut request = ureq::http::Request::builder()
+                    .method(ureq::http::Method::from_bytes(method.as_bytes()).unwrap())
+                    .uri(format!("{}{}", target.trim_end_matches('/'), path));
+                for (name, value) in &headers {
+                    if !["host", "content-length", "connection"]
+                        .contains(&name.to_ascii_lowercase().as_str())
+                    {
+                        request = request.header(name, value);
+                    }
+                }
+                let mut response = agent.run(request.body(body).unwrap()).unwrap();
+                let answer = response
+                    .body_mut()
+                    .read_to_string()
+                    .unwrap_or_default()
+                    .replace(&marker, &replacement);
+                let mut head = format!("HTTP/1.1 {}\r\n", response.status());
+                for (name, value) in response.headers() {
+                    if ["content-length", "transfer-encoding", "connection"]
+                        .contains(&name.as_str())
+                    {
+                        continue;
+                    }
+                    let value = value.to_str().unwrap_or_default().replace(&target, &proxy);
+                    head.push_str(&format!("{name}: {value}\r\n"));
+                }
+                head.push_str(&format!(
+                    "Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    answer.len()
+                ));
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(answer.as_bytes());
+            }
+        });
+        Self { url, bodies }
+    }
+
+    /// How many requests it got whose body holds `text`.
+    pub fn requests_holding(&self, text: &str) -> usize {
+        let bodies = self.bodies.lock().unwrap();
+        bodies.iter().filter(|body| body.contains(text)).count()
+    }
+}
+
+/// Reads a whole request: its request line, its headers and its body.
+fn read_whole_request(stream: &mut impl Read) -> (String, Vec<(String, String)>, Vec<u8>) {
+    let mut reader = BufReader::new(stream);
+    let mut request_line = String::new();
+    let _ = reader.read_line(&mut request_line);
+    let mut headers = Vec::new();
+    let mut line = String::new();
+    while reader.read_line(&mut line).is_ok_and(|read| read > 0) && line != "\r\n" {
+        if let Some((name, value)) = line.split_once(':') {
+            headers.push((name.trim().to_owned(), value.trim().to_owned()));
+        }
+        line.clear();
+    }
+    let length = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.parse().ok())
+        .unwrap_or(0);
+    let mut body = vec![0; length];
+    let _ = reader.read_exact(&mut body);
+    (request_line.trim_end().to_owned(), headers, body)
+}
