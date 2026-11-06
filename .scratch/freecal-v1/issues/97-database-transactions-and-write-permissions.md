@@ -11,14 +11,24 @@
 
 **Blocked by:** 96
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] `DatabaseTransaction` exists, and every write takes it; `Store::transaction` is gone
-- [ ] `JournalTransaction` holds a `DatabaseTransaction` and has no Mirror writes; `is_sync` is gone if nothing else needs it
-- [ ] Every write in `sql/journal.rs` takes `&JournalWritePermission`, and every write in `sql/mirror.rs` takes `&SyncEngineWritePermission`; `Journaled` is gone
-- [ ] Neither permission can be made outside its module; a compile-fail doctest (or an equivalent check) shows it for each
-- [ ] The Incoming Sync writes the Mirror with `SyncEngineWritePermission`, in the same Database Transaction as its Journal Transaction
-- [ ] `CODING_STANDARDS.md` "Local Store": each guarded write takes its guard's Write Permission and a Database Transaction (ADR 0011)
-- [ ] Every existing test passes unchanged apart from names and signatures
+- [x] `DatabaseTransaction` exists, and every write takes it; `Store::transaction` is gone
+- [x] `JournalTransaction` holds a `DatabaseTransaction` and has no Mirror writes; `is_sync` is gone if nothing else needs it
+- [x] Every write in `sql/journal.rs` takes `&JournalWritePermission`, and every write in `sql/mirror.rs` takes `&SyncEngineWritePermission`; `Journaled` is gone
+- [x] Neither permission can be made outside its module; a compile-fail doctest (or an equivalent check) shows it for each
+- [x] The Incoming Sync writes the Mirror with `SyncEngineWritePermission`, in the same Database Transaction as its Journal Transaction
+- [x] `CODING_STANDARDS.md` "Local Store": each guarded write takes its guard's Write Permission and a Database Transaction (ADR 0011)
+- [x] Every existing test passes unchanged apart from names and signatures
+
+## Comments
+
+**2026-11-06, implementation.** Writes are methods of `DatabaseTransaction` (`core/src/store/mod.rs`), begun with `Store::begin` and kept with `commit`; dropped uncommitted, nothing is kept. It derefs to `Store` for reads. `record` owns the Journal Transaction's Database Transaction and commits it; the Sync Engine's Mirror writes (`mirror`, `rewrite_combined_event_keys`, `unreadable`, `remove_object` in `core/src/sync/mod.rs`) run on it through `JournalTransaction::database_transaction`. `is_incoming_sync` stays: it still decides that an Incoming Sync's changes add no Unsent Changes. The Unguarded Writes in `core/src/lib.rs` each begin and commit their own Database Transaction.
+
+The compile-fail doctest couldn't work: every module of the crate is private, so a doctest, compiled as another crate, fails for the wrong reason. The equivalent check is `only_its_guard_makes_a_write_permission` (`core/src/store/mod.rs`): it reads the source, so it catches the usual ways but not every way; its doc comment names the limit.
+
+New terms, for approval:
+- **`sync::testing`** (new term): test-only module through which other modules' tests write the Mirror with the Sync Engine's Write Permission.
+- **Mirror writes** (new term, in comments): the Sync Engine's writes of the Mirror's server data.

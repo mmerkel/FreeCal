@@ -127,7 +127,10 @@ impl Core {
     }
 
     pub fn set_last_used_view(&self, view: View) -> Result<()> {
-        self.store().set_last_used_view(view)
+        let store = self.store();
+        let database_transaction = store.begin()?;
+        database_transaction.set_last_used_view(view)?;
+        database_transaction.commit()
     }
 
     /// The sidebar as it was left: on first launch shown at the default width.
@@ -136,7 +139,10 @@ impl Core {
     }
 
     pub fn set_sidebar(&self, sidebar: SidebarState) -> Result<()> {
-        self.store().set_sidebar(sidebar)
+        let store = self.store();
+        let database_transaction = store.begin()?;
+        database_transaction.set_sidebar(sidebar)?;
+        database_transaction.commit()
     }
 
     pub fn settings(&self) -> Result<Settings> {
@@ -147,9 +153,11 @@ impl Core {
     /// settings as they are now.
     pub fn update_settings(&self, update: SettingsUpdate) -> Result<Settings> {
         let store = self.store();
+        let database_transaction = store.begin()?;
         if let Some(appearance) = update.appearance {
-            store.set_appearance(appearance)?;
+            database_transaction.set_appearance(appearance)?;
         }
+        database_transaction.commit()?;
         store.settings()
     }
 
@@ -177,9 +185,15 @@ impl Core {
         self.keyring
             .store(&key, &label, &login.password)
             .map_err(CoreError::KeyringUnavailable)?;
-        let added = self
-            .store()
-            .insert_server_account(Provider::CalDav, &server, &key);
+        let added = {
+            let store = self.store();
+            store.begin().and_then(|database_transaction| {
+                let account =
+                    database_transaction.insert_server_account(Provider::CalDav, &server, &key)?;
+                database_transaction.commit()?;
+                Ok(account)
+            })
+        };
         if added.is_err() {
             // Best effort: the Account failed already.
             let _ = self.keyring.delete(&key);
@@ -217,19 +231,20 @@ impl Core {
             let store = self.store();
             // Added already, or earlier in `urls`.
             let mut taken = store.calendar_urls(account_id)?;
-            let added = store.transaction(|| {
-                urls.iter()
-                    .map(|url| {
-                        let available = offered.iter().find(|calendar| &calendar.url == url);
-                        match available {
-                            Some(available) if taken.insert(url.clone()) => {
-                                store.insert_server_calendar(account_id, available)
-                            }
-                            _ => Err(CoreError::CalendarNotAvailable(url.clone())),
+            let database_transaction = store.begin()?;
+            let added = urls
+                .iter()
+                .map(|url| {
+                    let available = offered.iter().find(|calendar| &calendar.url == url);
+                    match available {
+                        Some(available) if taken.insert(url.clone()) => {
+                            database_transaction.insert_server_calendar(account_id, available)
                         }
-                    })
-                    .collect::<Result<Vec<_>>>()
-            })?;
+                        _ => Err(CoreError::CalendarNotAvailable(url.clone())),
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?;
+            database_transaction.commit()?;
             let mut first_syncs = self.first_syncs.lock().unwrap();
             first_syncs.extend(added.iter().map(|calendar| calendar.id));
             added
@@ -263,7 +278,12 @@ impl Core {
                 })
                 .map(drop)
             })
-            .and_then(|state| self.store().set_synced(id, state.token.as_deref()));
+            .and_then(|state| {
+                let store = self.store();
+                let database_transaction = store.begin()?;
+                database_transaction.set_synced(id, state.token.as_deref())?;
+                database_transaction.commit()
+            });
         match pulled {
             Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(()),
             pulled => pulled,
@@ -430,7 +450,13 @@ impl Core {
                 .ok_or(CoreError::AccountNotFound(account_id))?
                 .provider
             {
-                Provider::Local => store.insert_calendar(account_id, name, &colour)?,
+                Provider::Local => {
+                    let database_transaction = store.begin()?;
+                    let created =
+                        database_transaction.insert_calendar(account_id, name, &colour)?;
+                    database_transaction.commit()?;
+                    created
+                }
                 Provider::CalDav => return Err(CoreError::NotLocalAccount(account_id)),
             }
         };
@@ -440,13 +466,23 @@ impl Core {
 
     pub fn rename_calendar(&self, id: CalendarId, name: &str) -> Result<()> {
         let name = calendar_name(name)?;
-        self.store().set_calendar_name(id, name)?;
+        {
+            let store = self.store();
+            let database_transaction = store.begin()?;
+            database_transaction.set_calendar_name(id, name)?;
+            database_transaction.commit()?;
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
 
     pub fn recolour_calendar(&self, id: CalendarId, colour: Colour) -> Result<()> {
-        self.store().set_calendar_colour(id, &colour)?;
+        {
+            let store = self.store();
+            let database_transaction = store.begin()?;
+            database_transaction.set_calendar_colour(id, &colour)?;
+            database_transaction.commit()?;
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
@@ -489,14 +525,24 @@ impl Core {
 
     /// Shows or hides a Calendar's Events.
     pub fn set_calendar_shown(&self, id: CalendarId, shown: bool) -> Result<()> {
-        self.store().set_calendar_shown(id, shown)?;
+        {
+            let store = self.store();
+            let database_transaction = store.begin()?;
+            database_transaction.set_calendar_shown(id, shown)?;
+            database_transaction.commit()?;
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
 
     /// Shows one Calendar and hides every other Calendar in all Accounts.
     pub fn show_only_calendar(&self, id: CalendarId) -> Result<()> {
-        self.store().show_only_calendar(id)?;
+        {
+            let store = self.store();
+            let database_transaction = store.begin()?;
+            database_transaction.show_only_calendar(id)?;
+            database_transaction.commit()?;
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }

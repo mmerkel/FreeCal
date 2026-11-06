@@ -1,10 +1,13 @@
 //! The Incoming Sync: what changed in a Calendar on its server, whatever
-//! its Provider, applied to its local copy in one Journal Transaction.
-//! Server Objects are matched by address.
+//! its Provider, applied to its local copy in one Journal Transaction, with
+//! its Mirror writes in the same Database Transaction. Server Objects are
+//! matched by address.
 
 use chrono_tz::Tz;
 
-use super::{event_keys_in_calendar, object_events, recurring_of, settle};
+use super::{
+    event_keys_in_calendar, mirror, object_events, recurring_of, remove_object, settle, unreadable,
+};
 use crate::event::{self, Loaded, ObjectEvent, ObjectId};
 use crate::journal::JournalTransaction;
 use crate::remote::{Changes, Fetched};
@@ -60,7 +63,7 @@ pub(crate) fn take(
     let recurring = recurring_of(fetched);
     for one in fetched {
         let Some(events) = &one.events else {
-            journal_transaction.unreadable(calendar_id, &one.object.href)?;
+            unreadable(journal_transaction, calendar_id, &one.object.href)?;
             continue;
         };
         let events = object_events(events, |uid| match recurring.get(uid) {
@@ -90,7 +93,8 @@ pub(crate) fn take(
             Some(object) => journal_transaction.corresponding_uids(object)?,
             None => Vec::new(),
         };
-        let object = journal_transaction.mirror(
+        let object = mirror(
+            journal_transaction,
             calendar_id,
             &one.object,
             object,
@@ -119,7 +123,7 @@ fn remove(
     zone: Tz,
 ) -> Result<()> {
     let corresponding_uids = journal_transaction.corresponding_uids(object)?;
-    journal_transaction.remove_object(object)?;
+    remove_object(journal_transaction, object)?;
     settle(journal_transaction, calendar_id, &corresponding_uids, zone)
 }
 

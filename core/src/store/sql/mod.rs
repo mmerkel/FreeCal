@@ -1,17 +1,20 @@
 //! Every query and write of the Local Store, but its schema: the SQL lives
-//! here and nowhere else. This file holds the readers; each write sits in
-//! the file of the guard that will hold its Write Permission (ADR 0011,
-//! ticket 97): [`journal`] for
+//! here and nowhere else. This file holds the readers, methods of
+//! [`Store`]. Every write is a method of a
+//! [`DatabaseTransaction`](super::DatabaseTransaction), and sits in the file
+//! of the Guard whose Write Permission it takes (ADR 0011): [`journal`] for
 //! the Change Journal's, [`mirror`] for the Sync Engine's, and [`unguarded`]
-//! for those no guard holds.
+//! for the Unguarded Writes.
 //!
-//! Writing the tables a guard holds, `event`, `server_object`,
+//! Writing the tables a Guard holds, `event`, `server_object`,
 //! `combined_event_key`, `unsent_change`, `journal_transaction` and
-//! `journal_event_modification`, takes a [`Journaled`], which only
-//! [`crate::journal`] can make: so the compiler keeps everything else from
-//! writing them. A new write to one of those tables takes one too.
+//! `journal_event_modification`, takes that Guard's Write Permission
+//! ([`JournalWritePermission`], [`SyncEngineWritePermission`]), which only
+//! its module can make: so the compiler keeps everything else from writing
+//! them. A new write to one of those tables takes one too.
 //!
-//! [`Journaled`]: crate::journal::Journaled
+//! [`JournalWritePermission`]: crate::journal::JournalWritePermission
+//! [`SyncEngineWritePermission`]: crate::sync::SyncEngineWritePermission
 
 mod journal;
 mod mirror;
