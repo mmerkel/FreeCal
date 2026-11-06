@@ -68,6 +68,14 @@ _Avoid_: Database, cache, local copy
 The state of an Event when a change made in FreeCal and a newer change on the server can't both be kept, so the user has to choose.
 _Avoid_: Collision, sync error
 
+**Server Version**:
+The Events a server holds for one Calendar and UID, the Recurring Event with its Exceptions, as FreeCal reads them; empty when the server deleted them. In a Conflict it stands against the User's Version, shown as "Server version".
+_Avoid_: Remote version, their version, server copy
+
+**User's Version**:
+The Events FreeCal holds for one Calendar and UID, with the changes not sent yet, whether from an edit, an import or an undo. In a Conflict it stands against the Server Version, shown as "Your version".
+_Avoid_: Local version (Local is for Local Accounts and Calendars), mine, client version
+
 **Unsent Change**:
 A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.
 _Avoid_: Pending change, queued change, outbox entry
@@ -122,36 +130,36 @@ _Avoid_: Opened event, full event
 What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
 _Avoid_: Resource (on its own), remote event, original server data
 
+**CalDAV Server Object**:
+A Server Object of a CalDAV Calendar: one resource, holding the components of exactly one UID, kept as the iCalendar text received.
+_Avoid_: Calendar object resource, CalDAV event
+
+**Google Server Object**:
+A Server Object of a Google Calendar: one Google event resource, a single Event, a Recurring Event or one Exception, kept as the JSON received.
+_Avoid_: Google event (on its own)
+
 **Mirror**:
-FreeCal's copy of every Server Object as the server last had it. Only the Sync Engine changes its server data; its Combined Event Keys are renormalised together with the Event Rows, and it goes with its Calendar.
+FreeCal's copy of every Server Object as the server last had it, in tables of its Provider. Only the Sync Engine writes it, and it goes with its Calendar.
 _Avoid_: Cache, server copy
 
 **Combined Event Key**:
-A Calendar and an Event Key in Calendar: a Calendar, a UID and a recurrence ID, with the recurrence ID normalised as the Event Rows hold it. Event Rows find their Server Object through its Combined Event Keys (`combined_event_key`); an Unsent Change is a Combined Event Key.
-_Avoid_: Key (on its own), Event Key (on its own), Event ID (that is the Event Row's own ID)
-
-**Event Key in Calendar**:
-A UID and a recurrence ID, normalised as the Event Rows hold it: a Combined Event Key without its Calendar, for where something else gives the Calendar, as a Server Object gives it its Combined Event Keys. It is unique only within one Calendar.
-_Avoid_: Event Key (on its own), UID key
+A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
+_Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
 
 **Corresponding Server Object**:
-The one Server Object of a Calendar that a UID's Event Rows belong to: of the Server Objects holding that UID, the one holding the Recurring Event, otherwise the first one mirrored. Any other Server Object holding the UID has no Event Rows.
+The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, of the CalDAV Server Objects holding that UID, the one holding the Event that isn't an Exception, otherwise the first one mirrored; on Google, the Google Server Object holding that UID and Occurrence. Any other Server Object holding the UID has no Event Rows.
 _Avoid_: Owner, primary object, home object
 
-**Corresponding UIDs**:
-The UIDs a Server Object is the Corresponding Server Object of; it corresponds to each of them.
-_Avoid_: Owned UIDs
-
-**Rewrite Combined Event Keys**:
-Replace a Server Object's Combined Event Keys of one UID, its data unchanged, for when its Event Rows come to hold their recurrence IDs otherwise.
-_Avoid_: Rekey
+**Propagate a Server Object**:
+Bring what a Server Object holds into the Event Rows of its UID, as part of its Server Version: each Occurrence is replaced, added or deleted to match, unless an Unsent Change about it keeps the User's Version or raises a Conflict. Always "to its Event Rows", from the server inwards.
+_Avoid_: Take, apply, reconcile, rewrite Combined Event Keys
 
 **Database Transaction**:
 One SQLite transaction on the Local Store, committed all or nothing. Every write takes one; a Journal Transaction runs inside one, and so do the Mirror's writes of an Incoming Sync.
 _Avoid_: Transaction (on its own), db transaction
 
 **Write Permission**:
-A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, deleting Calendars and accounts, and renormalising Combined Event Keys with their Event Rows; the Sync Engine's covers the Mirror's server data.
+A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts; the Sync Engine's covers the Mirror.
 _Avoid_: Token, Journaled, owner
 
 **Guard**:
@@ -167,7 +175,7 @@ Store one Journal Event Modification in the Change Journal, starting the Journal
 _Avoid_: Entry, add entry
 
 **Sync Engine**:
-The code that exchanges a Calendar's changes with its server, by Incoming Syncs and Outgoing Syncs. It is the only code that changes the Mirror's server data.
+The code that exchanges a Calendar's changes with its server, by Incoming Syncs and Outgoing Syncs. It is the only code that writes the Mirror.
 _Avoid_: Syncer, sync module, server code
 
 **Incoming Sync**:
