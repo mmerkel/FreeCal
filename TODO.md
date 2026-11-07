@@ -1,7 +1,9 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
+- [ ] simplify work from implementation of ticket 109 on
 - [ ] code base architecture
+- [ ] sync status
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
