@@ -1,7 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] simplify work for tickets 102-107
 - [ ] code architecture: are there any possible simplifications that offer themselves, e.g. new, beneficial invariants that appear when pushing rare cases to the edge?
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
