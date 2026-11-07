@@ -85,7 +85,7 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX calendar_account ON calendar (account_id);
     CREATE UNIQUE INDEX calendar_account_url ON calendar (account_id, url) WHERE url IS NOT NULL;
     CREATE TABLE caldav_server_object (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         calendar_id INTEGER NOT NULL REFERENCES calendar (id) ON DELETE CASCADE,
         href TEXT NOT NULL,
         etag TEXT,

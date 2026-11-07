@@ -27,7 +27,6 @@ use crate::event::{
     Loaded, RecurrenceId, ServerObject, StoredWhen, in_normal_form, instant, latest, new_uid, rule,
 };
 use crate::journal::{JournalTransaction, JournalTransactionId};
-use crate::remote::Fetched;
 use crate::{CalendarId, CoreError, Result, StructuredText};
 use windows_zones::WINDOWS_ZONES;
 
@@ -331,18 +330,6 @@ impl Holds {
             Holds::OneUid { uid: holds, .. } => holds == uid,
         }
     }
-}
-
-/// CalDAV resources as a server holds them, each with what it holds
-/// ([`read_caldav_resource`]).
-pub(crate) fn read_caldav_resources(objects: Vec<ServerObject>, zone: Tz) -> Vec<Fetched> {
-    objects
-        .into_iter()
-        .map(|object| {
-            let holds = read_caldav_resource(&object, zone);
-            Fetched { object, holds }
-        })
-        .collect()
 }
 
 /// What the CalDAV resource `object` holds, its Events read as [`preview`]

@@ -274,11 +274,6 @@ impl EventFields {
     }
 }
 
-/// A Server Object's row in the Local Store, which names it for good: IDs
-/// are never given out again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ObjectId(pub i64);
-
 /// A Server Object (ADR 0015): what a server stores as one piece and
 /// FreeCal writes back, one CalDAV resource at its href, or one Google event
 /// resource. Its row mirrors the server's last known state of it (address,

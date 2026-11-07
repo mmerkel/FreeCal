@@ -29,9 +29,10 @@ use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
-use crate::event::{EventFields, ObjectId, RecurrenceId, ServerObject, StoredRange, StoredWhen};
+use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::journal::{JournalEventModification, JournalTransactionId};
-use crate::remote::{Held, SyncPoint};
+use crate::remote::SyncPoint;
+use crate::sync::caldav::KnownServerResource;
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
     Result, ServerLogin, Settings, SidebarState, View,
@@ -213,11 +214,14 @@ impl Store {
         })?)
     }
 
-    /// The Known Server Resources of a Calendar, by their address as the
-    /// server gave it: its Server Objects, each with the UID it keeps, and
-    /// its Ignored Resources, each with the UID it holds that a Server
+    /// The Known Server Resources of a CalDAV Calendar, by their address as
+    /// the server gave it: its Server Objects, each with the UID it keeps,
+    /// and its Ignored Resources, each with the UID it holds that a Server
     /// Object keeps, none for one holding several or not read.
-    pub fn known_server_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
+    pub fn known_server_resources(
+        &self,
+        calendar_id: CalendarId,
+    ) -> Result<HashMap<String, KnownServerResource>> {
         let mut stmt = self.conn.prepare(
             "SELECT href, etag, uid, FALSE FROM caldav_server_object \
              WHERE calendar_id = ?1 \
@@ -227,7 +231,7 @@ impl Store {
         let known = readable(stmt.query_map([calendar_id.0], |row| {
             Ok((
                 row.get(0)?,
-                Held {
+                KnownServerResource {
                     etag: row.get(1)?,
                     uid: row.get(2)?,
                     ignored: row.get(3)?,
@@ -237,84 +241,34 @@ impl Store {
         Ok(known.into_iter().collect())
     }
 
-    /// Whether `href` in a Calendar is an Ignored Resource. Not a query of
-    /// the Mirror.
-    pub fn is_ignored(&self, calendar_id: CalendarId, href: &str) -> Result<bool> {
-        Ok(self.conn.query_row(
-            "SELECT EXISTS (SELECT 1 FROM caldav_ignored_resource \
-             WHERE calendar_id = ?1 AND href = ?2)",
-            params![calendar_id.0, href],
-            |row| row.get(0),
-        )?)
-    }
-
-    /// The Server Object of a Calendar at `href`, if there is one, with the
-    /// UID it keeps.
-    pub fn object_at(
-        &self,
-        calendar_id: CalendarId,
-        href: &str,
-    ) -> Result<Option<(ObjectId, String)>> {
+    /// The UID that the CalDAV Server Object at `href` in a Calendar keeps,
+    /// if one is there.
+    pub fn uid_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<String>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT id, uid FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
+                "SELECT uid FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
                 params![calendar_id.0, href],
-                |row| Ok((ObjectId(row.get(0)?), row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    /// The Corresponding Server Object of the UID `uid` in a Calendar, the
-    /// one the Calendar's Event Rows with the UID belong to: the one CalDAV
-    /// Server Object holding it, as the Local Store keeps a UID to one
-    /// (ADR 0015); none when none holds it.
-    pub fn corresponding_server_object(
-        &self,
-        calendar_id: CalendarId,
-        uid: &str,
-    ) -> Result<Option<ObjectId>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND uid = ?2",
-                params![calendar_id.0, uid],
-                |row| row.get(0).map(ObjectId),
-            )
-            .optional()?)
-    }
-
-    /// The UID the CalDAV Server Object `id` holds, of which it is the
-    /// Corresponding Server Object; none if it is gone.
-    pub fn held_uid(&self, id: ObjectId) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT uid FROM caldav_server_object WHERE id = ?1",
-                [id.0],
                 |row| row.get(0),
             )
             .optional()?)
     }
 
-    /// The Server Object the Event `id` belongs to: the Corresponding Server
-    /// Object of its UID in its Calendar. None for an Event no Server Object
-    /// holds, such as one not on a server yet.
-    pub fn object_of_event(&self, id: EventId) -> Result<Option<ObjectId>> {
-        match self.event_and_uid(id)? {
-            Some((uid, event)) => self.corresponding_server_object(event.calendar_id, &uid),
-            None => Err(CoreError::EventNotFound(id)),
-        }
-    }
-
-    /// The Server Object `id` as the server last gave it, none if it is
-    /// gone.
-    pub fn server_object(&self, id: ObjectId) -> Result<Option<ServerObject>> {
+    /// The Corresponding Server Object of the UID `uid` in a Calendar, the
+    /// one the Calendar's Event Rows with the UID belong to, as the server
+    /// last gave it: the one CalDAV Server Object holding it, as the Local
+    /// Store keeps a UID to one (ADR 0015); none when none holds it.
+    pub fn server_object(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Option<ServerObject>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT href, etag, data FROM caldav_server_object WHERE id = ?1",
-                [id.0],
+                "SELECT href, etag, data FROM caldav_server_object \
+                 WHERE calendar_id = ?1 AND uid = ?2",
+                params![calendar_id.0, uid],
                 |row| {
                     Ok(ServerObject {
                         href: row.get(0)?,
@@ -324,6 +278,16 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    /// The Server Object the Event `id` belongs to, as the server last gave
+    /// it: the Corresponding Server Object of its UID in its Calendar. None
+    /// for an Event no Server Object holds, such as one not on a server yet.
+    pub fn server_object_of_event(&self, id: EventId) -> Result<Option<ServerObject>> {
+        match self.event_and_uid(id)? {
+            Some((uid, event)) => self.server_object(event.calendar_id, &uid),
+            None => Err(CoreError::EventNotFound(id)),
+        }
     }
 
     pub fn find_calendar(&self, id: CalendarId) -> Result<Calendar> {

@@ -20,6 +20,43 @@ struct Synced {
 }
 
 impl Synced {
+    /// Like [`Synced::with_files`], through `proxy`.
+    fn files_through(proxy: &RewritingProxy, files: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(
+            NewCalendar::default(),
+            Some(&proxy.url),
+            |radicale, _, url| {
+                for (name, ics) in files {
+                    radicale.write_event_file(url, name, ics.clone());
+                }
+            },
+        )
+    }
+
+    /// Makes the Calendar's next sync the rest of a First Sync that stopped
+    /// after the pages it had, as if what the server holds now came on a
+    /// later page.
+    fn first_sync_unfinished(&self) {
+        self.harness.arrange_local_store(&format!(
+            "UPDATE calendar SET synced = 0, sync_token = NULL WHERE id = {}",
+            self.work.0
+        ));
+    }
+
+    /// The Log line for the resource `name` ignored as it holds `uid`,
+    /// which the resource `kept_by` keeps.
+    fn kept_line(&self, name: &str, uid: &str, kept_by: &str) -> String {
+        let calendar = self.url.strip_prefix(&self.radicale.url()).unwrap();
+        let href = |name: &str| format!("/{calendar}{name}.ics");
+        format!(
+            "Ignored the CalDAV resource {:?} of Calendar {}: it holds the UID {uid:?} \
+             that the CalDAV resource {:?} holds, which RFC 4791 §4.1 forbids",
+            href(name),
+            self.work.0,
+            href(kept_by),
+        )
+    }
+
     /// Puts `events` (name, iCalendar object) on the server, then adds the
     /// Calendar.
     fn with(events: &[(&str, Vec<u8>)]) -> Self {
@@ -183,6 +220,57 @@ impl Synced {
             .filter(|occurrence| occurrence.calendar_id == self.work)
             .map(|occurrence| occurrence.title)
             .collect()
+    }
+}
+
+/// The Log lines this thread wrote about Ignored Resources and
+/// resources FreeCal can't read.
+mod captured_log {
+    use std::cell::RefCell;
+    use std::sync::Once;
+
+    thread_local! {
+        static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    struct Capture;
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            let line = record.args().to_string();
+            if line.starts_with("Ignored the CalDAV resource")
+                || line.starts_with("Couldn't read the CalDAV resource")
+            {
+                LINES.with(|lines| lines.borrow_mut().push(line));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    /// Starts capturing this thread's Log lines, forgetting earlier ones.
+    pub(crate) fn start() {
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            log::set_logger(&Capture).unwrap();
+            log::set_max_level(log::LevelFilter::Warn);
+        });
+        LINES.with(|lines| lines.borrow_mut().clear());
+    }
+
+    /// The Log lines about Ignored Resources and resources FreeCal can't
+    /// read this thread wrote since [`start`].
+    pub(crate) fn lines() -> Vec<String> {
+        LINES.with(|lines| lines.borrow().clone())
+    }
+
+    /// How many of [`lines`] there are.
+    pub(crate) fn count() -> usize {
+        lines().len()
     }
 }
 
@@ -773,6 +861,249 @@ mod server_objects {
         }
     }
 
+    /// Of two resources arriving on different pages of a First Sync, the
+    /// first by the fixed order keeps the UID, whichever page it came on:
+    /// the one holding the Recurring Event, else the lower href. The other
+    /// is ignored, and written to the Log once.
+    #[test]
+    fn a_first_sync_keeps_the_first_by_the_fixed_order_whichever_page_it_came_on() {
+        let a = || ("a-standup", standup("Standup A"));
+        let b = || ("b-standup", standup("Standup B"));
+        let recurring = || ("z-weekly", weekly("Weekly"));
+        let exception = || ("a-weekly-moved", ics(&moved("Moved")));
+        let weekly = ["Weekly", "Weekly", "Weekly"].as_slice();
+        // The resource on the earlier page and the one on the later page,
+        // the one keeping the UID, the one ignored, the UID, and the titles
+        // shown.
+        let cases = [
+            (
+                a(),
+                b(),
+                "a-standup",
+                "b-standup",
+                "standup",
+                ["Standup A"].as_slice(),
+            ),
+            (
+                b(),
+                a(),
+                "a-standup",
+                "b-standup",
+                "standup",
+                &["Standup A"],
+            ),
+            (
+                recurring(),
+                exception(),
+                "z-weekly",
+                "a-weekly-moved",
+                "weekly",
+                weekly,
+            ),
+            (
+                exception(),
+                recurring(),
+                "z-weekly",
+                "a-weekly-moved",
+                "weekly",
+                weekly,
+            ),
+        ];
+        for (earlier, later, kept, ignored, uid, titles) in cases {
+            let synced = Synced::with_files(&[earlier]);
+            synced.first_sync_unfinished();
+            synced.write(later.0, later.1);
+            captured_log::start();
+
+            assert_eq!(synced.sync(), None, "a First Sync records nothing");
+
+            assert_eq!(synced.titles(), titles, "{kept} kept");
+            assert!(synced.href(titles[0]).ends_with(&format!("/{kept}.ics")));
+            assert_eq!(
+                captured_log::lines(),
+                [synced.kept_line(ignored, uid, kept)]
+            );
+            assert_eq!(synced.sync(), None);
+        }
+    }
+
+    /// The kept one and an Ignored Resource holding its UID both change in
+    /// one Incoming Sync: the kept one keeps the UID.
+    #[test]
+    fn the_kept_resource_changed_beside_an_ignored_resource_keeps_the_uid() {
+        let synced = Synced::with_files(&[
+            ("a-standup", standup("Standup A")),
+            ("b-standup", standup("Standup B")),
+        ]);
+        let id = synced.event("Standup A").id;
+        synced.write("a-standup", standup("Standup A changed"));
+        synced.write("b-standup", standup("Standup B changed"));
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Standup A changed"]);
+        assert_eq!(synced.event("Standup A changed").id, id);
+    }
+
+    /// ADR 0015's amendment for ticket 108: a CalDAV Server Object is its
+    /// Calendar and UID, so the kept resource moved to another href is a
+    /// takeover, and competes with the Ignored Resources holding its UID by
+    /// the fixed order, with or without a sync token. The Event stays.
+    #[test]
+    fn a_kept_resource_moved_to_another_href_competes_with_the_ignored_resources_by_the_fixed_order()
+     {
+        // The href it moves to, and the resource then keeping the UID with
+        // its title.
+        let cases = [
+            ("z-standup", ("b-standup", "Standup B")),
+            ("0-standup", ("0-standup", "Standup moved")),
+        ];
+        for (tokens, (to, (kept, title))) in [true, false]
+            .into_iter()
+            .flat_map(|tokens| cases.map(|case| (tokens, case)))
+        {
+            let synced = Synced::with_files(&[
+                ("a-standup", standup("Standup A")),
+                ("b-standup", standup("Standup B")),
+            ]);
+            if !tokens {
+                synced.without_sync_tokens();
+            }
+            let id = synced.event("Standup A").id;
+            synced.delete("a-standup");
+            synced.write(to, standup("Standup moved"));
+
+            synced.sync();
+
+            assert_eq!(synced.titles(), [title], "tokens: {tokens}, to {to}");
+            assert_eq!(synced.event(title).id, id);
+            assert!(synced.href(title).ends_with(&format!("/{kept}.ics")));
+            assert_eq!(synced.sync(), None, "tokens: {tokens}, to {to}");
+        }
+    }
+
+    /// A takeover costs no second request: the Ignored Resources it may need
+    /// are fetched in the same request as the rest, with or without a sync
+    /// token. The kept one comes to hold another UID, or nothing FreeCal
+    /// keeps.
+    #[test]
+    fn a_takeover_fetches_everything_in_one_request() {
+        let todo = ics("BEGIN:VTODO\nUID:todo\nSUMMARY:Todo\nEND:VTODO\n");
+        let cases = [
+            (
+                titled("review", "Review", "20261006"),
+                ["Standup B", "Review"].as_slice(),
+            ),
+            (todo, &["Standup B"]),
+        ];
+        for tokens in [true, false] {
+            for (holds, titles) in &cases {
+                let proxy = RewritingProxy::new(Radicale::shared(), "X-UNUSED", "X-UNUSED");
+                let synced = Synced::files_through(
+                    &proxy,
+                    &[
+                        ("a-standup", standup("Standup A")),
+                        ("b-standup", standup("Standup B")),
+                    ],
+                );
+                if !tokens {
+                    synced.without_sync_tokens();
+                }
+                let id = synced.event("Standup A").id;
+                synced.write("a-standup", holds.clone());
+                let multigets = proxy.requests_holding("calendar-multiget");
+
+                synced.sync();
+
+                assert_eq!(synced.titles(), *titles, "tokens: {tokens}");
+                assert_eq!(synced.event("Standup B").id, id);
+                assert_eq!(
+                    proxy.requests_holding("calendar-multiget") - multigets,
+                    1,
+                    "tokens: {tokens}"
+                );
+            }
+        }
+    }
+
+    /// The one holding the Recurring Event first, else the lowest href.
+    #[test]
+    fn of_several_ignored_resources_taking_over_the_fixed_order_decides() {
+        let synced = Synced::with_files(&[
+            ("a-standup", standup("Standup A")),
+            ("c-standup", standup("Standup C")),
+        ]);
+        synced.write("b-standup", standup("Standup B"));
+        assert_eq!(synced.sync(), None);
+        synced.delete("a-standup");
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Standup B"]);
+
+        let synced = Synced::with_files(&[("m-weekly-moved", ics(&moved("Moved")))]);
+        synced.write("z-weekly", weekly("Weekly"));
+        synced.write("a-weekly-moved", ics(&moved("Moved again")));
+        assert_eq!(synced.sync(), None);
+        synced.delete("m-weekly-moved");
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
+        assert!(synced.href("Weekly").ends_with("/z-weekly.ics"));
+    }
+
+    /// [`standup`] with a start FreeCal can't read: a UTC time with a zone,
+    /// which Radicale takes.
+    fn unreadable_standup(title: &str) -> Vec<u8> {
+        ics(&format!(
+            "BEGIN:VEVENT\nUID:standup\nSUMMARY:{title}\n\
+             DTSTART;TZID=Europe/Berlin:20261005T070000Z\n\
+             DTEND;TZID=Europe/Berlin:20261005T073000Z\nEND:VEVENT\n"
+        ))
+    }
+
+    /// With no Ignored Resource readable when the kept one goes, the UID's
+    /// Event Rows go; once one reads, it keeps the UID.
+    #[test]
+    fn with_no_ignored_resource_readable_on_takeover_the_event_goes() {
+        let synced = Synced::with_files(&[
+            ("a-standup", standup("Standup A")),
+            ("b-standup", standup("Standup B")),
+        ]);
+        synced.write("b-standup", unreadable_standup("Standup B"));
+        synced.sync();
+        synced.delete("a-standup");
+
+        synced.sync();
+
+        assert_eq!(synced.titles(), Vec::<String>::new());
+        synced.write("b-standup", standup("Standup B"));
+        synced.sync();
+        assert_eq!(synced.titles(), ["Standup B"]);
+    }
+
+    /// A kept one that becomes unreadable keeps the UID and its Event Rows,
+    /// though an Ignored Resource holding the UID changes in the same
+    /// Incoming Sync.
+    #[test]
+    fn a_kept_resource_that_becomes_unreadable_keeps_the_uid_beside_an_ignored_resource() {
+        let synced = Synced::with_files(&[
+            ("a-standup", standup("Standup A")),
+            ("b-standup", standup("Standup B")),
+        ]);
+        let id = synced.event("Standup A").id;
+        synced.write("a-standup", unreadable_standup("Standup A moved"));
+        synced.write("b-standup", standup("Standup B changed"));
+
+        assert_eq!(synced.sync(), None);
+
+        assert_eq!(synced.titles(), ["Standup A"]);
+        assert_eq!(synced.event("Standup A").id, id);
+        assert!(synced.href("Standup A").ends_with("/a-standup.ics"));
+        assert_eq!(synced.held_etag("Standup A"), None, "fetched again");
+    }
+
     #[test]
     fn a_removed_ignored_object_changes_no_event_row() {
         let synced = google_like();
@@ -954,19 +1285,121 @@ mod server_objects {
             assert_eq!(synced.event("Moved again").id, moved.id);
         }
 
+        /// ADR 0012: with its Recurring Event, it changes the Occurrence it
+        /// names, in another zone or in the Recurring Event's.
         #[test]
         fn joins_its_recurring_event_when_its_object_comes_to_hold_it() {
-            let synced = Synced::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+            for again in [moved_in_new_york("Moved again"), moved("Moved again")] {
+                let synced = Synced::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let id = synced.event("Moved").id;
+                synced.write("weekly", ics(&format!("{}{again}", recurring("Weekly"))));
+
+                synced.sync();
+
+                assert_eq!(shown(&synced), weekly_with("Moved again"), "{again}");
+                let joined = synced.event("Moved again");
+                assert_eq!(joined.id, id);
+                assert_eq!(joined.recurrence_id.as_deref(), Some("2026-10-12T08:00:00"));
+            }
+        }
+
+        /// Undoing the Incoming Sync that brought its Recurring Event leaves
+        /// it an Event of its own again.
+        #[test]
+        fn undoing_the_sync_that_brought_its_recurring_event_leaves_it_alone() {
+            let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
             let id = synced.event("Moved").id;
             synced.write(
                 "weekly",
-                ics(&format!("{}{}", recurring("Weekly"), moved("Moved again"))),
+                ics(&format!(
+                    "{}{}",
+                    recurring("Weekly"),
+                    moved_in_new_york("Moved")
+                )),
             );
+            let journal_transaction = synced.sync().unwrap();
 
-            synced.sync();
+            synced
+                .core
+                .undo_journal_transaction(journal_transaction)
+                .unwrap();
 
-            assert_eq!(shown(&synced), weekly_with("Moved again"));
-            assert_eq!(synced.event("Moved again").id, id);
+            assert_eq!(shown(&synced), alone("Moved"));
+            assert_eq!(synced.event("Moved").id, id);
+        }
+
+        /// Imports the `.ics` file holding `body` into the Calendar,
+        /// updating the Events it has.
+        fn import(synced: &Synced, body: &str) {
+            let file = freecal_core::ImportFile::new("weekly.ics", ics(body));
+            let preview = synced.core.preview_import(&file, synced.work).unwrap();
+            synced
+                .core
+                .run_import(&preview, freecal_core::ExistingEvents::Update)
+                .unwrap();
+        }
+
+        /// ADR 0012: importing its Recurring Event pairs it by Occurrence,
+        /// with or without an Exception of its own for that Occurrence.
+        #[test]
+        fn importing_its_recurring_event_pairs_it_by_occurrence() {
+            for body in [
+                recurring("Weekly"),
+                format!("{}{}", recurring("Weekly"), moved("Moved")),
+            ] {
+                let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let id = synced.event("Moved").id;
+
+                import(&synced, &body);
+
+                assert_eq!(shown(&synced), weekly_with("Moved"), "{body}");
+                assert_eq!(synced.event("Moved").id, id);
+            }
+        }
+
+        /// ADR 0012: changing its Recurring Event, imported beside it,
+        /// keeps it on its Occurrence, moving the Recurring Event too.
+        #[test]
+        fn changing_its_recurring_event_keeps_it_on_its_occurrence() {
+            for (hours, recurrence_id) in [(0, "2026-10-12T08:00:00"), (1, "2026-10-12T09:00:00")] {
+                let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let id = synced.event("Moved").id;
+                import(&synced, &recurring("Weekly"));
+                let first = support::on(&synced.core, "2026-10-05");
+                let event = synced.core.event(first.event_id).unwrap();
+                let freecal_core::When::Timed { start, end } = event.when else {
+                    panic!("a timed Event");
+                };
+                let shift = chrono::TimeDelta::hours(hours);
+                let draft = freecal_core::EventDraft {
+                    repeat: event.repeat,
+                    when: freecal_core::When::Timed {
+                        start: start + shift,
+                        end: end + shift,
+                    },
+                    ..support::draft(synced.work, "Renamed", event.when)
+                };
+
+                synced
+                    .core
+                    .edit_occurrence(
+                        first.event_id,
+                        first.recurrence_id.as_deref().unwrap(),
+                        freecal_core::Scope::All,
+                        false,
+                        draft,
+                    )
+                    .unwrap();
+
+                assert_eq!(
+                    synced.titles(),
+                    ["Renamed", "Moved", "Renamed"],
+                    "{hours} hours"
+                );
+                let moved = synced.event("Moved");
+                assert_eq!(moved.id, id);
+                assert_eq!(moved.recurrence_id.as_deref(), Some(recurrence_id));
+            }
         }
 
         #[test]
@@ -1025,52 +1458,6 @@ mod server_objects {
 /// unreadable.
 mod ignored_resources {
     use super::*;
-
-    /// The Log lines this thread wrote about Ignored Resources and
-    /// resources FreeCal can't read.
-    mod captured_log {
-        use std::cell::RefCell;
-        use std::sync::Once;
-
-        thread_local! {
-            static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-        }
-
-        struct Capture;
-
-        impl log::Log for Capture {
-            fn enabled(&self, _: &log::Metadata) -> bool {
-                true
-            }
-
-            fn log(&self, record: &log::Record) {
-                let line = record.args().to_string();
-                if line.starts_with("Ignored the CalDAV resource")
-                    || line.starts_with("Couldn't read the CalDAV resource")
-                {
-                    LINES.with(|lines| lines.borrow_mut().push(line));
-                }
-            }
-
-            fn flush(&self) {}
-        }
-
-        /// Starts capturing this thread's Log lines, forgetting earlier ones.
-        pub(super) fn start() {
-            static INSTALL: Once = Once::new();
-            INSTALL.call_once(|| {
-                log::set_logger(&Capture).unwrap();
-                log::set_max_level(log::LevelFilter::Warn);
-            });
-            LINES.with(|lines| lines.borrow_mut().clear());
-        }
-
-        /// How many Log lines about Ignored Resources and resources FreeCal
-        /// can't read this thread wrote since [`start`].
-        pub(super) fn count() -> usize {
-            LINES.with(|lines| lines.borrow().len())
-        }
-    }
 
     /// The line that [`SECOND_UID`] replaces in what the server answers.
     const MARKER: &str = "X-TEST-SECOND-UID:b";
@@ -1145,6 +1532,86 @@ mod ignored_resources {
             assert_eq!(synced.titles(), ["Standup", "A alone"]);
             assert!(synced.href("A alone").ends_with("/two.ics"));
             assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+
+            synced.put("two", two_uids("A again"));
+            assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+            assert_eq!(synced.titles(), ["Standup"], "it leaves the Mirror");
+        }
+    }
+
+    /// A kept resource coming to hold several UIDs: the Ignored Resource
+    /// holding its UID takes over.
+    #[test]
+    fn an_ignored_resource_takes_over_once_the_kept_one_holds_several_uids() {
+        for tokens in [false, true] {
+            let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
+            let synced = Synced::files_through(
+                &proxy,
+                &[
+                    ("a-standup", standup("Standup A")),
+                    ("b-standup", standup("Standup B")),
+                ],
+            );
+            if !tokens {
+                synced.without_sync_tokens();
+            }
+            let id = synced.event("Standup A").id;
+            let several = ics(&format!(
+                "BEGIN:VEVENT\nUID:standup\nSUMMARY:Standup A\nDTSTART:20261005T070000Z\n\
+                 DTEND:20261005T073000Z\n{MARKER}\nEND:VEVENT\n"
+            ));
+            synced.write("a-standup", several);
+
+            synced.sync();
+
+            assert_eq!(synced.titles(), ["Standup B"], "tokens: {tokens}");
+            assert_eq!(synced.event("Standup B").id, id);
+        }
+    }
+
+    /// In a First Sync too, beside the resource keeping one of its UIDs,
+    /// whichever comes first.
+    #[test]
+    fn beside_the_resource_keeping_one_of_its_uids_it_is_ignored_in_a_first_sync() {
+        for (first, second) in [("a-alone", "two"), ("two", "a-alone")] {
+            let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
+            let file = |name| match name {
+                "two" => (name, two_uids("A")),
+                _ => (name, titled("a", "A alone", "20261006")),
+            };
+            let files = [file(first), file(second)];
+            captured_log::start();
+
+            let synced = Synced::files_through(&proxy, &files);
+
+            assert_eq!(synced.titles(), ["A alone"]);
+            assert!(synced.href("A alone").ends_with("/a-alone.ics"));
+            assert_eq!(captured_log::count(), 1);
+        }
+    }
+
+    /// An Ignored Resource fetched again with an unchanged ETag, as for a
+    /// takeover when the Server Object keeping its UID changes but keeps
+    /// it, writes no Log line.
+    #[test]
+    fn fetched_again_unchanged_it_writes_no_log_line() {
+        for tokens in [false, true] {
+            let proxy = RewritingProxy::new(Radicale::shared(), "X-UNUSED", "X-UNUSED");
+            let synced = Synced::files_through(
+                &proxy,
+                &[
+                    ("a-standup", standup("Standup A")),
+                    ("b-standup", standup("Standup B")),
+                ],
+            );
+            synced.write("a-standup", standup("Standup A changed"));
+
+            assert_eq!(
+                sync_and_count(&synced, &proxy, "b-standup", tokens),
+                (1, 0),
+                "tokens: {tokens}"
+            );
+            assert_eq!(synced.titles(), ["Standup A changed"]);
         }
     }
 

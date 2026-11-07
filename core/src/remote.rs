@@ -8,7 +8,6 @@ use std::collections::HashMap;
 
 use chrono_tz::Tz;
 
-use crate::import::Holds;
 use crate::{AvailableCalendar, CalDavLogin, Provider, Result, ServerLogin, ServerObject, caldav};
 
 /// The most Events a page of a Calendar's First Sync holds. Each page is
@@ -24,37 +23,20 @@ pub(crate) struct SyncPoint {
     pub token: Option<String>,
 }
 
-/// A Server Object as an Incoming Sync fetched it, with what FreeCal reads
-/// in it.
-#[derive(Debug, Clone)]
-pub(crate) struct Fetched {
-    pub object: ServerObject,
-    /// What FreeCal reads in it.
-    pub holds: Holds,
-}
-
-/// A Known Server Resource: a Server Object FreeCal holds, or an Ignored
-/// Resource it remembers, as an Incoming Sync asks for what changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Held {
-    /// The ETag of the version FreeCal holds; none if the server gave none
-    /// or FreeCal couldn't read the server's version, so that it is fetched
-    /// on every Incoming Sync (ADR 0015).
-    pub etag: Option<String>,
-    /// The UID it holds as FreeCal last read it: the one a Server Object
-    /// keeps, or the one an Ignored Resource holds that a Server Object
-    /// keeps; none for an Ignored Resource holding several or not read.
-    pub uid: Option<String>,
-    /// Whether it is an Ignored Resource.
-    pub ignored: bool,
-}
+/// The Known Server Resources of a Calendar as the Provider interface takes
+/// them: each one's address as the server gave it, with the ETag of the
+/// version FreeCal holds; none if the server gave none or FreeCal couldn't
+/// read the server's version, so that it is fetched on every Incoming Sync
+/// (ADR 0015).
+pub(crate) type KnownVersions = HashMap<String, Option<String>>;
 
 /// What changed in a Calendar on its server.
 #[derive(Debug, Clone)]
 pub(crate) struct Changes {
-    /// Each Server Object that is new or changed.
-    pub changed: Vec<Fetched>,
-    /// The addresses of the Server Objects FreeCal holds that are gone, as
+    /// Each Server Object fetched, as received: those new or changed, and
+    /// the Known Server Resources asked for with them.
+    pub changed: Vec<ServerObject>,
+    /// The addresses of the Known Server Resources that are gone, as
     /// FreeCal holds them.
     pub removed: Vec<String>,
     /// The Calendar's sync state after these changes.
@@ -64,42 +46,46 @@ pub(crate) struct Changes {
     pub zone: Tz,
 }
 
+/// Given the addresses of the Known Server Resources an Incoming Sync is
+/// about to fetch or report removed, the addresses of other Known Server
+/// Resources to fetch with them, in the same request.
+pub(crate) type FetchToo<'a> = &'a dyn Fn(&[String]) -> Vec<String>;
+
 /// A server Account's server, logged in.
 pub(crate) trait Remote {
     /// The Calendars the Account has on its server that take Events.
     fn discover(&self) -> Result<Vec<AvailableCalendar>>;
 
-    /// Fetches every Server Object of the Calendar at `url` and hands them
-    /// to `page`, up to [`FIRST_SYNC_PAGE`] at a time, stopping at the first
-    /// error, its own or `page`'s. Floating times are pinned to the
-    /// Calendar's own time zone if the server gives one, otherwise to
-    /// `display` (ADR 0007), the zone `page` gets with them. Returns the
+    /// Fetches every Server Object of the Calendar at `url` and hands them,
+    /// as received, to `page`, up to [`FIRST_SYNC_PAGE`] at a time,
+    /// stopping at the first error, its own or `page`'s. `page` gets them
+    /// with the zone their floating times are pinned to (ADR 0007): the
+    /// Calendar's own time zone if the server gives one, otherwise
+    /// `display`. Returns the
     /// Calendar's sync state as of before it was listed, so that a change
     /// made meanwhile comes with the next Incoming Sync.
     fn all_events(
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
+        page: &mut dyn FnMut(Vec<ServerObject>, Tz) -> Result<()>,
     ) -> Result<SyncPoint>;
 
     /// What changed in the Calendar at `url` since `token`, or since FreeCal
-    /// last held `known_server_resources` without one, the Known Server
-    /// Resources: the Server Objects FreeCal holds and the Ignored Resources
-    /// it remembers, by address. An object whose ETag FreeCal holds already
-    /// isn't fetched again; one FreeCal holds without an ETag is fetched on
-    /// every Incoming Sync, listed as changed or not. A Known Server Resource
-    /// that is gone is among the removed. When a Server Object stops
-    /// keeping its UID, removed or holding something else now, the Ignored
-    /// Resources holding that UID are fetched too, in a second request, for
-    /// one to take over (ADR 0015). Floating times are pinned as
-    /// [`Remote::all_events`] pins them.
+    /// last held `known_server_resources` without one: the Known Server
+    /// Resources, by address with their versions. A resource whose ETag
+    /// FreeCal holds already isn't fetched again; one FreeCal holds without
+    /// an ETag is fetched on every Incoming Sync, listed as changed or not. A
+    /// Known Server Resource that is gone is among the removed. Those that
+    /// `fetch_too` asks for are fetched with the rest, changed or not. The
+    /// zone in [`Changes`] is the one [`Remote::all_events`] gives `page`.
     fn changes(
         &self,
         url: &str,
         token: Option<&str>,
-        known_server_resources: &HashMap<String, Held>,
+        known_server_resources: &KnownVersions,
         display: Tz,
+        fetch_too: FetchToo,
     ) -> Result<Changes>;
 }
 
@@ -112,7 +98,7 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
+        page: &mut dyn FnMut(Vec<ServerObject>, Tz) -> Result<()>,
     ) -> Result<SyncPoint> {
         caldav::Client::all_events(self, url, display, page)
     }
@@ -121,10 +107,11 @@ impl Remote for caldav::Client {
         &self,
         url: &str,
         token: Option<&str>,
-        known_server_resources: &HashMap<String, Held>,
+        known_server_resources: &KnownVersions,
         display: Tz,
+        fetch_too: FetchToo,
     ) -> Result<Changes> {
-        caldav::Client::changes(self, url, token, known_server_resources, display)
+        caldav::Client::changes(self, url, token, known_server_resources, display, fetch_too)
     }
 }
 

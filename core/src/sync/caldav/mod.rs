@@ -1,17 +1,67 @@
 //! The CalDAV part of the Sync Engine (ADR 0015): CalDAV's Incoming Sync
-//! ([`incoming`]), its writes of the Mirror, its rules for which
-//! resource keeps a UID: the fixed order among resources holding one UID
-//! ([`fixed_order`]) and recognising a Server Object that moved
-//! ([`moved`]), the CalDAV resources it doesn't mirror, the Ignored
-//! Resources: remembering them ([`ignore`]) and their Log lines
-//! ([`log_ignored`]), and the resources it can't read ([`unreadable`]).
+//! ([`incoming`]), its writes of the Mirror, by Calendar and UID, its rules
+//! for which resource keeps a UID: the fixed order among resources holding
+//! one UID ([`fixed_order`]) and the Ignored Resources fetched again for a
+//! takeover ([`ignored_to_fetch`]), the CalDAV resources it doesn't mirror,
+//! the Ignored Resources: remembering them and their Log lines
+//! ([`ignore`]), and the resources it can't read ([`unreadable`]).
 
 pub(crate) mod incoming;
 
+use std::collections::{HashMap, HashSet};
+
 use super::WRITE_PERMISSION;
-use crate::event::{Loaded, ObjectId, ServerObject};
+use crate::event::{Loaded, ServerObject};
 use crate::journal::JournalTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
+
+/// A Known Server Resource of a CalDAV Calendar as the CalDAV Sync Engine
+/// keeps it: a Server Object or an Ignored Resource, at an address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KnownServerResource {
+    /// The ETag of the version FreeCal holds; none if the server gave none
+    /// or FreeCal couldn't read the server's version, so that it is fetched
+    /// on every Incoming Sync (ADR 0015).
+    pub etag: Option<String>,
+    /// The UID it holds as FreeCal last read it: the one a Server Object
+    /// keeps, or the one an Ignored Resource holds that a Server Object
+    /// keeps; none for an Ignored Resource holding several or not read.
+    pub uid: Option<String>,
+    /// Whether it is an Ignored Resource.
+    pub ignored: bool,
+}
+
+/// The addresses of the Ignored Resources among `known`, a Calendar's
+/// Known Server Resources by address, to fetch with `asked`, the addresses
+/// of those an Incoming Sync fetches or finds removed, for a takeover (ADR
+/// 0015): those holding a UID that a Server Object among `asked` keeps,
+/// whether or not it still keeps it once fetched. Which resource keeps the
+/// UID is decided inside the Journal Transaction; fetching them in the same
+/// request needs no second one, at the price of fetching them when the
+/// Server Object still keeps its UID.
+fn ignored_to_fetch(known: &HashMap<String, KnownServerResource>, asked: &[String]) -> Vec<String> {
+    let asked_set: HashSet<&str> = asked.iter().map(String::as_str).collect();
+    let kept: HashSet<&str> = asked
+        .iter()
+        .filter_map(|href| known.get(href))
+        .filter(|resource| !resource.ignored)
+        .filter_map(|resource| resource.uid.as_deref())
+        .collect();
+    let mut hrefs: Vec<String> = known
+        .iter()
+        .filter(|(href, resource)| {
+            resource.ignored
+                && resource
+                    .uid
+                    .as_deref()
+                    .is_some_and(|uid| kept.contains(uid))
+                && !asked_set.contains(href.as_str())
+        })
+        .map(|(href, _)| href.clone())
+        .collect();
+    hrefs.sort();
+    hrefs
+}
 
 /// Where a CalDAV resource holding `events`, the Events of one UID, stands
 /// in the fixed order among the resources of one Incoming Sync holding
@@ -33,7 +83,7 @@ fn delete_if_unkept(
 ) -> Result<()> {
     if journal_transaction
         .database_transaction()
-        .corresponding_server_object(calendar_id, uid)?
+        .server_object(calendar_id, uid)?
         .is_some()
     {
         return Ok(());
@@ -41,10 +91,10 @@ fn delete_if_unkept(
     Loaded::of_uid(journal_transaction, calendar_id, uid)?.delete_all(journal_transaction)
 }
 
-/// The most UIDs a Log line of [`log_ignored`] lists.
+/// The most UIDs a Log line of [`ignore`] lists.
 const LOGGED_UIDS: usize = 5;
 
-/// The most characters of each UID a Log line of [`log_ignored`] holds.
+/// The most characters of each UID a Log line of [`ignore`] holds.
 const LOGGED_UID_LENGTH: usize = 200;
 
 /// Why the Sync Engine ignored a CalDAV resource (ADR 0015).
@@ -57,14 +107,7 @@ enum Ignored<'a> {
     UidKept { uid: &'a str, kept_by: &'a str },
 }
 
-/// Writes to the Log that the Sync Engine ignored the CalDAV resource at
-/// `href` of the Calendar `calendar_id`, and `why`: RFC 4791 §4.1 forbids
-/// it (ADR 0015).
-fn log_ignored(calendar_id: CalendarId, href: &str, why: Ignored) {
-    log::warn!("{}", ignored_line(calendar_id, href, why));
-}
-
-/// The Log line of [`log_ignored`]. Addresses and UIDs are untrusted, so
+/// The Log line of [`ignore`]. Addresses and UIDs are untrusted, so
 /// each is escaped, which keeps a newline in them from starting another
 /// line, and the line is kept short: the first [`LOGGED_UIDS`] UIDs, each
 /// cut to [`LOGGED_UID_LENGTH`] characters, and a count of the others.
@@ -101,36 +144,22 @@ fn ignored_line(calendar_id: CalendarId, href: &str, why: Ignored) -> String {
     )
 }
 
-/// Whether the CalDAV Server Object `object` is one of `moved_from`, the
-/// Server Objects removed in the same Incoming Sync, so that a new resource
-/// holding its UID is it moved to another address; taken out of
-/// `moved_from` if so.
-fn moved(object: ObjectId, moved_from: &mut Vec<ObjectId>) -> bool {
-    let before = moved_from.len();
-    moved_from.retain(|&removed| removed != object);
-    moved_from.len() != before
-}
-
 /// Makes `object`, as the server holds it now, the Mirror's version of the
-/// CalDAV Server Object `over` in a Calendar, address included, or of a new
-/// one, and returns its ID. It holds the UID `uid`, which no other Server
-/// Object of the Calendar may hold. An Ignored Resource
-/// at its address is forgotten in the same Database Transaction. Written in the
-/// Database Transaction of the Incoming Sync's `journal_transaction`, as
-/// only an Incoming Sync knows what the server holds, which checked that the
-/// Calendar is writable.
+/// CalDAV Server Object of a Calendar and the UID `uid`, address included
+/// (ADR 0015). An Ignored Resource at its address is forgotten in the same
+/// Database Transaction. Written in the Database Transaction of the
+/// Incoming Sync's `journal_transaction`, as only an Incoming Sync knows
+/// what the server holds, which checked that the Calendar is writable.
 fn mirror(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,
     object: &ServerObject,
-    over: Option<ObjectId>,
     uid: &str,
-) -> Result<ObjectId> {
+) -> Result<()> {
     journal_transaction.database_transaction().write_object(
         WRITE_PERMISSION,
         calendar_id,
         object,
-        over,
         uid,
     )
 }
@@ -167,34 +196,48 @@ fn unreadable_line(calendar_id: CalendarId, href: &str) -> String {
     )
 }
 
-/// Removes the Server Object `id` from the Mirror, as an Incoming Sync
-/// finds it gone from the server or no longer keeping its UID. The Event
-/// Rows of its UID stay, for the Incoming Sync to propagate the Server
-/// Object taking over to, or delete ([`delete_if_unkept`]).
-fn remove_object(journal_transaction: &JournalTransaction, id: ObjectId) -> Result<()> {
+/// Removes the Server Object of a Calendar and the UID `uid` from the
+/// Mirror, as an Incoming Sync finds it gone from the server or no longer
+/// keeping its UID. The Event Rows of its UID stay, for the Incoming Sync
+/// to propagate the Server Object taking over to, or delete
+/// ([`delete_if_unkept`]).
+fn remove_object(
+    journal_transaction: &JournalTransaction,
+    calendar_id: CalendarId,
+    uid: &str,
+) -> Result<()> {
     journal_transaction
         .database_transaction()
-        .delete_object(WRITE_PERMISSION, id)
+        .delete_object(WRITE_PERMISSION, calendar_id, uid)
 }
 
 /// Remembers `object`, a CalDAV resource of a Calendar that an Incoming
 /// Sync fetched and doesn't mirror, as an Ignored Resource with its ETag,
-/// so that it isn't fetched again until it changes, and with `uid`, the
-/// UID it holds that a Server Object keeps, so that it is fetched again
-/// when that one stops keeping it; none if it holds several. The Mirror
-/// holds nothing at its address any more.
+/// so that it isn't fetched again until it changes, and with the UID it
+/// holds that a Server Object keeps, so that it is fetched again when that
+/// one stops keeping it; none if it holds several. Writes to the Log that
+/// it is ignored, and `why`: RFC 4791 §4.1 forbids it. One fetched with an
+/// unchanged ETag, as for a takeover that didn't happen, writes no Log
+/// line. The Mirror holds nothing at its address any more.
 fn ignore(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,
     object: &ServerObject,
-    uid: Option<&str>,
+    why: Ignored,
 ) -> Result<()> {
-    journal_transaction.database_transaction().ignore_resource(
+    let uid = match why {
+        Ignored::SeveralUids(_) => None,
+        Ignored::UidKept { uid, .. } => Some(uid),
+    };
+    if journal_transaction.database_transaction().ignore_resource(
         WRITE_PERMISSION,
         calendar_id,
         object,
         uid,
-    )
+    )? {
+        log::warn!("{}", ignored_line(calendar_id, &object.href, why));
+    }
+    Ok(())
 }
 
 /// Forgets the Ignored Resource at `href` in a Calendar, if there is one,
@@ -221,24 +264,64 @@ pub(crate) mod testing {
         journal_transaction: &JournalTransaction,
         calendar_id: CalendarId,
         object: &ServerObject,
-        over: Option<ObjectId>,
         uid: &str,
-    ) -> Result<ObjectId> {
-        super::mirror(journal_transaction, calendar_id, object, over, uid)
+    ) -> Result<()> {
+        super::mirror(journal_transaction, calendar_id, object, uid)
     }
 
     /// [`remove_object`](super::remove_object).
     pub(crate) fn remove_object(
         journal_transaction: &JournalTransaction,
-        id: ObjectId,
+        calendar_id: CalendarId,
+        uid: &str,
     ) -> Result<()> {
-        super::remove_object(journal_transaction, id)
+        super::remove_object(journal_transaction, calendar_id, uid)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::{self, TransactionOrigin, record};
+    use crate::store::Store;
+
+    /// Not visible through the core interface, so not a seam test.
+    #[test]
+    fn deleting_its_calendar_deletes_an_ignored_resource() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+        let calendar_id = store.writable_server_calendar();
+        let object = ServerObject {
+            href: "/two.ics".to_owned(),
+            etag: Some("1".to_owned()),
+            data: String::new(),
+        };
+        let uids = ["a".to_owned(), "b".to_owned()];
+        record(
+            &store,
+            TransactionOrigin::IncomingSync,
+            0,
+            |journal_transaction| {
+                ignore(
+                    journal_transaction,
+                    calendar_id,
+                    &object,
+                    Ignored::SeveralUids(&uids),
+                )
+            },
+        )
+        .unwrap();
+        assert_eq!(store.known_server_resources(calendar_id).unwrap().len(), 1);
+
+        journal::delete_calendar(&store, calendar_id).unwrap();
+
+        assert!(
+            store
+                .known_server_resources(calendar_id)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn the_log_line_of_a_caldav_resource_holding_several_uids_escapes_and_cuts_what_the_server_gave()

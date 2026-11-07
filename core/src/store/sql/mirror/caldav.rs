@@ -8,45 +8,33 @@
 
 use rusqlite::{OptionalExtension, params};
 
-use crate::event::{ObjectId, ServerObject};
+use crate::event::ServerObject;
 use crate::store::DatabaseTransaction;
 use crate::sync::SyncEngineWritePermission;
 use crate::{CalendarId, Result};
 
 impl DatabaseTransaction<'_> {
-    /// Writes `object` over the CalDAV Server Object `over`, address
-    /// included, or as a new one of a Calendar, holding the UID `uid`, and
-    /// returns its ID. It fails if another Server Object of the Calendar
-    /// holds `uid` (ADR 0015). An Ignored Resource at its address leaves
-    /// `caldav_ignored_resource`, as an href is never both mirrored and
-    /// ignored.
+    /// Writes `object` as the CalDAV Server Object of a Calendar and the
+    /// UID `uid`, address included, over the one there is (ADR 0015). It
+    /// fails if another Server Object of the Calendar is at its address. An
+    /// Ignored Resource at its address leaves `caldav_ignored_resource`, as
+    /// an href is never both mirrored and ignored.
     pub(crate) fn write_object(
         &self,
         permission: &SyncEngineWritePermission,
         calendar_id: CalendarId,
         object: &ServerObject,
-        over: Option<ObjectId>,
         uid: &str,
-    ) -> Result<ObjectId> {
+    ) -> Result<()> {
         self.forget_ignored_resource(permission, calendar_id, &object.href)?;
-        match over {
-            Some(id) => {
-                self.tx.execute(
-                    "UPDATE caldav_server_object SET href = ?2, etag = ?3, data = ?4, \
-                     uid = ?5 WHERE id = ?1",
-                    params![id.0, object.href, object.etag, object.data, uid],
-                )?;
-                Ok(id)
-            }
-            None => {
-                self.tx.execute(
-                    "INSERT INTO caldav_server_object \
-                     (calendar_id, href, etag, data, uid) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![calendar_id.0, object.href, object.etag, object.data, uid],
-                )?;
-                Ok(ObjectId(self.tx.last_insert_rowid()))
-            }
-        }
+        self.tx.execute(
+            "INSERT INTO caldav_server_object (calendar_id, uid, href, etag, data) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT (calendar_id, uid) DO UPDATE \
+             SET href = excluded.href, etag = excluded.etag, data = excluded.data",
+            params![calendar_id.0, uid, object.href, object.etag, object.data],
+        )?;
+        Ok(())
     }
 
     /// Forgets the ETag of the Known Server Resource at `href` in a
@@ -95,31 +83,52 @@ impl DatabaseTransaction<'_> {
         Ok(ignored.is_none_or(|etag| etag.is_some()))
     }
 
-    /// Deletes the CalDAV Server Object `id`; Event Rows aren't written.
-    pub(crate) fn delete_object(&self, _: &SyncEngineWritePermission, id: ObjectId) -> Result<()> {
-        self.tx
-            .execute("DELETE FROM caldav_server_object WHERE id = ?1", [id.0])?;
+    /// Deletes the CalDAV Server Object of a Calendar and the UID `uid`;
+    /// Event Rows aren't written.
+    pub(crate) fn delete_object(
+        &self,
+        _: &SyncEngineWritePermission,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<()> {
+        self.tx.execute(
+            "DELETE FROM caldav_server_object WHERE calendar_id = ?1 AND uid = ?2",
+            params![calendar_id.0, uid],
+        )?;
         Ok(())
     }
 
     /// Remembers the CalDAV resource `object` of a Calendar as an Ignored
     /// Resource with its ETag and `uid`, the UID it holds that a Server
     /// Object keeps, none if it holds several, or updates both of the one
-    /// at its address. The Mirror must hold nothing at its address.
+    /// at its address. The Mirror must hold nothing at its address. Returns
+    /// whether it changed: it is new, or was remembered with another ETag
+    /// or none.
     pub(crate) fn ignore_resource(
         &self,
         _: &SyncEngineWritePermission,
         calendar_id: CalendarId,
         object: &ServerObject,
         uid: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
+        let remembered: Option<Option<String>> = self
+            .tx
+            .query_row(
+                "SELECT etag FROM caldav_ignored_resource WHERE calendar_id = ?1 AND href = ?2",
+                params![calendar_id.0, object.href],
+                |row| row.get(0),
+            )
+            .optional()?;
         self.tx.execute(
             "INSERT INTO caldav_ignored_resource (calendar_id, href, etag, uid) \
              VALUES (?1, ?2, ?3, ?4) \
              ON CONFLICT (calendar_id, href) DO UPDATE SET etag = excluded.etag, uid = excluded.uid",
             params![calendar_id.0, object.href, object.etag, uid],
         )?;
-        Ok(())
+        let unchanged = remembered
+            .flatten()
+            .is_some_and(|etag| object.etag == Some(etag));
+        Ok(!unchanged)
     }
 
     /// Forgets the Ignored Resource at `href` in a Calendar, if there is

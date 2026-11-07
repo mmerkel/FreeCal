@@ -14,7 +14,7 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::remote::{Changes, FIRST_SYNC_PAGE, Fetched, Held, SyncPoint};
+use crate::remote::{Changes, FIRST_SYNC_PAGE, FetchToo, KnownVersions, SyncPoint};
 use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
 
 const DAV: &str = "DAV:";
@@ -214,21 +214,21 @@ impl Client {
 
     /// Every object of the Calendar at `calendar`, handed to `page`
     /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
-    /// then fetched with `calendar-multiget` (RFC 4791). Floating times are
-    /// pinned to the Calendar's `calendar-timezone`, otherwise to `display`,
-    /// the zone `page` gets with them. Returns the Calendar's sync token as
-    /// the listing gave it.
+    /// then fetched with `calendar-multiget` (RFC 4791). `page` gets them
+    /// with the Calendar's `calendar-timezone`, otherwise `display`, the
+    /// zone their floating times are pinned to. Returns the Calendar's sync
+    /// token as the listing gave it.
     pub fn all_events(
         &self,
         calendar: &str,
         display: Tz,
-        page: &mut dyn FnMut(Vec<Fetched>, Tz) -> Result<()>,
+        page: &mut dyn FnMut(Vec<ServerObject>, Tz) -> Result<()>,
     ) -> Result<SyncPoint> {
         let listing = self.listing(&stored_url(&self.url, calendar)?, display)?;
         let members: Vec<String> = listing.members.into_iter().map(|(path, _)| path).collect();
         for hrefs in members.chunks(FIRST_SYNC_PAGE) {
             let zone = listing.zone.unwrap_or(display);
-            page(self.multiget(&listing.calendar, hrefs, zone)?, zone)?;
+            page(self.multiget(&listing.calendar, hrefs)?, zone)?;
         }
         Ok(SyncPoint {
             token: listing.token,
@@ -241,15 +241,14 @@ impl Client {
     /// Known Server Resources, by their address as the server gave it. Objects whose ETag
     /// FreeCal holds are left out; the others, and every Known Server
     /// Resource without a stored ETag, listed or not, are fetched with
-    /// `calendar-multiget`. When a Server Object
-    /// stops keeping its UID, the Ignored Resources holding that UID are
-    /// fetched in a second request, for one to take over ([`takeover`]).
+    /// `calendar-multiget`, together with those `fetch_too` asks for.
     pub fn changes(
         &self,
         calendar: &str,
         token: Option<&str>,
-        known_server_resources: &HashMap<String, Held>,
+        known_server_resources: &KnownVersions,
         display: Tz,
+        fetch_too: FetchToo,
     ) -> Result<Changes> {
         let calendar = stored_url(&self.url, calendar)?;
         let since = match token {
@@ -268,9 +267,9 @@ impl Client {
         let path =
             |href: &str| follow_href(&listing.calendar, href).map(|url| url.path().to_owned());
         // What FreeCal holds, by the path `member` gives each object.
-        let held: HashMap<String, (&String, &Held)> = known_server_resources
+        let held: HashMap<String, (&String, &Option<String>)> = known_server_resources
             .iter()
-            .filter_map(|(href, held)| Some((path(href)?, (href, held))))
+            .filter_map(|(href, etag)| Some((path(href)?, (href, etag))))
             .collect();
         let removed: Vec<String> = match removed {
             Some(removed) => removed
@@ -291,20 +290,39 @@ impl Client {
             .members
             .into_iter()
             .filter(|(path, etag)| {
-                etag.is_none() || held.get(path).is_none_or(|(_, held)| held.etag != *etag)
+                etag.is_none() || held.get(path).is_none_or(|(_, held)| *held != etag)
             })
             .map(|(path, _)| path)
             .collect();
+        let mut fetching: HashSet<String> = fetch.iter().cloned().collect();
+        let removed_paths: HashSet<String> = removed.iter().filter_map(|href| path(href)).collect();
         // Without a stored ETag, it is fetched whether listed or not, as a
         // sync token lists only what changed since.
-        let without_etag: Vec<String> = held
+        let mut without_etag: Vec<&String> = held
             .iter()
-            .filter(|(path, (href, held))| {
-                held.etag.is_none() && !fetch.contains(path) && !removed.contains(href)
+            .filter(|(path, (_, etag))| {
+                etag.is_none() && !fetching.contains(*path) && !removed_paths.contains(*path)
             })
-            .map(|(path, _)| path.clone())
+            .map(|(path, _)| path)
             .collect();
-        fetch.extend(without_etag);
+        without_etag.sort();
+        for path in without_etag {
+            fetching.insert(path.clone());
+            fetch.push(path.clone());
+        }
+        let asked: Vec<String> = fetch
+            .iter()
+            .filter_map(|path| held.get(path).map(|(href, _)| (*href).clone()))
+            .chain(removed.iter().cloned())
+            .collect();
+        for href in fetch_too(&asked) {
+            if let Some(path) = path(&href)
+                && !removed_paths.contains(&path)
+                && fetching.insert(path.clone())
+            {
+                fetch.push(path);
+            }
+        }
         // A removed Server Object's Event Rows may go to another holding its
         // UID, read from what FreeCal holds of it.
         let zone = match listing.zone {
@@ -318,19 +336,7 @@ impl Client {
         };
         let mut changed = Vec::new();
         for hrefs in fetch.chunks(FIRST_SYNC_PAGE) {
-            changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
-        }
-        let fetched: HashSet<String> = changed
-            .iter()
-            .filter_map(|fetched| path(&fetched.object.href))
-            .chain(fetch)
-            .collect();
-        let takeover: Vec<String> = takeover(&held, &removed, &changed, &path)
-            .into_iter()
-            .filter(|path| !fetched.contains(path))
-            .collect();
-        for hrefs in takeover.chunks(FIRST_SYNC_PAGE) {
-            changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
+            changed.extend(self.multiget(&listing.calendar, hrefs)?);
         }
         Ok(Changes {
             changed,
@@ -397,16 +403,15 @@ impl Client {
     }
 
     /// The objects at `hrefs` in the Calendar at `calendar`, fetched with
-    /// `calendar-multiget` (RFC 4791), with their Events. Floating times are
-    /// pinned to `zone`.
-    fn multiget(&self, calendar: &Url, hrefs: &[String], zone: Tz) -> Result<Vec<Fetched>> {
+    /// `calendar-multiget` (RFC 4791), as received.
+    fn multiget(&self, calendar: &Url, hrefs: &[String]) -> Result<Vec<ServerObject>> {
         let (answer, _) = self.send(
             b"REPORT",
             calendar,
             Depth::One,
             calendar_multiget_body(hrefs),
         )?;
-        let objects: Vec<ServerObject> = answer
+        Ok(answer
             .children(DAV, "response")
             .filter_map(|response| {
                 Some(ServerObject {
@@ -415,8 +420,7 @@ impl Client {
                     data: response.found(CALENDAR_DATA)?.text.clone(),
                 })
             })
-            .collect();
-        Ok(import::read_caldav_resources(objects, zone))
+            .collect())
     }
 
     /// The URL of the principal of the user who is logged in. Asking for it
@@ -523,47 +527,6 @@ struct Listing {
     token: Option<String>,
     /// The time zone for its floating times; none when not asked for.
     zone: Option<Tz>,
-}
-
-/// The paths, as `path` gives them, of the Ignored Resources among `held`,
-/// the Known Server Resources by path with their addresses, to fetch again
-/// for a takeover (ADR 0015): those holding an Ambiguous UID whose Server
-/// Object stops keeping it in this Incoming Sync, as it is among `removed` or
-/// `changed` holds something else now ([`Holds::keeps`](crate::import::Holds::keeps)). Ignored Resources
-/// removed too are left out.
-fn takeover(
-    held: &HashMap<String, (&String, &Held)>,
-    removed: &[String],
-    changed: &[Fetched],
-    path: &dyn Fn(&str) -> Option<String>,
-) -> Vec<String> {
-    let kept_uid = |path: &str| {
-        held.get(path)
-            .map(|(_, held)| *held)
-            .filter(|held| !held.ignored)
-            .and_then(|held| held.uid.as_deref())
-    };
-    let removed: HashSet<String> = removed.iter().filter_map(|href| path(href)).collect();
-    let mut lost: HashSet<&str> = removed.iter().filter_map(|path| kept_uid(path)).collect();
-    for fetched in changed {
-        let Some(uid) = path(&fetched.object.href).and_then(|path| kept_uid(&path)) else {
-            continue;
-        };
-        if !fetched.holds.keeps(uid) {
-            lost.insert(uid);
-        }
-    }
-    let mut paths: Vec<String> = held
-        .iter()
-        .filter(|(path, (_, held))| {
-            held.ignored
-                && held.uid.as_deref().is_some_and(|uid| lost.contains(uid))
-                && !removed.contains(*path)
-        })
-        .map(|(path, _)| path.clone())
-        .collect();
-    paths.sort();
-    paths
 }
 
 /// A Calendar's address as FreeCal stores it, which is untrusted too.
@@ -1000,7 +963,6 @@ fn parse(xml: &str) -> Option<Element> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::import::Holds;
 
     #[test]
     fn a_propfind_body_names_each_property_in_its_namespace() {
@@ -1229,69 +1191,6 @@ mod tests {
         let prop = root.child(DAV, "prop").unwrap();
         assert_eq!(prop.children.len(), 1);
         assert!(prop.children[0].is(DAV, "getetag"));
-    }
-
-    /// ADR 0015: the Ignored Resources holding a UID are fetched again when
-    /// the Server Object keeping it is removed or comes to hold another UID,
-    /// several or nothing, not when FreeCal can't read it; removed ones
-    /// aren't.
-    #[test]
-    fn a_takeover_fetches_the_ignored_resources_of_a_uid_no_longer_kept() {
-        let held = |uid: Option<&str>, ignored| Held {
-            etag: None,
-            uid: uid.map(str::to_owned),
-            ignored,
-        };
-        let known: HashMap<String, Held> = [
-            ("/kept.ics", held(Some("a"), false)),
-            ("/copy.ics", held(Some("a"), true)),
-            ("/gone-copy.ics", held(Some("a"), true)),
-            ("/other.ics", held(Some("b"), true)),
-            ("/several.ics", held(None, true)),
-        ]
-        .into_iter()
-        .map(|(href, held)| (href.to_owned(), held))
-        .collect();
-        let known: HashMap<String, (&String, &Held)> = known
-            .iter()
-            .map(|(href, held)| (href.clone(), (href, held)))
-            .collect();
-        let path = |href: &str| Some(href.to_owned());
-        let at = |holds| Fetched {
-            object: ServerObject {
-                href: "/kept.ics".to_owned(),
-                etag: None,
-                data: String::new(),
-            },
-            holds,
-        };
-        let one_uid = |uid: &str| Holds::OneUid {
-            uid: uid.to_owned(),
-            events: Vec::new(),
-        };
-        let removed = ["/gone-copy.ics".to_owned()];
-        let fetched_again = vec!["/copy.ics".to_owned()];
-
-        let removed_kept = ["/kept.ics".to_owned(), "/gone-copy.ics".to_owned()];
-        assert_eq!(takeover(&known, &removed_kept, &[], &path), fetched_again);
-        for holds in [
-            one_uid("c"),
-            Holds::SeveralUids(vec!["a".to_owned(), "c".to_owned()]),
-            Holds::NoEvents,
-        ] {
-            assert_eq!(
-                takeover(&known, &removed, &[at(holds.clone())], &path),
-                fetched_again,
-                "{holds:?}"
-            );
-        }
-        for holds in [one_uid("a"), Holds::Unreadable] {
-            assert_eq!(
-                takeover(&known, &removed, &[at(holds.clone())], &path),
-                Vec::<String>::new(),
-                "{holds:?}"
-            );
-        }
     }
 
     #[test]

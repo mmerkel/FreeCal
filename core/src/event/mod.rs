@@ -30,7 +30,7 @@ pub(crate) use recurrence_id::{NormalForm, RecurrenceId, in_normal_form};
 pub use rule::{Frequency, Repeat, RepeatEnd};
 pub(crate) use scope::{Edit, edit_event, edit_occurrence, exception_counts};
 pub use scope::{ExceptionCounts, Scope};
-pub(crate) use when::{EventFields, ObjectId, StoredRange, StoredWhen, instant};
+pub(crate) use when::{EventFields, StoredRange, StoredWhen, instant};
 pub use when::{EventId, ServerObject, When};
 
 /// What the user gives an Event when creating or editing it.

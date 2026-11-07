@@ -268,8 +268,8 @@ impl Core {
                         journal_transaction,
                         id,
                         &fetched,
+                        &[],
                         zone,
-                        &mut Vec::new(),
                     )
                 })
                 .map(drop)
@@ -342,10 +342,11 @@ impl Core {
         let synced = (|| {
             let known_server_resources = self.store().known_server_resources(id)?;
             let token = state.and_then(|state| state.token);
-            let changes = remote.changes(
+            let changes = sync::caldav::incoming::changes(
+                remote,
+                &known_server_resources,
                 url,
                 token.as_deref(),
-                &known_server_resources,
                 self.clock.time_zone(),
             )?;
             let origin = if first {
@@ -545,11 +546,7 @@ impl Core {
     /// Exception too. None for an Event no object holds, such as one not on
     /// a server yet.
     pub fn original_server_data(&self, id: EventId) -> Result<Option<ServerObject>> {
-        let store = self.store();
-        match store.object_of_event(id)? {
-            Some(object) => store.server_object(object),
-            None => Ok(None),
-        }
+        self.store().server_object_of_event(id)
     }
 
     /// Creates an Event in a writable Calendar, a Recurring Event when the
