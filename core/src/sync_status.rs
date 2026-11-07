@@ -134,8 +134,9 @@ pub enum OverallState {
 #[serde(rename_all = "camelCase")]
 pub struct OverallStatus {
     pub state: OverallState,
-    /// When the last sync of a server Account finished, in the Display
-    /// Time Zone, whatever its outcome.
+    /// The oldest of the server Accounts' and Calendars' last successful
+    /// syncs, in the Display Time Zone: all of them are synced at least up
+    /// to then. None while one of them hasn't synced since FreeCal started.
     #[cfg_attr(test, ts(type = "string | null"))]
     pub last_sync: Option<NaiveDateTime>,
 }
@@ -189,6 +190,8 @@ struct SyncState {
     /// Whether the running sync is a Calendar's First Sync.
     first_sync: bool,
     last: Option<(DateTime<FixedOffset>, SyncOutcome)>,
+    /// When its last sync that ended Synced finished.
+    last_synced: Option<DateTime<FixedOffset>>,
 }
 
 impl SyncState {
@@ -205,6 +208,9 @@ impl SyncState {
         if self.running == 0 {
             self.by_user = false;
             self.first_sync = false;
+        }
+        if let Some((at, SyncOutcome::Synced)) = &last {
+            self.last_synced = Some(*at);
         }
         if last.is_some() {
             self.last = last;
@@ -362,10 +368,17 @@ impl SyncStatusTracker {
         } else {
             OverallState::Synced
         };
+        let last_synced = |state: Option<&SyncState>| state?.last_synced;
         let last_sync = accounts
             .iter()
-            .filter_map(|id| self.accounts.get(id)?.last.as_ref().map(|(at, _)| *at))
-            .max()
+            .map(|id| last_synced(self.accounts.get(id)))
+            .chain(
+                calendars
+                    .iter()
+                    .map(|id| last_synced(self.calendars.get(id))),
+            )
+            .collect::<Option<Vec<_>>>()
+            .and_then(|times| times.into_iter().min())
             .map(|at| in_zone(at, zone));
         OverallStatus { state, last_sync }
     }

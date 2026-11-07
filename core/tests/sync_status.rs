@@ -433,6 +433,44 @@ fn the_overall_status_is_offline_only_when_every_server_account_is() {
 }
 
 #[test]
+fn the_overall_last_sync_is_the_oldest_last_successful_sync() {
+    let server = Server::new();
+    let core = &server.core;
+    let other = Radicale::shared().user();
+    let second = add_account(core, server.radicale, &other);
+    let url = server
+        .radicale
+        .create_calendar(&other, NewCalendar::default());
+    core.add_calendars(second, &[url]).unwrap();
+    let last_sync = || core.sync_statuses().unwrap().overall.last_sync;
+
+    server.harness.clock.set("2026-10-03T12:30:00+02:00");
+    core.sync_account(second, StartedBy::FreeCal).unwrap();
+
+    assert_eq!(
+        last_sync(),
+        Some(time("2026-10-03T12:00:00")),
+        "the first Account last synced at noon"
+    );
+
+    server.harness.clock.set("2026-10-03T12:40:00+02:00");
+    core.sync_account(server.account, StartedBy::FreeCal)
+        .unwrap();
+
+    assert_eq!(last_sync(), Some(time("2026-10-03T12:30:00")));
+
+    server.harness.clock.set("2026-10-03T12:50:00+02:00");
+    server.go_offline();
+    let _ = core.sync_account(server.account, StartedBy::FreeCal);
+
+    assert_eq!(
+        last_sync(),
+        Some(time("2026-10-03T12:30:00")),
+        "a failed sync doesn't count"
+    );
+}
+
+#[test]
 fn a_change_in_a_server_calendar_reports_its_unsent_changes() {
     let server = Server::new();
     make_writable(&server.harness, server.work);

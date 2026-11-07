@@ -35,3 +35,4 @@
   - Overall State (new term): the spec's overall status as a value (`OverallState`, `OverallStatus` with the last sync time).
   - Sync Status Tracker (new term): the in-memory Sync Status of every server Account and Calendar (`SyncStatusTracker`).
   - Syncing Delay (new term): the window holding back a routine sync's "Syncing" for about 1 second (`SyncingDelay`, `src/lib/syncDisplay.ts`).
+- 2026-11-07 (review with the user): the status indicator's time is the oldest of the server Accounts' and Calendars' last successful syncs, so "Synced 09:00" means everything is synced at least up to 09:00, and a failed attempt doesn't count. It had been the latest finished sync of any Account, whatever its outcome. Trade-off: one Account that hasn't synced for a while holds the time back for all; the sidebar rows keep their own times. No time shows while any of them hasn't synced since FreeCal started (`SyncStatusTracker::overall`).

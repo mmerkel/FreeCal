@@ -218,8 +218,9 @@ export type OverallState = { "kind": "conflict" } | { "kind": "syncError" } | { 
 
 export type OverallStatus = { state: OverallState,
 /**
- * When the last sync of a server Account finished, in the Display
- * Time Zone, whatever its outcome.
+ * The oldest of the server Accounts' and Calendars' last successful
+ * syncs, in the Display Time Zone: all of them are synced at least up
+ * to then. None while one of them hasn't synced since FreeCal started.
  */
 lastSync: string | null, };
 
