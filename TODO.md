@@ -1,7 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] code architecture: are there any possible simplifications that offer themselves, e.g. new, beneficial invariants that appear when pushing rare cases to the edge?
+- [ ] code base architecture
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
@@ -31,6 +31,8 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 - [ ] change in today can change the view of the calendar grid, which interferes with any ongoing drag-and-drop operation; what was the solution we had for that?  Should there not be a more general solution, related to any calendar change?  Or not, it could be interesting to drag an event to the next month, by pressing n during a drag-and-drop operation.  This is possible already, actually.  But we should abort any drag-and-drop on any other change of the calendar grid!
 - [ ] frontend bug: there is a weird vertical line appearing on the "week" button when changing from the month to the week view using "w" on the keyboard.
 - [ ] restore window size (and status - minimized/maximized etc) on app restart - what is the best solution?  doing it from the app side or let the window manager do it?
+- [ ] code architecture: are there any possible simplifications that offer themselves, e.g. new, beneficial invariants that appear when pushing rare cases to the edge?
+
 
 # Ticket leftovers
 
@@ -49,7 +51,6 @@ Skipped:
 - [ ] split `Loaded.exceptions` in `Loaded::sorted` into those paired with an Occurrence and Events of their own, so callers can't forget the check (ties into the possible bug; changes behaviour)
 - [ ] do `Loaded::join` inside the writers that create or replace a Recurring Event (`Loaded::take`, `propagate_to_event_rows`) instead of in import and sync
 - [ ] dedupe all Exceptions by `SEQUENCE` in `assemble`, joined ones too, and drop `latest` from `Loaded::take`
-- [ ] keep the "unreadable objects are fetched again" rule out of the CalDAV client (`Held.unreadable` in `caldav.rs`): sync passes the hrefs to fetch, so a future Remote (Google) needn't repeat it
 - [ ] unique index on `caldav_server_object (calendar_id, href)`, `objects_at` returning one object; unsure whether duplicates can arise
 - [ ] fewer `Loaded::of_uid` loads in import (`run`, up to three per Event) and sync (`join` loads even when a Recurring Event is stored; `moved` re-queries removed objects for each new one)
 - [ ] drop `journal::hash_as` and call `hash_with(…, None)` directly
