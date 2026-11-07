@@ -44,3 +44,18 @@ FreeCal never writes to the server to repair such resources, and doesn't report 
 - A takeover can cost an Incoming Sync a second request to the server.
 - Server Object IDs, like Event IDs, are never reused.
 - Each Provider's Mirror tables have their own migrations, and the rules reading the Mirror are written per Provider.
+
+## Amendments
+
+- 2026-11-07, ticket 109: "fetched again until it reads" now holds with sync tokens too, which list only what changed. FreeCal doesn't mark a resource unreadable; it forgets its ETag. A Known Server Resource with no stored ETag is fetched on every Incoming Sync, listed or not:
+  - A mirrored Server Object FreeCal can't read keeps its last readable text, its UID and its Event Rows.
+  - A new resource FreeCal can't read becomes an Ignored Resource with neither ETag nor UID.
+  - An Ignored Resource FreeCal can't read keeps its UID.
+
+  The same rule covers servers that give no ETags, against RFC 4791 §5.3.4. A resource becoming unreadable writes one Log line. FreeCal re-fetches rather than waiting for the resource to change, so that an update of FreeCal that can read it shows its Events. A mirrored Server Object's ETag must stay the version of the text the Mirror holds, so it couldn't take the newer ETag anyway.
+- 2026-11-07, for ticket 17: the Sender writes an update or a delete only with `If-Match` on the ETag the Mirror holds. An Unsent Change whose Server Object has no stored ETag waits until it reads. A successful write whose response gives no ETag leaves the text sent in the Mirror without one, so the next Incoming Sync fetches what the server stored.
+- 2026-11-07, ticket 108: a CalDAV Server Object is its Calendar and UID, which the unique index makes one-to-one; nothing stored refers to its ID.
+  - **Moves:** a resource moved to another href in one Incoming Sync is a takeover, and competes with the Ignored Resources holding its UID by the fixed order. It no longer counts as the same Server Object beating them. This puts a shown copy switching without a user action, rejected above for new resources, on a server that both holds an Ambiguous UID and moves the kept copy. In exchange, one rule replaces two.
+  - **The previous Server Version** (ADR 0014) is what the Mirror held for the UID, after a move or a takeover too.
+  - **Server Object IDs** are gone, with the consequence that they are never reused.
+  - **The takeover's fetch:** the Ignored Resources whose UID a Server Object listed as changed or removed keeps are fetched in the Incoming Sync's first request, whether or not that Server Object still keeps it. So a takeover costs no second request. Which resource keeps a UID is decided once, inside the Journal Transaction.

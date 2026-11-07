@@ -47,3 +47,4 @@ New terms:
 - **Take over** (new term): an Ignored Resource becoming the one keeping a UID once the kept one stops holding it (`takeover`).
 - **Fixed order** (new term): the order among resources of one Incoming Sync holding one UID, the one holding the single Event or Recurring Event first, then the lowest href (`fixed_order`).
 - **Candidate** (new term): a fetched resource holding one UID, competing to keep it (`Candidate`); the decision is a `Keeper`.
+- 2026-11-07 (grilling for ticket 108, ADR 0015's amendment): the moved rule above changes. A CalDAV Server Object is its Calendar and UID, so a moved resource is a takeover and competes with the Ignored Resources by the fixed order. The takeover's second request goes: Ignored Resources whose UID a changed or removed Server Object keeps are fetched in the first request. See ticket 108.

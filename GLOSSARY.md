@@ -135,7 +135,7 @@ What a server stores as one piece and FreeCal writes back: one CalDAV resource a
 _Avoid_: Resource (on its own), remote event, original server data
 
 **CalDAV Server Object**:
-A Server Object of a CalDAV Calendar: one resource, holding the components of exactly one UID, kept as the iCalendar text received.
+A Server Object of a CalDAV Calendar: one resource, holding the components of exactly one UID, kept as the iCalendar text received. It is the Server Object of its Calendar and UID, whichever href holds it, so a move to another href doesn't make it another one.
 _Avoid_: Calendar object resource, CalDAV event
 
 **Google Server Object**:
@@ -147,7 +147,7 @@ FreeCal's copy of every Server Object as the server last had it, in tables of it
 _Avoid_: Cache, server copy
 
 **Ignored Resource**:
-A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs, remembered with its ETag so that it isn't fetched again until it changes. It is not part of the Mirror and has no Event Rows.
+A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs or one it couldn't read. It is remembered with its ETag, so that it isn't fetched again until it changes; one it couldn't read is remembered without, so that it is fetched on every Incoming Sync until it reads. It is not part of the Mirror and has no Event Rows.
 _Avoid_: Skipped object, rejected resource
 
 **Forget an Ignored Resource**:
