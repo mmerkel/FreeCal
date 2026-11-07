@@ -33,9 +33,11 @@
     calendars: Calendar[];
     /** The Sync Status of each server Account and Calendar as shown, once read. */
     syncStatuses?: SyncStatuses;
+    /** What the status indicator says, once read. */
+    overallText?: string;
   }
 
-  let { core, accounts, calendars, syncStatuses }: Props = $props();
+  let { core, accounts, calendars, syncStatuses, overallText }: Props = $props();
 
   /** What the user is in the middle of, if anything. Only one at a time. */
   type Editing =
@@ -256,275 +258,294 @@
   </form>
 {/snippet}
 
-<nav class="sidebar" aria-label={t('sidebar.label')}>
-  {#if failure}
-    <p class="failure" role="alert">{failure}</p>
-  {/if}
+<div class="sidebar">
+  <nav aria-label={t('sidebar.label')}>
+    {#if failure}
+      <p class="failure" role="alert">{failure}</p>
+    {/if}
 
-  {#each accounts as account (account.id)}
-    {@const headingId = `sidebar-account-${account.id}`}
-    {@const accountState = accountSyncText(account)}
-    <section>
-      <div class="account">
-        <h2 id={headingId} title={accountName(account)}>{accountName(account)}</h2>
-        {#if account.provider === 'local'}
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={t('sidebar.newCalendar')}
-            title={t('sidebar.newCalendar')}
-            onclick={() => (editing = { kind: 'creating', accountId: account.id })}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
-        {:else}
-          {@const accountOptions = t('account.optionsNamed', { account: accountName(account) })}
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={accountOptions}
-            title={accountOptions}
-            aria-haspopup="menu"
-            aria-expanded={accountMenuFor === account.id}
-            bind:this={accountButtons[account.id]}
-            onclick={() =>
-              accountMenuFor === account.id
-                ? closeAccountMenu(account.id)
-                : openAccountMenu(account)}
-          >
-            <EllipsisVertical size={14} aria-hidden="true" />
-          </button>
-          {#if accountMenuFor === account.id}
-            <Menu
-              label={accountOptions}
-              anchor={accountButtons[account.id]}
-              onclose={() => closeAccountMenu(account.id)}
+    {#each accounts as account (account.id)}
+      {@const headingId = `sidebar-account-${account.id}`}
+      {@const accountState = accountSyncText(account)}
+      <section>
+        <div class="account">
+          <h2 id={headingId} title={accountName(account)}>{accountName(account)}</h2>
+          {#if account.provider === 'local'}
+            <button
+              type="button"
+              class="icon-button"
+              aria-label={t('sidebar.newCalendar')}
+              title={t('sidebar.newCalendar')}
+              onclick={() => (editing = { kind: 'creating', accountId: account.id })}
             >
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={() => chooseForAccount(account.id, () => startManaging(account))}
-              >
-                <ListChecks size={14} aria-hidden="true" />
-                {t('account.manageCalendars')}
-              </button>
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={() => chooseForAccount(account.id, () => void core.syncNow(account.id))}
-              >
-                <RefreshCw size={14} aria-hidden="true" />
-                {t('menu.syncNow')}
-              </button>
-              <hr class="menu-separator" />
-              <button
-                type="button"
-                class="menu-item danger"
-                role="menuitem"
-                onclick={() =>
-                  chooseForAccount(
-                    account.id,
-                    () => (editing = { kind: 'confirmingRemoveAccount', account }),
-                  )}
-              >
-                <Unplug size={14} aria-hidden="true" />
-                {t('account.remove')}
-              </button>
-            </Menu>
-          {/if}
-        {/if}
-      </div>
-      {#if accountState}
-        <p class="account-state" title={accountState}>{accountState}</p>
-      {/if}
-
-      <ul aria-labelledby={headingId}>
-        {#each calendarsOf(account) as calendar (calendar.id)}
-          {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
-          {@const syncId = `sidebar-sync-${calendar.id}`}
-          {@const unsentId = `sidebar-unsent-${calendar.id}`}
-          {@const lockId = `sidebar-lock-${calendar.id}`}
-          {@const report = calendarReport(calendar)}
-          {@const syncState = syncText(report?.status)}
-          {@const unsent = report?.unsentChanges ?? 0}
-          {@const unsentText = tCount('calendar.unsent', unsent)}
-          {@const stateId = `sidebar-state-${calendar.id}`}
-          {@const tooltip = t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
-            name: calendar.name,
-          })}
-          <!-- A description replaces the tooltip's, so it goes on in it. -->
-          {@const describedBy = [
-            syncState && syncId,
-            unsent > 0 && unsentId,
-            calendar.readOnly && lockId,
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
-            {#if editing?.kind === 'renaming' && editing.id === calendar.id}
-              {@render nameForm(calendar.name, calendar.colour, (name) =>
-                rename(calendar.id, name),
-              )}
-            {:else}
-              <button
-                type="button"
-                class="row toggle"
-                role="switch"
-                aria-checked={calendar.shown}
-                title={tooltip}
-                aria-describedby={describedBy ? `${describedBy} ${stateId}` : undefined}
-                {...menuOpeners(calendar)}
-                onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
-              >
-                <span class="calendar-dot" style:--colour={calendar.colour} aria-hidden="true"
-                ></span>
-                <span class="label">
-                  <span class="name">{calendar.name}</span>
-                  {#if syncState}
-                    <!-- The switch's description, not part of its name. -->
-                    <span class="sync-state" id={syncId} title={syncState} aria-hidden="true">
-                      {syncState}
-                    </span>
-                  {/if}
-                </span>
-                {#if describedBy}
-                  <span id={stateId} hidden>{tooltip}</span>
-                {/if}
-                {#if unsent > 0}
-                  <!-- Also the switch's description. -->
-                  <span class="unsent marker" title={unsentText} aria-hidden="true">
-                    <CloudUpload size={12} aria-hidden="true" />
-                    <span id={unsentId} hidden>{unsentText}</span>
-                    {unsent}
-                  </span>
-                {/if}
-                {#if calendar.readOnly}
-                  <!-- Also the switch's description. -->
-                  <span
-                    class="lock marker"
-                    id={lockId}
-                    title={t('calendar.readOnly')}
-                    aria-hidden="true"
-                  >
-                    <Lock size={12} aria-label={t('calendar.readOnly')} />
-                  </span>
-                {/if}
-              </button>
-              <button
-                type="button"
-                class="icon-button more"
-                aria-label={optionsLabel}
-                title={optionsLabel}
-                aria-haspopup="menu"
-                aria-expanded={menuFor === calendar.id}
-                bind:this={moreButtons[calendar.id]}
-                {...menuOpeners(calendar)}
-                onclick={() =>
-                  menuFor === calendar.id ? closeMenu(calendar.id) : openMenu(calendar)}
-              >
-                <EllipsisVertical size={14} aria-hidden="true" />
-              </button>
-            {/if}
-
-            {#if menuFor === calendar.id}
-              {@const colourLabelId = `sidebar-colour-${calendar.id}`}
+              <Plus size={14} aria-hidden="true" />
+            </button>
+          {:else}
+            {@const accountOptions = t('account.optionsNamed', { account: accountName(account) })}
+            <button
+              type="button"
+              class="icon-button"
+              aria-label={accountOptions}
+              title={accountOptions}
+              aria-haspopup="menu"
+              aria-expanded={accountMenuFor === account.id}
+              bind:this={accountButtons[account.id]}
+              onclick={() =>
+                accountMenuFor === account.id
+                  ? closeAccountMenu(account.id)
+                  : openAccountMenu(account)}
+            >
+              <EllipsisVertical size={14} aria-hidden="true" />
+            </button>
+            {#if accountMenuFor === account.id}
               <Menu
-                label={optionsLabel}
-                anchor={moreButtons[calendar.id]}
-                onclose={() => closeMenu(calendar.id)}
+                label={accountOptions}
+                anchor={accountButtons[account.id]}
+                onclose={() => closeAccountMenu(account.id)}
               >
-                <div class="menu-label" id={colourLabelId}>{t('calendar.colour')}</div>
-                <div class="swatches" role="group" aria-labelledby={colourLabelId}>
-                  {#each SWATCHES as swatch (swatch.colour)}
-                    <button
-                      type="button"
-                      class="swatch"
-                      role="menuitemradio"
-                      aria-checked={swatch.colour === calendar.colour}
-                      aria-label={t(swatch.name)}
-                      title={t(swatch.name)}
-                      style:--colour={swatch.colour}
-                      onclick={() =>
-                        choose(calendar.id, () =>
-                          change(() => core.recolourCalendar(calendar.id, swatch.colour)),
-                        )}
-                    ></button>
-                  {/each}
-                </div>
-                <hr class="menu-separator" />
                 <button
                   type="button"
                   class="menu-item"
                   role="menuitem"
-                  onclick={() =>
-                    choose(calendar.id, () => (editing = { kind: 'renaming', id: calendar.id }))}
+                  onclick={() => chooseForAccount(account.id, () => startManaging(account))}
                 >
-                  <Pencil size={14} aria-hidden="true" />
-                  {t('calendar.rename')}
+                  <ListChecks size={14} aria-hidden="true" />
+                  {t('account.manageCalendars')}
                 </button>
                 <button
                   type="button"
                   class="menu-item"
                   role="menuitem"
-                  onclick={() =>
-                    choose(calendar.id, () => change(() => core.showOnlyCalendar(calendar.id)))}
+                  onclick={() => chooseForAccount(account.id, () => void core.syncNow(account.id))}
                 >
-                  <Eye size={14} aria-hidden="true" />
-                  {t('calendar.showOnly')}
+                  <RefreshCw size={14} aria-hidden="true" />
+                  {t('menu.syncNow')}
                 </button>
                 <hr class="menu-separator" />
-                {#if fromServer(calendar)}
-                  <button
-                    type="button"
-                    class="menu-item danger"
-                    role="menuitem"
-                    onclick={() =>
-                      choose(calendar.id, () => (editing = { kind: 'confirmingRemove', calendar }))}
-                  >
-                    <CircleMinus size={14} aria-hidden="true" />
-                    {t('calendar.remove')}
-                  </button>
-                {:else}
-                  <button
-                    type="button"
-                    class="menu-item danger"
-                    role="menuitem"
-                    onclick={() =>
-                      choose(calendar.id, () => (editing = { kind: 'confirmingDelete', calendar }))}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    {t('calendar.delete')}
-                  </button>
-                {/if}
+                <button
+                  type="button"
+                  class="menu-item danger"
+                  role="menuitem"
+                  onclick={() =>
+                    chooseForAccount(
+                      account.id,
+                      () => (editing = { kind: 'confirmingRemoveAccount', account }),
+                    )}
+                >
+                  <Unplug size={14} aria-hidden="true" />
+                  {t('account.remove')}
+                </button>
               </Menu>
             {/if}
-          </li>
-        {/each}
-
-        {#if editing?.kind === 'creating' && editing.accountId === account.id}
-          <li>
-            {@render nameForm('', newCalendarColour(calendars), (name) => create(account.id, name))}
-          </li>
-        {:else if calendarsOf(account).length === 0}
-          <li class="hint">
-            {t(account.provider === 'local' ? 'sidebar.noCalendars' : 'sidebar.noServerCalendars')}
-          </li>
+          {/if}
+        </div>
+        {#if accountState}
+          <p class="account-state" title={accountState}>{accountState}</p>
         {/if}
-      </ul>
-    </section>
-  {/each}
 
-  <button
-    type="button"
-    class="button outline add-account"
-    onclick={() => (editing = { kind: 'addingAccount' })}
-  >
-    <Plus size={14} aria-hidden="true" />
-    {t('sidebar.addAccount')}
-  </button>
-</nav>
+        <ul aria-labelledby={headingId}>
+          {#each calendarsOf(account) as calendar (calendar.id)}
+            {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
+            {@const syncId = `sidebar-sync-${calendar.id}`}
+            {@const unsentId = `sidebar-unsent-${calendar.id}`}
+            {@const lockId = `sidebar-lock-${calendar.id}`}
+            {@const report = calendarReport(calendar)}
+            {@const syncState = syncText(report?.status)}
+            {@const unsent = report?.unsentChanges ?? 0}
+            {@const unsentText = tCount('calendar.unsent', unsent)}
+            {@const stateId = `sidebar-state-${calendar.id}`}
+            {@const tooltip = t(
+              calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip',
+              {
+                name: calendar.name,
+              },
+            )}
+            <!-- A description replaces the tooltip's, so it goes on in it. -->
+            {@const describedBy = [
+              syncState && syncId,
+              unsent > 0 && unsentId,
+              calendar.readOnly && lockId,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
+              {#if editing?.kind === 'renaming' && editing.id === calendar.id}
+                {@render nameForm(calendar.name, calendar.colour, (name) =>
+                  rename(calendar.id, name),
+                )}
+              {:else}
+                <button
+                  type="button"
+                  class="row toggle"
+                  role="switch"
+                  aria-checked={calendar.shown}
+                  title={tooltip}
+                  aria-describedby={describedBy ? `${describedBy} ${stateId}` : undefined}
+                  {...menuOpeners(calendar)}
+                  onclick={() => change(() => core.setCalendarShown(calendar.id, !calendar.shown))}
+                >
+                  <span class="calendar-dot" style:--colour={calendar.colour} aria-hidden="true"
+                  ></span>
+                  <span class="label">
+                    <span class="name">{calendar.name}</span>
+                    {#if syncState}
+                      <!-- The switch's description, not part of its name. -->
+                      <span class="sync-state" id={syncId} title={syncState} aria-hidden="true">
+                        {syncState}
+                      </span>
+                    {/if}
+                  </span>
+                  {#if describedBy}
+                    <span id={stateId} hidden>{tooltip}</span>
+                  {/if}
+                  {#if unsent > 0}
+                    <!-- Also the switch's description. -->
+                    <span class="unsent marker" title={unsentText} aria-hidden="true">
+                      <CloudUpload size={12} aria-hidden="true" />
+                      <span id={unsentId} hidden>{unsentText}</span>
+                      {unsent}
+                    </span>
+                  {/if}
+                  {#if calendar.readOnly}
+                    <!-- Also the switch's description. -->
+                    <span
+                      class="lock marker"
+                      id={lockId}
+                      title={t('calendar.readOnly')}
+                      aria-hidden="true"
+                    >
+                      <Lock size={12} aria-label={t('calendar.readOnly')} />
+                    </span>
+                  {/if}
+                </button>
+                <button
+                  type="button"
+                  class="icon-button more"
+                  aria-label={optionsLabel}
+                  title={optionsLabel}
+                  aria-haspopup="menu"
+                  aria-expanded={menuFor === calendar.id}
+                  bind:this={moreButtons[calendar.id]}
+                  {...menuOpeners(calendar)}
+                  onclick={() =>
+                    menuFor === calendar.id ? closeMenu(calendar.id) : openMenu(calendar)}
+                >
+                  <EllipsisVertical size={14} aria-hidden="true" />
+                </button>
+              {/if}
+
+              {#if menuFor === calendar.id}
+                {@const colourLabelId = `sidebar-colour-${calendar.id}`}
+                <Menu
+                  label={optionsLabel}
+                  anchor={moreButtons[calendar.id]}
+                  onclose={() => closeMenu(calendar.id)}
+                >
+                  <div class="menu-label" id={colourLabelId}>{t('calendar.colour')}</div>
+                  <div class="swatches" role="group" aria-labelledby={colourLabelId}>
+                    {#each SWATCHES as swatch (swatch.colour)}
+                      <button
+                        type="button"
+                        class="swatch"
+                        role="menuitemradio"
+                        aria-checked={swatch.colour === calendar.colour}
+                        aria-label={t(swatch.name)}
+                        title={t(swatch.name)}
+                        style:--colour={swatch.colour}
+                        onclick={() =>
+                          choose(calendar.id, () =>
+                            change(() => core.recolourCalendar(calendar.id, swatch.colour)),
+                          )}
+                      ></button>
+                    {/each}
+                  </div>
+                  <hr class="menu-separator" />
+                  <button
+                    type="button"
+                    class="menu-item"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => (editing = { kind: 'renaming', id: calendar.id }))}
+                  >
+                    <Pencil size={14} aria-hidden="true" />
+                    {t('calendar.rename')}
+                  </button>
+                  <button
+                    type="button"
+                    class="menu-item"
+                    role="menuitem"
+                    onclick={() =>
+                      choose(calendar.id, () => change(() => core.showOnlyCalendar(calendar.id)))}
+                  >
+                    <Eye size={14} aria-hidden="true" />
+                    {t('calendar.showOnly')}
+                  </button>
+                  <hr class="menu-separator" />
+                  {#if fromServer(calendar)}
+                    <button
+                      type="button"
+                      class="menu-item danger"
+                      role="menuitem"
+                      onclick={() =>
+                        choose(
+                          calendar.id,
+                          () => (editing = { kind: 'confirmingRemove', calendar }),
+                        )}
+                    >
+                      <CircleMinus size={14} aria-hidden="true" />
+                      {t('calendar.remove')}
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="menu-item danger"
+                      role="menuitem"
+                      onclick={() =>
+                        choose(
+                          calendar.id,
+                          () => (editing = { kind: 'confirmingDelete', calendar }),
+                        )}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      {t('calendar.delete')}
+                    </button>
+                  {/if}
+                </Menu>
+              {/if}
+            </li>
+          {/each}
+
+          {#if editing?.kind === 'creating' && editing.accountId === account.id}
+            <li>
+              {@render nameForm('', newCalendarColour(calendars), (name) =>
+                create(account.id, name),
+              )}
+            </li>
+          {:else if calendarsOf(account).length === 0}
+            <li class="hint">
+              {t(
+                account.provider === 'local' ? 'sidebar.noCalendars' : 'sidebar.noServerCalendars',
+              )}
+            </li>
+          {/if}
+        </ul>
+      </section>
+    {/each}
+
+    <button
+      type="button"
+      class="button outline add-account"
+      onclick={() => (editing = { kind: 'addingAccount' })}
+    >
+      <Plus size={14} aria-hidden="true" />
+      {t('sidebar.addAccount')}
+    </button>
+  </nav>
+  {#if overallText}
+    <!-- The toolbar's status indicator carries this text for screen readers. -->
+    <p class="overall-text" title={overallText} aria-hidden="true">{overallText}</p>
+  {/if}
+</div>
 
 {#snippet confirmation(title: string, body: MessageKey, confirm: MessageKey, onconfirm: () => void)}
   <Dialog role="alertdialog" {title} onclose={cancel}>
@@ -583,34 +604,61 @@
 {/if}
 
 <style>
-  /* Its width is SidebarPane's. */
+  /* Its width is SidebarPane's. The Calendars scroll; the status text
+     stays at the bottom. */
   .sidebar {
-    box-sizing: border-box;
+    /* From the sidebar's left edge to a row's, and from a row's left edge
+       to its dot, which the status text adds up to line up with the
+       Calendar names. */
+    --sidebar-inset: var(--space-4);
+    --row-inset: var(--space-4);
+    --dot-gap: var(--space-5);
+    display: flex;
     flex: 1;
+    flex-direction: column;
     min-width: 0;
-    /* Little on the right, next to the scrollbar strip or the splitter. */
-    padding: var(--space-6) var(--space-1) var(--space-6) var(--space-4);
-    overflow-y: auto;
     border-right: 1px solid var(--border);
     background: var(--surface);
+  }
+
+  nav {
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
+    /* Little on the right, next to the scrollbar strip or the splitter. */
+    padding: var(--space-6) var(--space-1) var(--space-6) var(--sidebar-inset);
+    overflow-y: auto;
+  }
+
+  .overall-text {
+    flex: none;
+    margin: 0;
+    padding: var(--space-3) var(--space-4) var(--space-4)
+      calc(var(--sidebar-inset) + var(--row-inset) + var(--calendar-dot-size) + var(--dot-gap));
+    overflow: hidden;
+    border-top: 1px solid var(--border);
+    color: var(--foreground-muted);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* A styled scrollbar takes its own strip, shown only while the sidebar
      overflows, instead of GTK's overlay bar, which lies over the rows' ⋮
      buttons and takes their clicks. WebKitGTK ignores `scrollbar-width` and
      `scrollbar-gutter` for this. */
-  .sidebar::-webkit-scrollbar {
+  nav::-webkit-scrollbar {
     width: 0.5rem;
     background: transparent;
   }
 
-  .sidebar::-webkit-scrollbar-thumb {
+  nav::-webkit-scrollbar-thumb {
     border: 1px solid transparent;
     border-radius: 0.25rem;
     background: var(--border-strong) padding-box;
   }
 
-  .sidebar::-webkit-scrollbar-thumb:hover {
+  nav::-webkit-scrollbar-thumb:hover {
     background-color: var(--foreground-faint);
   }
 
@@ -650,7 +698,7 @@
     align-items: center;
     gap: var(--space-4);
     min-height: 1.75rem;
-    padding: 0 var(--space-1) 0 var(--space-4);
+    padding: 0 var(--space-1) 0 var(--row-inset);
     border-radius: var(--radius);
   }
 
@@ -663,7 +711,7 @@
     display: flex;
     flex: 1;
     align-items: center;
-    gap: var(--space-5);
+    gap: var(--dot-gap);
     min-width: 0;
   }
 

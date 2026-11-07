@@ -1,6 +1,6 @@
 <!--
   The toolbar over the grid: Today, previous and next,
-  the shown period, the view switch, the status indicator and the main menu (Sync now, Import…, Settings…,
+  the shown period, the view switch, the status indicator's icon and the main menu (Sync now, Import…, Settings…,
   About FreeCal and Quit). The Today button is a
   toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
@@ -18,12 +18,11 @@
   import Info from '@lucide/svelte/icons/info';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
-  import type { OverallState, OverallStatus, View } from '../core/types';
+  import type { OverallState, View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
   import Menu from './Menu.svelte';
   import { monthTitle, type TitlePart } from './navigation';
   import { shortcutHint, shortcutKeys } from './shortcuts';
-  import { lastSyncText } from './syncDisplay.svelte';
 
   interface Props {
     view: View;
@@ -35,9 +34,10 @@
     onview: (view: View) => void;
     /** A month name in the title was clicked. */
     onmonth: (month: Temporal.PlainYearMonth) => void;
-    /** The overall status as shown, once read. */
-    sync?: OverallStatus;
-    today: Temporal.PlainDate;
+    /** The overall state as shown, once read. */
+    syncState?: OverallState;
+    /** What the status indicator says, its icon's tooltip, once read. */
+    overallText?: string;
     onsyncnow: () => void;
     onimport: () => void;
     onsettings: () => void;
@@ -53,8 +53,8 @@
     onstep,
     onview,
     onmonth,
-    sync,
-    today,
+    syncState,
+    overallText,
     onsyncnow,
     onimport,
     onsettings,
@@ -81,27 +81,16 @@
   const previous = $derived(t(steps[view].previous));
   const next = $derived(t(steps[view].next));
 
-  /** Each overall state's words and icon in the status indicator. */
-  const syncStates: Record<OverallState['kind'], { label: MessageKey; icon: typeof CloudCheck }> = {
-    conflict: { label: 'sync.conflict', icon: TriangleAlert },
-    syncError: { label: 'sync.errorShort', icon: CircleAlert },
-    offline: { label: 'sync.offline', icon: CloudOff },
-    syncing: { label: 'sync.syncing', icon: RefreshCw },
-    synced: { label: 'sync.synced', icon: CloudCheck },
+  /** Each overall state's icon in the status indicator. */
+  const syncIcons: Record<OverallState['kind'], typeof CloudCheck> = {
+    conflict: TriangleAlert,
+    syncError: CircleAlert,
+    offline: CloudOff,
+    syncing: RefreshCw,
+    synced: CloudCheck,
   };
 
-  const SyncIcon = $derived(syncStates[sync?.state.kind ?? 'synced'].icon);
-
-  /** What the status indicator says: the overall state, with when the last sync finished. */
-  const syncText = $derived.by(() => {
-    if (!sync) return '';
-    const state = t(syncStates[sync.state.kind].label);
-    if (!sync.lastSync) return state;
-    const time = lastSyncText(sync.lastSync, today);
-    return sync.state.kind === 'synced'
-      ? t('sync.syncedAt', { time })
-      : t('sync.lastSync', { state, time });
-  });
+  const SyncIcon = $derived(syncIcons[syncState?.kind ?? 'synced']);
 
   /** Runs a menu item's action: the menu closes first, so focus returns to its button. */
   function choose(action: () => void) {
@@ -167,11 +156,18 @@
       </button>
     {/each}
   </div>
-  {#if sync}
-    <!-- Not a live region: it would announce every routine sync. -->
-    <div class="sync-status marker" role="group" aria-label={t('sync.indicator')}>
-      <SyncIcon size={16} aria-hidden="true" />
-      <span>{syncText}</span>
+  {#if syncState}
+    <!-- Not a live region: it would announce every routine sync. The icon
+         carries the text, which the sidebar shows only while it is shown. -->
+    <div
+      class="sync-status marker"
+      role="group"
+      aria-label={t('sync.indicator')}
+      title={overallText}
+    >
+      <span class="sync-icon" role="img" aria-label={overallText}>
+        <SyncIcon size={16} aria-hidden="true" />
+      </span>
     </div>
   {/if}
   <div class="main-menu">
@@ -271,10 +267,11 @@
   }
 
   .sync-status {
-    gap: var(--space-2);
     margin-left: var(--space-4);
-    font-size: var(--text-sm);
-    white-space: nowrap;
+  }
+
+  .sync-icon {
+    display: flex;
   }
 
   kbd {

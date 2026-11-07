@@ -55,6 +55,7 @@
   --radius-lg: 0.625rem;
   --control-height: 2.125rem;
   --icon-button-size: 1.375rem;
+  --calendar-dot-size: 0.625rem;
 }
 
 /* Dark values. `data-color-scheme` on the root element is the one switch:
@@ -291,8 +292,8 @@ input[type='radio'] {
    with a soft edge, which looks rounder at this size than a rounded box does. */
 .calendar-dot {
   flex: none;
-  width: 0.625rem;
-  height: 0.625rem;
+  width: var(--calendar-dot-size);
+  height: var(--calendar-dot-size);
   background: radial-gradient(
     circle closest-side,
     var(--colour) calc(100% - 1px),

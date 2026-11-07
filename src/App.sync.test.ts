@@ -2,7 +2,7 @@
 // the fake core with a stand-in grid: they follow "Sync status changed".
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import App from './App.svelte';
 import type { SyncStatus, SyncStatusReport } from './core/types';
 import { SYNCING_DELAY_MS } from './lib/syncDisplay.svelte';
@@ -10,9 +10,12 @@ import { FakeCore } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
+// Three minutes after the last sync, at noon in Berlin.
+beforeEach(() => vi.setSystemTime('2026-10-03T10:03:00Z'));
 afterEach(() => vi.useRealTimers());
 
-const noon = { at: '2026-10-03T12:00:00', outcome: { kind: 'synced' } } as const;
+/** A sync finished at noon in Berlin. */
+const noon = { at: '2026-10-03T10:00:00Z', outcome: { kind: 'synced' } } as const;
 
 function report(status: SyncStatus, unsentChanges = 0): SyncStatusReport {
   return { status, lastSync: noon, unsentChanges };
@@ -42,6 +45,23 @@ function indicator() {
   return screen.getByRole('group', { name: 'Sync status' });
 }
 
+/**
+ * What the status indicator says: as the toolbar icon's name and tooltip,
+ * and as the line at the bottom of the sidebar, which must agree.
+ */
+function statusText(): string {
+  const icon = within(indicator()).getByRole('img');
+  const text = icon.getAttribute('aria-label') ?? '';
+  expect(indicator()).toHaveAttribute('title', text);
+  expect(sidebarStatusText()).toBe(text);
+  return text;
+}
+
+/** The status text at the bottom of the sidebar, if it shows. */
+function sidebarStatusText(): string | undefined {
+  return document.querySelector('.overall-text')?.textContent?.trim();
+}
+
 /** The sidebar's section of the Account "ada (CalDAV)". */
 function accountSection() {
   return within(
@@ -56,37 +76,67 @@ function team() {
 test('with no server Accounts the indicator says synced, with no time', async () => {
   await showApp(new FakeCore());
 
-  expect(indicator()).toHaveTextContent('Synced');
-  expect(indicator()).not.toHaveTextContent('12:00');
+  expect(statusText()).toBe('Synced');
 });
 
-test('the indicator shows the overall status and when the last sync finished', async () => {
+test('the indicator shows the overall status and how long ago the last sync finished', async () => {
   const { core } = withServer();
   await showApp(core);
 
-  expect(indicator()).toHaveTextContent('Synced 12:00');
+  expect(statusText()).toBe('Synced 3 minutes ago');
+});
+
+test('under a minute the time ago counts up every second, then goes on in minutes', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime('2026-10-03T10:00:05Z');
+  const { core } = withServer();
+  render(App, { core });
+  await vi.waitFor(() => screen.getByRole('list', { name: 'Grid' }));
+
+  expect(statusText()).toBe('Synced 5 seconds ago');
+
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(statusText()).toBe('Synced 6 seconds ago');
+
+  await vi.advanceTimersByTimeAsync(83_000);
+  expect(statusText()).toBe('Synced 1 minute ago');
+
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(statusText()).toBe('Synced 2 minutes ago');
+});
+
+test('while the sidebar is hidden, only the toolbar icon’s tooltip says the status', async () => {
+  const { core } = withServer();
+  core.storedSidebar = { shown: false, width: null };
+  await showApp(core);
+
+  expect(indicator()).toHaveAttribute('title', 'Synced 3 minutes ago');
+  expect(within(indicator()).getByRole('img')).toHaveAccessibleName('Synced 3 minutes ago');
+  // Its line in the sidebar is hidden with the sidebar.
+  const line = document.querySelector('.overall-text')!;
+  expect(line.parentElement!.closest('[aria-hidden="true"]')).not.toBeNull();
 });
 
 test('the indicator and the Account row follow "Sync status changed" to Offline and back', async () => {
   const { core, account } = withServer();
   await showApp(core);
 
-  core.setOverall({ state: { kind: 'offline' }, lastSync: '2026-10-03T12:05:00' });
+  core.setOverall({ state: { kind: 'offline' }, lastSync: '2026-10-03T10:01:00Z' });
   core.reportAccount(account, {
     status: { kind: 'offline' },
-    lastSync: { at: '2026-10-03T12:05:00', outcome: { kind: 'offline' } },
+    lastSync: { at: '2026-10-03T10:01:00Z', outcome: { kind: 'offline' } },
     unsentChanges: 0,
   });
 
-  await vi.waitFor(() => expect(indicator()).toHaveTextContent('Offline · last sync 12:05'));
+  await vi.waitFor(() => expect(statusText()).toBe('Offline · last sync 2 minutes ago'));
   expect(accountSection().getByText('Offline')).toBeInTheDocument();
   // Shown once on the Account, not on its Calendars.
   expect(team()).not.toHaveAccessibleDescription(/Offline/);
 
-  core.setOverall({ state: { kind: 'synced' }, lastSync: '2026-10-03T12:07:00' });
+  core.setOverall({ state: { kind: 'synced' }, lastSync: '2026-10-03T10:02:00Z' });
   core.reportAccount(account, report({ kind: 'synced' }));
 
-  await vi.waitFor(() => expect(indicator()).toHaveTextContent('Synced 12:07'));
+  await vi.waitFor(() => expect(statusText()).toBe('Synced 1 minute ago'));
   expect(accountSection().queryByText('Offline')).toBeNull();
 });
 
@@ -100,7 +150,7 @@ test('a Sync Error shows on the Calendar where it happened, with its message', a
     report({ kind: 'syncError', error: { code: 'serverRefused', status: 403, message: 'No' } }),
   );
 
-  await vi.waitFor(() => expect(indicator()).toHaveTextContent('Sync error'));
+  await vi.waitFor(() => expect(statusText()).toBe('Sync error · last sync 3 minutes ago'));
   expect(team()).toHaveAccessibleDescription(/Sync error: .*403/);
 });
 
@@ -129,12 +179,12 @@ test('a sync FreeCal started shows as Syncing only after about a second', async 
   );
   await vi.advanceTimersByTimeAsync(SYNCING_DELAY_MS / 2);
 
-  expect(indicator()).toHaveTextContent('Synced 12:00');
+  expect(statusText()).toBe('Synced 3 minutes ago');
   expect(accountSection().queryByText('Syncing…')).toBeNull();
 
   await vi.advanceTimersByTimeAsync(SYNCING_DELAY_MS / 2);
 
-  expect(indicator()).toHaveTextContent('Syncing…');
+  expect(statusText()).toBe('Syncing… · last sync 3 minutes ago');
   expect(accountSection().getByText('Syncing…')).toBeInTheDocument();
 });
 
@@ -145,7 +195,7 @@ test('a sync the user started shows as Syncing at once', async () => {
   core.setOverall({ state: { kind: 'syncing', byUser: true }, lastSync: noon.at });
   core.reportAccount(account, report({ kind: 'syncing', byUser: true, firstSync: false }));
 
-  await vi.waitFor(() => expect(indicator()).toHaveTextContent('Syncing…'));
+  await vi.waitFor(() => expect(statusText()).toBe('Syncing… · last sync 3 minutes ago'));
   expect(accountSection().getByText('Syncing…')).toBeInTheDocument();
 });
 

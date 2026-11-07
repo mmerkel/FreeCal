@@ -13,7 +13,7 @@ use freecal_core::{
 use support::radicale::{NewCalendar, Radicale, User, closed_port_url};
 use support::{
     Harness, account_sync_status, add_account, calendar, calendar_sync_status, draft,
-    make_writable, time, timed,
+    make_writable, timed, utc,
 };
 
 /// A user on Radicale with two Calendars, "Work" and "Home", both added
@@ -142,7 +142,7 @@ fn noon() -> FinishedSync {
 
 fn finished(outcome: SyncOutcome) -> FinishedSync {
     FinishedSync {
-        at: time("2026-10-03T12:00:00"),
+        at: utc("2026-10-03T10:00:00Z"),
         outcome,
     }
 }
@@ -238,7 +238,7 @@ fn adding_calendars_reports_their_first_sync_as_started_by_the_user() {
         core.sync_statuses().unwrap().overall,
         OverallStatus {
             state: OverallState::Synced,
-            last_sync: Some(time("2026-10-03T12:00:00")),
+            last_sync: Some(utc("2026-10-03T10:00:00Z")),
         }
     );
 }
@@ -254,7 +254,7 @@ fn a_sync_reports_syncing_then_synced_for_the_account_and_each_calendar() {
         .unwrap();
 
     let at_five_past = Some(FinishedSync {
-        at: time("2026-10-03T12:05:00"),
+        at: utc("2026-10-03T10:05:00Z"),
         outcome: SyncOutcome::Synced,
     });
     let (account, work, home) = (server.account, server.work, server.home);
@@ -446,15 +446,15 @@ fn the_overall_last_sync_is_the_oldest_last_successful_sync() {
 
     assert_eq!(
         last_sync(),
-        Some(time("2026-10-03T12:00:00")),
-        "the first Account last synced at noon"
+        Some(utc("2026-10-03T10:00:00Z")),
+        "the first Account last synced at noon, 10:00 UTC"
     );
 
     server.harness.clock.set("2026-10-03T12:40:00+02:00");
     core.sync_account(server.account, StartedBy::FreeCal)
         .unwrap();
 
-    assert_eq!(last_sync(), Some(time("2026-10-03T12:30:00")));
+    assert_eq!(last_sync(), Some(utc("2026-10-03T10:30:00Z")));
 
     server.harness.clock.set("2026-10-03T12:50:00+02:00");
     server.go_offline();
@@ -462,7 +462,7 @@ fn the_overall_last_sync_is_the_oldest_last_successful_sync() {
 
     assert_eq!(
         last_sync(),
-        Some(time("2026-10-03T12:30:00")),
+        Some(utc("2026-10-03T10:30:00Z")),
         "a failed sync doesn't count"
     );
 }
@@ -477,7 +477,7 @@ fn after_a_relaunch_each_last_sync_shows_until_the_next_sync() {
     let server = server.relaunch();
 
     let offline_at = FinishedSync {
-        at: time("2026-10-03T12:30:00"),
+        at: utc("2026-10-03T10:30:00Z"),
         outcome: SyncOutcome::Offline,
     };
     assert_eq!(
@@ -492,7 +492,7 @@ fn after_a_relaunch_each_last_sync_shows_until_the_next_sync() {
         server.core.sync_statuses().unwrap().overall,
         OverallStatus {
             state: OverallState::Offline,
-            last_sync: Some(time("2026-10-03T12:00:00")),
+            last_sync: Some(utc("2026-10-03T10:00:00Z")),
         }
     );
 }

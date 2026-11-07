@@ -11,8 +11,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, FixedOffset, NaiveDateTime};
-use chrono_tz::Tz;
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, CalendarId, CoreError, ErrorCode};
@@ -150,9 +149,10 @@ impl SyncRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct FinishedSync {
-    /// When it finished, in the Display Time Zone.
+    /// When it finished: an instant, in RFC 3339 UTC, as the overall
+    /// status's last sync.
     #[cfg_attr(test, ts(type = "string"))]
-    pub at: NaiveDateTime,
+    pub at: DateTime<Utc>,
     pub outcome: SyncOutcome,
 }
 
@@ -210,10 +210,12 @@ pub enum OverallState {
 pub struct OverallStatus {
     pub state: OverallState,
     /// The oldest of the server Accounts' and Calendars' last successful
-    /// syncs, in the Display Time Zone: all of them are synced at least up
-    /// to then. None while one of them hasn't synced since FreeCal started.
+    /// syncs: all of them are synced at least up to then. None while one
+    /// of them hasn't synced since FreeCal started. An instant, in RFC 3339
+    /// UTC, not a wall time, so that the time since it doesn't jump across
+    /// a DST change.
     #[cfg_attr(test, ts(type = "string | null"))]
-    pub last_sync: Option<NaiveDateTime>,
+    pub last_sync: Option<DateTime<Utc>>,
 }
 
 /// The Sync Status of every server Account and Calendar, with the overall
@@ -295,11 +297,11 @@ impl SyncState {
             .map_or(SyncStatus::Synced, |(_, outcome)| outcome.clone().into())
     }
 
-    fn report(&self, unsent_changes: u32, zone: Tz) -> SyncStatusReport {
+    fn report(&self, unsent_changes: u32) -> SyncStatusReport {
         SyncStatusReport {
             status: self.status(),
             last_sync: self.record.last.as_ref().map(|(at, outcome)| FinishedSync {
-                at: in_zone(*at, zone),
+                at: at.with_timezone(&Utc),
                 outcome: outcome.clone(),
             }),
             unsent_changes,
@@ -317,10 +319,6 @@ const NEVER_SYNCED: SyncState = SyncState {
         last_synced: None,
     },
 };
-
-fn in_zone(at: DateTime<FixedOffset>, zone: Tz) -> NaiveDateTime {
-    at.with_timezone(&zone).naive_local()
-}
 
 /// The sync state of every server Account and Calendar: the running syncs,
 /// and the Sync Records, loaded from the Local Store on launch. One with no
@@ -425,28 +423,23 @@ impl SyncStatusTracker {
         self.accounts.remove(&id);
     }
 
-    pub fn account(&self, id: AccountId, unsent_changes: u32, zone: Tz) -> AccountSyncStatus {
+    pub fn account(&self, id: AccountId, unsent_changes: u32) -> AccountSyncStatus {
         AccountSyncStatus {
             account_id: id,
-            report: state(&self.accounts, &id).report(unsent_changes, zone),
+            report: state(&self.accounts, &id).report(unsent_changes),
         }
     }
 
-    pub fn calendar(&self, id: CalendarId, unsent_changes: u32, zone: Tz) -> CalendarSyncStatus {
+    pub fn calendar(&self, id: CalendarId, unsent_changes: u32) -> CalendarSyncStatus {
         CalendarSyncStatus {
             calendar_id: id,
-            report: state(&self.calendars, &id).report(unsent_changes, zone),
+            report: state(&self.calendars, &id).report(unsent_changes),
         }
     }
 
     /// The overall status of the server Accounts `accounts` and their
     /// Calendars `calendars`.
-    pub fn overall(
-        &self,
-        accounts: &[AccountId],
-        calendars: &[CalendarId],
-        zone: Tz,
-    ) -> OverallStatus {
+    pub fn overall(&self, accounts: &[AccountId], calendars: &[CalendarId]) -> OverallStatus {
         let account_states: Vec<&SyncState> = accounts
             .iter()
             .map(|id| state(&self.accounts, id))
@@ -483,7 +476,7 @@ impl SyncStatusTracker {
             )
             .collect::<Option<Vec<_>>>()
             .and_then(|times| times.into_iter().min())
-            .map(|at| in_zone(at, zone));
+            .map(|at| at.with_timezone(&Utc));
         OverallStatus { state, last_sync }
     }
 }

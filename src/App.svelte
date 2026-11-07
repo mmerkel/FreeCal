@@ -46,7 +46,7 @@
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
-  import { SyncingDelay } from './lib/syncDisplay.svelte';
+  import { overallSyncText, SyncingDelay } from './lib/syncDisplay.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
@@ -110,6 +110,17 @@
   const syncingDelay = new SyncingDelay();
   /** The Sync Statuses as shown, with a routine sync's Syncing held back for a moment. */
   const shownSyncStatuses = $derived(syncStatuses && syncingDelay.shown(syncStatuses));
+  /** Now, to the second, so that the time since the last sync counts up. */
+  let now = $state(Temporal.Now.instant());
+  /** What the status indicator says, once the Sync Statuses are read. */
+  const overallText = $derived(
+    shownSyncStatuses && overallSyncText(shownSyncStatuses.overall, now),
+  );
+
+  $effect(() => {
+    const timer = setInterval(() => (now = Temporal.Now.instant()), 1000);
+    return () => clearInterval(timer);
+  });
   /** Why FreeCal couldn't start, in words, for the startup error screen. */
   let startupReason = $state<string>();
   let readFailure = $state<string>();
@@ -713,6 +724,7 @@
         accounts={directory.accounts}
         calendars={directory.calendars}
         syncStatuses={shownSyncStatuses}
+        {overallText}
       />
     </SidebarPane>
     <main class="grid">
@@ -724,8 +736,8 @@
         onstep={(by) => navigate(step(shown, by))}
         onview={(view) => navigate(switchView(shown, view))}
         onmonth={(month) => navigate(openMonth(shown, month))}
-        sync={shownSyncStatuses?.overall}
-        {today}
+        syncState={shownSyncStatuses?.overall.state}
+        {overallText}
         onsyncnow={syncNow}
         onimport={startImport}
         onsettings={openSettings}

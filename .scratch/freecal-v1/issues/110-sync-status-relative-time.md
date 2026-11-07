@@ -13,12 +13,27 @@ Spec: US-68; "Overall status"; the UI section's status indicator line (updated 2
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** S
 
-- [ ] The text says how long ago the last sync was, in the largest whole unit, rounded half up, counting up every second under a minute (Vitest with fake timers, including 89 s, 90 s, 1 h 25 min, 1 h 31 min and 59 min 40 s)
-- [ ] Other overall states say "<state> · last sync <time ago>"; with no last sync, the state alone
-- [ ] The time ago doesn't jump across a DST change
-- [ ] The text sits at the bottom of the sidebar, left-aligned with the Calendar names at every sidebar width, and doesn't scroll with the Calendars
-- [ ] The toolbar keeps the icon, whose tooltip always shows the full text, also while the sidebar is hidden
+- [x] The text says how long ago the last sync was, in the largest whole unit, rounded half up, counting up every second under a minute (Vitest with fake timers, including 89 s, 90 s, 1 h 25 min, 1 h 31 min and 59 min 40 s)
+- [x] Other overall states say "<state> · last sync <time ago>"; with no last sync, the state alone
+- [x] The time ago doesn't jump across a DST change
+- [x] The text sits at the bottom of the sidebar, left-aligned with the Calendar names at every sidebar width, and doesn't scroll with the Calendars
+- [x] The toolbar keeps the icon, whose tooltip always shows the full text, also while the sidebar is hidden
+
+## Comments
+
+**2026-11-07, implementation:**
+
+- **Time base:** the wall time in the Display Time Zone can't give the instant in the hour a DST change repeats. So the interface now carries the overall status's `lastSync` as an instant, in RFC 3339 UTC (`OverallStatus`, `core/src/sync_status.rs`). Each Account's and Calendar's last finished sync (`FinishedSync.at`) changed the same way, so that both follow one rule. The frontend doesn't read that one yet. Trade-off: a slightly larger change than the ticket needed, for one rule across the interface.
+- **Tests:** the rounding cases (89 s, 90 s, 1 h 25 min, 1 h 31 min, 59 min 40 s and others) test the time-ago function with two fixed instants (`src/lib/syncDisplay.test.ts`). The every-second count-up and the move to minutes run on the whole window with fake timers (`src/App.sync.test.ts`).
+- **Not asked for:**
+  - A last sync later than now, from a clock that went back, reads "0 seconds ago".
+  - A thin line separates the sidebar's status text from the Calendars.
+  - The window's clock ticks every second. It re-renders the text only when the text changes.
+- **Accessibility:** screen readers get the text from the toolbar icon (`role="img"`, named with the text, inside the "Sync status" group). The sidebar line is `aria-hidden`, so it isn't read twice.
+- **New terms:**
+  - **Overall Text** (new term): what the status indicator says, the overall state with the time since the last sync (`overallSyncText`, `overallText`, `.overall-text`).
+  - **Time Ago** (new term): how long before now an instant was, in the largest whole unit, rounded half up (`timeAgo`, `{ago}`).

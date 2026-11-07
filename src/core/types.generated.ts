@@ -161,7 +161,8 @@ export type ExistingEvents = "update" | "skip" | "copy";
  */
 export type FinishedSync = {
 /**
- * When it finished, in the Display Time Zone.
+ * When it finished: an instant, in RFC 3339 UTC, as the overall
+ * status's last sync.
  */
 at: string, outcome: SyncOutcome, };
 
@@ -219,8 +220,10 @@ export type OverallState = { "kind": "conflict" } | { "kind": "syncError" } | { 
 export type OverallStatus = { state: OverallState,
 /**
  * The oldest of the server Accounts' and Calendars' last successful
- * syncs, in the Display Time Zone: all of them are synced at least up
- * to then. None while one of them hasn't synced since FreeCal started.
+ * syncs: all of them are synced at least up to then. None while one
+ * of them hasn't synced since FreeCal started. An instant, in RFC 3339
+ * UTC, not a wall time, so that the time since it doesn't jump across
+ * a DST change.
  */
 lastSync: string | null, };
 

@@ -3,6 +3,9 @@ import { en } from './en';
 
 export type MessageKey = keyof typeof en;
 
+/** The app's locale, for the `Intl` formats that word things. v1 ships English only. */
+export const LOCALE = 'en';
+
 /** Looks up a UI string and fills in its `{name}` placeholders. v1 ships English only. */
 export function t(key: MessageKey, params: Record<string, string> = {}): string {
   return en[key].replace(/\{(\w+)\}/g, (placeholder, name: string) => params[name] ?? placeholder);
@@ -17,7 +20,7 @@ type WithoutOne<Key> = Key extends `${infer Base}.one` ? Base : never;
  * number, with `{count}` and its other placeholders filled in.
  */
 export function tCount(key: CountKey, count: number, params: Record<string, string> = {}): string {
-  const form = new Intl.PluralRules('en').select(count) === 'one' ? 'one' : 'other';
+  const form = new Intl.PluralRules(LOCALE).select(count) === 'one' ? 'one' : 'other';
   return t(`${key}.${form}`, { ...params, count: String(count) });
 }
 

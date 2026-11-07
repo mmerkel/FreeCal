@@ -336,7 +336,7 @@ export const samples = {
           "firstSync": false
         },
         "lastSync": {
-          "at": "2026-10-05T09:30:00",
+          "at": "2026-10-05T07:30:00Z",
           "outcome": {
             "kind": "synced"
           }
@@ -395,7 +395,7 @@ export const samples = {
   ],
   FinishedSync: [
     {
-      "at": "2026-10-05T09:30:00",
+      "at": "2026-10-05T07:30:00Z",
       "outcome": {
         "kind": "synced"
       }
@@ -409,7 +409,7 @@ export const samples = {
         "firstSync": false
       },
       "lastSync": {
-        "at": "2026-10-05T09:30:00",
+        "at": "2026-10-05T07:30:00Z",
         "outcome": {
           "kind": "synced"
         }
@@ -427,7 +427,7 @@ export const samples = {
           "firstSync": false
         },
         "lastSync": {
-          "at": "2026-10-05T09:30:00",
+          "at": "2026-10-05T07:30:00Z",
           "outcome": {
             "kind": "synced"
           }
@@ -471,7 +471,7 @@ export const samples = {
       "state": {
         "kind": "synced"
       },
-      "lastSync": "2026-10-05T09:30:00"
+      "lastSync": "2026-10-05T07:30:00Z"
     },
     {
       "state": {
@@ -486,7 +486,7 @@ export const samples = {
         "state": {
           "kind": "synced"
         },
-        "lastSync": "2026-10-05T09:30:00"
+        "lastSync": "2026-10-05T07:30:00Z"
       },
       "accounts": [
         {
@@ -498,7 +498,7 @@ export const samples = {
               "firstSync": false
             },
             "lastSync": {
-              "at": "2026-10-05T09:30:00",
+              "at": "2026-10-05T07:30:00Z",
               "outcome": {
                 "kind": "synced"
               }

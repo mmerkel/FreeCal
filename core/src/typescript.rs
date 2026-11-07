@@ -134,7 +134,7 @@ fn samples_file() -> (String, Vec<String>) {
         message: "Forbidden".to_owned(),
     };
     let finished = FinishedSync {
-        at: date(5).and_hms_opt(9, 30, 0).unwrap(),
+        at: date(5).and_hms_opt(7, 30, 0).unwrap().and_utc(),
         outcome: SyncOutcome::Synced,
     };
     let report = SyncStatusReport {
@@ -159,7 +159,7 @@ fn samples_file() -> (String, Vec<String>) {
     };
     let overall = OverallStatus {
         state: OverallState::Synced,
-        last_sync: Some(date(5).and_hms_opt(9, 30, 0).unwrap()),
+        last_sync: Some(date(5).and_hms_opt(7, 30, 0).unwrap().and_utc()),
     };
     let calendar = Calendar {
         id: CalendarId(2),

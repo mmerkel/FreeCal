@@ -263,6 +263,11 @@ pub fn time(text: &str) -> NaiveDateTime {
     text.parse().unwrap()
 }
 
+/// An instant, written in RFC 3339.
+pub fn utc(text: &str) -> DateTime<Utc> {
+    text.parse().unwrap()
+}
+
 pub fn timed(start: &str, end: &str) -> When {
     When::Timed {
         start: time(start),

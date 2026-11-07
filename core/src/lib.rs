@@ -552,17 +552,16 @@ impl Core {
         let accounts = server_accounts_of(&store)?;
         let calendars = store.unsent_change_counts()?;
         let statuses = self.tracker(&store);
-        let zone = self.clock.time_zone();
         let calendar_ids: Vec<CalendarId> = calendars.iter().map(|c| c.calendar_id).collect();
         Ok(SyncStatuses {
-            overall: statuses.overall(&accounts, &calendar_ids, zone),
+            overall: statuses.overall(&accounts, &calendar_ids),
             accounts: accounts
                 .iter()
-                .map(|id| statuses.account(*id, unsent_of_account(&calendars, *id), zone))
+                .map(|id| statuses.account(*id, unsent_of_account(&calendars, *id)))
                 .collect(),
             calendars: calendars
                 .iter()
-                .map(|calendar| statuses.calendar(calendar.calendar_id, calendar.count, zone))
+                .map(|calendar| statuses.calendar(calendar.calendar_id, calendar.count))
                 .collect(),
         })
     }
@@ -580,26 +579,19 @@ impl Core {
     ) -> Result<Vec<Signal>> {
         let servers = server_accounts_of(store)?;
         let statuses = self.tracker(store);
-        let zone = self.clock.time_zone();
         let calendar_signals = counts
             .iter()
             .filter(|count| calendars.contains(&count.calendar_id))
             .map(|count| {
-                Signal::CalendarSyncStatusChanged(statuses.calendar(
-                    count.calendar_id,
-                    count.count,
-                    zone,
-                ))
+                Signal::CalendarSyncStatusChanged(statuses.calendar(count.calendar_id, count.count))
             });
         let account_signals = servers
             .into_iter()
             .filter(|id| accounts.contains(id))
             .map(|id| {
-                Signal::AccountSyncStatusChanged(statuses.account(
-                    id,
-                    unsent_of_account(counts, id),
-                    zone,
-                ))
+                Signal::AccountSyncStatusChanged(
+                    statuses.account(id, unsent_of_account(counts, id)),
+                )
             });
         Ok(calendar_signals.chain(account_signals).collect())
     }
