@@ -81,9 +81,10 @@ impl Candidate<'_> {
 /// isn't mirrored; one holding several UIDs, which RFC 4791 §4.1 forbids,
 /// is also written to the Log and remembered as an Ignored Resource with
 /// its ETag (ADR 0015), and an Ignored Resource that now holds nothing is
-/// forgotten. One FreeCal can't read keeps its last readable version, UID
-/// and Event Rows, recorded as unreadable; an Ignored Resource keeps its
-/// ETag, so that it is fetched again. `moved_from` are the Server Objects
+/// forgotten. One FreeCal can't read loses its ETag, so that it is fetched
+/// again ([`unreadable`]): a Server Object keeps its last readable version,
+/// UID and Event Rows, an Ignored Resource its UID, and a new one becomes
+/// an Ignored Resource. `moved_from` are the Server Objects
 /// removed in the same Incoming Sync; one taken over leaves it. A Recurring
 /// Event that arrives joins the Calendar's Exceptions that had none without
 /// writing them, as they keep their recurrence IDs as obtained (ADR 0012).
@@ -604,6 +605,12 @@ mod tests {
             at.map(|(object, _)| object)
         }
 
+        /// The stored ETag of the Known Server Resource at `href`.
+        fn stored_etag(&self, href: &str) -> Option<String> {
+            let known = self.store.known_server_resources(self.calendar_id);
+            known.unwrap()[href].etag.clone()
+        }
+
         /// The Calendar's Ignored Resources, each with its ETag and the
         /// UID it holds that a Server Object keeps, by address.
         fn ignored(&self) -> Vec<(String, Option<String>, Option<String>)> {
@@ -677,25 +684,28 @@ mod tests {
         assert_eq!(alone.ignored(), []);
     }
 
-    /// An Ignored Resource that FreeCal can no longer read keeps the ETag
-    /// it had, so that it is fetched again.
+    /// ADR 0015: a resource FreeCal can't read has no stored ETag, so that
+    /// it is fetched on every Incoming Sync until it reads. A new one is an
+    /// Ignored Resource holding no UID; an Ignored Resource forgets its
+    /// ETag. Once it reads, it is handled as any fetched resource.
     #[test]
-    fn an_ignored_resource_freecal_cant_read_keeps_its_etag() {
+    fn a_resource_freecal_cant_read_has_no_etag_until_it_reads() {
         let alone = Alone::new();
-        alone.incoming_sync(
-            vec![fetched_with_etag(
-                "/two.ics",
-                &format!("{OTHER}{WEEKLY}"),
-                "1",
-            )],
-            &[],
-        );
-        alone.incoming_sync(vec![unreadable_at("/two.ics", "2")], &[]);
+        let not_read = [("/two.ics".to_owned(), None, None)];
 
-        assert_eq!(
-            alone.ignored(),
-            [("/two.ics".to_owned(), Some("1".to_owned()), None)]
-        );
+        alone.incoming_sync(vec![unreadable_at("/two.ics", "1")], &[]);
+        assert_eq!(alone.ignored(), not_read);
+        assert_eq!(alone.mirrored("/two.ics"), None);
+
+        alone.incoming_sync(vec![fetched_with_etag("/two.ics", OTHER, "2")], &[]);
+        assert_eq!(alone.ignored(), []);
+        assert_eq!(alone.titles(), ["Other", "Moved"]);
+
+        let alone = Alone::new();
+        let two = fetched_with_etag("/two.ics", &format!("{OTHER}{WEEKLY}"), "1");
+        alone.incoming_sync(vec![two], &[]);
+        alone.incoming_sync(vec![unreadable_at("/two.ics", "2")], &[]);
+        assert_eq!(alone.ignored(), not_read);
     }
 
     /// Deleting a Calendar deletes its Ignored Resources.
@@ -1057,7 +1067,8 @@ mod tests {
             assert_eq!(alone.ignored(), [ignored("/a.ics", Some("1"), "weekly")]);
         }
 
-        /// The Ignored Resource keeps its ETag, so that it is fetched again.
+        /// The Ignored Resource forgets its ETag, so that it is fetched
+        /// again, and keeps its UID.
         #[test]
         fn with_no_ignored_resource_readable_on_takeover_the_event_rows_are_deleted() {
             let (alone, _) = kept_and_ignored();
@@ -1066,7 +1077,7 @@ mod tests {
 
             assert_eq!(alone.titles(), ["Moved"]);
             assert_eq!(alone.mirrored("/a.ics"), None);
-            assert_eq!(alone.ignored(), [ignored("/b.ics", Some("1"), "other")]);
+            assert_eq!(alone.ignored(), [ignored("/b.ics", None, "other")]);
         }
 
         #[test]
@@ -1082,6 +1093,7 @@ mod tests {
             assert_eq!(alone.titles(), ["A", "Moved"]);
             assert_eq!(alone.shown()[0].1, id);
             assert_eq!(alone.mirrored("/a.ics"), kept);
+            assert_eq!(alone.stored_etag("/a.ics"), None, "fetched again");
             assert_eq!(alone.ignored(), [ignored("/b.ics", Some("2"), "other")]);
         }
 

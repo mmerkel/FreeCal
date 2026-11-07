@@ -37,14 +37,13 @@ pub(crate) struct Fetched {
 /// Resource it remembers, as an Incoming Sync asks for what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Held {
-    /// The ETag of the version FreeCal holds; none if the server gave none.
+    /// The ETag of the version FreeCal holds; none if the server gave none
+    /// or FreeCal couldn't read the server's version, so that it is fetched
+    /// on every Incoming Sync (ADR 0015).
     pub etag: Option<String>,
-    /// Whether FreeCal couldn't read the server's version, so that it holds
-    /// an earlier one.
-    pub unreadable: bool,
     /// The UID it holds as FreeCal last read it: the one a Server Object
     /// keeps, or the one an Ignored Resource holds that a Server Object
-    /// keeps; none for an Ignored Resource holding several.
+    /// keeps; none for an Ignored Resource holding several or not read.
     pub uid: Option<String>,
     /// Whether it is an Ignored Resource.
     pub ignored: bool,
@@ -88,8 +87,8 @@ pub(crate) trait Remote {
     /// last held `known_server_resources` without one, the Known Server
     /// Resources: the Server Objects FreeCal holds and the Ignored Resources
     /// it remembers, by address. An object whose ETag FreeCal holds already
-    /// isn't fetched again, unless FreeCal couldn't read it, so that it is
-    /// fetched on each Incoming Sync until it reads. A Known Server Resource
+    /// isn't fetched again; one FreeCal holds without an ETag is fetched on
+    /// every Incoming Sync, listed as changed or not. A Known Server Resource
     /// that is gone is among the removed. When a Server Object stops
     /// keeping its UID, removed or holding something else now, the Ignored
     /// Resources holding that UID are fetched too, in a second request, for

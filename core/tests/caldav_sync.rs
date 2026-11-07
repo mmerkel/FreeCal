@@ -862,7 +862,10 @@ mod server_objects {
 
         assert_eq!(synced.titles(), ["Standup"]);
         let id = synced.event("Standup").id;
-        assert_eq!(synced.core.original_server_data(id).unwrap(), held);
+        let kept = synced.core.original_server_data(id).unwrap().unwrap();
+        let held = held.unwrap();
+        assert_eq!((kept.href, kept.data), (held.href, held.data));
+        assert_eq!(kept.etag, None, "fetched again");
         synced.put("standup", standup("Standup moved"));
         synced.sync();
         assert_eq!(synced.titles(), ["Standup moved"]);
@@ -1002,7 +1005,7 @@ mod server_objects {
         // As if FreeCal couldn't read the version the server has, and held
         // an earlier one.
         synced.harness.arrange_local_store(&format!(
-            "UPDATE caldav_server_object SET unreadable = 1 WHERE calendar_id = {0};
+            "UPDATE caldav_server_object SET etag = NULL WHERE calendar_id = {0};
              UPDATE event SET title = 'Earlier' WHERE calendar_id = {0};",
             synced.work.0
         ));
@@ -1017,11 +1020,14 @@ mod server_objects {
 /// ADR 0015: a CalDAV resource holding several UIDs, which RFC 4791 §4.1
 /// forbids, is an Ignored Resource, fetched and written to the Log again
 /// only when it changes. Each fetch of it writes one Log line, which is how
-/// these tests count them.
+/// these tests count them. A resource FreeCal can't read is fetched on
+/// every Incoming Sync until it reads, with one Log line when it becomes
+/// unreadable.
 mod ignored_resources {
     use super::*;
 
-    /// The Log lines this thread wrote about Ignored Resources.
+    /// The Log lines this thread wrote about Ignored Resources and
+    /// resources FreeCal can't read.
     mod captured_log {
         use std::cell::RefCell;
         use std::sync::Once;
@@ -1039,7 +1045,9 @@ mod ignored_resources {
 
             fn log(&self, record: &log::Record) {
                 let line = record.args().to_string();
-                if line.starts_with("Ignored the CalDAV resource") {
+                if line.starts_with("Ignored the CalDAV resource")
+                    || line.starts_with("Couldn't read the CalDAV resource")
+                {
                     LINES.with(|lines| lines.borrow_mut().push(line));
                 }
             }
@@ -1057,8 +1065,8 @@ mod ignored_resources {
             LINES.with(|lines| lines.borrow_mut().clear());
         }
 
-        /// How many Log lines about Ignored Resources this thread wrote
-        /// since [`start`].
+        /// How many Log lines about Ignored Resources and resources FreeCal
+        /// can't read this thread wrote since [`start`].
         pub(super) fn count() -> usize {
             LINES.with(|lines| lines.borrow().len())
         }
@@ -1096,17 +1104,23 @@ mod ignored_resources {
     }
 
     /// Syncs, without a sync token unless `tokens`, and returns how many
-    /// times it fetched the resource `two` and how many Log lines about
-    /// Ignored Resources it wrote.
-    fn sync_and_count(synced: &Synced, proxy: &RewritingProxy, tokens: bool) -> (usize, usize) {
+    /// times it fetched the resource `name` and how many Log lines
+    /// [`captured_log`] counts it wrote.
+    fn sync_and_count(
+        synced: &Synced,
+        proxy: &RewritingProxy,
+        name: &str,
+        tokens: bool,
+    ) -> (usize, usize) {
         if !tokens {
             synced.without_sync_tokens();
         }
-        let fetched = proxy.requests_holding("two.ics");
+        let path = format!("{name}.ics");
+        let fetched = proxy.requests_holding(&path);
         captured_log::start();
         synced.sync();
         (
-            proxy.requests_holding("two.ics") - fetched,
+            proxy.requests_holding(&path) - fetched,
             captured_log::count(),
         )
     }
@@ -1115,7 +1129,7 @@ mod ignored_resources {
     fn is_fetched_and_logged_once_until_it_changes_and_mirrored_once_it_holds_one_uid() {
         for tokens in [false, true] {
             let (synced, proxy) = through_proxy();
-            let sync = || sync_and_count(&synced, &proxy, tokens);
+            let sync = || sync_and_count(&synced, &proxy, "two", tokens);
             synced.put("two", two_uids("A"));
 
             assert_eq!(sync(), (1, 1), "tokens: {tokens}");
@@ -1140,7 +1154,7 @@ mod ignored_resources {
     fn is_forgotten_once_removed_from_the_server() {
         for tokens in [false, true] {
             let (synced, proxy) = through_proxy();
-            let sync = || sync_and_count(&synced, &proxy, tokens);
+            let sync = || sync_and_count(&synced, &proxy, "two", tokens);
             synced.put("two", two_uids("A"));
             assert_eq!(sync(), (1, 1), "tokens: {tokens}");
 
@@ -1150,6 +1164,114 @@ mod ignored_resources {
 
             synced.put("two", two_uids("A"));
             assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+        }
+    }
+
+    /// ADR 0015: a resource FreeCal can't read has no stored ETag, so that
+    /// it is fetched on every Incoming Sync until it reads, though a sync
+    /// token doesn't list it again. A proxy shows [`late`] with a start
+    /// FreeCal can't read until it stops rewriting, as if an update of
+    /// FreeCal could read it.
+    mod unreadable {
+        use super::*;
+
+        /// The start of [`late`] as Radicale keeps it.
+        const READABLE_START: &str = "DTSTART;TZID=Europe/Berlin:20261007T090000";
+
+        /// What the proxy shows instead: a UTC time with a zone, which
+        /// FreeCal can't read.
+        const UNREADABLE_START: &str = "DTSTART;TZID=Europe/Berlin:20261007T090000Z";
+
+        /// An Event with the UID `uid` titled `title` on 7 October, from
+        /// 07:00 UTC, which the proxy shows unreadable.
+        fn late(uid: &str, title: &str) -> Vec<u8> {
+            ics(&format!(
+                "BEGIN:VEVENT\nUID:{uid}\nSUMMARY:{title}\n{READABLE_START}\n\
+                 DTEND;TZID=Europe/Berlin:20261007T100000\nEND:VEVENT\n"
+            ))
+        }
+
+        /// A Calendar holding the Event "Standup", synced through a proxy
+        /// that shows [`late`] unreadable.
+        fn through_proxy() -> (Synced, RewritingProxy) {
+            let proxy = RewritingProxy::new(Radicale::shared(), READABLE_START, UNREADABLE_START);
+            let synced = Synced::arranged(
+                NewCalendar::default(),
+                Some(&proxy.url),
+                |radicale, user, url| {
+                    radicale.put_event(user, url, "standup", standup("Standup"));
+                },
+            );
+            (synced, proxy)
+        }
+
+        #[test]
+        fn a_new_one_is_fetched_on_each_sync_until_it_reads_and_its_event_then_shows() {
+            for tokens in [false, true] {
+                let (synced, proxy) = through_proxy();
+                let sync = || sync_and_count(&synced, &proxy, "late", tokens);
+                synced.put("late", late("late", "Late"));
+
+                assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                assert_eq!(synced.titles(), ["Standup"]);
+
+                proxy.stop_rewriting();
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                assert_eq!(synced.titles(), ["Standup", "Late"]);
+                assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+            }
+        }
+
+        /// It keeps its UID, and takes over once it reads and the Server
+        /// Object keeping the UID goes.
+        #[test]
+        fn an_ignored_resource_is_fetched_on_each_sync_until_it_reads() {
+            for tokens in [false, true] {
+                let (synced, proxy) = through_proxy();
+                let sync = || sync_and_count(&synced, &proxy, "copy", tokens);
+                // Radicale refuses a second resource holding a UID.
+                synced.write("copy", titled("standup", "Copy", "20261008"));
+                assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+                assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+
+                synced.write("copy", late("standup", "Copy"));
+                assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                assert_eq!(synced.titles(), ["Standup"]);
+
+                proxy.stop_rewriting();
+                assert_eq!(sync(), (1, 1), "ignored as it reads, tokens: {tokens}");
+                assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+                synced.delete("standup");
+                synced.sync();
+                assert_eq!(synced.titles(), ["Copy"]);
+            }
+        }
+
+        #[test]
+        fn a_server_object_keeps_its_text_uid_and_event_rows_and_is_fetched_until_it_reads() {
+            for tokens in [false, true] {
+                let (synced, proxy) = through_proxy();
+                let sync = || sync_and_count(&synced, &proxy, "late", tokens);
+                synced.put("late", titled("late", "Late", "20261007"));
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                let id = synced.event("Late").id;
+                let text = synced.held("Late").unwrap().data;
+
+                synced.put("late", late("late", "Late moved"));
+                assert_eq!(sync(), (1, 1), "tokens: {tokens}");
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                assert_eq!(synced.titles(), ["Standup", "Late"]);
+                assert_eq!(synced.event("Late").id, id);
+                assert_eq!(synced.held("Late").unwrap().data, text);
+
+                proxy.stop_rewriting();
+                assert_eq!(sync(), (1, 0), "tokens: {tokens}");
+                assert_eq!(synced.titles(), ["Standup", "Late moved"]);
+                assert_eq!(synced.event("Late moved").id, id);
+                assert_eq!(sync(), (0, 0), "tokens: {tokens}");
+            }
         }
     }
 }

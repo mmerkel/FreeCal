@@ -19,13 +19,19 @@ ADR 0015's amendment of 2026-11-07 records this.
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] With sync tokens, a new resource FreeCal can't read is fetched on each Incoming Sync until it reads, and its Event then shows (seam test, Radicale)
-- [ ] With sync tokens, an Ignored Resource that becomes unreadable is fetched on each Incoming Sync until it reads (seam test)
-- [ ] A mirrored Server Object that becomes unreadable keeps its text, UID and Event Rows, and is fetched on each Incoming Sync until it reads. The existing test arranges this with `etag = NULL` instead of `unreadable = 1`
-- [ ] The Log gets one line when a resource becomes unreadable, and none on the fetches after while it stays so
-- [ ] No `unreadable` column, field or function remains. A Known Server Resource crossing the Provider interface is its address and optional ETag, plus what ticket 108 removes
-- [ ] The glossary's Ignored Resource entry and the schema comment agree with ADR 0015's amendment
+- [x] With sync tokens, a new resource FreeCal can't read is fetched on each Incoming Sync until it reads, and its Event then shows (seam test, Radicale)
+- [x] With sync tokens, an Ignored Resource that becomes unreadable is fetched on each Incoming Sync until it reads (seam test)
+- [x] A mirrored Server Object that becomes unreadable keeps its text, UID and Event Rows, and is fetched on each Incoming Sync until it reads. The existing test arranges this with `etag = NULL` instead of `unreadable = 1`
+- [x] The Log gets one line when a resource becomes unreadable, and none on the fetches after while it stays so
+- [x] No `unreadable` column, field or function remains. A Known Server Resource crossing the Provider interface is its address and optional ETag, plus what ticket 108 removes
+- [x] The glossary's Ignored Resource entry and the schema comment agree with ADR 0015's amendment
+
+## Comments
+
+- 2026-11-07, implementation: a resource FreeCal can't read loses its stored ETag (`DatabaseTransaction::forget_etag`, `core/src/store/sql/mirror/caldav.rs`), and `Client::changes` (`core/src/caldav.rs`) fetches every Known Server Resource without one, listed or not. The Log line is `unreadable_line` in `core/src/sync/caldav/mod.rs`. The seam tests (`ignored_resources::unreadable`, `core/tests/caldav_sync.rs`) run with and without sync tokens. They go through a proxy that shows a start FreeCal can't read until it stops rewriting (`RewritingProxy::stop_rewriting`), as if an update of FreeCal could read the resource.
+- Known gap, as the ticket defines it: on a server that gives no ETags, a stored resource becoming unreadable writes no Log line, since its ETag was already missing. That server case has no test of its own; the same `etag IS NULL` rule covers it.
+- New terms: **forget the ETag** (new term), clear a Known Server Resource's stored ETag so it is fetched on every Incoming Sync, or remember a new resource as an Ignored Resource with neither ETag nor UID (`forget_etag`); **unreadable** (new term), of a Known Server Resource FreeCal couldn't read, which has no stored ETag (`unreadable`, `unreadable_line`).

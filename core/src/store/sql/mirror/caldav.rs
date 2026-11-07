@@ -6,7 +6,7 @@
 //! [`SyncEngineWritePermission`], which only [`crate::sync`] can make, and is
 //! a method of a [`DatabaseTransaction`].
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::event::{ObjectId, ServerObject};
 use crate::store::DatabaseTransaction;
@@ -33,7 +33,7 @@ impl DatabaseTransaction<'_> {
             Some(id) => {
                 self.tx.execute(
                     "UPDATE caldav_server_object SET href = ?2, etag = ?3, data = ?4, \
-                     unreadable = 0, uid = ?5 WHERE id = ?1",
+                     uid = ?5 WHERE id = ?1",
                     params![id.0, object.href, object.etag, object.data, uid],
                 )?;
                 Ok(id)
@@ -49,18 +49,50 @@ impl DatabaseTransaction<'_> {
         }
     }
 
-    /// Marks the CalDAV Server Object at `href` in a Calendar unreadable.
-    pub(crate) fn mark_unreadable(
+    /// Forgets the ETag of the Known Server Resource at `href` in a
+    /// Calendar, as FreeCal can't read what the server holds there, so that
+    /// it is fetched on every Incoming Sync until it reads (ADR 0015). A
+    /// CalDAV Server Object keeps its text and UID, and an Ignored Resource
+    /// its UID; a resource FreeCal doesn't know yet becomes an Ignored
+    /// Resource with neither ETag nor UID. Returns whether it became
+    /// unreadable: it is new, or its ETag was known.
+    pub(crate) fn forget_etag(
         &self,
         _: &SyncEngineWritePermission,
         calendar_id: CalendarId,
         href: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
+        let at = params![calendar_id.0, href];
+        let mirrored: Option<Option<String>> = self
+            .tx
+            .query_row(
+                "SELECT etag FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
+                at,
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(etag) = mirrored {
+            self.tx.execute(
+                "UPDATE caldav_server_object SET etag = NULL WHERE calendar_id = ?1 AND href = ?2",
+                at,
+            )?;
+            return Ok(etag.is_some());
+        }
+        let ignored: Option<Option<String>> = self
+            .tx
+            .query_row(
+                "SELECT etag FROM caldav_ignored_resource WHERE calendar_id = ?1 AND href = ?2",
+                at,
+                |row| row.get(0),
+            )
+            .optional()?;
         self.tx.execute(
-            "UPDATE caldav_server_object SET unreadable = 1 WHERE calendar_id = ?1 AND href = ?2",
-            params![calendar_id.0, href],
+            "INSERT INTO caldav_ignored_resource (calendar_id, href, etag, uid) \
+             VALUES (?1, ?2, NULL, NULL) \
+             ON CONFLICT (calendar_id, href) DO UPDATE SET etag = NULL",
+            at,
         )?;
-        Ok(())
+        Ok(ignored.is_none_or(|etag| etag.is_some()))
     }
 
     /// Deletes the CalDAV Server Object `id`; Event Rows aren't written.

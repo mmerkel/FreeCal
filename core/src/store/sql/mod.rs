@@ -216,12 +216,12 @@ impl Store {
     /// The Known Server Resources of a Calendar, by their address as the
     /// server gave it: its Server Objects, each with the UID it keeps, and
     /// its Ignored Resources, each with the UID it holds that a Server
-    /// Object keeps, none for one holding several.
+    /// Object keeps, none for one holding several or not read.
     pub fn known_server_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
         let mut stmt = self.conn.prepare(
-            "SELECT href, etag, unreadable, uid, FALSE FROM caldav_server_object \
+            "SELECT href, etag, uid, FALSE FROM caldav_server_object \
              WHERE calendar_id = ?1 \
-             UNION ALL SELECT href, etag, FALSE, uid, TRUE FROM caldav_ignored_resource \
+             UNION ALL SELECT href, etag, uid, TRUE FROM caldav_ignored_resource \
              WHERE calendar_id = ?1",
         )?;
         let known = readable(stmt.query_map([calendar_id.0], |row| {
@@ -229,9 +229,8 @@ impl Store {
                 row.get(0)?,
                 Held {
                     etag: row.get(1)?,
-                    unreadable: row.get(2)?,
-                    uid: row.get(3)?,
-                    ignored: row.get(4)?,
+                    uid: row.get(2)?,
+                    ignored: row.get(3)?,
                 },
             ))
         })?)?;

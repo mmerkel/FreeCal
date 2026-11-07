@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use base64::Engine;
@@ -459,11 +460,12 @@ pub fn closed_port_url() -> String {
 /// A stand-in for a server that keeps what Radicale refuses, such as a
 /// resource holding several UIDs: a proxy in front of Radicale that passes
 /// each request through and the answer back, with every `marker` in an
-/// answer replaced by `replacement`. It records the bodies of the requests
-/// it gets.
+/// answer replaced by `replacement` until [`RewritingProxy::stop_rewriting`].
+/// It records the bodies of the requests it gets.
 pub struct RewritingProxy {
     pub url: String,
     bodies: Arc<Mutex<Vec<String>>>,
+    rewriting: Arc<AtomicBool>,
 }
 
 impl RewritingProxy {
@@ -473,6 +475,8 @@ impl RewritingProxy {
         let target = radicale.url();
         let bodies = Arc::new(Mutex::new(Vec::new()));
         let recorded = bodies.clone();
+        let rewriting = Arc::new(AtomicBool::new(true));
+        let rewrites = rewriting.clone();
         let (marker, replacement, proxy) = (marker.to_owned(), replacement.to_owned(), url.clone());
         std::thread::spawn(move || {
             // A fresh connection for each request: Radicale may close an
@@ -504,11 +508,10 @@ impl RewritingProxy {
                     }
                 }
                 let mut response = agent.run(request.body(body).unwrap()).unwrap();
-                let answer = response
-                    .body_mut()
-                    .read_to_string()
-                    .unwrap_or_default()
-                    .replace(&marker, &replacement);
+                let mut answer = response.body_mut().read_to_string().unwrap_or_default();
+                if rewrites.load(Ordering::SeqCst) {
+                    answer = answer.replace(&marker, &replacement);
+                }
                 let mut head = format!("HTTP/1.1 {}\r\n", response.status());
                 for (name, value) in response.headers() {
                     if ["content-length", "transfer-encoding", "connection"]
@@ -527,7 +530,16 @@ impl RewritingProxy {
                 let _ = stream.write_all(answer.as_bytes());
             }
         });
-        Self { url, bodies }
+        Self {
+            url,
+            bodies,
+            rewriting,
+        }
+    }
+
+    /// Passes answers back unchanged from now on.
+    pub fn stop_rewriting(&self) {
+        self.rewriting.store(false, Ordering::SeqCst);
     }
 
     /// How many requests it got whose body holds `text`.

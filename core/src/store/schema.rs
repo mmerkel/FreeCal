@@ -30,17 +30,20 @@ const MIGRATIONS: &[&str] = &[
     //
     // Each Provider has Mirror tables of its own (ADR 0015). A CalDAV
     // Server Object mirrors one resource, the only one at its href in its
-    // Calendar, with its iCalendar text as received, and `unreadable` once
-    // FreeCal couldn't read the server's version, so that the Mirror holds
-    // the last version it could. It holds one UID, the only one holding it
-    // in its Calendar, as a resource holding several, or a UID another
-    // already holds, isn't mirrored (ADR 0015): a Calendar's Event Rows with
-    // one UID find their Corresponding Server Object by it. An Ignored Resource
-    // is a CalDAV resource the Sync Engine fetched and doesn't mirror, with
-    // the ETag it had, so that it isn't fetched again until it changes, and
-    // the UID that a mirrored resource already holds; none for one holding
-    // several UIDs (ADR 0015). It isn't part of the Mirror, and an href is
-    // never both mirrored and ignored, which the triggers enforce. Recurrence IDs
+    // Calendar, with its iCalendar text as received. It holds one UID, the
+    // only one holding it in its Calendar, as a resource holding several,
+    // or a UID another already holds, isn't mirrored (ADR 0015): a
+    // Calendar's Event Rows with one UID find their Corresponding Server
+    // Object by it. An Ignored Resource is a CalDAV resource the Sync
+    // Engine fetched and doesn't mirror, with the ETag it had, so that it
+    // isn't fetched again until it changes, and the UID that a mirrored
+    // resource already holds; none for one holding several UIDs or not
+    // read (ADR 0015). It isn't part of the Mirror, and an href is never
+    // both mirrored and ignored, which the triggers enforce. A Server
+    // Object or Ignored Resource without an ETag is fetched on every
+    // Incoming Sync: FreeCal couldn't read the server's version, so that a
+    // Server Object holds the last one it could, or the server gave none.
+    // Recurrence IDs
     // everywhere are stored as obtained and compared by Occurrence, never in
     // SQL (ADR 0012).
     //
@@ -87,7 +90,6 @@ const MIGRATIONS: &[&str] = &[
         href TEXT NOT NULL,
         etag TEXT,
         data TEXT NOT NULL,
-        unreadable INTEGER NOT NULL DEFAULT 0,
         uid TEXT NOT NULL
     );
     CREATE UNIQUE INDEX caldav_server_object_calendar_href ON caldav_server_object (calendar_id, href);

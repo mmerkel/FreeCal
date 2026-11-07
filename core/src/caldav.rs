@@ -239,8 +239,9 @@ impl Client {
     /// `sync-collection` (RFC 6578), or else found by listing the whole
     /// Calendar with ETags and comparing with `known_server_resources`, the
     /// Known Server Resources, by their address as the server gave it. Objects whose ETag
-    /// FreeCal holds are left out, unless FreeCal couldn't read them; the
-    /// others are fetched with `calendar-multiget`. When a Server Object
+    /// FreeCal holds are left out; the others, and every Known Server
+    /// Resource without a stored ETag, listed or not, are fetched with
+    /// `calendar-multiget`. When a Server Object
     /// stops keeping its UID, the Ignored Resources holding that UID are
     /// fetched in a second request, for one to take over ([`takeover`]).
     pub fn changes(
@@ -290,22 +291,20 @@ impl Client {
             .members
             .into_iter()
             .filter(|(path, etag)| {
-                etag.is_none()
-                    || held
-                        .get(path)
-                        .is_none_or(|(_, held)| held.unreadable || held.etag != *etag)
+                etag.is_none() || held.get(path).is_none_or(|(_, held)| held.etag != *etag)
             })
             .map(|(path, _)| path)
             .collect();
-        // A sync token lists only what changed since.
-        let unchanged: Vec<String> = held
+        // Without a stored ETag, it is fetched whether listed or not, as a
+        // sync token lists only what changed since.
+        let without_etag: Vec<String> = held
             .iter()
             .filter(|(path, (href, held))| {
-                held.unreadable && !fetch.contains(path) && !removed.contains(href)
+                held.etag.is_none() && !fetch.contains(path) && !removed.contains(href)
             })
             .map(|(path, _)| path.clone())
             .collect();
-        fetch.extend(unchanged);
+        fetch.extend(without_etag);
         // A removed Server Object's Event Rows may go to another holding its
         // UID, read from what FreeCal holds of it.
         let zone = match listing.zone {
@@ -1240,7 +1239,6 @@ mod tests {
     fn a_takeover_fetches_the_ignored_resources_of_a_uid_no_longer_kept() {
         let held = |uid: Option<&str>, ignored| Held {
             etag: None,
-            unreadable: false,
             uid: uid.map(str::to_owned),
             ignored,
         };

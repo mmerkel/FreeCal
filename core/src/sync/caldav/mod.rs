@@ -2,9 +2,9 @@
 //! ([`incoming`]), its writes of the Mirror, its rules for which
 //! resource keeps a UID: the fixed order among resources holding one UID
 //! ([`fixed_order`]) and recognising a Server Object that moved
-//! ([`moved`]), and the CalDAV resources it doesn't mirror, the Ignored
+//! ([`moved`]), the CalDAV resources it doesn't mirror, the Ignored
 //! Resources: remembering them ([`ignore`]) and their Log lines
-//! ([`log_ignored`]).
+//! ([`log_ignored`]), and the resources it can't read ([`unreadable`]).
 
 pub(crate) mod incoming;
 
@@ -136,16 +136,35 @@ fn mirror(
 }
 
 /// Records that FreeCal couldn't read what the server holds now at `href` in
-/// a Calendar: the Server Object there keeps the last version it could, and
-/// its Event Rows stay as they are.
+/// a Calendar by forgetting its ETag, so that it is fetched on every
+/// Incoming Sync until it reads (ADR 0015). A Server Object there keeps the
+/// last version it could read, its UID and its Event Rows; an Ignored
+/// Resource keeps its UID; a new resource becomes an Ignored Resource
+/// holding no UID. Writes to the Log when it becomes unreadable, not on
+/// each fetch while it stays so.
 fn unreadable(
     journal_transaction: &JournalTransaction,
     calendar_id: CalendarId,
     href: &str,
 ) -> Result<()> {
-    journal_transaction
-        .database_transaction()
-        .mark_unreadable(WRITE_PERMISSION, calendar_id, href)
+    if journal_transaction.database_transaction().forget_etag(
+        WRITE_PERMISSION,
+        calendar_id,
+        href,
+    )? {
+        log::warn!("{}", unreadable_line(calendar_id, href));
+    }
+    Ok(())
+}
+
+/// The Log line of [`unreadable`]. The address is untrusted, so it is
+/// escaped, which keeps a newline in it from starting another line.
+fn unreadable_line(calendar_id: CalendarId, href: &str) -> String {
+    format!(
+        "Couldn't read the CalDAV resource {href:?} of Calendar {}: it is fetched on every \
+         Incoming Sync until it reads",
+        calendar_id.0
+    )
 }
 
 /// Removes the Server Object `id` from the Mirror, as an Incoming Sync
@@ -239,6 +258,18 @@ mod tests {
                  \"e\" and 2 more",
                 "x".repeat(LOGGED_UID_LENGTH)
             )
+        );
+        assert!(!line.contains('\n') && !line.contains('\r'));
+    }
+
+    #[test]
+    fn the_log_line_of_an_unreadable_caldav_resource_escapes_its_address() {
+        let line = unreadable_line(CalendarId(7), "/late\r\n.ics");
+
+        assert_eq!(
+            line,
+            "Couldn't read the CalDAV resource \"/late\\r\\n.ics\" of Calendar 7: it is \
+             fetched on every Incoming Sync until it reads"
         );
         assert!(!line.contains('\n') && !line.contains('\r'));
     }
