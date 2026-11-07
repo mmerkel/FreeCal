@@ -1,5 +1,6 @@
 import type { OverallState, SyncStatus, SyncStatusReport, SyncStatuses } from '../core/types';
 import { hourCycle } from './clock.svelte';
+import { asDate } from './when';
 
 /**
  * How long a sync FreeCal started itself runs before the window shows it as
@@ -14,11 +15,10 @@ export const SYNCING_DELAY_MS = 1000;
  * Calendar alike. Only the display waits; the Signals came straight away.
  */
 export class SyncingDelay {
-  /** When each one syncing was first seen syncing, by `key`. */
-  private started = new Map<string, number>();
-  private timers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Called when a held-back Syncing is due, so that the window shows it. */
-  ondue: () => void = () => {};
+  /** Each Syncing held back, or come due, by `key`. */
+  private waits = new Map<string, { timer: ReturnType<typeof setTimeout>; due: boolean }>();
+  /** Counts held-back Syncing states coming due, so that what reads `shown` reads it again then. */
+  private dues = $state(0);
 
   /**
    * `statuses` as the window shows them now: a Syncing still held back
@@ -26,6 +26,7 @@ export class SyncingDelay {
    * its last sync ended.
    */
   shown(statuses: SyncStatuses): SyncStatuses {
+    void this.dues;
     const syncing = new Set<string>();
     const overall = this.held('overall', statuses.overall.state, syncing)
       ? { ...statuses.overall, state: { kind: 'synced' } satisfies OverallState }
@@ -45,7 +46,7 @@ export class SyncingDelay {
         report: report(`calendar ${calendar.calendarId}`, calendar.report),
       })),
     };
-    for (const key of this.started.keys()) {
+    for (const key of [...this.waits.keys()]) {
       if (!syncing.has(key)) this.forget(key);
     }
     return shown;
@@ -53,7 +54,7 @@ export class SyncingDelay {
 
   /** Stops waiting for any Syncing. */
   stop() {
-    for (const key of [...this.started.keys()]) this.forget(key);
+    for (const key of [...this.waits.keys()]) this.forget(key);
   }
 
   /** Whether `key`, which is in `state`, is Syncing still held back; notes it in `syncing`. */
@@ -61,22 +62,22 @@ export class SyncingDelay {
     if (state.kind !== 'syncing') return false;
     syncing.add(key);
     if (state.byUser) return false;
-    const started = this.started.get(key);
-    if (started === undefined) {
-      this.started.set(key, Date.now());
-      this.timers.set(
-        key,
-        setTimeout(() => this.ondue(), SYNCING_DELAY_MS),
-      );
-      return true;
-    }
-    return Date.now() - started < SYNCING_DELAY_MS;
+    const wait = this.waits.get(key);
+    if (wait) return !wait.due;
+    const started = {
+      due: false,
+      timer: setTimeout(() => {
+        started.due = true;
+        this.dues++;
+      }, SYNCING_DELAY_MS),
+    };
+    this.waits.set(key, started);
+    return true;
   }
 
   private forget(key: string) {
-    clearTimeout(this.timers.get(key));
-    this.timers.delete(key);
-    this.started.delete(key);
+    clearTimeout(this.waits.get(key)?.timer);
+    this.waits.delete(key);
   }
 }
 
@@ -91,5 +92,5 @@ export function lastSyncText(at: string, today: Temporal.PlainDate): string {
     timeStyle: 'short',
     hourCycle: hourCycle(),
   });
-  return format.format(new Date(time.year, time.month - 1, time.day, time.hour, time.minute));
+  return format.format(asDate(time));
 }

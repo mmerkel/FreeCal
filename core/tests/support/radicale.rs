@@ -469,6 +469,12 @@ pub struct RewritingProxy {
 }
 
 impl RewritingProxy {
+    /// A proxy that passes every request and answer on unchanged, and
+    /// records them.
+    pub fn passthrough(radicale: &Radicale) -> Self {
+        Self::new(radicale, "X-UNUSED", "X-UNUSED")
+    }
+
     pub fn new(radicale: &Radicale, marker: &str, replacement: &str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());

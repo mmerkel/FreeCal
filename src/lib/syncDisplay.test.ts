@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { SyncStatuses } from '../core/types';
 import { accountId, calendarId } from '../test/ids';
-import { SYNCING_DELAY_MS, SyncingDelay } from './syncDisplay';
+import { SYNCING_DELAY_MS, SyncingDelay } from './syncDisplay.svelte';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -74,15 +74,4 @@ test('while Syncing waits, a row shows how its last sync ended', () => {
   const shown = delay.shown(failed);
 
   expect(shown.accounts[0].report.status).toEqual({ kind: 'offline' });
-});
-
-test('it tells when a waiting Syncing is due, so that the window shows it then', () => {
-  const delay = new SyncingDelay();
-  const due = vi.fn();
-  delay.ondue = due;
-  delay.shown(statuses(false));
-
-  vi.advanceTimersByTime(SYNCING_DELAY_MS);
-
-  expect(due).toHaveBeenCalled();
 });

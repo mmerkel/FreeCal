@@ -7,12 +7,14 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use freecal_core::{
-    AccountId, AccountSyncStatus, CalDavLogin, CalendarId, CalendarSyncStatus, Core, ErrorCode,
-    FinishedSync, OverallState, OverallStatus, Signal, StartedBy, SyncOutcome, SyncStatus,
-    SyncStatusReport,
+    AccountId, AccountSyncStatus, CalendarId, CalendarSyncStatus, Core, ErrorCode, FinishedSync,
+    OverallState, OverallStatus, Signal, StartedBy, SyncOutcome, SyncStatus, SyncStatusReport,
 };
 use support::radicale::{NewCalendar, Radicale, User, closed_port_url};
-use support::{Harness, calendar, draft, make_writable, time, timed};
+use support::{
+    Harness, account_sync_status, add_account, calendar, calendar_sync_status, draft,
+    make_writable, time, timed,
+};
 
 /// A user on Radicale with two Calendars, "Work" and "Home", both added
 /// to a new Core, with no Signals recorded yet.
@@ -55,6 +57,17 @@ impl Server {
             home: added[1].id,
             home_url: std::mem::take(&mut urls[1]),
         }
+    }
+
+    /// Adds the Account of another Radicale user, with one Calendar.
+    fn add_second_account(&self) -> AccountId {
+        let other = self.radicale.user();
+        let second = add_account(&self.core, self.radicale, &other);
+        let url = self
+            .radicale
+            .create_calendar(&other, NewCalendar::default());
+        self.core.add_calendars(second, &[url]).unwrap();
+        second
     }
 
     /// Points the Account and its Calendars at a server that isn't there,
@@ -104,23 +117,11 @@ impl Server {
     }
 
     fn account_status(&self) -> SyncStatusReport {
-        let statuses = self.core.sync_statuses().unwrap();
-        statuses
-            .accounts
-            .into_iter()
-            .find(|status| status.account_id == self.account)
-            .unwrap()
-            .report
+        account_sync_status(&self.core, self.account)
     }
 
     fn calendar_status(&self, id: CalendarId) -> SyncStatusReport {
-        let statuses = self.core.sync_statuses().unwrap();
-        statuses
-            .calendars
-            .into_iter()
-            .find(|status| status.calendar_id == id)
-            .unwrap()
-            .report
+        calendar_sync_status(&self.core, id)
     }
 }
 
@@ -132,17 +133,6 @@ fn move_account(harness: &Harness, id: AccountId, from: &str, to: &str) {
          UPDATE calendar SET url = replace(url, '{from}', '{to}') WHERE account_id = {id}",
         id = id.0
     ));
-}
-
-fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
-    core.add_caldav_account(&CalDavLogin {
-        url: radicale.url(),
-        username: user.name.clone(),
-        password: user.password.clone(),
-    })
-    .unwrap()
-    .account
-    .id
 }
 
 /// The harness clock's time, 12:00 in Berlin, in the Display Time Zone.
@@ -163,6 +153,20 @@ fn report(status: SyncStatus, last_sync: Option<FinishedSync>) -> SyncStatusRepo
         last_sync,
         unsent_changes: 0,
     }
+}
+
+fn calendar_signal(id: CalendarId, status: SyncStatus, last_sync: Option<FinishedSync>) -> Signal {
+    Signal::CalendarSyncStatusChanged(CalendarSyncStatus {
+        calendar_id: id,
+        report: report(status, last_sync),
+    })
+}
+
+fn account_signal(id: AccountId, status: SyncStatus, last_sync: Option<FinishedSync>) -> Signal {
+    Signal::AccountSyncStatusChanged(AccountSyncStatus {
+        account_id: id,
+        report: report(status, last_sync),
+    })
 }
 
 fn syncing(by_user: bool, first_sync: bool) -> SyncStatus {
@@ -220,26 +224,14 @@ fn adding_calendars_reports_their_first_sync_as_started_by_the_user() {
 
     let work = core.add_calendars(account, &[url]).unwrap()[0].id;
 
-    let calendar = |status, last_sync| {
-        Signal::CalendarSyncStatusChanged(CalendarSyncStatus {
-            calendar_id: work,
-            report: report(status, last_sync),
-        })
-    };
-    let account_signal = |status, last_sync| {
-        Signal::AccountSyncStatusChanged(AccountSyncStatus {
-            account_id: account,
-            report: report(status, last_sync),
-        })
-    };
     assert_eq!(
         harness.signals.received(),
         [
             Signal::CalendarsChanged,
-            calendar(syncing(true, true), None),
-            account_signal(syncing(true, false), None),
-            calendar(SyncStatus::Synced, Some(noon())),
-            account_signal(SyncStatus::Synced, Some(noon())),
+            calendar_signal(work, syncing(true, true), None),
+            account_signal(account, syncing(true, false), None),
+            calendar_signal(work, SyncStatus::Synced, Some(noon())),
+            account_signal(account, SyncStatus::Synced, Some(noon())),
         ]
     );
     assert_eq!(
@@ -265,27 +257,16 @@ fn a_sync_reports_syncing_then_synced_for_the_account_and_each_calendar() {
         at: time("2026-10-03T12:05:00"),
         outcome: SyncOutcome::Synced,
     });
-    let calendar = |id, status, last_sync| {
-        Signal::CalendarSyncStatusChanged(CalendarSyncStatus {
-            calendar_id: id,
-            report: report(status, last_sync),
-        })
-    };
-    let account = |status, last_sync| {
-        Signal::AccountSyncStatusChanged(AccountSyncStatus {
-            account_id: server.account,
-            report: report(status, last_sync),
-        })
-    };
+    let (account, work, home) = (server.account, server.work, server.home);
     assert_eq!(
         server.harness.signals.received(),
         [
-            account(syncing(false, false), Some(noon())),
-            calendar(server.work, syncing(false, false), Some(noon())),
-            calendar(server.work, SyncStatus::Synced, at_five_past.clone()),
-            calendar(server.home, syncing(false, false), Some(noon())),
-            calendar(server.home, SyncStatus::Synced, at_five_past.clone()),
-            account(SyncStatus::Synced, at_five_past),
+            account_signal(account, syncing(false, false), Some(noon())),
+            calendar_signal(work, syncing(false, false), Some(noon())),
+            calendar_signal(work, SyncStatus::Synced, at_five_past.clone()),
+            calendar_signal(home, syncing(false, false), Some(noon())),
+            calendar_signal(home, SyncStatus::Synced, at_five_past.clone()),
+            account_signal(account, SyncStatus::Synced, at_five_past),
         ]
     );
 }
@@ -429,12 +410,7 @@ fn a_login_the_keyring_doesnt_give_is_a_sync_error_of_the_account() {
 fn the_overall_status_is_offline_only_when_every_server_account_is() {
     let offline = Server::new();
     let core = &offline.core;
-    let other = Radicale::shared().user();
-    let second = add_account(core, offline.radicale, &other);
-    let url = offline
-        .radicale
-        .create_calendar(&other, NewCalendar::default());
-    core.add_calendars(second, &[url]).unwrap();
+    let second = offline.add_second_account();
     offline.go_offline();
     let _ = core.sync_account(offline.account, StartedBy::FreeCal);
 
@@ -462,12 +438,7 @@ fn the_overall_status_is_offline_only_when_every_server_account_is() {
 fn the_overall_last_sync_is_the_oldest_last_successful_sync() {
     let server = Server::new();
     let core = &server.core;
-    let other = Radicale::shared().user();
-    let second = add_account(core, server.radicale, &other);
-    let url = server
-        .radicale
-        .create_calendar(&other, NewCalendar::default());
-    core.add_calendars(second, &[url]).unwrap();
+    let second = server.add_second_account();
     let last_sync = || core.sync_statuses().unwrap().overall.last_sync;
 
     server.harness.clock.set("2026-10-03T12:30:00+02:00");

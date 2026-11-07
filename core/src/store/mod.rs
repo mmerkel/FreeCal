@@ -14,6 +14,7 @@ mod sql;
 
 #[cfg(test)]
 pub use sql::UnsentChange;
+pub(crate) use sql::UnsentChangeCount;
 
 use std::ops::Deref;
 use std::path::Path;

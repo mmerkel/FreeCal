@@ -5,6 +5,7 @@
  */
 import type { View } from '../core/types';
 import { startOfWeek } from './week.svelte';
+import { asDate } from './when';
 
 export interface Navigation {
   view: View;
@@ -73,7 +74,9 @@ export function periodTitle({ view, date }: Navigation): TitlePart[] {
   switch (view) {
     case 'day':
       return titleParts(
-        new Intl.DateTimeFormat(undefined, { dateStyle: 'full' }).formatToParts(asDate(date)),
+        new Intl.DateTimeFormat(undefined, { dateStyle: 'full' }).formatToParts(
+          asDate(date.toPlainDateTime()),
+        ),
         () => date.toPlainYearMonth(),
       );
     case 'week': {
@@ -84,7 +87,7 @@ export function periodTitle({ view, date }: Navigation): TitlePart[] {
           year: 'numeric',
           month: 'short',
           day: 'numeric',
-        }).formatRangeToParts(asDate(start), asDate(end)),
+        }).formatRangeToParts(asDate(start.toPlainDateTime()), asDate(end.toPlainDateTime())),
         (source) => (source === 'endRange' ? end : start).toPlainYearMonth(),
       );
     }
@@ -96,7 +99,7 @@ export function periodTitle({ view, date }: Navigation): TitlePart[] {
 /** A month and its year in words, such as the month view's title. */
 export function monthTitle(month: Temporal.PlainYearMonth): string {
   return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long' }).format(
-    asDate(month.toPlainDate({ day: 1 })),
+    asDate(month.toPlainDate({ day: 1 }).toPlainDateTime()),
   );
 }
 
@@ -113,8 +116,4 @@ function titleParts(
     else joined.push({ text: part.value });
   }
   return joined;
-}
-
-function asDate(day: Temporal.PlainDate): Date {
-  return new Date(day.year, day.month - 1, day.day);
 }

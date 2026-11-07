@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import App from './App.svelte';
 import type { SyncStatus, SyncStatusReport } from './core/types';
-import { SYNCING_DELAY_MS } from './lib/syncDisplay';
+import { SYNCING_DELAY_MS } from './lib/syncDisplay.svelte';
 import { FakeCore } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));

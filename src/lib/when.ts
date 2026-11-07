@@ -188,6 +188,7 @@ export function describeWhen(when: When): string {
   );
 }
 
-function asDate(time: Temporal.PlainDateTime): Date {
+/** `time` as a JavaScript `Date` in the local time zone, for `Intl` to format. */
+export function asDate(time: Temporal.PlainDateTime): Date {
   return new Date(time.year, time.month - 1, time.day, time.hour, time.minute);
 }

@@ -5,11 +5,9 @@
 
 mod support;
 
-use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Core, OverallState, Signal, SyncStatus, SyncTrigger,
-};
+use freecal_core::{AccountId, CalendarId, Core, OverallState, Signal, SyncStatus, SyncTrigger};
 use support::radicale::{NewCalendar, Radicale};
-use support::{Harness, calendar, draft, make_writable, timed};
+use support::{Harness, account_sync_status, calendar, draft, make_writable, timed};
 
 /// A new Core with two server Accounts on Radicale, each with one
 /// Calendar, and the Local Account with its starting Calendars. The
@@ -74,15 +72,7 @@ impl Synced {
     }
 
     fn account_status(&self, id: AccountId) -> SyncStatus {
-        self.core
-            .sync_statuses()
-            .unwrap()
-            .accounts
-            .into_iter()
-            .find(|status| status.account_id == id)
-            .unwrap()
-            .report
-            .status
+        account_sync_status(&self.core, id).status
     }
 }
 
@@ -90,15 +80,7 @@ impl Synced {
 fn add_account(core: &Core, radicale: &Radicale) -> (AccountId, CalendarId) {
     let user = radicale.user();
     let url = radicale.create_calendar(&user, NewCalendar::default());
-    let account = core
-        .add_caldav_account(&CalDavLogin {
-            url: radicale.url(),
-            username: user.name.clone(),
-            password: user.password.clone(),
-        })
-        .unwrap()
-        .account
-        .id;
+    let account = support::add_account(core, radicale, &user);
     let calendar = core.add_calendars(account, &[url]).unwrap()[0].id;
     (account, calendar)
 }

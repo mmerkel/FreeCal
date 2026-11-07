@@ -46,7 +46,7 @@
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
-  import { SyncingDelay } from './lib/syncDisplay';
+  import { SyncingDelay } from './lib/syncDisplay.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
@@ -107,15 +107,9 @@
   let directory = $state<Directory>();
   /** The Sync Status of every server Account and Calendar, as last read. */
   let syncStatuses = $state<SyncStatuses>();
-  /** Counts held-back Syncing states coming due, so that they show then. */
-  let syncingDue = $state(0);
   const syncingDelay = new SyncingDelay();
-  syncingDelay.ondue = () => syncingDue++;
   /** The Sync Statuses as shown, with a routine sync's Syncing held back for a moment. */
-  const shownSyncStatuses = $derived.by(() => {
-    void syncingDue;
-    return syncStatuses && syncingDelay.shown(syncStatuses);
-  });
+  const shownSyncStatuses = $derived(syncStatuses && syncingDelay.shown(syncStatuses));
   /** Why FreeCal couldn't start, in words, for the startup error screen. */
   let startupReason = $state<string>();
   let readFailure = $state<string>();

@@ -296,19 +296,22 @@ impl Client {
             .collect();
         let mut fetching: HashSet<String> = fetch.iter().cloned().collect();
         let removed_paths: HashSet<String> = removed.iter().filter_map(|href| path(href)).collect();
+        // Adds a path not fetched yet nor removed.
+        let mut add = |fetch: &mut Vec<String>, path: String| {
+            if !removed_paths.contains(&path) && fetching.insert(path.clone()) {
+                fetch.push(path);
+            }
+        };
         // Without a stored ETag, it is fetched whether listed or not, as a
         // sync token lists only what changed since.
         let mut without_etag: Vec<&String> = held
             .iter()
-            .filter(|(path, (_, etag))| {
-                etag.is_none() && !fetching.contains(*path) && !removed_paths.contains(*path)
-            })
+            .filter(|(_, (_, etag))| etag.is_none())
             .map(|(path, _)| path)
             .collect();
         without_etag.sort();
         for path in without_etag {
-            fetching.insert(path.clone());
-            fetch.push(path.clone());
+            add(&mut fetch, path.clone());
         }
         let asked: Vec<String> = fetch
             .iter()
@@ -316,11 +319,8 @@ impl Client {
             .chain(removed.iter().cloned())
             .collect();
         for href in fetch_too(&asked) {
-            if let Some(path) = path(&href)
-                && !removed_paths.contains(&path)
-                && fetching.insert(path.clone())
-            {
-                fetch.push(path);
+            if let Some(path) = path(&href) {
+                add(&mut fetch, path);
             }
         }
         // A removed Server Object's Event Rows may go to another holding its

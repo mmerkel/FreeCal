@@ -13,10 +13,13 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
-    Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft, EventId, Frequency, Keyring,
-    KeyringError, Occurrence, Repeat, RepeatEnd, Signal, SignalSink, When,
+    AccountId, CalDavLogin, Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft,
+    EventId, Frequency, Keyring, KeyringError, Occurrence, Repeat, RepeatEnd, Signal, SignalSink,
+    SyncStatusReport, When,
 };
 use tempfile::TempDir;
+
+use radicale::{Radicale, User};
 
 pub struct Harness {
     data_dir: TempDir,
@@ -338,4 +341,43 @@ pub fn ics(body: &str) -> Vec<u8> {
 /// A `VEVENT` whose title is its UID, with `start` and `end` as whole lines.
 pub fn event(uid: &str, start: &str, end: &str) -> String {
     format!("BEGIN:VEVENT\nUID:{uid}\nSUMMARY:{uid}\n{start}\n{end}\nEND:VEVENT\n")
+}
+
+/// The login of `user` on `radicale`.
+pub fn user_login(radicale: &Radicale, user: &User) -> CalDavLogin {
+    CalDavLogin {
+        url: radicale.url(),
+        username: user.name.clone(),
+        password: user.password.clone(),
+    }
+}
+
+/// Adds the CalDAV Account of `user` on `radicale`.
+pub fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
+    core.add_caldav_account(&user_login(radicale, user))
+        .unwrap()
+        .account
+        .id
+}
+
+/// The Sync Status of the server Account `id`.
+pub fn account_sync_status(core: &Core, id: AccountId) -> SyncStatusReport {
+    core.sync_statuses()
+        .unwrap()
+        .accounts
+        .into_iter()
+        .find(|status| status.account_id == id)
+        .unwrap()
+        .report
+}
+
+/// The Sync Status of the server Calendar `id`.
+pub fn calendar_sync_status(core: &Core, id: CalendarId) -> SyncStatusReport {
+    core.sync_statuses()
+        .unwrap()
+        .calendars
+        .into_iter()
+        .find(|status| status.calendar_id == id)
+        .unwrap()
+        .report
 }

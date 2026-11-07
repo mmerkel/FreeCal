@@ -3,22 +3,12 @@ mod support;
 use std::sync::{Arc, Mutex, Weak};
 
 use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal,
-    SyncStatus, link_allowed,
+    CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal, SyncStatus, link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, all_day, date, draft, event, ics, make_writable, timed, titles};
-
-fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
-    core.add_caldav_account(&CalDavLogin {
-        url: radicale.url(),
-        username: user.name.clone(),
-        password: user.password.clone(),
-    })
-    .unwrap()
-    .account
-    .id
-}
+use support::{
+    Harness, add_account, all_day, date, draft, event, ics, make_writable, timed, titles,
+};
 
 fn server_calendar(radicale: &Radicale, user: &User) -> String {
     radicale.create_calendar(

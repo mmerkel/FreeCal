@@ -62,7 +62,7 @@ use calendar::calendar_name;
 use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::{Remote, SyncPoint};
-use store::Store;
+use store::{Store, UnsentChangeCount};
 use sync_scheduler::SyncScheduler;
 use sync_status::SyncStatusTracker;
 
@@ -344,9 +344,7 @@ impl Core {
         if account.ok_or(CoreError::AccountNotFound(id))?.provider == Provider::Local {
             return Ok(Vec::new());
         }
-        {
-            self.tracker(&self.store()).start_account(id, started_by);
-        }
+        self.tracker(&self.store()).start_account(id, started_by);
         self.send_sync_statuses(&[id], &[]);
         let mut synced = Vec::new();
         let mut failed = None;
@@ -390,7 +388,7 @@ impl Core {
             return;
         }
         let accounts = if due.every_account() {
-            self.server_accounts()
+            server_accounts_of(&self.store())
         } else {
             Ok(due.accounts().collect())
         };
@@ -463,17 +461,19 @@ impl Core {
             let store = self.store();
             let accounts = server_accounts_of(&store)?;
             let now = self.clock.now();
-            let mut marked = Vec::new();
-            for id in accounts {
-                let record = self.tracker(&store).account_offline(id, now);
-                if let Some(record) = record {
-                    store.write(|database_transaction| {
-                        database_transaction.set_account_sync_record(id, &record)
-                    })?;
-                    marked.push(id);
-                }
-            }
-            Ok::<_, CoreError>(marked)
+            let records: Vec<_> = {
+                let mut statuses = self.tracker(&store);
+                accounts
+                    .into_iter()
+                    .filter_map(|id| Some((id, statuses.account_offline(id, now)?)))
+                    .collect()
+            };
+            store.write(|database_transaction| {
+                records.iter().try_for_each(|(id, record)| {
+                    database_transaction.set_account_sync_record(*id, record)
+                })
+            })?;
+            Ok::<_, CoreError>(records.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
         })();
         match marked {
             Ok(marked) => self.send_sync_statuses(&marked, &[]),
@@ -494,11 +494,6 @@ impl Core {
 
     fn scheduler(&self) -> std::sync::MutexGuard<'_, SyncScheduler> {
         self.scheduler.lock().unwrap()
-    }
-
-    /// Every server Account, in the order they were added.
-    fn server_accounts(&self) -> Result<Vec<AccountId>> {
-        server_accounts_of(&self.store())
     }
 
     /// Ends the Calendar `id`'s running sync, which failed with `failed` if
@@ -553,33 +548,60 @@ impl Core {
     /// The Sync Status of every server Account and Calendar, with the
     /// overall status. The Local Account and its Calendars have none.
     pub fn sync_statuses(&self) -> Result<SyncStatuses> {
-        self.read_sync_statuses(&self.store())
-    }
-
-    fn read_sync_statuses(&self, store: &Store) -> Result<SyncStatuses> {
-        let accounts = server_accounts_of(store)?;
+        let store = self.store();
+        let accounts = server_accounts_of(&store)?;
         let calendars = store.unsent_change_counts()?;
-        let statuses = self.tracker(store);
+        let statuses = self.tracker(&store);
         let zone = self.clock.time_zone();
         let calendar_ids: Vec<CalendarId> = calendars.iter().map(|c| c.calendar_id).collect();
         Ok(SyncStatuses {
             overall: statuses.overall(&accounts, &calendar_ids, zone),
             accounts: accounts
                 .iter()
-                .map(|id| {
-                    let unsent = calendars
-                        .iter()
-                        .filter(|calendar| calendar.account_id == *id)
-                        .map(|calendar| calendar.count)
-                        .sum();
-                    statuses.account(*id, unsent, zone)
-                })
+                .map(|id| statuses.account(*id, unsent_of_account(&calendars, *id), zone))
                 .collect(),
             calendars: calendars
                 .iter()
                 .map(|calendar| statuses.calendar(calendar.calendar_id, calendar.count, zone))
                 .collect(),
         })
+    }
+
+    /// "Sync status changed" for the server Accounts `accounts` and
+    /// Calendars `calendars` as they are now, their Unsent Changes counted
+    /// in `counts`. The Local Account and its Calendars, and those removed
+    /// meanwhile, are left out.
+    fn sync_status_signals(
+        &self,
+        store: &Store,
+        counts: &[UnsentChangeCount],
+        accounts: &[AccountId],
+        calendars: &[CalendarId],
+    ) -> Result<Vec<Signal>> {
+        let servers = server_accounts_of(store)?;
+        let statuses = self.tracker(store);
+        let zone = self.clock.time_zone();
+        let calendar_signals = counts
+            .iter()
+            .filter(|count| calendars.contains(&count.calendar_id))
+            .map(|count| {
+                Signal::CalendarSyncStatusChanged(statuses.calendar(
+                    count.calendar_id,
+                    count.count,
+                    zone,
+                ))
+            });
+        let account_signals = servers
+            .into_iter()
+            .filter(|id| accounts.contains(id))
+            .map(|id| {
+                Signal::AccountSyncStatusChanged(statuses.account(
+                    id,
+                    unsent_of_account(counts, id),
+                    zone,
+                ))
+            });
+        Ok(calendar_signals.chain(account_signals).collect())
     }
 
     /// The Sync Status of each server Account and Calendar, locked inside
@@ -594,22 +616,16 @@ impl Core {
     /// meanwhile, are left out. Should the Local Store fail, none is sent;
     /// the next one says it all again.
     fn send_sync_statuses(&self, accounts: &[AccountId], calendars: &[CalendarId]) {
-        let statuses = match self.sync_statuses() {
-            Ok(statuses) => statuses,
-            Err(error) => return log::warn!("Couldn't read the Sync Status to send: {error}"),
-        };
-        let calendar_signals = statuses
-            .calendars
-            .into_iter()
-            .filter(|status| calendars.contains(&status.calendar_id))
-            .map(Signal::CalendarSyncStatusChanged);
-        let account_signals = statuses
-            .accounts
-            .into_iter()
-            .filter(|status| accounts.contains(&status.account_id))
-            .map(Signal::AccountSyncStatusChanged);
-        for signal in calendar_signals.chain(account_signals) {
-            self.signals.send(signal);
+        let signals = (|| {
+            let store = self.store();
+            let counts = store.unsent_change_counts()?;
+            self.sync_status_signals(&store, &counts, accounts, calendars)
+        })();
+        match signals {
+            Ok(signals) => signals
+                .into_iter()
+                .for_each(|signal| self.signals.send(signal)),
+            Err(error) => log::warn!("Couldn't read the Sync Status to send: {error}"),
         }
     }
 
@@ -1068,16 +1084,25 @@ impl Core {
     /// have changed, and asks for a sync of those Accounts, which sends the
     /// change right after it.
     fn after_local_change(&self, calendars: &[CalendarId]) {
-        let accounts = match self.store().unsent_change_counts() {
-            Ok(counts) => counts
-                .into_iter()
+        let read = (|| {
+            let store = self.store();
+            let counts = store.unsent_change_counts()?;
+            let accounts: Vec<AccountId> = counts
+                .iter()
                 .filter(|count| calendars.contains(&count.calendar_id))
                 .map(|count| count.account_id)
-                .collect::<Vec<_>>(),
+                .collect();
+            let signals = self.sync_status_signals(&store, &counts, &accounts, calendars)?;
+            Ok::<_, CoreError>((accounts, signals))
+        })();
+        let (accounts, signals) = match read {
+            Ok(read) => read,
             Err(error) => return log::warn!("Couldn't read the Sync Status to send: {error}"),
         };
+        signals
+            .into_iter()
+            .for_each(|signal| self.signals.send(signal));
         if !accounts.is_empty() {
-            self.send_sync_statuses(&accounts, calendars);
             self.ask_for_sync(|scheduler| {
                 for id in &accounts {
                     scheduler.ask_account(*id, StartedBy::FreeCal);
@@ -1113,6 +1138,15 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(CoreError::LocalStoreInUse),
         Err(TryLockError::Error(error)) => Err(error.into()),
     }
+}
+
+/// How many Unsent Changes the Calendars of the Account `id` have together.
+fn unsent_of_account(counts: &[UnsentChangeCount], id: AccountId) -> u32 {
+    counts
+        .iter()
+        .filter(|count| count.account_id == id)
+        .map(|count| count.count)
+        .sum()
 }
 
 /// Every server Account in the Local Store, in the order they were added.

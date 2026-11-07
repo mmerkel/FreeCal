@@ -37,6 +37,25 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
+    /// The ETag kept at `href` in a Calendar in `table`, a CalDAV Server
+    /// Object's or an Ignored Resource's: none when it holds nothing there,
+    /// `Some(None)` when it holds no ETag.
+    fn etag_at(
+        &self,
+        table: &'static str,
+        calendar_id: CalendarId,
+        href: &str,
+    ) -> Result<Option<Option<String>>> {
+        Ok(self
+            .tx
+            .query_row(
+                &format!("SELECT etag FROM {table} WHERE calendar_id = ?1 AND href = ?2"),
+                params![calendar_id.0, href],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Forgets the ETag of the Known Server Resource at `href` in a
     /// Calendar, as FreeCal can't read what the server holds there, so that
     /// it is fetched on every Incoming Sync until it reads (ADR 0015). A
@@ -51,29 +70,14 @@ impl DatabaseTransaction<'_> {
         href: &str,
     ) -> Result<bool> {
         let at = params![calendar_id.0, href];
-        let mirrored: Option<Option<String>> = self
-            .tx
-            .query_row(
-                "SELECT etag FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
-                at,
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(etag) = mirrored {
+        if let Some(etag) = self.etag_at("caldav_server_object", calendar_id, href)? {
             self.tx.execute(
                 "UPDATE caldav_server_object SET etag = NULL WHERE calendar_id = ?1 AND href = ?2",
                 at,
             )?;
             return Ok(etag.is_some());
         }
-        let ignored: Option<Option<String>> = self
-            .tx
-            .query_row(
-                "SELECT etag FROM caldav_ignored_resource WHERE calendar_id = ?1 AND href = ?2",
-                at,
-                |row| row.get(0),
-            )
-            .optional()?;
+        let ignored = self.etag_at("caldav_ignored_resource", calendar_id, href)?;
         self.tx.execute(
             "INSERT INTO caldav_ignored_resource (calendar_id, href, etag, uid) \
              VALUES (?1, ?2, NULL, NULL) \
@@ -111,14 +115,7 @@ impl DatabaseTransaction<'_> {
         object: &ServerObject,
         uid: Option<&str>,
     ) -> Result<bool> {
-        let remembered: Option<Option<String>> = self
-            .tx
-            .query_row(
-                "SELECT etag FROM caldav_ignored_resource WHERE calendar_id = ?1 AND href = ?2",
-                params![calendar_id.0, object.href],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let remembered = self.etag_at("caldav_ignored_resource", calendar_id, &object.href)?;
         self.tx.execute(
             "INSERT INTO caldav_ignored_resource (calendar_id, href, etag, uid) \
              VALUES (?1, ?2, ?3, ?4) \

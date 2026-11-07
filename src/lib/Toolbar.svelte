@@ -23,7 +23,7 @@
   import Menu from './Menu.svelte';
   import { monthTitle, type TitlePart } from './navigation';
   import { shortcutHint, shortcutKeys } from './shortcuts';
-  import { lastSyncText } from './syncDisplay';
+  import { lastSyncText } from './syncDisplay.svelte';
 
   interface Props {
     view: View;

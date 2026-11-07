@@ -286,6 +286,15 @@ fn titled(uid: &str, title: &str, day: &str) -> Vec<u8> {
     ))
 }
 
+/// "Standup A" at `a-standup` and "Standup B" at `b-standup`, both with the
+/// UID `standup`.
+fn two_standups() -> [(&'static str, Vec<u8>); 2] {
+    [
+        ("a-standup", standup("Standup A")),
+        ("b-standup", standup("Standup B")),
+    ]
+}
+
 fn standup(title: &str) -> Vec<u8> {
     ics(&format!(
         "BEGIN:VEVENT\nUID:standup\nSUMMARY:{title}\nDTSTART:20261005T070000Z\n\
@@ -870,10 +879,7 @@ mod server_objects {
     #[test]
     fn an_ignored_object_takes_over_when_the_kept_ones_uid_changes() {
         for tokens in [true, false] {
-            let synced = Synced::with_files(&[
-                ("a-standup", standup("Standup A")),
-                ("b-standup", standup("Standup B")),
-            ]);
+            let synced = Synced::with_files(&two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -958,10 +964,7 @@ mod server_objects {
     /// one Incoming Sync: the kept one keeps the UID.
     #[test]
     fn the_kept_resource_changed_beside_an_ignored_resource_keeps_the_uid() {
-        let synced = Synced::with_files(&[
-            ("a-standup", standup("Standup A")),
-            ("b-standup", standup("Standup B")),
-        ]);
+        let synced = Synced::with_files(&two_standups());
         let id = synced.event("Standup A").id;
         synced.write("a-standup", standup("Standup A changed"));
         synced.write("b-standup", standup("Standup B changed"));
@@ -989,10 +992,7 @@ mod server_objects {
             .into_iter()
             .flat_map(|tokens| cases.map(|case| (tokens, case)))
         {
-            let synced = Synced::with_files(&[
-                ("a-standup", standup("Standup A")),
-                ("b-standup", standup("Standup B")),
-            ]);
+            let synced = Synced::with_files(&two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -1025,14 +1025,8 @@ mod server_objects {
         ];
         for tokens in [true, false] {
             for (holds, titles) in &cases {
-                let proxy = RewritingProxy::new(Radicale::shared(), "X-UNUSED", "X-UNUSED");
-                let synced = Synced::files_through(
-                    &proxy,
-                    &[
-                        ("a-standup", standup("Standup A")),
-                        ("b-standup", standup("Standup B")),
-                    ],
-                );
+                let proxy = RewritingProxy::passthrough(Radicale::shared());
+                let synced = Synced::files_through(&proxy, &two_standups());
                 if !tokens {
                     synced.without_sync_tokens();
                 }
@@ -1094,10 +1088,7 @@ mod server_objects {
     /// Event Rows go; once one reads, it keeps the UID.
     #[test]
     fn with_no_ignored_resource_readable_on_takeover_the_event_goes() {
-        let synced = Synced::with_files(&[
-            ("a-standup", standup("Standup A")),
-            ("b-standup", standup("Standup B")),
-        ]);
+        let synced = Synced::with_files(&two_standups());
         synced.write("b-standup", unreadable_standup("Standup B"));
         synced.sync();
         synced.delete("a-standup");
@@ -1115,10 +1106,7 @@ mod server_objects {
     /// Incoming Sync.
     #[test]
     fn a_kept_resource_that_becomes_unreadable_keeps_the_uid_beside_an_ignored_resource() {
-        let synced = Synced::with_files(&[
-            ("a-standup", standup("Standup A")),
-            ("b-standup", standup("Standup B")),
-        ]);
+        let synced = Synced::with_files(&two_standups());
         let id = synced.event("Standup A").id;
         synced.write("a-standup", unreadable_standup("Standup A moved"));
         synced.write("b-standup", standup("Standup B changed"));
@@ -1572,13 +1560,7 @@ mod ignored_resources {
     fn an_ignored_resource_takes_over_once_the_kept_one_holds_several_uids() {
         for tokens in [false, true] {
             let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
-            let synced = Synced::files_through(
-                &proxy,
-                &[
-                    ("a-standup", standup("Standup A")),
-                    ("b-standup", standup("Standup B")),
-                ],
-            );
+            let synced = Synced::files_through(&proxy, &two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -1623,14 +1605,8 @@ mod ignored_resources {
     #[test]
     fn fetched_again_unchanged_it_writes_no_log_line() {
         for tokens in [false, true] {
-            let proxy = RewritingProxy::new(Radicale::shared(), "X-UNUSED", "X-UNUSED");
-            let synced = Synced::files_through(
-                &proxy,
-                &[
-                    ("a-standup", standup("Standup A")),
-                    ("b-standup", standup("Standup B")),
-                ],
-            );
+            let proxy = RewritingProxy::passthrough(Radicale::shared());
+            let synced = Synced::files_through(&proxy, &two_standups());
             synced.write("a-standup", standup("Standup A changed"));
 
             assert_eq!(

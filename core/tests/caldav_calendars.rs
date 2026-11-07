@@ -1,16 +1,8 @@
 mod support;
 
-use freecal_core::{AccountId, CalDavLogin, Calendar, Colour, Core, CoreError, ErrorCode, Signal};
+use freecal_core::{AccountId, Calendar, Colour, Core, CoreError, ErrorCode, Signal};
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, calendar, draft, make_writable, timed};
-
-fn user_login(radicale: &Radicale, user: &User) -> CalDavLogin {
-    CalDavLogin {
-        url: radicale.url(),
-        username: user.name.clone(),
-        password: user.password.clone(),
-    }
-}
+use support::{Harness, add_account, calendar, draft, make_writable, timed};
 
 fn server_calendar(radicale: &Radicale, user: &User, name: &str) -> String {
     radicale.create_calendar(
@@ -20,13 +12,6 @@ fn server_calendar(radicale: &Radicale, user: &User, name: &str) -> String {
             ..NewCalendar::default()
         },
     )
-}
-
-fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
-    core.add_caldav_account(&user_login(radicale, user))
-        .unwrap()
-        .account
-        .id
 }
 
 fn available_urls(core: &Core, account: AccountId) -> Vec<String> {

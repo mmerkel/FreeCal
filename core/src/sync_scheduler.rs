@@ -61,29 +61,18 @@ impl SyncRequests {
 
     /// Who the sync of the Account `id` counts as started by.
     pub fn started_by(&self, id: AccountId) -> StartedBy {
-        let user = |asked: Option<&StartedBy>| asked == Some(&StartedBy::User);
-        if user(self.every_account.as_ref()) || user(self.accounts.get(&id)) {
-            StartedBy::User
-        } else {
-            StartedBy::FreeCal
-        }
+        self.every_account
+            .max(self.accounts.get(&id).copied())
+            .unwrap_or(StartedBy::FreeCal)
     }
 
     fn ask_every_account(&mut self, by: StartedBy) {
-        self.every_account = Some(stronger(self.every_account, by));
+        self.every_account = self.every_account.max(Some(by));
     }
 
     fn ask_account(&mut self, id: AccountId, by: StartedBy) {
-        let asked = self.accounts.get(&id).copied();
-        self.accounts.insert(id, stronger(asked, by));
-    }
-}
-
-fn stronger(asked: Option<StartedBy>, by: StartedBy) -> StartedBy {
-    if asked == Some(StartedBy::User) {
-        StartedBy::User
-    } else {
-        by
+        let asked = self.accounts.entry(id).or_insert(by);
+        *asked = (*asked).max(by);
     }
 }
 

@@ -20,11 +20,12 @@ use crate::{AccountId, CalendarId, CoreError, ErrorCode};
 /// Whether the user started a sync (sync now, adding Calendars), so that
 /// its Syncing shows at once, or FreeCal did (polls and the other
 /// triggers), so that it shows only once it has run for a while (spec:
-/// "Overall status").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// "Overall status"). The user ranks above FreeCal, so that the
+/// stronger of two is their `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StartedBy {
-    User,
     FreeCal,
+    User,
 }
 
 /// The Sync Status of one server Account or Calendar.
@@ -80,6 +81,17 @@ impl SyncOutcome {
                 error: error.checked()?,
             }),
             outcome => Some(outcome),
+        }
+    }
+
+    /// How a sync that failed with `error` ended: Offline when its server
+    /// couldn't be reached at the network level, a Sync Error otherwise.
+    pub(crate) fn of_failure(error: &CoreError) -> Self {
+        match error {
+            CoreError::ServerUnreachable(_) => SyncOutcome::Offline,
+            error => SyncOutcome::SyncError {
+                error: error.code(),
+            },
         }
     }
 }
@@ -230,19 +242,6 @@ pub(crate) fn about_account(error: &CoreError) -> bool {
     )
 }
 
-impl SyncOutcome {
-    /// How a sync that failed with `error` ended: Offline when its server
-    /// couldn't be reached at the network level, a Sync Error otherwise.
-    pub(crate) fn of_failure(error: &CoreError) -> Self {
-        match error {
-            CoreError::ServerUnreachable(_) => SyncOutcome::Offline,
-            error => SyncOutcome::SyncError {
-                error: error.code(),
-            },
-        }
-    }
-}
-
 /// One server Account's or Calendar's sync state, without its Unsent
 /// Changes.
 #[derive(Debug, Clone, Default)]
@@ -284,14 +283,16 @@ impl SyncState {
     }
 
     fn status(&self) -> SyncStatus {
-        match &self.record.last {
-            _ if self.running > 0 => SyncStatus::Syncing {
+        if self.running > 0 {
+            return SyncStatus::Syncing {
                 by_user: self.by_user,
                 first_sync: self.first_sync,
-            },
-            Some((_, outcome)) => outcome.clone().into(),
-            None => SyncStatus::Synced,
+            };
         }
+        self.record
+            .last
+            .as_ref()
+            .map_or(SyncStatus::Synced, |(_, outcome)| outcome.clone().into())
     }
 
     fn report(&self, unsent_changes: u32, zone: Tz) -> SyncStatusReport {
@@ -305,6 +306,17 @@ impl SyncState {
         }
     }
 }
+
+/// The state of one that has never synced.
+const NEVER_SYNCED: SyncState = SyncState {
+    running: 0,
+    by_user: false,
+    first_sync: false,
+    record: SyncRecord {
+        last: None,
+        last_synced: None,
+    },
+};
 
 fn in_zone(at: DateTime<FixedOffset>, zone: Tz) -> NaiveDateTime {
     at.with_timezone(&zone).naive_local()
@@ -416,24 +428,14 @@ impl SyncStatusTracker {
     pub fn account(&self, id: AccountId, unsent_changes: u32, zone: Tz) -> AccountSyncStatus {
         AccountSyncStatus {
             account_id: id,
-            report: self
-                .accounts
-                .get(&id)
-                .cloned()
-                .unwrap_or_default()
-                .report(unsent_changes, zone),
+            report: state(&self.accounts, &id).report(unsent_changes, zone),
         }
     }
 
     pub fn calendar(&self, id: CalendarId, unsent_changes: u32, zone: Tz) -> CalendarSyncStatus {
         CalendarSyncStatus {
             calendar_id: id,
-            report: self
-                .calendars
-                .get(&id)
-                .cloned()
-                .unwrap_or_default()
-                .report(unsent_changes, zone),
+            report: state(&self.calendars, &id).report(unsent_changes, zone),
         }
     }
 
@@ -445,15 +447,15 @@ impl SyncStatusTracker {
         calendars: &[CalendarId],
         zone: Tz,
     ) -> OverallStatus {
-        let account_states: Vec<SyncState> = accounts
+        let account_states: Vec<&SyncState> = accounts
             .iter()
-            .map(|id| self.accounts.get(id).cloned().unwrap_or_default())
+            .map(|id| state(&self.accounts, id))
             .collect();
         let account_statuses: Vec<SyncStatus> =
-            account_states.iter().map(SyncState::status).collect();
+            account_states.iter().map(|state| state.status()).collect();
         let calendar_statuses: Vec<SyncStatus> = calendars
             .iter()
-            .map(|id| self.calendars.get(id).cloned().unwrap_or_default().status())
+            .map(|id| state(&self.calendars, id).status())
             .collect();
         let all = || account_statuses.iter().chain(&calendar_statuses);
         let syncing_by = |by_user: bool| {
@@ -461,7 +463,7 @@ impl SyncStatusTracker {
         };
         let state = if all().any(|status| matches!(status, SyncStatus::SyncError { .. })) {
             OverallState::SyncError
-        } else if !account_states.is_empty() && account_states.iter().all(SyncState::offline) {
+        } else if !account_states.is_empty() && account_states.iter().all(|state| state.offline()) {
             OverallState::Offline
         } else if syncing_by(true) {
             OverallState::Syncing { by_user: true }
@@ -484,4 +486,9 @@ impl SyncStatusTracker {
             .map(|at| in_zone(at, zone));
         OverallStatus { state, last_sync }
     }
+}
+
+/// The sync state of `id`, which has never synced without an entry.
+fn state<'a, K: std::hash::Hash + Eq>(states: &'a HashMap<K, SyncState>, id: &K) -> &'a SyncState {
+    states.get(id).unwrap_or(&NEVER_SYNCED)
 }
