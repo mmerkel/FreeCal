@@ -20,6 +20,7 @@ import type {
   SettingsUpdate,
   SidebarState,
   Signal,
+  SyncStatuses,
   JournalTransactionId,
   View,
   When,
@@ -62,7 +63,7 @@ export interface CoreApi {
   /**
    * Adds Available Calendars of a server Account, by their `url`, all or
    * none. Resolves once each one's first sync has pulled its Events; until
-   * then the Calendar's `firstSync` says so. Should a first sync fail, the
+   * then the Calendar's Sync Status says so. Should a first sync fail, the
    * Calendars stay added and this rejects.
    */
   addCalendars(accountId: AccountId, urls: string[]): Promise<Calendar[]>;
@@ -73,6 +74,12 @@ export interface CoreApi {
   removeAccount(id: AccountId): Promise<void>;
   /** Every Calendar of every Account, in the order they were added. */
   listCalendars(): Promise<Calendar[]>;
+  /**
+   * The Sync Status of every server Account and Calendar, with the overall
+   * status. The Local Account and its Calendars have none. "Sync status
+   * changed" says when it changes.
+   */
+  syncStatuses(): Promise<SyncStatuses>;
   /** Creates a Calendar in the Local Account. `colour` is `#rrggbb`. */
   createCalendar(accountId: AccountId, name: string, colour: string): Promise<Calendar>;
   renameCalendar(id: CalendarId, name: string): Promise<void>;

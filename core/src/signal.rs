@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use serde::Serialize;
 
-use crate::CalendarId;
+use crate::{AccountSyncStatus, CalendarId, CalendarSyncStatus};
 
 /// A message from the core saying that something changed.
 ///
@@ -24,6 +24,12 @@ pub enum Signal {
     /// on a new day. The frontend moves the today highlight, and jumps to
     /// the new today while it is tracking today.
     DateChanged { date: NaiveDate },
+    /// A status Signal, "Sync status changed" for a server Account: its new
+    /// Sync Status Report. Never for the Local Account.
+    AccountSyncStatusChanged(AccountSyncStatus),
+    /// A status Signal, "Sync status changed" for a server Account's
+    /// Calendar: its new Sync Status Report. Never for a Local Calendar.
+    CalendarSyncStatusChanged(CalendarSyncStatus),
 }
 
 /// Receives the core's Signals, for example the Tauri shell forwarding them to

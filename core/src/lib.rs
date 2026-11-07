@@ -19,11 +19,11 @@ mod signal;
 mod store;
 mod structured_text;
 mod sync;
+mod sync_status;
 #[cfg(test)]
 mod typescript;
 mod view;
 
-use std::collections::HashSet;
 use std::fs::{File, TryLockError};
 use std::path::Path;
 
@@ -49,6 +49,10 @@ pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
 pub use structured_text::{Piece, StructuredText, link_allowed};
+pub use sync_status::{
+    AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, StartedBy,
+    SyncOutcome, SyncStatus, SyncStatusReport, SyncStatuses,
+};
 pub use view::View;
 
 use calendar::calendar_name;
@@ -56,6 +60,7 @@ use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::{Remote, SyncPoint};
 use store::Store;
+use sync_status::SyncStatusTracker;
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
@@ -71,9 +76,9 @@ pub struct Core {
     keyring: Arc<dyn Keyring>,
     /// The local date as [`Core::check_date`] last saw it.
     date: Mutex<NaiveDate>,
-    /// The Calendars whose First Sync is running. Locked inside the Store
-    /// lock, never around it.
-    first_syncs: Mutex<HashSet<CalendarId>>,
+    /// The Sync Status of each server Account and Calendar. Locked inside
+    /// the Store lock, never around it.
+    sync_statuses: Mutex<SyncStatusTracker>,
 }
 
 impl Core {
@@ -97,7 +102,7 @@ impl Core {
             signals,
             keyring,
             date,
-            first_syncs: Mutex::new(HashSet::new()),
+            sync_statuses: Mutex::new(SyncStatusTracker::default()),
         })
     }
 
@@ -209,12 +214,16 @@ impl Core {
     /// server's as it offers them now.
     ///
     /// Then each one's First Sync pulls its Events, one after the other,
-    /// which the Change Journal doesn't record (ADR 0009).
-    /// While it runs, the Calendar says so ([`Calendar::first_sync`]), with
-    /// "Calendars changed" as it starts and ends, and it commits page by page,
-    /// with "Occurrences changed" for each page. A Calendar removed meanwhile
-    /// stops its First Sync. Should one fail, the Calendars stay added, the
-    /// Events it pulled so far stay too, and the error is returned.
+    /// which the Change Journal doesn't record (ADR 0009), as a sync the
+    /// user started. Their Sync Status and the Account's say Syncing, the
+    /// Calendars' as a First Sync, from when they are added, and each
+    /// First Sync commits page by page, with "Occurrences changed" for each
+    /// page. A Calendar removed meanwhile stops its First Sync. Should one
+    /// fail, the Calendars stay added, the Events it pulled so far stay too,
+    /// the error is returned, and it is the Sync Status of the Calendar or,
+    /// when it is about the Account, of the Account (see
+    /// [`Core::sync_account`]), which leaves the First Syncs still to run
+    /// for the next sync.
     pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
         let remote = self.remote(account_id)?;
         let offered = offered_by(remote.as_deref())?;
@@ -235,27 +244,33 @@ impl Core {
                     })
                     .collect::<Result<Vec<_>>>()
             })?;
-            let mut first_syncs = self.first_syncs.lock().unwrap();
-            first_syncs.extend(added.iter().map(|calendar| calendar.id));
+            if remote.is_some() {
+                let mut statuses = self.tracker(&store);
+                statuses.start_account(account_id, StartedBy::User);
+                for calendar in &added {
+                    statuses.start_calendar(calendar.id, StartedBy::User, true);
+                }
+            }
             added
         };
         self.signals.send(Signal::CalendarsChanged);
         let Some(remote) = remote else {
             return Ok(added);
         };
-        let synced = added
-            .iter()
-            .zip(urls)
-            .try_for_each(|(calendar, url)| self.first_sync(remote.as_ref(), calendar.id, url));
-        {
-            let _store = self.store();
-            let mut first_syncs = self.first_syncs.lock().unwrap();
-            for calendar in &added {
-                first_syncs.remove(&calendar.id);
+        let ids: Vec<CalendarId> = added.iter().map(|calendar| calendar.id).collect();
+        self.send_sync_statuses(&[account_id], &ids);
+        let mut failed = None;
+        for (calendar, url) in added.iter().zip(urls) {
+            if failed.is_some() {
+                // Left for the next sync.
+                self.end_calendar_sync(calendar.id, None);
+                continue;
             }
+            let synced = self.first_sync(remote.as_ref(), calendar.id, url);
+            failed = self.end_calendar_sync(calendar.id, synced.err());
         }
-        self.signals.send(Signal::CalendarsChanged);
-        synced.map(|()| added)
+        self.end_account_sync(account_id, failed.as_ref());
+        failed.map_or(Ok(added), Err)
     }
 
     /// Pulls every Event of the Calendar `id` at `url` on the server, page by
@@ -292,27 +307,159 @@ impl Core {
     /// Incoming Sync, in Read-only Calendars too, and sends one "Occurrences
     /// changed" once committed; an Incoming Sync that changes nothing records
     /// no Journal Transaction. A Calendar whose First Sync didn't finish gets
-    /// the rest of its First Sync, unrecorded like the rest, while the
-    /// Calendar says so as [`Core::add_calendars`] does. A Calendar on its
-    /// First Sync now, or removed meanwhile, is left out.
+    /// the rest of its First Sync, unrecorded like the rest, while its Sync
+    /// Status says so as [`Core::add_calendars`] does. A Calendar syncing
+    /// now, or removed meanwhile, is left out.
     ///
-    /// Should a Calendar's sync fail, the others still sync, and the first
-    /// error is returned. Returns each Calendar synced, with its Journal
-    /// Transaction. None for the Local Account.
-    pub fn sync_account(&self, id: AccountId) -> Result<Vec<Changed<CalendarId>>> {
-        let Some(remote) = self.remote(id)? else {
+    /// The Account's Sync Status and each Calendar's say Syncing while they
+    /// sync, started by `started_by`, and then how it ended, with "Sync status
+    /// changed" each time. A failure about the whole Account (see
+    /// [`sync_status::about_account`]) makes the Account Offline, when its
+    /// server couldn't be reached at the network level, or gives it a Sync
+    /// Error, and stops the sync: the Calendars not synced yet keep their
+    /// Sync Status. Any other failure is a Sync Error of the Calendar whose
+    /// sync it stopped, and the other Calendars still sync. The first error
+    /// is returned. Returns each Calendar synced, with its Journal
+    /// Transaction. None for the Local Account, which has no Sync Status.
+    pub fn sync_account(
+        &self,
+        id: AccountId,
+        started_by: StartedBy,
+    ) -> Result<Vec<Changed<CalendarId>>> {
+        let account = self.store().find_account(id)?;
+        if account.ok_or(CoreError::AccountNotFound(id))?.provider == Provider::Local {
             return Ok(Vec::new());
-        };
-        let calendars = self.store().server_calendars(id)?;
+        }
+        {
+            self.tracker(&self.store()).start_account(id, started_by);
+        }
+        self.send_sync_statuses(&[id], &[]);
         let mut synced = Vec::new();
         let mut failed = None;
-        for (calendar_id, url, state) in calendars {
-            match self.sync_calendar(remote.as_ref(), calendar_id, &url, state) {
-                Ok(changed) => synced.extend(changed),
-                Err(error) => _ = failed.get_or_insert(error),
+        let mut about_account = None;
+        match self
+            .remote(id)
+            .and_then(|remote| Ok((remote, self.store().server_calendars(id)?)))
+        {
+            Err(error) => about_account = Some(error),
+            Ok((None, _)) => {}
+            Ok((Some(remote), calendars)) => {
+                for (calendar_id, url, state) in calendars {
+                    match self.sync_calendar(remote.as_ref(), calendar_id, &url, state, started_by)
+                    {
+                        Ok(changed) => synced.extend(changed),
+                        Err(error) if sync_status::about_account(&error) => {
+                            about_account = Some(error);
+                            break;
+                        }
+                        Err(error) => _ = failed.get_or_insert(error),
+                    }
+                }
             }
         }
-        failed.map_or(Ok(synced), Err)
+        self.end_account_sync(id, about_account.as_ref());
+        about_account.or(failed).map_or(Ok(synced), Err)
+    }
+
+    /// Ends the Calendar `id`'s running sync, which failed with `failed` if
+    /// given, and sends its new Sync Status. A failure about its Account
+    /// leaves its Sync Status as before the sync, and is returned for the
+    /// Account's. A Calendar removed meanwhile is no failure.
+    fn end_calendar_sync(&self, id: CalendarId, failed: Option<CoreError>) -> Option<CoreError> {
+        let failed = failed.filter(
+            |error| !matches!(error, CoreError::CalendarNotFound(removed) if *removed == id),
+        );
+        let finished = match &failed {
+            Some(error) if sync_status::about_account(error) => None,
+            Some(error) => Some(SyncOutcome::of_failure(error)),
+            None => Some(SyncOutcome::Synced),
+        };
+        {
+            self.tracker(&self.store())
+                .end_calendar(id, finished.map(|outcome| (self.clock.now(), outcome)));
+        }
+        self.send_sync_statuses(&[], &[id]);
+        failed
+    }
+
+    /// Ends the Account `id`'s running sync, which ended with `about_account`
+    /// if a failure about the whole Account stopped it, and sends its new
+    /// Sync Status.
+    fn end_account_sync(&self, id: AccountId, about_account: Option<&CoreError>) {
+        let outcome = about_account.map_or(SyncOutcome::Synced, SyncOutcome::of_failure);
+        {
+            self.tracker(&self.store())
+                .end_account(id, self.clock.now(), outcome);
+        }
+        self.send_sync_statuses(&[id], &[]);
+    }
+
+    /// The Sync Status of every server Account and Calendar, with the
+    /// overall status. The Local Account and its Calendars have none.
+    pub fn sync_statuses(&self) -> Result<SyncStatuses> {
+        self.read_sync_statuses(&self.store())
+    }
+
+    fn read_sync_statuses(&self, store: &Store) -> Result<SyncStatuses> {
+        let accounts: Vec<AccountId> = store
+            .list_accounts()?
+            .into_iter()
+            .filter(|account| account.provider != Provider::Local)
+            .map(|account| account.id)
+            .collect();
+        let calendars = store.unsent_change_counts()?;
+        let statuses = self.tracker(store);
+        let zone = self.clock.time_zone();
+        let calendar_ids: Vec<CalendarId> = calendars.iter().map(|c| c.calendar_id).collect();
+        Ok(SyncStatuses {
+            overall: statuses.overall(&accounts, &calendar_ids, zone),
+            accounts: accounts
+                .iter()
+                .map(|id| {
+                    let unsent = calendars
+                        .iter()
+                        .filter(|calendar| calendar.account_id == *id)
+                        .map(|calendar| calendar.count)
+                        .sum();
+                    statuses.account(*id, unsent, zone)
+                })
+                .collect(),
+            calendars: calendars
+                .iter()
+                .map(|calendar| statuses.calendar(calendar.calendar_id, calendar.count, zone))
+                .collect(),
+        })
+    }
+
+    /// The Sync Status of each server Account and Calendar, locked inside
+    /// the Store lock `_store`, never around it.
+    fn tracker<'a>(&'a self, _store: &Store) -> std::sync::MutexGuard<'a, SyncStatusTracker> {
+        self.sync_statuses.lock().unwrap()
+    }
+
+    /// Sends "Sync status changed" for the server Accounts `accounts` and
+    /// Calendars `calendars` as they are now, once the Store lock is
+    /// released. The Local Account and its Calendars, and those removed
+    /// meanwhile, are left out. Should the Local Store fail, none is sent;
+    /// the next one says it all again.
+    fn send_sync_statuses(&self, accounts: &[AccountId], calendars: &[CalendarId]) {
+        let statuses = match self.sync_statuses() {
+            Ok(statuses) => statuses,
+            Err(error) => return log::warn!("Couldn't read the Sync Status to send: {error}"),
+        };
+        let calendar_signals = statuses
+            .calendars
+            .into_iter()
+            .filter(|status| calendars.contains(&status.calendar_id))
+            .map(Signal::CalendarSyncStatusChanged);
+        let account_signals = statuses
+            .accounts
+            .into_iter()
+            .filter(|status| accounts.contains(&status.account_id))
+            .map(Signal::AccountSyncStatusChanged);
+        for signal in calendar_signals.chain(account_signals) {
+            self.signals.send(signal);
+        }
     }
 
     /// Runs the Incoming Sync of the Calendar `id` at `url` on the server from
@@ -324,21 +471,18 @@ impl Core {
         id: CalendarId,
         url: &str,
         state: Option<SyncPoint>,
+        started_by: StartedBy,
     ) -> Result<Option<Changed<CalendarId>>> {
         let first = state.is_none();
         {
-            let _store = self.store();
-            let mut first_syncs = self.first_syncs.lock().unwrap();
-            if first_syncs.contains(&id) {
+            let store = self.store();
+            let mut statuses = self.tracker(&store);
+            if statuses.calendar_syncing(id) {
                 return Ok(None);
             }
-            if first {
-                first_syncs.insert(id);
-            }
+            statuses.start_calendar(id, started_by, first);
         }
-        if first {
-            self.signals.send(Signal::CalendarsChanged);
-        }
+        self.send_sync_statuses(&[], &[id]);
         let synced = (|| {
             let known_server_resources = self.store().known_server_resources(id)?;
             let token = state.and_then(|state| state.token);
@@ -358,20 +502,17 @@ impl Core {
                 sync::caldav::incoming::incoming_sync(journal_transaction, id, &changes)
             })
         })();
-        if first {
-            {
-                let _store = self.store();
-                self.first_syncs.lock().unwrap().remove(&id);
-            }
-            self.signals.send(Signal::CalendarsChanged);
-        }
         match synced {
-            Ok(changed) => Ok(Some(Changed {
-                journal_transaction: changed.journal_transaction,
-                value: id,
-            })),
-            Err(CoreError::CalendarNotFound(removed)) if removed == id => Ok(None),
-            Err(error) => Err(error),
+            Ok(changed) => {
+                self.end_calendar_sync(id, None);
+                Ok(Some(Changed {
+                    journal_transaction: changed.journal_transaction,
+                    value: id,
+                }))
+            }
+            Err(error) => self
+                .end_calendar_sync(id, Some(error))
+                .map_or(Ok(None), Err),
         }
     }
 
@@ -419,20 +560,23 @@ impl Core {
                 .delete(&key)
                 .map_err(CoreError::KeyringUnavailable)?;
         }
-        journal::delete_account(&self.store(), id)?;
+        {
+            let store = self.store();
+            let calendars = store.account_calendars(id)?;
+            journal::delete_account(&store, id)?;
+            let mut statuses = self.tracker(&store);
+            statuses.forget_account(id);
+            for calendar in calendars {
+                statuses.forget_calendar(calendar);
+            }
+        }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }
 
     /// Every Calendar of every Account, in the order they were added.
     pub fn list_calendars(&self) -> Result<Vec<Calendar>> {
-        let store = self.store();
-        let first_syncs = self.first_syncs.lock().unwrap();
-        let mut calendars = store.list_calendars()?;
-        for calendar in &mut calendars {
-            calendar.first_sync = first_syncs.contains(&calendar.id);
-        }
-        Ok(calendars)
+        self.store().list_calendars()
     }
 
     /// Creates a Calendar in the Local Account. Server Accounts' Calendars
@@ -507,6 +651,7 @@ impl Core {
                 (Provider::CalDav, false) => return Err(CoreError::NotLocalCalendar(id)),
             }
             journal::delete_calendar(&store, id)?;
+            self.tracker(&store).forget_calendar(id);
         }
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
@@ -729,7 +874,7 @@ impl Core {
     /// change.
     pub fn undo_journal_transaction(&self, id: JournalTransactionId) -> Result<Changed<()>> {
         let undone = journal::undo(&self.store(), id, self.clock.now().timestamp())?;
-        Ok(self.signal(undone))
+        Ok(self.signal(undone, TransactionOrigin::Undo))
     }
 
     /// Runs `change` as one Journal Transaction of `origin` and sends
@@ -741,13 +886,22 @@ impl Core {
     ) -> Result<Changed<T>> {
         let recorded =
             journal::record(&self.store(), origin, self.clock.now().timestamp(), change)?;
-        Ok(self.signal(recorded))
+        Ok(self.signal(recorded, origin))
     }
 
     /// Sends "Occurrences changed" for a recorded Journal Transaction's
-    /// Calendars, once the Store lock is released.
-    fn signal<T>(&self, recorded: journal::Recorded<T>) -> Changed<T> {
+    /// Calendars, once the Store lock is released. A change of `origin`
+    /// other than a sync can add Unsent Changes, so it also sends "Sync
+    /// status changed" for those of its Calendars that are a server
+    /// Account's, and their Accounts; a sync sends its own as it ends.
+    fn signal<T>(&self, recorded: journal::Recorded<T>, origin: TransactionOrigin) -> Changed<T> {
         if !recorded.calendars.is_empty() {
+            if !matches!(
+                origin,
+                TransactionOrigin::FirstSync | TransactionOrigin::IncomingSync
+            ) {
+                self.send_unsent_change_counts(&recorded.calendars);
+            }
             self.signals.send(Signal::OccurrencesChanged {
                 calendar_ids: recorded.calendars,
             });
@@ -755,6 +909,23 @@ impl Core {
         Changed {
             journal_transaction: recorded.journal_transaction,
             value: recorded.value,
+        }
+    }
+
+    /// Sends "Sync status changed" for those of `calendars` that are a
+    /// server Account's, and for their Accounts, as their Unsent Changes may
+    /// have changed.
+    fn send_unsent_change_counts(&self, calendars: &[CalendarId]) {
+        let accounts = match self.store().unsent_change_counts() {
+            Ok(counts) => counts
+                .into_iter()
+                .filter(|count| calendars.contains(&count.calendar_id))
+                .map(|count| count.account_id)
+                .collect::<Vec<_>>(),
+            Err(error) => return log::warn!("Couldn't read the Sync Status to send: {error}"),
+        };
+        if !accounts.is_empty() {
+            self.send_sync_statuses(&accounts, calendars);
         }
     }
 

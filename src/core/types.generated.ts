@@ -13,6 +13,8 @@ server: ServerLogin | null, };
  */
 export type AccountId = number & { readonly __brand: "AccountId" };
 
+export type AccountSyncStatus = { accountId: AccountId, report: SyncStatusReport, };
+
 /**
  * A server Account just added, with the Calendars its server offers.
  */
@@ -63,18 +65,14 @@ readOnly: boolean,
  * Whether its server doesn't allow the user to change it, so that it
  * stays read-only whatever the user marks.
  */
-serverReadOnly: boolean,
-/**
- * Whether its First Sync is running, so that its Events are still
- * loading; the sidebar says so. Sync Status may take this over (ticket
- * 15).
- */
-firstSync: boolean, };
+serverReadOnly: boolean, };
 
 /**
  * Branded in TypeScript, so that it can't be mixed up with other IDs.
  */
 export type CalendarId = number & { readonly __brand: "CalendarId" };
+
+export type CalendarSyncStatus = { calendarId: CalendarId, report: SyncStatusReport, };
 
 /**
  * What a change to Events returns: its value, and the Journal Transaction
@@ -158,6 +156,15 @@ export type ExceptionCounts = { thisAndFollowing: number, all: number, };
  */
 export type ExistingEvents = "update" | "skip" | "copy";
 
+/**
+ * The last sync of an Account or Calendar that finished.
+ */
+export type FinishedSync = {
+/**
+ * When it finished, in the Display Time Zone.
+ */
+at: string, outcome: SyncOutcome, };
+
 export type Frequency = "daily" | "weekly" | "monthly" | "yearly";
 
 /**
@@ -202,6 +209,19 @@ eventId: EventId, calendarId: CalendarId, title: string, when: When,
  * or changing none of its Occurrences.
  */
 recurrenceId: string | null, };
+
+/**
+ * The most important state of all server Accounts and Calendars, as the
+ * status indicator and the tray show it (spec: "Overall status").
+ */
+export type OverallState = { "kind": "conflict" } | { "kind": "syncError" } | { "kind": "offline" } | { "kind": "syncing", byUser: boolean, } | { "kind": "synced" };
+
+export type OverallStatus = { state: OverallState,
+/**
+ * When the last sync of a server Account finished, in the Display
+ * Time Zone, whatever its outcome.
+ */
+lastSync: string | null, };
 
 /**
  * One piece of a paragraph.
@@ -268,7 +288,7 @@ export type SidebarState = { shown: boolean, width: number | null, };
  * (desktop notifications). Signals are fire-and-forget. The v1 Signals are
  * added by the tickets that first send them.
  */
-export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, };
+export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, } | { "kind": "accountSyncStatusChanged" } & AccountSyncStatus | { "kind": "calendarSyncStatusChanged" } & CalendarSyncStatus;
 
 /**
  * An Event's description or location, ready to show and to edit.
@@ -284,6 +304,36 @@ paragraphs: Array<Array<Piece>>,
  * edit.
  */
 text: string, };
+
+/**
+ * How a sync ended.
+ */
+export type SyncOutcome = { "kind": "synced" } | { "kind": "offline" } | { "kind": "syncError", error: ErrorCode, };
+
+/**
+ * The Sync Status of one server Account or Calendar.
+ */
+export type SyncStatus = { "kind": "syncing", byUser: boolean, firstSync: boolean, } | { "kind": "synced" } | { "kind": "offline" } | { "kind": "syncError", error: ErrorCode, };
+
+/**
+ * What "Sync status changed" says about one server Account or Calendar
+ * (new term: Sync Status Report).
+ */
+export type SyncStatusReport = { status: SyncStatus,
+/**
+ * None until a sync of it has finished in this running FreeCal.
+ */
+lastSync: FinishedSync | null,
+/**
+ * Its Unsent Changes; an Account's are those of all its Calendars.
+ */
+unsentChanges: number, };
+
+/**
+ * The Sync Status of every server Account and Calendar, with the overall
+ * status, as the window reads them on starting.
+ */
+export type SyncStatuses = { overall: OverallStatus, accounts: Array<AccountSyncStatus>, calendars: Array<CalendarSyncStatus>, };
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

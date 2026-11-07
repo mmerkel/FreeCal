@@ -19,6 +19,8 @@ import type {
   SettingsUpdate,
   SidebarState,
   Signal,
+  SyncStatusReport,
+  SyncStatuses,
   StructuredText,
   JournalTransactionId,
   View,
@@ -120,6 +122,16 @@ export class FakeCore implements CoreApi {
   calendarUrls = new Map<CalendarId, string>();
   /** The password the keyring holds for each server Account. */
   keyring = new Map<AccountId, string>();
+  /**
+   * The Sync Status of every server Account and Calendar, as
+   * `syncStatuses` gives it. Tests change it with `reportAccount`,
+   * `reportCalendar` and `setOverall`.
+   */
+  statuses: SyncStatuses = {
+    overall: { state: { kind: 'synced' }, lastSync: null },
+    accounts: [],
+    calendars: [],
+  };
   /** While set, first syncs run until it resolves. */
   private heldFirstSyncs?: Promise<void>;
   private journalTransactions = new Map<JournalTransactionId, JournalTransaction>();
@@ -138,7 +150,6 @@ export class FakeCore implements CoreApi {
       shown: true,
       readOnly: false,
       serverReadOnly: false,
-      firstSync: false,
       ...calendar,
     };
     this.calendars.push(added);
@@ -192,6 +203,39 @@ export class FakeCore implements CoreApi {
 
   emit(signal: Signal) {
     for (const subscriber of this.subscribers) subscriber(signal);
+  }
+
+  /** Gives a server Account a new Sync Status Report and sends "Sync status changed" for it. */
+  reportAccount(id: AccountId, report: SyncStatusReport) {
+    this.statuses.accounts = [
+      ...this.statuses.accounts.filter((account) => account.accountId !== id),
+      { accountId: id, report },
+    ];
+    this.emit({ kind: 'accountSyncStatusChanged', accountId: id, report: structuredClone(report) });
+  }
+
+  /** Gives a server Calendar a new Sync Status Report and sends "Sync status changed" for it. */
+  reportCalendar(id: CalendarId, report: SyncStatusReport) {
+    this.statuses.calendars = [
+      ...this.statuses.calendars.filter((calendar) => calendar.calendarId !== id),
+      { calendarId: id, report },
+    ];
+    this.emit({
+      kind: 'calendarSyncStatusChanged',
+      calendarId: id,
+      report: structuredClone(report),
+    });
+  }
+
+  /** Sets the overall status, without a Signal: the next "Sync status changed" comes with it. */
+  setOverall(overall: SyncStatuses['overall']) {
+    this.statuses.overall = overall;
+  }
+
+  async syncStatuses() {
+    this.calls.push('syncStatuses');
+    this.started();
+    return structuredClone(this.statuses);
   }
 
   async today() {
@@ -318,13 +362,18 @@ export class FakeCore implements CoreApi {
       taken.add(url);
       return offered;
     });
-    const added = available.map((calendar) =>
-      this.addServerCalendar(id, calendar.url, { firstSync: true }),
-    );
+    const added = available.map((calendar) => this.addServerCalendar(id, calendar.url));
     this.emit({ kind: 'calendarsChanged' });
+    const report = (status: SyncStatusReport['status']) => ({
+      status,
+      lastSync: null,
+      unsentChanges: 0,
+    });
+    for (const calendar of added) {
+      this.reportCalendar(calendar.id, report({ kind: 'syncing', byUser: true, firstSync: true }));
+    }
     await this.heldFirstSyncs;
-    for (const calendar of added) calendar.firstSync = false;
-    this.emit({ kind: 'calendarsChanged' });
+    for (const calendar of added) this.reportCalendar(calendar.id, report({ kind: 'synced' }));
     return structuredClone(added);
   }
 
@@ -384,6 +433,9 @@ export class FakeCore implements CoreApi {
    */
   private dropCalendar(id: CalendarId) {
     this.calendarUrls.delete(id);
+    this.statuses.calendars = this.statuses.calendars.filter(
+      (calendar) => calendar.calendarId !== id,
+    );
     this.calendars = this.calendars.filter((calendar) => calendar.id !== id);
     const gone = new Set(
       this.events.filter((event) => event.calendarId === id).map((event) => event.id),

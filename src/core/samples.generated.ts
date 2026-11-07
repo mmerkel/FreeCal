@@ -82,8 +82,7 @@ export const samples = {
       "colour": "#3a86ff",
       "shown": true,
       "readOnly": false,
-      "serverReadOnly": false,
-      "firstSync": false
+      "serverReadOnly": false
     }
   ],
   EventId: [
@@ -326,6 +325,200 @@ export const samples = {
     {
       "kind": "dateChanged",
       "date": "2026-10-04"
+    },
+    {
+      "kind": "accountSyncStatusChanged",
+      "accountId": 3,
+      "report": {
+        "status": {
+          "kind": "syncing",
+          "byUser": true,
+          "firstSync": false
+        },
+        "lastSync": {
+          "at": "2026-10-05T09:30:00",
+          "outcome": {
+            "kind": "synced"
+          }
+        },
+        "unsentChanges": 2
+      }
+    },
+    {
+      "kind": "calendarSyncStatusChanged",
+      "calendarId": 2,
+      "report": {
+        "status": {
+          "kind": "synced"
+        },
+        "lastSync": null,
+        "unsentChanges": 0
+      }
+    }
+  ],
+  SyncStatus: [
+    {
+      "kind": "syncing",
+      "byUser": false,
+      "firstSync": true
+    },
+    {
+      "kind": "synced"
+    },
+    {
+      "kind": "offline"
+    },
+    {
+      "kind": "syncError",
+      "error": {
+        "code": "serverRefused",
+        "status": 403,
+        "message": "Forbidden"
+      }
+    }
+  ],
+  SyncOutcome: [
+    {
+      "kind": "synced"
+    },
+    {
+      "kind": "offline"
+    },
+    {
+      "kind": "syncError",
+      "error": {
+        "code": "serverRefused",
+        "status": 403,
+        "message": "Forbidden"
+      }
+    }
+  ],
+  FinishedSync: [
+    {
+      "at": "2026-10-05T09:30:00",
+      "outcome": {
+        "kind": "synced"
+      }
+    }
+  ],
+  SyncStatusReport: [
+    {
+      "status": {
+        "kind": "syncing",
+        "byUser": true,
+        "firstSync": false
+      },
+      "lastSync": {
+        "at": "2026-10-05T09:30:00",
+        "outcome": {
+          "kind": "synced"
+        }
+      },
+      "unsentChanges": 2
+    }
+  ],
+  AccountSyncStatus: [
+    {
+      "accountId": 3,
+      "report": {
+        "status": {
+          "kind": "syncing",
+          "byUser": true,
+          "firstSync": false
+        },
+        "lastSync": {
+          "at": "2026-10-05T09:30:00",
+          "outcome": {
+            "kind": "synced"
+          }
+        },
+        "unsentChanges": 2
+      }
+    }
+  ],
+  CalendarSyncStatus: [
+    {
+      "calendarId": 2,
+      "report": {
+        "status": {
+          "kind": "synced"
+        },
+        "lastSync": null,
+        "unsentChanges": 0
+      }
+    }
+  ],
+  OverallState: [
+    {
+      "kind": "conflict"
+    },
+    {
+      "kind": "syncError"
+    },
+    {
+      "kind": "offline"
+    },
+    {
+      "kind": "syncing",
+      "byUser": true
+    },
+    {
+      "kind": "synced"
+    }
+  ],
+  OverallStatus: [
+    {
+      "state": {
+        "kind": "synced"
+      },
+      "lastSync": "2026-10-05T09:30:00"
+    },
+    {
+      "state": {
+        "kind": "offline"
+      },
+      "lastSync": null
+    }
+  ],
+  SyncStatuses: [
+    {
+      "overall": {
+        "state": {
+          "kind": "synced"
+        },
+        "lastSync": "2026-10-05T09:30:00"
+      },
+      "accounts": [
+        {
+          "accountId": 3,
+          "report": {
+            "status": {
+              "kind": "syncing",
+              "byUser": true,
+              "firstSync": false
+            },
+            "lastSync": {
+              "at": "2026-10-05T09:30:00",
+              "outcome": {
+                "kind": "synced"
+              }
+            },
+            "unsentChanges": 2
+          }
+        }
+      ],
+      "calendars": [
+        {
+          "calendarId": 2,
+          "report": {
+            "status": {
+              "kind": "synced"
+            },
+            "lastSync": null,
+            "unsentChanges": 0
+          }
+        }
+      ]
     }
   ],
   View: [
@@ -652,6 +845,15 @@ type Samples = {
   StructuredText: Unbranded<T.StructuredText>[];
   Piece: Unbranded<T.Piece>[];
   Signal: Unbranded<T.Signal>[];
+  SyncStatus: Unbranded<T.SyncStatus>[];
+  SyncOutcome: Unbranded<T.SyncOutcome>[];
+  FinishedSync: Unbranded<T.FinishedSync>[];
+  SyncStatusReport: Unbranded<T.SyncStatusReport>[];
+  AccountSyncStatus: Unbranded<T.AccountSyncStatus>[];
+  CalendarSyncStatus: Unbranded<T.CalendarSyncStatus>[];
+  OverallState: Unbranded<T.OverallState>[];
+  OverallStatus: Unbranded<T.OverallStatus>[];
+  SyncStatuses: Unbranded<T.SyncStatuses>[];
   View: Unbranded<T.View>[];
   SidebarState: Unbranded<T.SidebarState>[];
   Appearance: Unbranded<T.Appearance>[];

@@ -14,8 +14,8 @@ use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
     Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents,
     ImportFile, ImportOutcome, ImportPreview, ImportSummary, JournalTransactionId, Occurrence,
-    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SystemClock, View, When,
-    link_allowed,
+    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SystemClock,
+    View, When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -156,6 +156,11 @@ async fn remove_account(app: AppHandle, id: i64) -> CommandResult<()> {
 #[tauri::command]
 fn list_calendars(core: State<Core>) -> CommandResult<Vec<Calendar>> {
     core.list_calendars().map_err(ErrorCode::from)
+}
+
+#[tauri::command]
+fn sync_statuses(core: State<Core>) -> CommandResult<SyncStatuses> {
+    core.sync_statuses().map_err(ErrorCode::from)
 }
 
 #[tauri::command]
@@ -590,6 +595,7 @@ fn main() {
             add_calendars,
             remove_account,
             list_calendars,
+            sync_statuses,
             create_calendar,
             rename_calendar,
             recolour_calendar,

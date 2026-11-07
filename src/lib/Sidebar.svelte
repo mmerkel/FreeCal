@@ -1,5 +1,6 @@
 <script lang="ts">
   import CircleMinus from '@lucide/svelte/icons/circle-minus';
+  import CloudUpload from '@lucide/svelte/icons/cloud-upload';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import Eye from '@lucide/svelte/icons/eye';
   import ListChecks from '@lucide/svelte/icons/list-checks';
@@ -9,8 +10,16 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import Unplug from '@lucide/svelte/icons/unplug';
   import type { CoreApi } from '../core/CoreApi';
-  import type { Account, AccountId, AvailableCalendar, Calendar, CalendarId } from '../core/types';
-  import { errorText, t, type MessageKey } from '../i18n';
+  import type {
+    Account,
+    AccountId,
+    AvailableCalendar,
+    Calendar,
+    CalendarId,
+    SyncStatus,
+    SyncStatuses,
+  } from '../core/types';
+  import { errorText, t, tCount, type MessageKey } from '../i18n';
   import AddAccountDialog from './AddAccountDialog.svelte';
   import Dialog from './Dialog.svelte';
   import ManageCalendarsDialog from './ManageCalendarsDialog.svelte';
@@ -21,9 +30,11 @@
     core: CoreApi;
     accounts: Account[];
     calendars: Calendar[];
+    /** The Sync Status of each server Account and Calendar as shown, once read. */
+    syncStatuses?: SyncStatuses;
   }
 
-  let { core, accounts, calendars }: Props = $props();
+  let { core, accounts, calendars, syncStatuses }: Props = $props();
 
   /** What the user is in the middle of, if anything. Only one at a time. */
   type Editing =
@@ -56,6 +67,33 @@
       case 'caldav':
         return t('account.caldav', { username: account.server?.username ?? '' });
     }
+  }
+
+  /**
+   * What a row says about its Sync Status, when it isn't Synced. A
+   * Calendar on its first sync says that its Events are still loading.
+   */
+  function syncText(status: SyncStatus | undefined): string | undefined {
+    switch (status?.kind) {
+      case 'syncing':
+        return t(status.firstSync ? 'calendar.firstSync' : 'sync.syncing');
+      case 'offline':
+        return t('sync.offline');
+      case 'syncError':
+        return t('sync.error', { error: errorText(status.error) });
+      default:
+        return undefined;
+    }
+  }
+
+  function accountSyncText(account: Account): string | undefined {
+    return syncText(
+      syncStatuses?.accounts.find((status) => status.accountId === account.id)?.report.status,
+    );
+  }
+
+  function calendarReport(calendar: Calendar) {
+    return syncStatuses?.calendars.find((status) => status.calendarId === calendar.id)?.report;
   }
 
   function calendarsOf(account: Account): Calendar[] {
@@ -224,6 +262,7 @@
 
   {#each accounts as account (account.id)}
     {@const headingId = `sidebar-account-${account.id}`}
+    {@const accountState = accountSyncText(account)}
     <section>
       <div class="account">
         <h2 id={headingId} title={accountName(account)}>{accountName(account)}</h2>
@@ -287,18 +326,30 @@
           {/if}
         {/if}
       </div>
+      {#if accountState}
+        <p class="account-state" title={accountState}>{accountState}</p>
+      {/if}
 
       <ul aria-labelledby={headingId}>
         {#each calendarsOf(account) as calendar (calendar.id)}
           {@const optionsLabel = t('calendar.optionsNamed', { name: calendar.name })}
-          {@const loadingId = `sidebar-loading-${calendar.id}`}
+          {@const syncId = `sidebar-sync-${calendar.id}`}
+          {@const unsentId = `sidebar-unsent-${calendar.id}`}
           {@const lockId = `sidebar-lock-${calendar.id}`}
+          {@const report = calendarReport(calendar)}
+          {@const syncState = syncText(report?.status)}
+          {@const unsent = report?.unsentChanges ?? 0}
+          {@const unsentText = tCount('calendar.unsent', unsent)}
           {@const stateId = `sidebar-state-${calendar.id}`}
           {@const tooltip = t(calendar.shown ? 'calendar.shownTooltip' : 'calendar.hiddenTooltip', {
             name: calendar.name,
           })}
           <!-- A description replaces the tooltip's, so it goes on in it. -->
-          {@const describedBy = [calendar.firstSync && loadingId, calendar.readOnly && lockId]
+          {@const describedBy = [
+            syncState && syncId,
+            unsent > 0 && unsentId,
+            calendar.readOnly && lockId,
+          ]
             .filter(Boolean)
             .join(' ')}
           <li class:open={menuFor === calendar.id} class:hidden={!calendar.shown}>
@@ -321,19 +372,32 @@
                 ></span>
                 <span class="label">
                   <span class="name">{calendar.name}</span>
-                  {#if calendar.firstSync}
+                  {#if syncState}
                     <!-- The switch's description, not part of its name. -->
-                    <span class="loading" id={loadingId} aria-hidden="true">
-                      {t('calendar.firstSync')}
+                    <span class="sync-state" id={syncId} title={syncState} aria-hidden="true">
+                      {syncState}
                     </span>
                   {/if}
                 </span>
                 {#if describedBy}
                   <span id={stateId} hidden>{tooltip}</span>
                 {/if}
+                {#if unsent > 0}
+                  <!-- Also the switch's description. -->
+                  <span class="unsent marker" title={unsentText} aria-hidden="true">
+                    <CloudUpload size={12} aria-hidden="true" />
+                    <span id={unsentId} hidden>{unsentText}</span>
+                    {unsent}
+                  </span>
+                {/if}
                 {#if calendar.readOnly}
                   <!-- Also the switch's description. -->
-                  <span class="lock" id={lockId} title={t('calendar.readOnly')} aria-hidden="true">
+                  <span
+                    class="lock marker"
+                    id={lockId}
+                    title={t('calendar.readOnly')}
+                    aria-hidden="true"
+                  >
                     <Lock size={12} aria-label={t('calendar.readOnly')} />
                   </span>
                 {/if}
@@ -625,20 +689,25 @@
     min-width: 0;
   }
 
-  .loading {
+  .sync-state,
+  .account-state {
     color: var(--foreground-muted);
     font-size: var(--text-xs);
   }
 
-  /* Grey and near colourless, like every marker on a row. */
-  .lock {
-    display: flex;
-    flex: none;
-    color: var(--foreground-muted);
+  .account-state {
+    margin: 0;
+    padding: 0 var(--space-2) var(--space-2) var(--space-4);
+  }
+
+  .unsent {
+    gap: var(--space-1);
+    font-size: var(--text-xs);
   }
 
   .name,
-  .loading {
+  .sync-state,
+  .account-state {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

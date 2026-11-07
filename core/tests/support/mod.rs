@@ -149,6 +149,20 @@ impl RecordingSignals {
         self.received.lock().unwrap().clone()
     }
 
+    /// The Signals received but "Sync status changed", for tests about the
+    /// others.
+    pub fn received_but_sync_status(&self) -> Vec<Signal> {
+        self.received()
+            .into_iter()
+            .filter(|signal| {
+                !matches!(
+                    signal,
+                    Signal::AccountSyncStatusChanged(_) | Signal::CalendarSyncStatusChanged(_)
+                )
+            })
+            .collect()
+    }
+
     pub fn clear(&self) {
         self.received.lock().unwrap().clear();
     }

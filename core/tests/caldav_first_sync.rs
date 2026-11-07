@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use freecal_core::{
     AccountId, CalDavLogin, CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal,
-    link_allowed,
+    SyncStatus, link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
 use support::{Harness, all_day, date, draft, event, ics, make_writable, timed, titles};
@@ -265,41 +265,57 @@ fn the_first_sync_commits_page_by_page_and_reports_that_it_runs() {
     let core = Arc::new(harness.open_without_starting_calendars());
     let account = add_account(&core, radicale, &user);
     // What a subscriber reading the core on each Signal sees: whether the
-    // Calendar is on its first sync, and how many of its Events are there.
+    // Calendar's Sync Status says it is on its first sync, and how many of
+    // its Events are there.
     let seen = Arc::new(Mutex::new(Vec::new()));
     let reader: Weak<Core> = Arc::downgrade(&core);
     let record = seen.clone();
     harness.signals.on_receive(move |signal| {
         let core = reader.upgrade().unwrap();
-        let calendar = core.list_calendars().unwrap().pop();
+        let first_sync = core
+            .sync_statuses()
+            .unwrap()
+            .calendars
+            .pop()
+            .map(|calendar| calendar.report.status)
+            .is_some_and(|status| {
+                matches!(
+                    status,
+                    SyncStatus::Syncing {
+                        first_sync: true,
+                        ..
+                    }
+                )
+            });
         let events = core
             .occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap()
             .len();
-        record.lock().unwrap().push((
-            signal.clone(),
-            calendar.map(|calendar| calendar.first_sync),
-            events,
-        ));
+        let kind = match signal {
+            Signal::CalendarsChanged => "calendars changed",
+            Signal::OccurrencesChanged { .. } => "occurrences changed",
+            Signal::AccountSyncStatusChanged(_) => "account sync status changed",
+            Signal::CalendarSyncStatusChanged(_) => "calendar sync status changed",
+            Signal::DateChanged { .. } => "date changed",
+        };
+        record.lock().unwrap().push((kind, first_sync, events));
     });
     harness.signals.clear();
 
-    let added = core.add_calendars(account, &[work]).unwrap();
+    core.add_calendars(account, &[work]).unwrap();
 
-    let id = added[0].id;
-    let page = Signal::OccurrencesChanged {
-        calendar_ids: vec![id],
-    };
     assert_eq!(
         *seen.lock().unwrap(),
         [
-            (Signal::CalendarsChanged, Some(true), 0),
-            (page.clone(), Some(true), FIRST_SYNC_PAGE),
-            (page, Some(true), FIRST_SYNC_PAGE + 1),
-            (Signal::CalendarsChanged, Some(false), FIRST_SYNC_PAGE + 1),
+            ("calendars changed", true, 0),
+            ("calendar sync status changed", true, 0),
+            ("account sync status changed", true, 0),
+            ("occurrences changed", true, FIRST_SYNC_PAGE),
+            ("occurrences changed", true, FIRST_SYNC_PAGE + 1),
+            ("calendar sync status changed", false, FIRST_SYNC_PAGE + 1),
+            ("account sync status changed", false, FIRST_SYNC_PAGE + 1),
         ]
     );
-    assert!(!added[0].first_sync);
 }
 
 #[test]
@@ -359,9 +375,12 @@ fn a_calendar_with_no_events_sends_no_occurrences_changed() {
 
     core.add_calendars(account, &[work]).unwrap();
 
-    assert_eq!(
-        harness.signals.received(),
-        [Signal::CalendarsChanged, Signal::CalendarsChanged]
+    assert!(
+        !harness
+            .signals
+            .received()
+            .iter()
+            .any(|signal| matches!(signal, Signal::OccurrencesChanged { .. }))
     );
 }
 

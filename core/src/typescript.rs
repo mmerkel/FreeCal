@@ -20,6 +20,10 @@ use crate::{
     Repeat, RepeatEnd, Scope, ServerLogin, Settings, SettingsUpdate, SidebarState, Signal,
     StructuredText, View, When,
 };
+use crate::{
+    AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, SyncOutcome,
+    SyncStatus, SyncStatusReport, SyncStatuses,
+};
 
 const TYPES: &str = "../src/core/types.generated.ts";
 const SAMPLES: &str = "../src/core/samples.generated.ts";
@@ -78,6 +82,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<ImportOutcome>();
     types.visit::<Changed<Event>>();
     types.visit::<ErrorCode>();
+    types.visit::<SyncStatuses>();
     let names = types.declarations.keys().cloned().collect();
     let declarations: Vec<_> = types.declarations.into_values().collect();
     (generated(&declarations.join("\n")), names)
@@ -124,6 +129,38 @@ fn samples_file() -> (String, Vec<String>) {
         paragraphs: vec![vec![text.clone(), link.clone()]],
         text: "Agenda: notes (https://example.org/notes)".to_owned(),
     };
+    let refused = ErrorCode::ServerRefused {
+        status: 403,
+        message: "Forbidden".to_owned(),
+    };
+    let finished = FinishedSync {
+        at: date(5).and_hms_opt(9, 30, 0).unwrap(),
+        outcome: SyncOutcome::Synced,
+    };
+    let report = SyncStatusReport {
+        status: SyncStatus::Syncing {
+            by_user: true,
+            first_sync: false,
+        },
+        last_sync: Some(finished.clone()),
+        unsent_changes: 2,
+    };
+    let account_status = AccountSyncStatus {
+        account_id: AccountId(3),
+        report: report.clone(),
+    };
+    let calendar_status = CalendarSyncStatus {
+        calendar_id: CalendarId(2),
+        report: SyncStatusReport {
+            status: SyncStatus::Synced,
+            last_sync: None,
+            unsent_changes: 0,
+        },
+    };
+    let overall = OverallStatus {
+        state: OverallState::Synced,
+        last_sync: Some(date(5).and_hms_opt(9, 30, 0).unwrap()),
+    };
     let calendar = Calendar {
         id: CalendarId(2),
         account_id: AccountId(1),
@@ -132,7 +169,6 @@ fn samples_file() -> (String, Vec<String>) {
         shown: true,
         read_only: false,
         server_read_only: false,
-        first_sync: false,
     };
     let repeat = Repeat {
         frequency: Frequency::Weekly,
@@ -254,7 +290,48 @@ fn samples_file() -> (String, Vec<String>) {
                 calendar_ids: vec![CalendarId(2)],
             },
             Signal::DateChanged { date: date(4) },
+            Signal::AccountSyncStatusChanged(account_status.clone()),
+            Signal::CalendarSyncStatusChanged(calendar_status.clone()),
         ]),
+        samples(&[
+            SyncStatus::Syncing {
+                by_user: false,
+                first_sync: true,
+            },
+            SyncStatus::Synced,
+            SyncStatus::Offline,
+            SyncStatus::SyncError {
+                error: refused.clone(),
+            },
+        ]),
+        samples(&[
+            SyncOutcome::Synced,
+            SyncOutcome::Offline,
+            SyncOutcome::SyncError { error: refused },
+        ]),
+        samples(&[finished]),
+        samples(&[report]),
+        samples(std::slice::from_ref(&account_status)),
+        samples(std::slice::from_ref(&calendar_status)),
+        samples(&[
+            OverallState::Conflict,
+            OverallState::SyncError,
+            OverallState::Offline,
+            OverallState::Syncing { by_user: true },
+            OverallState::Synced,
+        ]),
+        samples(&[
+            overall.clone(),
+            OverallStatus {
+                state: OverallState::Offline,
+                last_sync: None,
+            },
+        ]),
+        samples(&[SyncStatuses {
+            overall,
+            accounts: vec![account_status],
+            calendars: vec![calendar_status],
+        }]),
         samples(&[View::Day, View::Week, View::Month]),
         samples(&[
             SidebarState::default(),

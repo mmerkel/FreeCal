@@ -1,7 +1,8 @@
 mod support;
 
 use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Changed, Core, Event, ServerObject, Signal,
+    AccountId, CalDavLogin, CalendarId, Changed, Core, Event, ServerObject, Signal, StartedBy,
+    SyncStatus,
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
 use support::{Harness, date, event, ics, make_writable};
@@ -173,7 +174,10 @@ impl Synced {
     /// Syncs the Account, which has only this Calendar, and returns the
     /// Calendar's Journal Transaction.
     fn sync(&self) -> Option<freecal_core::JournalTransactionId> {
-        let synced = self.core.sync_account(self.account).unwrap();
+        let synced = self
+            .core
+            .sync_account(self.account, StartedBy::FreeCal)
+            .unwrap();
         assert_eq!(
             synced
                 .iter()
@@ -301,11 +305,14 @@ fn a_sync_pulls_an_event_created_on_the_server() {
         )),
     );
 
-    synced.core.sync_account(synced.account).unwrap();
+    synced
+        .core
+        .sync_account(synced.account, StartedBy::FreeCal)
+        .unwrap();
 
     assert_eq!(synced.titles(), ["Standup", "review"]);
     assert_eq!(
-        synced.harness.signals.received(),
+        synced.harness.signals.received_but_sync_status(),
         [Signal::OccurrencesChanged {
             calendar_ids: vec![synced.work]
         }]
@@ -325,7 +332,10 @@ fn a_sync_pulls_an_event_changed_on_the_server_with_its_new_server_data() {
         synced.held_etag("Standup moved"),
         Some(synced.etag("standup"))
     );
-    assert_eq!(synced.harness.signals.received(), synced.changed_signals());
+    assert_eq!(
+        synced.harness.signals.received_but_sync_status(),
+        synced.changed_signals()
+    );
 }
 
 #[test]
@@ -382,7 +392,7 @@ fn a_sync_that_changes_nothing_records_no_journal_transaction_and_sends_nothing(
     let journal_transaction = synced.sync();
 
     assert_eq!(journal_transaction, None);
-    assert_eq!(synced.harness.signals.received(), []);
+    assert_eq!(synced.harness.signals.received_but_sync_status(), []);
 }
 
 #[test]
@@ -396,7 +406,10 @@ fn many_changes_send_one_occurrences_changed() {
     synced.sync();
 
     assert_eq!(synced.titles(), ["Standup moved", "a", "b", "c"]);
-    assert_eq!(synced.harness.signals.received(), synced.changed_signals());
+    assert_eq!(
+        synced.harness.signals.received_but_sync_status(),
+        synced.changed_signals()
+    );
 }
 
 #[test]
@@ -420,7 +433,10 @@ fn each_calendar_syncs_as_a_journal_transaction_of_its_own_with_its_own_signal()
         .put_event(&synced.user, &home_url, "standup", standup("Dentist"));
     synced.harness.signals.clear();
 
-    let changed = synced.core.sync_account(synced.account).unwrap();
+    let changed = synced
+        .core
+        .sync_account(synced.account, StartedBy::FreeCal)
+        .unwrap();
 
     assert_eq!(
         changed
@@ -439,7 +455,7 @@ fn each_calendar_syncs_as_a_journal_transaction_of_its_own_with_its_own_signal()
         changed[1].journal_transaction
     );
     assert_eq!(
-        synced.harness.signals.received(),
+        synced.harness.signals.received_but_sync_status(),
         [
             Signal::OccurrencesChanged {
                 calendar_ids: vec![synced.work]
@@ -650,12 +666,23 @@ fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
     assert_eq!(journal_transaction, None, "the First Sync isn't recorded");
     assert_eq!(synced.titles(), ["review", "late"]);
     assert_eq!(
-        synced.harness.signals.received(),
-        [
-            Signal::CalendarsChanged,
-            synced.changed_signals()[0].clone(),
-            Signal::CalendarsChanged,
-        ]
+        synced.harness.signals.received_but_sync_status(),
+        synced.changed_signals()
+    );
+    assert!(
+        synced
+            .harness
+            .signals
+            .received()
+            .iter()
+            .any(|signal| matches!(
+                signal,
+                Signal::CalendarSyncStatusChanged(status) if matches!(
+                    status.report.status,
+                    SyncStatus::Syncing { first_sync: true, .. }
+                )
+            )),
+        "its Sync Status says it is a First Sync"
     );
     // It is finished now: the next sync is recorded.
     synced.put("late", titled("late", "late moved", "20261007"));
@@ -695,7 +722,7 @@ fn the_local_account_has_nothing_to_sync() {
     let local = core.list_accounts().unwrap()[0].id;
 
     assert_eq!(
-        core.sync_account(local).unwrap(),
+        core.sync_account(local, StartedBy::FreeCal).unwrap(),
         Vec::<Changed<CalendarId>>::new()
     );
 }

@@ -59,10 +59,6 @@ pub struct Calendar {
     /// Whether its server doesn't allow the user to change it, so that it
     /// stays read-only whatever the user marks.
     pub server_read_only: bool,
-    /// Whether its First Sync is running, so that its Events are still
-    /// loading; the sidebar says so. Sync Status may take this over (ticket
-    /// 15).
-    pub first_sync: bool,
 }
 
 /// A Calendar a server Account offers that the user hasn't added. FreeCal

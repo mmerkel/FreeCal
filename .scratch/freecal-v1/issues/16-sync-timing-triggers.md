@@ -15,3 +15,4 @@
 
 ## Comments
 - 2026-10-18 (from 82): the on-demand sync is `Core::sync_account(AccountId)`, which blocks until each Calendar is synced; it leaves out a Calendar on its first sync.
+- 2026-11-07 (from 15): `Core::sync_account` now takes `StartedBy`: sync now passes `StartedBy::User` so that Syncing shows at once, polls and triggers `StartedBy::FreeCal`. A Calendar that is syncing is left out of another sync.

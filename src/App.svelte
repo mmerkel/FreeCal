@@ -15,6 +15,7 @@
     SettingsUpdate,
     SidebarState,
     Signal,
+    SyncStatuses,
     JournalTransactionId,
     View,
     When,
@@ -45,6 +46,7 @@
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
+  import { SyncingDelay } from './lib/syncDisplay';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
@@ -103,6 +105,17 @@
   let interacting = false;
   let dateChangeHeld = false;
   let directory = $state<Directory>();
+  /** The Sync Status of every server Account and Calendar, as last read. */
+  let syncStatuses = $state<SyncStatuses>();
+  /** Counts held-back Syncing states coming due, so that they show then. */
+  let syncingDue = $state(0);
+  const syncingDelay = new SyncingDelay();
+  syncingDelay.ondue = () => syncingDue++;
+  /** The Sync Statuses as shown, with a routine sync's Syncing held back for a moment. */
+  const shownSyncStatuses = $derived.by(() => {
+    void syncingDue;
+    return syncStatuses && syncingDelay.shown(syncStatuses);
+  });
   /** Why FreeCal couldn't start, in words, for the startup error screen. */
   let startupReason = $state<string>();
   let readFailure = $state<string>();
@@ -155,6 +168,7 @@
 
   // Reads can overtake each other; only the latest one of each kind may land.
   let latestDirectoryRead = 0;
+  let latestSyncStatusesRead = 0;
   let latestOccurrencesRead = 0;
   let latestEventRead = 0;
 
@@ -165,6 +179,12 @@
       directory = { accounts, calendars };
       readFailure = undefined;
     }
+  }
+
+  async function readSyncStatuses() {
+    const read = ++latestSyncStatusesRead;
+    const statuses = await core.syncStatuses();
+    if (read === latestSyncStatusesRead) syncStatuses = statuses;
   }
 
   async function readOccurrences() {
@@ -194,6 +214,7 @@
   /** Everything shown depends on the Calendars; re-reads after any change. */
   function refreshAll() {
     readDirectory().catch(reportRead);
+    readSyncStatuses().catch(reportRead);
     readOccurrences().catch(reportRead);
     readOpenedEvent();
   }
@@ -212,6 +233,11 @@
       case 'dateChanged':
         today = Temporal.PlainDate.from(signal.date);
         followToday();
+        break;
+      case 'accountSyncStatusChanged':
+      case 'calendarSyncStatusChanged':
+        // Read whole, as the overall status comes with them.
+        readSyncStatuses().catch(reportRead);
         break;
     }
   }
@@ -281,6 +307,7 @@
         core.lastUsedView(),
         core.sidebar(),
         readDirectory(),
+        readSyncStatuses(),
       ]);
       // A "Date changed" that came in meanwhile is newer.
       today ??= currentDate;
@@ -296,6 +323,7 @@
     return () => {
       stopped = true;
       unsubscribe?.();
+      syncingDelay.stop();
     };
   });
 
@@ -680,7 +708,12 @@
   {@const sidebarState = sidebar}
   <div class="app">
     <SidebarPane sidebar={sidebarState} onchange={changeSidebar}>
-      <Sidebar {core} accounts={directory.accounts} calendars={directory.calendars} />
+      <Sidebar
+        {core}
+        accounts={directory.accounts}
+        calendars={directory.calendars}
+        syncStatuses={shownSyncStatuses}
+      />
     </SidebarPane>
     <main class="grid">
       <Toolbar
@@ -691,6 +724,8 @@
         onstep={(by) => navigate(step(shown, by))}
         onview={(view) => navigate(switchView(shown, view))}
         onmonth={(month) => navigate(openMonth(shown, month))}
+        sync={shownSyncStatuses?.overall}
+        {today}
         onimport={startImport}
         onsettings={openSettings}
         onabout={openAbout}

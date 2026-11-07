@@ -15,7 +15,6 @@ const calendars: Calendar[] = [
     shown: true,
     readOnly: false,
     serverReadOnly: false,
-    firstSync: false,
   },
   {
     id: calendarId(2),
@@ -25,7 +24,6 @@ const calendars: Calendar[] = [
     shown: false,
     readOnly: false,
     serverReadOnly: false,
-    firstSync: false,
   },
 ];
 

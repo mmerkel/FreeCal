@@ -1,6 +1,6 @@
 <!--
   The toolbar over the grid: Today, previous and next,
-  the shown period, the view switch and the main menu (Import…, Settings…,
+  the shown period, the view switch, the status indicator and the main menu (Import…, Settings…,
   About FreeCal and Quit). The Today button is a
   toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
@@ -8,16 +8,22 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import CircleAlert from '@lucide/svelte/icons/circle-alert';
+  import CloudCheck from '@lucide/svelte/icons/cloud-check';
+  import CloudOff from '@lucide/svelte/icons/cloud-off';
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import ImportIcon from '@lucide/svelte/icons/import';
   import Info from '@lucide/svelte/icons/info';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
-  import type { View } from '../core/types';
+  import type { OverallState, OverallStatus, View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
   import Menu from './Menu.svelte';
   import { monthTitle, type TitlePart } from './navigation';
   import { shortcutHint, shortcutKeys } from './shortcuts';
+  import { lastSyncText } from './syncDisplay';
 
   interface Props {
     view: View;
@@ -29,6 +35,9 @@
     onview: (view: View) => void;
     /** A month name in the title was clicked. */
     onmonth: (month: Temporal.PlainYearMonth) => void;
+    /** The overall status as shown, once read. */
+    sync?: OverallStatus;
+    today: Temporal.PlainDate;
     onimport: () => void;
     onsettings: () => void;
     onabout: () => void;
@@ -43,6 +52,8 @@
     onstep,
     onview,
     onmonth,
+    sync,
+    today,
     onimport,
     onsettings,
     onabout,
@@ -67,6 +78,28 @@
 
   const previous = $derived(t(steps[view].previous));
   const next = $derived(t(steps[view].next));
+
+  /** Each overall state's words and icon in the status indicator. */
+  const syncStates: Record<OverallState['kind'], { label: MessageKey; icon: typeof CloudCheck }> = {
+    conflict: { label: 'sync.conflict', icon: TriangleAlert },
+    syncError: { label: 'sync.errorShort', icon: CircleAlert },
+    offline: { label: 'sync.offline', icon: CloudOff },
+    syncing: { label: 'sync.syncing', icon: RefreshCw },
+    synced: { label: 'sync.synced', icon: CloudCheck },
+  };
+
+  const SyncIcon = $derived(syncStates[sync?.state.kind ?? 'synced'].icon);
+
+  /** What the status indicator says: the overall state, with when the last sync finished. */
+  const syncText = $derived.by(() => {
+    if (!sync) return '';
+    const state = t(syncStates[sync.state.kind].label);
+    if (!sync.lastSync) return state;
+    const time = lastSyncText(sync.lastSync, today);
+    return sync.state.kind === 'synced'
+      ? t('sync.syncedAt', { time })
+      : t('sync.lastSync', { state, time });
+  });
 
   /** Runs a menu item's action: the menu closes first, so focus returns to its button. */
   function choose(action: () => void) {
@@ -132,6 +165,13 @@
       </button>
     {/each}
   </div>
+  {#if sync}
+    <!-- Not a live region: it would announce every routine sync. -->
+    <div class="sync-status marker" role="group" aria-label={t('sync.indicator')}>
+      <SyncIcon size={16} aria-hidden="true" />
+      <span>{syncText}</span>
+    </div>
+  {/if}
   <div class="main-menu">
     <button
       type="button"
@@ -221,6 +261,13 @@
 
   .main-menu {
     margin-left: var(--space-2);
+  }
+
+  .sync-status {
+    gap: var(--space-2);
+    margin-left: var(--space-4);
+    font-size: var(--text-sm);
+    white-space: nowrap;
   }
 
   kbd {

@@ -53,7 +53,6 @@ impl DatabaseTransaction<'_> {
             shown: true,
             read_only: false,
             server_read_only: false,
-            first_sync: false,
         })
     }
 

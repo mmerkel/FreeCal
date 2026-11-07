@@ -25,7 +25,6 @@ const home: Calendar = {
   shown: true,
   readOnly: false,
   serverReadOnly: false,
-  firstSync: false,
 };
 
 function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Occurrence {

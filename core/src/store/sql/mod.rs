@@ -175,7 +175,6 @@ impl Store {
                     shown: row.get(4)?,
                     read_only: row.get::<_, bool>(5)? || row.get::<_, bool>(6)?,
                     server_read_only: row.get(6)?,
-                    first_sync: false,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -211,6 +210,24 @@ impl Store {
                     .then(|| row.get(3).map(|token| SyncPoint { token }))
                     .transpose()?,
             ))
+        })?)
+    }
+
+    /// How many Unsent Changes each server Account's Calendar has, in the
+    /// order they were added.
+    pub fn unsent_change_counts(&self) -> Result<Vec<UnsentChangeCount>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT calendar.id, calendar.account_id, \
+                 (SELECT COUNT(*) FROM unsent_change WHERE calendar_id = calendar.id) \
+             FROM calendar JOIN account ON account.id = calendar.account_id \
+             WHERE account.provider != 'local' ORDER BY calendar.id",
+        )?;
+        readable(stmt.query_map([], |row| {
+            Ok(UnsentChangeCount {
+                calendar_id: CalendarId(row.get(0)?),
+                account_id: AccountId(row.get(1)?),
+                count: row.get(2)?,
+            })
         })?)
     }
 
@@ -515,6 +532,14 @@ impl Store {
             .prepare(&format!("SELECT id, {EVENT_FIELDS} FROM event"))?;
         readable(stmt.query_map([], |row| Ok((EventId(row.get(0)?), event_fields(row, 1)?)))?)
     }
+}
+
+/// How many Unsent Changes a server Account's Calendar has.
+#[derive(Debug, Clone, Copy)]
+pub struct UnsentChangeCount {
+    pub calendar_id: CalendarId,
+    pub account_id: AccountId,
+    pub count: u32,
 }
 
 /// A row of `unsent_change` as stored, its recurrence ID as text, for tests

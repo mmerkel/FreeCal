@@ -27,3 +27,4 @@
 - 2026-10-25 (grilling, ADR 0011): blocked by 91. "Pending" now means a Server Object with one of its Combined Event Keys in `unsent_change`.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.
 - 2026-11-06 (grilling, ADR 0014): blocked by 100. A Conflict is no longer "a server change to a Server Object while one of its Combined Event Keys is in `unsent_change`" (comment of 2026-10-25); it is found per Occurrence in the Provider-neutral core from the Server Version, as ADR 0014 says. For a single Event, "per Occurrence" is the Event itself; the rules for Recurring Events are ticket 21's. New terms in `GLOSSARY.md`: Server Version, User's Version.
+- 2026-11-07 (from 15): the overall status already ranks Conflict first (`OverallState::Conflict`), but nothing raises it: feed the Conflicts into `SyncStatusTracker::overall` (`core/src/sync_status.rs`) and tick ticket 15's overall-status box.

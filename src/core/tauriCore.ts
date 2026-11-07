@@ -25,6 +25,7 @@ export const tauriCore: CoreApi = {
   addCalendars: (accountId, urls) => invoke('add_calendars', { accountId, urls }),
   removeAccount: (id) => invoke('remove_account', { id }),
   listCalendars: () => invoke('list_calendars'),
+  syncStatuses: () => invoke('sync_statuses'),
   createCalendar: (accountId, name, colour) =>
     invoke('create_calendar', { accountId, name, colour }),
   renameCalendar: (id, name) => invoke('rename_calendar', { id, name }),

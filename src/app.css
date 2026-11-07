@@ -359,6 +359,16 @@ input[type='radio'] {
   background: var(--danger-soft);
 }
 
+/* A marker on a row or in the toolbar, such as a lock or the sync status:
+   grey and near colourless, as Calendar colours are the only strong
+   colours. */
+.marker {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--foreground-muted);
+}
+
 .menu-label {
   padding: var(--space-3) var(--space-4) var(--space-2);
   color: var(--foreground-muted);

@@ -68,15 +68,19 @@ fn adding_an_available_calendar_makes_it_a_calendar_of_the_account() {
         // Every newly added server Calendar, until 1.0.
         read_only: true,
         server_read_only: false,
-        first_sync: false,
     }];
     assert_eq!(added, expected);
     assert_eq!(core.list_calendars().unwrap(), expected);
     assert_eq!(available_urls(&core, account), vec![home]);
-    // As its first sync starts, and as it ends.
+    // Once, as it is added; its Sync Status says when its first sync ends.
     assert_eq!(
-        harness.signals.received(),
-        vec![Signal::CalendarsChanged, Signal::CalendarsChanged]
+        harness
+            .signals
+            .received()
+            .into_iter()
+            .filter(|signal| *signal == Signal::CalendarsChanged)
+            .count(),
+        1
     );
 }
 
