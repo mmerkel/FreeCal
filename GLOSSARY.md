@@ -218,6 +218,14 @@ _Avoid_: Send (on its own), push, upload
 The code that sends the Unsent Changes, comparing each Combined Event Key's Event Rows with its Server Object to decide between create, update and delete.
 _Avoid_: Uploader, pusher, outbox
 
+**Sync Scheduler**:
+The code that decides when FreeCal syncs: Polls, syncs on window focus, on waking from sleep and after local edits, sync now, and the system's network status. It only decides; the syncs run one Account after another on one thread.
+_Avoid_: Sync timer, sync loop, syncer
+
+**Poll**:
+The regular sync of every server Account, every 2 minutes while the window is open and every 15 minutes in the background. Any sync of every Account restarts its period.
+_Avoid_: Refresh, periodic sync, tick
+
 **Transaction Origin**:
 Where a Journal Transaction's changes came from: a user action, an import, an undo, a First Sync or an Incoming Sync.
 _Avoid_: Origin (on its own), source, cause
