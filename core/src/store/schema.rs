@@ -193,6 +193,18 @@ const MIGRATIONS: &[&str] = &[
     );
     INSERT INTO app_state (id) VALUES (1);
     ",
+    // Ticket 15: a server Account's or Calendar's Sync Record, so that a
+    // relaunch shows how its last sync ended until it syncs again: when its
+    // last sync finished (Unix seconds) and its Sync Outcome as JSON, and
+    // when its last successful sync finished. All untrusted when read.
+    "
+    ALTER TABLE account ADD COLUMN last_sync_at INTEGER;
+    ALTER TABLE account ADD COLUMN last_sync_outcome TEXT;
+    ALTER TABLE account ADD COLUMN last_synced_at INTEGER;
+    ALTER TABLE calendar ADD COLUMN last_sync_at INTEGER;
+    ALTER TABLE calendar ADD COLUMN last_sync_outcome TEXT;
+    ALTER TABLE calendar ADD COLUMN last_synced_at INTEGER;
+    ",
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether

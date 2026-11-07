@@ -715,7 +715,7 @@ fn transport_error(error: ureq::Error) -> CoreError {
 /// A server's own text, made safe to pass on: control and bidi formatting
 /// characters become spaces, whitespace runs one space, and it is cut to
 /// [`MAX_MESSAGE`] characters. It stays untrusted text.
-fn plain_message(text: &str) -> String {
+pub(crate) fn plain_message(text: &str) -> String {
     let spaced: String = text
         .chars()
         .map(|c| match c {

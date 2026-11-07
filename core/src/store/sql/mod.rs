@@ -33,10 +33,29 @@ use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredW
 use crate::journal::{JournalEventModification, JournalTransactionId};
 use crate::remote::SyncPoint;
 use crate::sync::caldav::KnownServerResource;
+use crate::sync_status::SyncRecord;
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
     Result, ServerLogin, Settings, SidebarState, View,
 };
+
+/// The Sync Record in columns 1 to 3 of `row`; a part with a value of
+/// another type is left out, as one that can't be read.
+fn sync_record(row: &Row) -> rusqlite::Result<SyncRecord> {
+    let integer = |index| match row.get(index)? {
+        Value::Integer(value) => Ok::<_, rusqlite::Error>(Some(value)),
+        _ => Ok(None),
+    };
+    let text = |index| match row.get(index)? {
+        Value::Text(value) => Ok::<_, rusqlite::Error>(Some(value)),
+        _ => Ok(None),
+    };
+    Ok(SyncRecord::from_stored(
+        integer(1)?,
+        text(2)?.as_deref(),
+        integer(3)?,
+    ))
+}
 
 /// The rows whose values have the types asked for. A row with a value of
 /// another type is skipped rather than keeping the Local Store from opening;
@@ -229,6 +248,26 @@ impl Store {
                 count: row.get(2)?,
             })
         })?)
+    }
+
+    /// The Sync Record of each server Account that has one.
+    pub fn account_sync_records(&self) -> Result<Vec<(AccountId, SyncRecord)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, last_sync_at, last_sync_outcome, last_synced_at FROM account \
+             WHERE provider != 'local'",
+        )?;
+        readable(stmt.query_map([], |row| Ok((AccountId(row.get(0)?), sync_record(row)?)))?)
+    }
+
+    /// The Sync Record of each server Account's Calendar.
+    pub fn calendar_sync_records(&self) -> Result<Vec<(CalendarId, SyncRecord)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT calendar.id, calendar.last_sync_at, calendar.last_sync_outcome, \
+                 calendar.last_synced_at \
+             FROM calendar JOIN account ON account.id = calendar.account_id \
+             WHERE account.provider != 'local'",
+        )?;
+        readable(stmt.query_map([], |row| Ok((CalendarId(row.get(0)?), sync_record(row)?)))?)
     }
 
     /// The Known Server Resources of a CalDAV Calendar, by their address as

@@ -4,16 +4,16 @@
 //! indicator and the tray show. The Local Account and its Calendars have
 //! none.
 //!
-//! The states live in memory, as [`SyncStatusTracker`], for the running
-//! FreeCal: each sync sets them again, and ticket 16 syncs right after
-//! launch. Unsent Changes are counted from the Local Store whenever a
-//! [`SyncStatusReport`] is made.
+//! The running syncs live in memory, as [`SyncStatusTracker`]. How each
+//! one's last sync ended is its [`SyncRecord`], which the Local Store keeps
+//! too, so that a relaunch shows it until the next sync. Unsent Changes are
+//! counted from the Local Store whenever a [`SyncStatusReport`] is made.
 
 use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use chrono_tz::Tz;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, CalendarId, CoreError, ErrorCode};
 
@@ -51,8 +51,8 @@ pub enum SyncStatus {
     },
 }
 
-/// How a sync ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// How a sync ended. The Local Store keeps it as its JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SyncOutcome {
@@ -68,6 +68,69 @@ impl From<SyncOutcome> for SyncStatus {
             SyncOutcome::Offline => SyncStatus::Offline,
             SyncOutcome::SyncError { error } => SyncStatus::SyncError { error },
         }
+    }
+}
+
+impl SyncOutcome {
+    /// Reads a stored Sync Outcome, untrusted: none when it can't be read,
+    /// and a Sync Error's text made plain again (see [`ErrorCode::checked`]).
+    fn from_stored(json: &str) -> Option<Self> {
+        match serde_json::from_str(json).ok()? {
+            SyncOutcome::SyncError { error } => Some(SyncOutcome::SyncError {
+                error: error.checked()?,
+            }),
+            outcome => Some(outcome),
+        }
+    }
+}
+
+/// How the last sync of a server Account or Calendar ended, and when its
+/// last successful one finished (new term: Sync Record). The Local Store
+/// keeps it, so that a relaunch shows it until the next sync.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct SyncRecord {
+    pub last: Option<(DateTime<FixedOffset>, SyncOutcome)>,
+    pub last_synced: Option<DateTime<FixedOffset>>,
+}
+
+impl SyncRecord {
+    /// A Sync Record as the Local Store keeps it, untrusted: a time in Unix
+    /// seconds, or an outcome, that can't be read leaves its part out.
+    pub fn from_stored(
+        last_at: Option<i64>,
+        last_outcome: Option<&str>,
+        last_synced_at: Option<i64>,
+    ) -> Self {
+        let time = |seconds: Option<i64>| {
+            DateTime::from_timestamp(seconds?, 0).map(|at| at.fixed_offset())
+        };
+        SyncRecord {
+            last: time(last_at).zip(last_outcome.and_then(SyncOutcome::from_stored)),
+            last_synced: time(last_synced_at),
+        }
+    }
+
+    /// The Sync Record as the Local Store keeps it: when the last sync
+    /// finished, its Sync Outcome as JSON, and when the last successful one
+    /// finished.
+    pub fn stored(&self) -> (Option<i64>, Option<String>, Option<i64>) {
+        let (at, outcome) = self
+            .last
+            .as_ref()
+            .map(|(at, outcome)| {
+                let json =
+                    serde_json::to_string(outcome).expect("a Sync Outcome always serializes");
+                (at.timestamp(), json)
+            })
+            .unzip();
+        (at, outcome, self.last_synced.map(|at| at.timestamp()))
+    }
+
+    fn finish(&mut self, at: DateTime<FixedOffset>, outcome: SyncOutcome) {
+        if outcome == SyncOutcome::Synced {
+            self.last_synced = Some(at);
+        }
+        self.last = Some((at, outcome));
     }
 }
 
@@ -88,7 +151,7 @@ pub struct FinishedSync {
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusReport {
     pub status: SyncStatus,
-    /// None until a sync of it has finished in this running FreeCal.
+    /// None until a sync of it has finished.
     pub last_sync: Option<FinishedSync>,
     /// Its Unsent Changes; an Account's are those of all its Calendars.
     pub unsent_changes: u32,
@@ -189,9 +252,7 @@ struct SyncState {
     by_user: bool,
     /// Whether the running sync is a Calendar's First Sync.
     first_sync: bool,
-    last: Option<(DateTime<FixedOffset>, SyncOutcome)>,
-    /// When its last sync that ended Synced finished.
-    last_synced: Option<DateTime<FixedOffset>>,
+    record: SyncRecord,
 }
 
 impl SyncState {
@@ -209,11 +270,8 @@ impl SyncState {
             self.by_user = false;
             self.first_sync = false;
         }
-        if let Some((at, SyncOutcome::Synced)) = &last {
-            self.last_synced = Some(*at);
-        }
-        if last.is_some() {
-            self.last = last;
+        if let Some((at, outcome)) = last {
+            self.record.finish(at, outcome);
         }
     }
 
@@ -221,12 +279,12 @@ impl SyncState {
     /// tries it again by itself, so that the overall status doesn't flicker
     /// to Syncing on each try.
     fn offline(&self) -> bool {
-        let last_offline = matches!(self.last, Some((_, SyncOutcome::Offline)));
+        let last_offline = matches!(self.record.last, Some((_, SyncOutcome::Offline)));
         last_offline && (self.running == 0 || !self.by_user)
     }
 
     fn status(&self) -> SyncStatus {
-        match &self.last {
+        match &self.record.last {
             _ if self.running > 0 => SyncStatus::Syncing {
                 by_user: self.by_user,
                 first_sync: self.first_sync,
@@ -239,7 +297,7 @@ impl SyncState {
     fn report(&self, unsent_changes: u32, zone: Tz) -> SyncStatusReport {
         SyncStatusReport {
             status: self.status(),
-            last_sync: self.last.as_ref().map(|(at, outcome)| FinishedSync {
+            last_sync: self.record.last.as_ref().map(|(at, outcome)| FinishedSync {
                 at: in_zone(*at, zone),
                 outcome: outcome.clone(),
             }),
@@ -252,8 +310,9 @@ fn in_zone(at: DateTime<FixedOffset>, zone: Tz) -> NaiveDateTime {
     at.with_timezone(&zone).naive_local()
 }
 
-/// The sync state of every server Account and Calendar in this running
-/// FreeCal. One with no entry has never synced here: it is Synced.
+/// The sync state of every server Account and Calendar: the running syncs,
+/// and the Sync Records, loaded from the Local Store on launch. One with no
+/// entry has never synced: it is Synced.
 #[derive(Debug, Default)]
 pub(crate) struct SyncStatusTracker {
     accounts: HashMap<AccountId, SyncState>,
@@ -261,6 +320,24 @@ pub(crate) struct SyncStatusTracker {
 }
 
 impl SyncStatusTracker {
+    /// The Sync Records the Local Store keeps, on launch.
+    pub fn load(
+        accounts: Vec<(AccountId, SyncRecord)>,
+        calendars: Vec<(CalendarId, SyncRecord)>,
+    ) -> Self {
+        let state = |record| SyncState {
+            record,
+            ..SyncState::default()
+        };
+        SyncStatusTracker {
+            accounts: accounts.into_iter().map(|(id, r)| (id, state(r))).collect(),
+            calendars: calendars
+                .into_iter()
+                .map(|(id, r)| (id, state(r)))
+                .collect(),
+        }
+    }
+
     pub fn start_account(&mut self, id: AccountId, started_by: StartedBy) {
         self.accounts
             .entry(id)
@@ -268,10 +345,17 @@ impl SyncStatusTracker {
             .start(started_by, false);
     }
 
-    pub fn end_account(&mut self, id: AccountId, at: DateTime<FixedOffset>, outcome: SyncOutcome) {
-        if let Some(state) = self.accounts.get_mut(&id) {
-            state.end(Some((at, outcome)));
-        }
+    /// Ends the Account's running sync. Returns its new Sync Record, for
+    /// the Local Store; none for an Account removed meanwhile.
+    pub fn end_account(
+        &mut self,
+        id: AccountId,
+        at: DateTime<FixedOffset>,
+        outcome: SyncOutcome,
+    ) -> Option<SyncRecord> {
+        let state = self.accounts.get_mut(&id)?;
+        state.end(Some((at, outcome)));
+        Some(state.record.clone())
     }
 
     /// Whether a sync of the Calendar runs, which another one leaves out.
@@ -289,16 +373,18 @@ impl SyncStatusTracker {
     }
 
     /// Ends a Calendar's running sync: with how it finished, or none when it
-    /// didn't get to, as when its Account went Offline. A Calendar removed
+    /// didn't get to, as when its Account went Offline. Returns its new
+    /// Sync Record when it finished, for the Local Store. A Calendar removed
     /// meanwhile stays forgotten.
     pub fn end_calendar(
         &mut self,
         id: CalendarId,
         finished: Option<(DateTime<FixedOffset>, SyncOutcome)>,
-    ) {
-        if let Some(state) = self.calendars.get_mut(&id) {
-            state.end(finished);
-        }
+    ) -> Option<SyncRecord> {
+        let state = self.calendars.get_mut(&id)?;
+        let ended = finished.is_some();
+        state.end(finished);
+        ended.then(|| state.record.clone())
     }
 
     /// Forgets a removed Calendar.
@@ -368,7 +454,7 @@ impl SyncStatusTracker {
         } else {
             OverallState::Synced
         };
-        let last_synced = |state: Option<&SyncState>| state?.last_synced;
+        let last_synced = |state: Option<&SyncState>| state?.record.last_synced;
         let last_sync = accounts
             .iter()
             .map(|id| last_synced(self.accounts.get(id)))

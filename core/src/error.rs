@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AccountId, CalendarId, EventId, JournalTransactionId, KeyringError};
 
@@ -149,7 +149,7 @@ impl CoreError {
 /// translates through its i18n layer, with the names of files it is about.
 /// Most codes stand for a [`CoreError`]; the last ones are failures of the
 /// shell's own commands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "code", rename_all = "camelCase")]
 pub enum ErrorCode {
@@ -253,6 +253,22 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// A code read back from the Local Store, untrusted: the server's text
+    /// made plain again as [`ErrorCode::ServerRefused`] promises, and none
+    /// for a [`ErrorCode::RedirectedElsewhere`] whose `url` isn't one.
+    pub(crate) fn checked(self) -> Option<Self> {
+        Some(match self {
+            ErrorCode::ServerRefused { status, message } => ErrorCode::ServerRefused {
+                status,
+                message: crate::caldav::plain_message(&message),
+            },
+            ErrorCode::RedirectedElsewhere { url } => ErrorCode::RedirectedElsewhere {
+                url: url::Url::parse(&url).ok()?.to_string(),
+            },
+            code => code,
+        })
+    }
+
     /// Every code, for the generated TypeScript samples.
     #[cfg(test)]
     pub(crate) fn all() -> Vec<ErrorCode> {

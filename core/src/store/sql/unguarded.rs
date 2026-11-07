@@ -5,6 +5,7 @@
 use rusqlite::params;
 
 use crate::store::DatabaseTransaction;
+use crate::sync_status::SyncRecord;
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
     Provider, Result, ServerLogin, SidebarState, View,
@@ -87,6 +88,34 @@ impl DatabaseTransaction<'_> {
             id,
             token,
         )
+    }
+
+    /// Keeps the server Account's Sync Record; an Account removed
+    /// meanwhile is left as it is.
+    pub fn set_account_sync_record(&self, id: AccountId, record: &SyncRecord) -> Result<()> {
+        self.set_sync_record(
+            "UPDATE account SET last_sync_at = ?2, last_sync_outcome = ?3, last_synced_at = ?4 \
+             WHERE id = ?1",
+            id.0,
+            record,
+        )
+    }
+
+    /// Keeps the server Calendar's Sync Record; a Calendar removed
+    /// meanwhile is left as it is.
+    pub fn set_calendar_sync_record(&self, id: CalendarId, record: &SyncRecord) -> Result<()> {
+        self.set_sync_record(
+            "UPDATE calendar SET last_sync_at = ?2, last_sync_outcome = ?3, last_synced_at = ?4 \
+             WHERE id = ?1",
+            id.0,
+            record,
+        )
+    }
+
+    fn set_sync_record(&self, sql: &str, id: i64, record: &SyncRecord) -> Result<()> {
+        let (at, outcome, synced_at) = record.stored();
+        self.tx.execute(sql, params![id, at, outcome, synced_at])?;
+        Ok(())
     }
 
     pub fn set_calendar_name(&self, id: CalendarId, name: &str) -> Result<()> {

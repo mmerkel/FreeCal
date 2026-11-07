@@ -94,6 +94,10 @@ impl Core {
         std::fs::create_dir_all(data_dir)?;
         let lock = lock_local_store(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
+        let sync_statuses = SyncStatusTracker::load(
+            store.account_sync_records()?,
+            store.calendar_sync_records()?,
+        );
         let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
             _lock: lock,
@@ -102,7 +106,7 @@ impl Core {
             signals,
             keyring,
             date,
-            sync_statuses: Mutex::new(SyncStatusTracker::default()),
+            sync_statuses: Mutex::new(sync_statuses),
         })
     }
 
@@ -269,8 +273,8 @@ impl Core {
             let synced = self.first_sync(remote.as_ref(), calendar.id, url);
             failed = self.end_calendar_sync(calendar.id, synced.err());
         }
-        self.end_account_sync(account_id, failed.as_ref());
-        failed.map_or(Ok(added), Err)
+        let kept = self.end_account_sync(account_id, failed.as_ref());
+        failed.or(kept.err()).map_or(Ok(added), Err)
     }
 
     /// Pulls every Event of the Calendar `id` at `url` on the server, page by
@@ -357,14 +361,18 @@ impl Core {
                 }
             }
         }
-        self.end_account_sync(id, about_account.as_ref());
-        about_account.or(failed).map_or(Ok(synced), Err)
+        let kept = self.end_account_sync(id, about_account.as_ref());
+        about_account
+            .or(failed)
+            .or(kept.err())
+            .map_or(Ok(synced), Err)
     }
 
     /// Ends the Calendar `id`'s running sync, which failed with `failed` if
-    /// given, and sends its new Sync Status. A failure about its Account
-    /// leaves its Sync Status as before the sync, and is returned for the
-    /// Account's. A Calendar removed meanwhile is no failure.
+    /// given, keeps its Sync Record and sends its new Sync Status. A failure
+    /// about its Account leaves its Sync Status as before the sync, and is
+    /// returned for the Account's. A Calendar removed meanwhile is no
+    /// failure; failing to keep the Sync Record is.
     fn end_calendar_sync(&self, id: CalendarId, failed: Option<CoreError>) -> Option<CoreError> {
         let failed = failed.filter(
             |error| !matches!(error, CoreError::CalendarNotFound(removed) if *removed == id),
@@ -374,24 +382,39 @@ impl Core {
             Some(error) => Some(SyncOutcome::of_failure(error)),
             None => Some(SyncOutcome::Synced),
         };
-        {
-            self.tracker(&self.store())
+        let kept = {
+            let store = self.store();
+            let record = self
+                .tracker(&store)
                 .end_calendar(id, finished.map(|outcome| (self.clock.now(), outcome)));
-        }
+            record.map_or(Ok(()), |record| {
+                store.write(|database_transaction| {
+                    database_transaction.set_calendar_sync_record(id, &record)
+                })
+            })
+        };
         self.send_sync_statuses(&[], &[id]);
-        failed
+        failed.or(kept.err())
     }
 
     /// Ends the Account `id`'s running sync, which ended with `about_account`
-    /// if a failure about the whole Account stopped it, and sends its new
-    /// Sync Status.
-    fn end_account_sync(&self, id: AccountId, about_account: Option<&CoreError>) {
+    /// if a failure about the whole Account stopped it, keeps its Sync
+    /// Record and sends its new Sync Status.
+    fn end_account_sync(&self, id: AccountId, about_account: Option<&CoreError>) -> Result<()> {
         let outcome = about_account.map_or(SyncOutcome::Synced, SyncOutcome::of_failure);
-        {
-            self.tracker(&self.store())
+        let kept = {
+            let store = self.store();
+            let record = self
+                .tracker(&store)
                 .end_account(id, self.clock.now(), outcome);
-        }
+            record.map_or(Ok(()), |record| {
+                store.write(|database_transaction| {
+                    database_transaction.set_account_sync_record(id, &record)
+                })
+            })
+        };
         self.send_sync_statuses(&[id], &[]);
+        kept
     }
 
     /// The Sync Status of every server Account and Calendar, with the

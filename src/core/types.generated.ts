@@ -307,7 +307,7 @@ paragraphs: Array<Array<Piece>>,
 text: string, };
 
 /**
- * How a sync ended.
+ * How a sync ended. The Local Store keeps it as its JSON.
  */
 export type SyncOutcome = { "kind": "synced" } | { "kind": "offline" } | { "kind": "syncError", error: ErrorCode, };
 
@@ -322,7 +322,7 @@ export type SyncStatus = { "kind": "syncing", byUser: boolean, firstSync: boolea
  */
 export type SyncStatusReport = { status: SyncStatus,
 /**
- * None until a sync of it has finished in this running FreeCal.
+ * None until a sync of it has finished.
  */
 lastSync: FinishedSync | null,
 /**

@@ -77,6 +77,32 @@ impl Server {
         move_account(&self.harness, self.account, &offline, &self.radicale.url());
     }
 
+    /// Quits FreeCal and launches it again on the same Local Store.
+    fn relaunch(self) -> Self {
+        let Server {
+            radicale,
+            user,
+            harness,
+            core,
+            account,
+            work,
+            home,
+            home_url,
+        } = self;
+        drop(core);
+        let core = harness.open();
+        Server {
+            radicale,
+            user,
+            harness,
+            core,
+            account,
+            work,
+            home,
+            home_url,
+        }
+    }
+
     fn account_status(&self) -> SyncStatusReport {
         let statuses = self.core.sync_statuses().unwrap();
         statuses
@@ -468,6 +494,68 @@ fn the_overall_last_sync_is_the_oldest_last_successful_sync() {
         Some(time("2026-10-03T12:30:00")),
         "a failed sync doesn't count"
     );
+}
+
+#[test]
+fn after_a_relaunch_each_last_sync_shows_until_the_next_sync() {
+    let server = Server::new();
+    server.harness.clock.set("2026-10-03T12:30:00+02:00");
+    server.go_offline();
+    let _ = server.core.sync_account(server.account, StartedBy::FreeCal);
+
+    let server = server.relaunch();
+
+    let offline_at = FinishedSync {
+        at: time("2026-10-03T12:30:00"),
+        outcome: SyncOutcome::Offline,
+    };
+    assert_eq!(
+        server.account_status(),
+        report(SyncStatus::Offline, Some(offline_at))
+    );
+    assert_eq!(
+        server.calendar_status(server.work),
+        report(SyncStatus::Synced, Some(noon()))
+    );
+    assert_eq!(
+        server.core.sync_statuses().unwrap().overall,
+        OverallStatus {
+            state: OverallState::Offline,
+            last_sync: Some(time("2026-10-03T12:00:00")),
+        }
+    );
+}
+
+#[test]
+fn a_stored_last_sync_is_untrusted() {
+    let server = Server::new();
+    let long = "x".repeat(300);
+    server.harness.arrange_local_store(&format!(
+        "UPDATE calendar SET last_sync_outcome = 'not an outcome' WHERE id = {work};
+         UPDATE calendar SET last_sync_outcome =
+             '{{\"kind\":\"syncError\",\"error\":{{\"code\":\"serverRefused\",\"status\":500,\"message\":\"a\\nb{long}\"}}}}'
+             WHERE id = {home};
+         UPDATE account SET last_sync_at = 1e30",
+        work = server.work.0,
+        home = server.home.0,
+    ));
+
+    let server = server.relaunch();
+
+    assert_eq!(server.calendar_status(server.work).last_sync, None);
+    let Some(FinishedSync {
+        outcome:
+            SyncOutcome::SyncError {
+                error: ErrorCode::ServerRefused { message, .. },
+            },
+        ..
+    }) = server.calendar_status(server.home).last_sync
+    else {
+        panic!("the stored Sync Error is read");
+    };
+    assert!(message.starts_with("a b"), "{message}");
+    assert_eq!(message.chars().count(), 200);
+    assert_eq!(server.account_status().last_sync, None);
 }
 
 #[test]
