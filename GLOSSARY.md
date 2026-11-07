@@ -223,7 +223,7 @@ The code that decides when FreeCal syncs: Polls, syncs on window focus, on wakin
 _Avoid_: Sync timer, sync loop, syncer
 
 **Poll**:
-The regular sync of every server Account, every 2 minutes while the window is open and every 15 minutes in the background. Any sync of every Account restarts its period.
+The regular sync of every server Account, every 5 minutes while the window is open and every 15 minutes in the background. Any sync of every Account restarts its period.
 _Avoid_: Refresh, periodic sync, tick
 
 **Transaction Origin**:

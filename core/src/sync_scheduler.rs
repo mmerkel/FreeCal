@@ -14,7 +14,7 @@ use chrono::{DateTime, FixedOffset, TimeDelta};
 use crate::{AccountId, StartedBy};
 
 /// How often every server Account is polled while the window is open
-/// (US-64). The spec asks for 2 minutes; the user chose 5.
+/// (US-64).
 const POLL_WITH_WINDOW: TimeDelta = TimeDelta::minutes(5);
 
 /// How often every server Account is polled while FreeCal runs in the
