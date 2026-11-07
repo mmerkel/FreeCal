@@ -173,7 +173,7 @@ fn opening_the_window_again_polls_once_two_minutes_have_passed() {
 fn focusing_the_window_and_waking_from_sleep_sync_at_once() {
     for trigger in [SyncTrigger::WindowFocused, SyncTrigger::Woke] {
         let synced = Synced::new();
-        synced.at("12:00:30");
+        synced.at("12:01:00");
 
         synced.core.trigger_sync(trigger);
 
@@ -183,15 +183,27 @@ fn focusing_the_window_and_waking_from_sleep_sync_at_once() {
             "{trigger:?}"
         );
         // The trigger's sync counts as the poll.
-        synced.at("12:02:00");
+        synced.at("12:02:59");
         assert_eq!(synced.run_and_take_syncs(), [], "{trigger:?}");
-        synced.at("12:02:30");
+        synced.at("12:03:00");
         assert_eq!(
             synced.run_and_take_syncs(),
             synced.by_freecal(),
             "{trigger:?}"
         );
     }
+}
+
+#[test]
+fn focusing_the_window_within_a_minute_of_a_sync_syncs_nothing() {
+    let synced = Synced::new();
+    synced.at("12:00:59");
+
+    synced.core.trigger_sync(SyncTrigger::WindowFocused);
+    assert_eq!(synced.run_and_take_syncs(), []);
+
+    synced.core.trigger_sync(SyncTrigger::Woke);
+    assert_eq!(synced.run_and_take_syncs(), synced.by_freecal());
 }
 
 #[test]

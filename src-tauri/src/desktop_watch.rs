@@ -69,8 +69,8 @@ pub fn watch_wake(on_wake: impl Fn() + Send + 'static) {
 fn wakes(on_wake: &impl Fn()) -> zbus::Result<()> {
     let connection = Connection::system()?;
     let manager = LoginManagerProxyBlocking::new(&connection)?;
-    for signal in manager.receive_prepare_for_sleep()? {
-        if !signal.args()?.start {
+    for notice in manager.receive_prepare_for_sleep()? {
+        if !notice.args()?.start {
             on_wake();
         }
     }

@@ -399,6 +399,10 @@ impl Core {
             Err(error) => return log::warn!("Couldn't read the Accounts to sync: {error}"),
         };
         for id in accounts {
+            // The network went away meanwhile; its return syncs them all.
+            if !self.scheduler().network_available() {
+                break;
+            }
             match self.sync_account(id, due.started_by(id)) {
                 Ok(_) | Err(CoreError::ServerUnreachable(_) | CoreError::AccountNotFound(_)) => {}
                 Err(error) => log::warn!("Syncing Account {} failed: {error}", id.0),
@@ -422,10 +426,12 @@ impl Core {
         self.scheduler().set_window_open(open);
     }
 
-    /// Asks for a sync of every server Account because of `trigger`.
+    /// Asks for a sync of every server Account because of `trigger`, but
+    /// not for a window focus within a minute of the last sync of every
+    /// Account.
     pub fn trigger_sync(&self, trigger: SyncTrigger) {
-        log::debug!("Syncing every Account on {trigger:?}");
-        self.ask_for_sync(|scheduler| scheduler.ask_every_account(StartedBy::FreeCal));
+        let now = self.clock.now();
+        self.ask_for_sync(|scheduler| scheduler.trigger(trigger, now));
     }
 
     /// Sync now: asks for a sync of the Account `id`, or of every server
@@ -1045,7 +1051,7 @@ impl Core {
                 origin,
                 TransactionOrigin::FirstSync | TransactionOrigin::IncomingSync
             ) {
-                self.send_unsent_change_counts(&recorded.calendars);
+                self.after_local_change(&recorded.calendars);
             }
             self.signals.send(Signal::OccurrencesChanged {
                 calendar_ids: recorded.calendars,
@@ -1061,7 +1067,7 @@ impl Core {
     /// server Account's, and for their Accounts, as their Unsent Changes may
     /// have changed, and asks for a sync of those Accounts, which sends the
     /// change right after it.
-    fn send_unsent_change_counts(&self, calendars: &[CalendarId]) {
+    fn after_local_change(&self, calendars: &[CalendarId]) {
         let accounts = match self.store().unsent_change_counts() {
             Ok(counts) => counts
                 .into_iter()

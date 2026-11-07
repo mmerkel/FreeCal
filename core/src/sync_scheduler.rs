@@ -21,6 +21,11 @@ const POLL_WITH_WINDOW: TimeDelta = TimeDelta::minutes(2);
 /// background (US-65).
 const POLL_IN_BACKGROUND: TimeDelta = TimeDelta::minutes(15);
 
+/// How long after a sync of every server Account focusing the window
+/// syncs nothing, so that the focus right after launch, or switching back
+/// and forth between windows, doesn't sync again and again.
+const FOCUS_QUIET: TimeDelta = TimeDelta::minutes(1);
+
 /// Something besides a poll, a local edit or sync now that makes every
 /// server Account sync at once, as the shell notices it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,8 +127,23 @@ impl SyncScheduler {
         was && !available
     }
 
+    pub fn network_available(&self) -> bool {
+        self.network_available
+    }
+
     pub fn ask_every_account(&mut self, by: StartedBy) {
         self.requests.ask_every_account(by);
+    }
+
+    /// Asks for a sync of every server Account because of `trigger` at
+    /// `now`; a window focus less than [`FOCUS_QUIET`] after the last sync
+    /// of every Account asks for none.
+    pub fn trigger(&mut self, trigger: SyncTrigger, now: DateTime<FixedOffset>) {
+        let quiet = trigger == SyncTrigger::WindowFocused
+            && self.last_poll.is_some_and(|last| now - last < FOCUS_QUIET);
+        if !quiet {
+            self.requests.ask_every_account(StartedBy::FreeCal);
+        }
     }
 
     pub fn ask_account(&mut self, id: AccountId, by: StartedBy) {
