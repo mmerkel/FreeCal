@@ -97,6 +97,8 @@ export const en = {
   'calendar.deleteTitle': 'Delete “{name}”?',
   'calendar.deleteBody': 'This Calendar and all its Events will be deleted. This can’t be undone.',
   'calendar.firstSync': 'Loading for the first time…',
+  'calendar.notLoaded': 'Not loaded yet',
+  'calendar.notFullyLoaded': '{state} · not fully loaded',
   'calendar.unsent.one': '{count} change not yet sent',
   'calendar.unsent.other': '{count} changes not yet sent',
   'sync.indicator': 'Sync status',

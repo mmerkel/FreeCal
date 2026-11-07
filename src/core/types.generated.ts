@@ -72,7 +72,13 @@ serverReadOnly: boolean, };
  */
 export type CalendarId = number & { readonly __brand: "CalendarId" };
 
-export type CalendarSyncStatus = { calendarId: CalendarId, report: SyncStatusReport, };
+export type CalendarSyncStatus = { calendarId: CalendarId, report: SyncStatusReport,
+/**
+ * Whether its First Sync is unfinished, whatever its Sync Status: its
+ * Events may be missing. The Local Store says so, not the running
+ * syncs, so that it holds after a relaunch too.
+ */
+firstSyncUnfinished: boolean, };
 
 /**
  * What a change to Events returns: its value, and the Journal Transaction
@@ -317,7 +323,7 @@ export type SyncOutcome = { "kind": "synced" } | { "kind": "offline" } | { "kind
 /**
  * The Sync Status of one server Account or Calendar.
  */
-export type SyncStatus = { "kind": "syncing", byUser: boolean, firstSync: boolean, } | { "kind": "synced" } | { "kind": "offline" } | { "kind": "syncError", error: ErrorCode, };
+export type SyncStatus = { "kind": "syncing", byUser: boolean, } | { "kind": "synced" } | { "kind": "offline" } | { "kind": "syncError", error: ErrorCode, };
 
 /**
  * What "Sync status changed" says about one server Account or Calendar

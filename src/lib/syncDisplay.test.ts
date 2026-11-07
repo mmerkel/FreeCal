@@ -10,9 +10,7 @@ const lastSync = { at: '2026-10-03T10:00:00Z', outcome: { kind: 'synced' } } as 
 
 function statuses(byUser: boolean | undefined): SyncStatuses {
   const status =
-    byUser === undefined
-      ? ({ kind: 'synced' } as const)
-      : ({ kind: 'syncing', byUser, firstSync: false } as const);
+    byUser === undefined ? ({ kind: 'synced' } as const) : ({ kind: 'syncing', byUser } as const);
   return {
     overall: {
       state: byUser === undefined ? { kind: 'synced' } : { kind: 'syncing', byUser },
@@ -23,6 +21,7 @@ function statuses(byUser: boolean | undefined): SyncStatuses {
       {
         calendarId: calendarId(3),
         report: { status: { kind: 'offline' }, lastSync: null, unsentChanges: 0 },
+        firstSyncUnfinished: false,
       },
     ],
   };

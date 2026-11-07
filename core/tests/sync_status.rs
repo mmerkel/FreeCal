@@ -4,16 +4,18 @@
 
 mod support;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use freecal_core::{
-    AccountId, AccountSyncStatus, CalendarId, CalendarSyncStatus, Core, ErrorCode, FinishedSync,
-    OverallState, OverallStatus, Signal, StartedBy, SyncOutcome, SyncStatus, SyncStatusReport,
+    AccountId, AccountSyncStatus, CalDavLogin, CalendarId, CalendarSyncStatus, Core, CoreError,
+    ErrorCode, FinishedSync, OverallState, OverallStatus, Signal, StartedBy, SyncOutcome,
+    SyncStatus, SyncStatusReport,
 };
-use support::radicale::{NewCalendar, Radicale, User, closed_port_url};
+use support::radicale::{NewCalendar, Radicale, RewritingProxy, User, closed_port_url};
 use support::{
-    Harness, account_sync_status, add_account, calendar, calendar_sync_status, draft,
-    make_writable, timed, utc,
+    Harness, account_sync_status, add_account, calendar, calendar_sync_status, draft, event, ics,
+    make_writable, timed, titles, user_login, utc,
 };
 
 /// A user on Radicale with two Calendars, "Work" and "Home", both added
@@ -159,6 +161,20 @@ fn calendar_signal(id: CalendarId, status: SyncStatus, last_sync: Option<Finishe
     Signal::CalendarSyncStatusChanged(CalendarSyncStatus {
         calendar_id: id,
         report: report(status, last_sync),
+        first_sync_unfinished: false,
+    })
+}
+
+/// Like [`calendar_signal`], for a Calendar whose First Sync is unfinished.
+fn unfinished_signal(
+    id: CalendarId,
+    status: SyncStatus,
+    last_sync: Option<FinishedSync>,
+) -> Signal {
+    Signal::CalendarSyncStatusChanged(CalendarSyncStatus {
+        calendar_id: id,
+        report: report(status, last_sync),
+        first_sync_unfinished: true,
     })
 }
 
@@ -169,11 +185,8 @@ fn account_signal(id: AccountId, status: SyncStatus, last_sync: Option<FinishedS
     })
 }
 
-fn syncing(by_user: bool, first_sync: bool) -> SyncStatus {
-    SyncStatus::Syncing {
-        by_user,
-        first_sync,
-    }
+fn syncing(by_user: bool) -> SyncStatus {
+    SyncStatus::Syncing { by_user }
 }
 
 #[test]
@@ -228,8 +241,8 @@ fn adding_calendars_reports_their_first_sync_as_started_by_the_user() {
         harness.signals.received(),
         [
             Signal::CalendarsChanged,
-            calendar_signal(work, syncing(true, true), None),
-            account_signal(account, syncing(true, false), None),
+            unfinished_signal(work, syncing(true), None),
+            account_signal(account, syncing(true), None),
             calendar_signal(work, SyncStatus::Synced, Some(noon())),
             account_signal(account, SyncStatus::Synced, Some(noon())),
         ]
@@ -261,10 +274,10 @@ fn a_sync_reports_syncing_then_synced_for_the_account_and_each_calendar() {
     assert_eq!(
         server.harness.signals.received(),
         [
-            account_signal(account, syncing(false, false), Some(noon())),
-            calendar_signal(work, syncing(false, false), Some(noon())),
+            account_signal(account, syncing(false), Some(noon())),
+            calendar_signal(work, syncing(false), Some(noon())),
             calendar_signal(work, SyncStatus::Synced, at_five_past.clone()),
-            calendar_signal(home, syncing(false, false), Some(noon())),
+            calendar_signal(home, syncing(false), Some(noon())),
             calendar_signal(home, SyncStatus::Synced, at_five_past.clone()),
             account_signal(account, SyncStatus::Synced, at_five_past),
         ]
@@ -551,6 +564,7 @@ fn a_change_in_a_server_calendar_reports_its_unsent_changes() {
                 unsent_changes: 1,
                 ..report(SyncStatus::Synced, Some(noon()))
             },
+            first_sync_unfinished: false,
         }))
     );
     assert!(
@@ -579,5 +593,250 @@ fn a_removed_calendar_has_no_sync_status() {
             .map(|status| status.calendar_id)
             .collect::<Vec<_>>(),
         [server.work]
+    );
+}
+
+/// Three Calendars on Radicale, "A", "B" and "C", with one Event each, and
+/// a new Core with the user's Account added through `proxy`, none of the
+/// Calendars added yet. Returns the Core's harness, the Core, the Account
+/// and the Calendars' URLs through the proxy.
+fn three_calendars(
+    radicale: &Radicale,
+    user: &User,
+    proxy: &RewritingProxy,
+) -> (Harness, Arc<Core>, AccountId, Vec<String>) {
+    let urls: Vec<String> = ["A", "B", "C"]
+        .into_iter()
+        .map(|name| {
+            let url = radicale.create_calendar(
+                user,
+                NewCalendar {
+                    name: Some(name),
+                    ..NewCalendar::default()
+                },
+            );
+            radicale.put_event(
+                user,
+                &url,
+                name,
+                ics(&event(
+                    name,
+                    "DTSTART:20261005T070000Z",
+                    "DTEND:20261005T080000Z",
+                )),
+            );
+            url.replace(&radicale.url(), &proxy.url)
+        })
+        .collect();
+    let harness = Harness::new();
+    let core = Arc::new(harness.open_without_starting_calendars());
+    let account = core
+        .add_caldav_account(&CalDavLogin {
+            url: proxy.url.clone(),
+            ..user_login(radicale, user)
+        })
+        .unwrap()
+        .account
+        .id;
+    harness.signals.clear();
+    (harness, core, account, urls)
+}
+
+/// Runs `react` once, on the first Signal saying that the Calendar listed
+/// first in Sync Statuses is Synced.
+fn once_first_synced(
+    harness: &Harness,
+    core: &Arc<Core>,
+    react: impl Fn() + Send + Sync + 'static,
+) {
+    let reader = Arc::downgrade(core);
+    let done = AtomicBool::new(false);
+    harness.signals.on_receive(move |signal| {
+        let Signal::CalendarSyncStatusChanged(status) = signal else {
+            return;
+        };
+        let core = reader.upgrade().unwrap();
+        let first = core.sync_statuses().unwrap().calendars[0].calendar_id;
+        if status.calendar_id == first
+            && status.report.status == SyncStatus::Synced
+            && !done.swap(true, Ordering::SeqCst)
+        {
+            react();
+        }
+    });
+}
+
+#[test]
+fn adding_calendars_stopped_by_a_failure_about_the_account_leaves_the_rest_for_the_next_sync() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let proxy = Arc::new(RewritingProxy::passthrough(radicale));
+    let (harness, core, account, urls) = three_calendars(radicale, &user, &proxy);
+    let away = proxy.clone();
+    once_first_synced(&harness, &core, move || away.go_away());
+
+    let failed = core.add_calendars(account, &urls);
+
+    assert!(
+        matches!(failed, Err(CoreError::ServerUnreachable(_))),
+        "{failed:?}"
+    );
+    let ids: Vec<CalendarId> = core
+        .list_calendars()
+        .unwrap()
+        .into_iter()
+        .filter(|calendar| calendar.account_id == account)
+        .map(|calendar| calendar.id)
+        .collect();
+    // Each added Calendar is syncing its First Sync from when it is added.
+    assert_eq!(
+        harness.signals.received()[..5],
+        [
+            Signal::CalendarsChanged,
+            unfinished_signal(ids[0], syncing(true), None),
+            unfinished_signal(ids[1], syncing(true), None),
+            unfinished_signal(ids[2], syncing(true), None),
+            account_signal(account, syncing(true), None),
+        ]
+    );
+    let statuses = core.sync_statuses().unwrap();
+    assert_eq!(
+        statuses.calendars,
+        [
+            CalendarSyncStatus {
+                calendar_id: ids[0],
+                report: report(SyncStatus::Synced, Some(noon())),
+                first_sync_unfinished: false,
+            },
+            // As before the sync: never synced.
+            CalendarSyncStatus {
+                calendar_id: ids[1],
+                report: report(SyncStatus::Synced, None),
+                first_sync_unfinished: true,
+            },
+            CalendarSyncStatus {
+                calendar_id: ids[2],
+                report: report(SyncStatus::Synced, None),
+                first_sync_unfinished: true,
+            },
+        ]
+    );
+    assert_eq!(
+        account_sync_status(&core, account),
+        report(SyncStatus::Offline, Some(finished(SyncOutcome::Offline)))
+    );
+    assert_eq!(
+        statuses.overall,
+        OverallStatus {
+            state: OverallState::Offline,
+            last_sync: None,
+        }
+    );
+
+    proxy.come_back();
+    harness.clock.set("2026-10-03T12:05:00+02:00");
+    core.sync_account(account, StartedBy::FreeCal).unwrap();
+
+    for id in &ids {
+        let status = core
+            .sync_statuses()
+            .unwrap()
+            .calendars
+            .into_iter()
+            .find(|status| status.calendar_id == *id)
+            .unwrap();
+        assert_eq!(status.report.status, SyncStatus::Synced);
+        assert!(!status.first_sync_unfinished);
+    }
+    assert_eq!(titles(&core, ids[1]), ["B"]);
+    assert_eq!(titles(&core, ids[2]), ["C"]);
+}
+
+#[test]
+fn a_failure_about_one_calendar_while_adding_calendars_is_that_calendars_sync_error() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let proxy = RewritingProxy::passthrough(radicale);
+    let (harness, core, account, urls) = three_calendars(radicale, &user, &proxy);
+    let b = urls[1].replace(&proxy.url, &radicale.url());
+    once_first_synced(&harness, &core, move || radicale.delete_calendar(&user, &b));
+
+    let failed = core.add_calendars(account, &urls);
+
+    assert!(
+        matches!(failed, Err(CoreError::ServerRefused { status: 404, .. })),
+        "{failed:?}"
+    );
+    let statuses = core.sync_statuses().unwrap();
+    let [a, b, c] = statuses.calendars.as_slice() else {
+        panic!("{statuses:?}");
+    };
+    assert_eq!(a.report.status, SyncStatus::Synced);
+    assert!(
+        matches!(
+            &b.report.status,
+            SyncStatus::SyncError {
+                error: ErrorCode::ServerRefused { status: 404, .. }
+            }
+        ),
+        "{b:?}"
+    );
+    assert!(b.first_sync_unfinished);
+    // The other Calendars still sync, as in any sync of the Account.
+    assert_eq!(c.report.status, SyncStatus::Synced);
+    assert!(!c.first_sync_unfinished);
+    assert_eq!(titles(&core, c.calendar_id), ["C"]);
+    assert_eq!(
+        account_sync_status(&core, account),
+        report(SyncStatus::Synced, Some(noon()))
+    );
+    assert_eq!(statuses.overall.state, OverallState::SyncError);
+}
+
+#[test]
+fn a_calendar_quit_during_its_first_sync_says_so_after_a_relaunch_until_it_finishes() {
+    let server = Server::new();
+    // As if FreeCal quit during the Work Calendar's First Sync.
+    server.harness.arrange_local_store(&format!(
+        "UPDATE calendar SET synced = 0, sync_token = NULL, last_sync_at = NULL, \
+             last_sync_outcome = NULL, last_synced_at = NULL WHERE id = {}",
+        server.work.0
+    ));
+    let server = server.relaunch();
+
+    let statuses = server.core.sync_statuses().unwrap();
+
+    assert_eq!(
+        statuses.calendars[0],
+        CalendarSyncStatus {
+            calendar_id: server.work,
+            report: report(SyncStatus::Synced, None),
+            first_sync_unfinished: true,
+        }
+    );
+    assert!(!statuses.calendars[1].first_sync_unfinished);
+    // The overall status doesn't show it; never having synced does.
+    assert_eq!(
+        statuses.overall,
+        OverallStatus {
+            state: OverallState::Synced,
+            last_sync: None,
+        }
+    );
+
+    server.harness.signals.clear();
+    server
+        .core
+        .sync_account(server.account, StartedBy::FreeCal)
+        .unwrap();
+
+    let at_noon = Some(noon());
+    let received = server.harness.signals.received();
+    assert_eq!(
+        received[1..3],
+        [
+            unfinished_signal(server.work, syncing(false), None),
+            calendar_signal(server.work, SyncStatus::Synced, at_noon),
+        ]
     );
 }

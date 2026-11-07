@@ -461,11 +461,14 @@ pub fn closed_port_url() -> String {
 /// resource holding several UIDs: a proxy in front of Radicale that passes
 /// each request through and the answer back, with every `marker` in an
 /// answer replaced by `replacement` until [`RewritingProxy::stop_rewriting`].
-/// It records the bodies of the requests it gets.
+/// It records the bodies of the requests it gets. Between
+/// [`RewritingProxy::go_away`] and [`RewritingProxy::come_back`] it closes
+/// each connection unanswered, as a server that can't be reached.
 pub struct RewritingProxy {
     pub url: String,
     bodies: Arc<Mutex<Vec<String>>>,
     rewriting: Arc<AtomicBool>,
+    away: Arc<AtomicBool>,
 }
 
 impl RewritingProxy {
@@ -483,6 +486,8 @@ impl RewritingProxy {
         let recorded = bodies.clone();
         let rewriting = Arc::new(AtomicBool::new(true));
         let rewrites = rewriting.clone();
+        let away = Arc::new(AtomicBool::new(false));
+        let gone = away.clone();
         let (marker, replacement, proxy) = (marker.to_owned(), replacement.to_owned(), url.clone());
         std::thread::spawn(move || {
             // A fresh connection for each request: Radicale may close an
@@ -496,6 +501,9 @@ impl RewritingProxy {
                 .new_agent();
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
+                if gone.load(Ordering::SeqCst) {
+                    continue;
+                }
                 let (request_line, headers, body) = read_whole_request(&mut stream);
                 recorded
                     .lock()
@@ -540,7 +548,18 @@ impl RewritingProxy {
             url,
             bodies,
             rewriting,
+            away,
         }
+    }
+
+    /// Closes each connection unanswered from now on.
+    pub fn go_away(&self) {
+        self.away.store(true, Ordering::SeqCst);
+    }
+
+    /// Passes requests through again.
+    pub fn come_back(&self) {
+        self.away.store(false, Ordering::SeqCst);
     }
 
     /// Passes answers back unchanged from now on.

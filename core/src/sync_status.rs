@@ -7,13 +7,15 @@
 //! The running syncs live in memory, as [`SyncStatusTracker`]. How each
 //! one's last sync ended is its [`SyncRecord`], which the Local Store keeps
 //! too, so that a relaunch shows it until the next sync. Unsent Changes are
-//! counted from the Local Store whenever a [`SyncStatusReport`] is made.
+//! counted, and whether a Calendar's First Sync is unfinished is read, from
+//! the Local Store whenever a [`SyncStatusReport`] is made.
 
 use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::store::ServerCalendarState;
 use crate::{AccountId, CalendarId, CoreError, ErrorCode};
 
 /// Whether the user started a sync (sync now, adding Calendars), so that
@@ -33,12 +35,10 @@ pub enum StartedBy {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SyncStatus {
     /// A sync runs. `by_user` says that the user started it, so that the
-    /// window shows it at once. `first_sync` says that it is a Calendar's
-    /// First Sync, whose Events are still loading; never for an Account.
+    /// window shows it at once.
     #[serde(rename_all = "camelCase")]
     Syncing {
         by_user: bool,
-        first_sync: bool,
     },
     Synced,
     /// Its server can't be reached at the network level. Only an Account
@@ -183,6 +183,10 @@ pub struct AccountSyncStatus {
 pub struct CalendarSyncStatus {
     pub calendar_id: CalendarId,
     pub report: SyncStatusReport,
+    /// Whether its First Sync is unfinished, whatever its Sync Status: its
+    /// Events may be missing. The Local Store says so, not the running
+    /// syncs, so that it holds after a relaunch too.
+    pub first_sync_unfinished: bool,
 }
 
 /// The most important state of all server Accounts and Calendars, as the
@@ -251,16 +255,13 @@ struct SyncState {
     /// How many syncs of it run, and whether the user started one of them.
     running: u32,
     by_user: bool,
-    /// Whether the running sync is a Calendar's First Sync.
-    first_sync: bool,
     record: SyncRecord,
 }
 
 impl SyncState {
-    fn start(&mut self, started_by: StartedBy, first_sync: bool) {
+    fn start(&mut self, started_by: StartedBy) {
         self.running += 1;
         self.by_user |= started_by == StartedBy::User;
-        self.first_sync = first_sync;
     }
 
     /// Ends a running sync, with `last` when it finished, none when it
@@ -269,7 +270,6 @@ impl SyncState {
         self.running = self.running.saturating_sub(1);
         if self.running == 0 {
             self.by_user = false;
-            self.first_sync = false;
         }
         if let Some((at, outcome)) = last {
             self.record.finish(at, outcome);
@@ -288,7 +288,6 @@ impl SyncState {
         if self.running > 0 {
             return SyncStatus::Syncing {
                 by_user: self.by_user,
-                first_sync: self.first_sync,
             };
         }
         self.record
@@ -313,7 +312,6 @@ impl SyncState {
 const NEVER_SYNCED: SyncState = SyncState {
     running: 0,
     by_user: false,
-    first_sync: false,
     record: SyncRecord {
         last: None,
         last_synced: None,
@@ -349,10 +347,7 @@ impl SyncStatusTracker {
     }
 
     pub fn start_account(&mut self, id: AccountId, started_by: StartedBy) {
-        self.accounts
-            .entry(id)
-            .or_default()
-            .start(started_by, false);
+        self.accounts.entry(id).or_default().start(started_by);
     }
 
     /// Ends the Account's running sync. Returns its new Sync Record, for
@@ -391,11 +386,8 @@ impl SyncStatusTracker {
             .is_some_and(|state| state.running > 0)
     }
 
-    pub fn start_calendar(&mut self, id: CalendarId, started_by: StartedBy, first_sync: bool) {
-        self.calendars
-            .entry(id)
-            .or_default()
-            .start(started_by, first_sync);
+    pub fn start_calendar(&mut self, id: CalendarId, started_by: StartedBy) {
+        self.calendars.entry(id).or_default().start(started_by);
     }
 
     /// Ends a Calendar's running sync: with how it finished, or none when it
@@ -430,10 +422,13 @@ impl SyncStatusTracker {
         }
     }
 
-    pub fn calendar(&self, id: CalendarId, unsent_changes: u32) -> CalendarSyncStatus {
+    /// The Calendar's Sync Status, with what the Local Store holds toward it.
+    pub fn calendar(&self, stored: &ServerCalendarState) -> CalendarSyncStatus {
+        let id = stored.calendar_id;
         CalendarSyncStatus {
             calendar_id: id,
-            report: state(&self.calendars, &id).report(unsent_changes),
+            report: state(&self.calendars, &id).report(stored.unsent_changes),
+            first_sync_unfinished: stored.first_sync_unfinished,
         }
     }
 

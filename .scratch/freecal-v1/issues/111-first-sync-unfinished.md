@@ -18,14 +18,24 @@ Spec: US-68; US-69; "Signals" ("Sync status changed" and the First Sync paragrap
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] When one of several Calendars being added fails its First Sync, the Calendars after it keep their Sync Status as before (Synced, no last sync) with their First Sync unfinished, and the next sync of the Account finishes them
-- [ ] A Calendar-level failure while adding Calendars is that Calendar's Sync Error, not the Account's; a failure about the Account is the Account's, as in an Account sync
-- [ ] Adding Calendars and syncing an Account go through one loop; each added Calendar shows as syncing its First Sync from when it is added
-- [ ] Each Calendar's "Sync status changed" and `sync_statuses()` say whether its First Sync is unfinished: while it syncs, after a failure, and after a relaunch during a First Sync
-- [ ] `SyncStatus::Syncing` has no First Sync marker any more
-- [ ] The sidebar shows "Loading for the first time…", "Not loaded yet" and "<Sync Error> · not fully loaded" as above (Vitest with the fake core)
-- [ ] The overall status and the tray don't change for a Calendar with its First Sync unfinished
+- [x] When one of several Calendars being added fails its First Sync, the Calendars after it keep their Sync Status as before (Synced, no last sync) with their First Sync unfinished, and the next sync of the Account finishes them
+- [x] A Calendar-level failure while adding Calendars is that Calendar's Sync Error, not the Account's; a failure about the Account is the Account's, as in an Account sync
+- [x] Adding Calendars and syncing an Account go through one loop; each added Calendar shows as syncing its First Sync from when it is added
+- [x] Each Calendar's "Sync status changed" and `sync_statuses()` say whether its First Sync is unfinished: while it syncs, after a failure, and after a relaunch during a First Sync
+- [x] `SyncStatus::Syncing` has no First Sync marker any more
+- [x] The sidebar shows "Loading for the first time…", "Not loaded yet" and "<Sync Error> · not fully loaded" as above (Vitest with the fake core)
+- [x] The overall status and the tray don't change for a Calendar with its First Sync unfinished
+
+## Comments
+
+Done (2026-11-07). Adding Calendars and syncing an Account share one loop (`Core::sync_calendars`, `core/src/lib.rs`); adding Calendars passes the Calendars it already marked as syncing. A Calendar the sync didn't reach ends as it was before, with no Sync Record written. Each Calendar's "Sync status changed" carries `first_sync_unfinished`, read from the Calendar row's `synced` column whenever a report is made.
+
+Design choice, beyond the ticket's letter: the rest of an unfinished First Sync runs page by page while the Calendar holds nothing from its server yet (as the spec's "commits page by page" asks), and otherwise as one Incoming Sync with no token, as before, because a paged rest can't remove Events deleted on the server meanwhile. Strongest con: a large Calendar that failed partway shows nothing new until the whole rest has loaded.
+
+New terms:
+- **Server Calendar State** (new term): what the Local Store holds toward a server Calendar's Sync Status, its Unsent Changes and whether its First Sync is unfinished (`ServerCalendarState`, `core/src/store/sql/mod.rs`; replaces `UnsentChangeCount`).
+- `CalendarToSync` (new term): a server Calendar to sync, with its address on the server and how far it is synced (`core/src/lib.rs`).

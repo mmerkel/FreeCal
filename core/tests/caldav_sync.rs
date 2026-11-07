@@ -686,10 +686,8 @@ fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
             .iter()
             .any(|signal| matches!(
                 signal,
-                Signal::CalendarSyncStatusChanged(status) if matches!(
-                    status.report.status,
-                    SyncStatus::Syncing { first_sync: true, .. }
-                )
+                Signal::CalendarSyncStatusChanged(status) if status.first_sync_unfinished
+                    && matches!(status.report.status, SyncStatus::Syncing { .. })
             )),
         "its Sync Status says it is a First Sync"
     );

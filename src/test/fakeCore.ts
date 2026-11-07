@@ -216,16 +216,20 @@ export class FakeCore implements CoreApi {
     this.emit({ kind: 'accountSyncStatusChanged', accountId: id, report: structuredClone(report) });
   }
 
-  /** Gives a server Calendar a new Sync Status Report and sends "Sync status changed" for it. */
-  reportCalendar(id: CalendarId, report: SyncStatusReport) {
+  /**
+   * Gives a server Calendar a new Sync Status Report, with whether its First
+   * Sync is unfinished, and sends "Sync status changed" for it.
+   */
+  reportCalendar(id: CalendarId, report: SyncStatusReport, firstSyncUnfinished = false) {
     this.statuses.calendars = [
       ...this.statuses.calendars.filter((calendar) => calendar.calendarId !== id),
-      { calendarId: id, report },
+      { calendarId: id, report, firstSyncUnfinished },
     ];
     this.emit({
       kind: 'calendarSyncStatusChanged',
       calendarId: id,
       report: structuredClone(report),
+      firstSyncUnfinished,
     });
   }
 
@@ -377,7 +381,7 @@ export class FakeCore implements CoreApi {
       unsentChanges: 0,
     });
     for (const calendar of added) {
-      this.reportCalendar(calendar.id, report({ kind: 'syncing', byUser: true, firstSync: true }));
+      this.reportCalendar(calendar.id, report({ kind: 'syncing', byUser: true }), true);
     }
     await this.heldFirstSyncs;
     for (const calendar of added) this.reportCalendar(calendar.id, report({ kind: 'synced' }));

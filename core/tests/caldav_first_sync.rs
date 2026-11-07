@@ -267,15 +267,9 @@ fn the_first_sync_commits_page_by_page_and_reports_that_it_runs() {
             .unwrap()
             .calendars
             .pop()
-            .map(|calendar| calendar.report.status)
-            .is_some_and(|status| {
-                matches!(
-                    status,
-                    SyncStatus::Syncing {
-                        first_sync: true,
-                        ..
-                    }
-                )
+            .is_some_and(|calendar| {
+                calendar.first_sync_unfinished
+                    && matches!(calendar.report.status, SyncStatus::Syncing { .. })
             });
         let events = core
             .occurrences(date("2026-10-05"), date("2026-10-06"))

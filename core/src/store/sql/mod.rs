@@ -232,20 +232,25 @@ impl Store {
         })?)
     }
 
-    /// How many Unsent Changes each server Account's Calendar has, in the
+    /// The Server Calendar State of each server Account's Calendar, in the
     /// order they were added.
-    pub fn unsent_change_counts(&self) -> Result<Vec<UnsentChangeCount>> {
+    pub fn server_calendar_states(&self) -> Result<Vec<ServerCalendarState>> {
         let mut stmt = self.conn.prepare(
             "SELECT calendar.id, calendar.account_id, \
-                 (SELECT COUNT(*) FROM unsent_change WHERE calendar_id = calendar.id) \
+                 (SELECT COUNT(*) FROM unsent_change WHERE calendar_id = calendar.id), \
+                 calendar.synced \
              FROM calendar JOIN account ON account.id = calendar.account_id \
              WHERE account.provider != 'local' ORDER BY calendar.id",
         )?;
         readable(stmt.query_map([], |row| {
-            Ok(UnsentChangeCount {
+            // Read as `server_calendars` reads it, so that the Sync Status
+            // and the next sync agree.
+            let synced: bool = row.get(3)?;
+            Ok(ServerCalendarState {
                 calendar_id: CalendarId(row.get(0)?),
                 account_id: AccountId(row.get(1)?),
-                count: row.get(2)?,
+                unsent_changes: row.get(2)?,
+                first_sync_unfinished: !synced,
             })
         })?)
     }
@@ -573,12 +578,15 @@ impl Store {
     }
 }
 
-/// How many Unsent Changes a server Account's Calendar has.
+/// What the Local Store holds toward a server Account's Calendar's Sync
+/// Status (new term: Server Calendar State): how many Unsent Changes it has,
+/// and whether its First Sync is unfinished.
 #[derive(Debug, Clone, Copy)]
-pub struct UnsentChangeCount {
+pub struct ServerCalendarState {
     pub calendar_id: CalendarId,
     pub account_id: AccountId,
-    pub count: u32,
+    pub unsent_changes: u32,
+    pub first_sync_unfinished: bool,
 }
 
 /// A row of `unsent_change` as stored, its recurrence ID as text, for tests

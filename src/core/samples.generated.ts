@@ -332,8 +332,7 @@ export const samples = {
       "report": {
         "status": {
           "kind": "syncing",
-          "byUser": true,
-          "firstSync": false
+          "byUser": true
         },
         "lastSync": {
           "at": "2026-10-05T07:30:00Z",
@@ -353,14 +352,14 @@ export const samples = {
         },
         "lastSync": null,
         "unsentChanges": 0
-      }
+      },
+      "firstSyncUnfinished": true
     }
   ],
   SyncStatus: [
     {
       "kind": "syncing",
-      "byUser": false,
-      "firstSync": true
+      "byUser": false
     },
     {
       "kind": "synced"
@@ -405,8 +404,7 @@ export const samples = {
     {
       "status": {
         "kind": "syncing",
-        "byUser": true,
-        "firstSync": false
+        "byUser": true
       },
       "lastSync": {
         "at": "2026-10-05T07:30:00Z",
@@ -423,8 +421,7 @@ export const samples = {
       "report": {
         "status": {
           "kind": "syncing",
-          "byUser": true,
-          "firstSync": false
+          "byUser": true
         },
         "lastSync": {
           "at": "2026-10-05T07:30:00Z",
@@ -445,7 +442,8 @@ export const samples = {
         },
         "lastSync": null,
         "unsentChanges": 0
-      }
+      },
+      "firstSyncUnfinished": true
     }
   ],
   OverallState: [
@@ -494,8 +492,7 @@ export const samples = {
           "report": {
             "status": {
               "kind": "syncing",
-              "byUser": true,
-              "firstSync": false
+              "byUser": true
             },
             "lastSync": {
               "at": "2026-10-05T07:30:00Z",
@@ -516,7 +513,8 @@ export const samples = {
             },
             "lastSync": null,
             "unsentChanges": 0
-          }
+          },
+          "firstSyncUnfinished": true
         }
       ]
     }

@@ -138,10 +138,7 @@ fn samples_file() -> (String, Vec<String>) {
         outcome: SyncOutcome::Synced,
     };
     let report = SyncStatusReport {
-        status: SyncStatus::Syncing {
-            by_user: true,
-            first_sync: false,
-        },
+        status: SyncStatus::Syncing { by_user: true },
         last_sync: Some(finished.clone()),
         unsent_changes: 2,
     };
@@ -156,6 +153,7 @@ fn samples_file() -> (String, Vec<String>) {
             last_sync: None,
             unsent_changes: 0,
         },
+        first_sync_unfinished: true,
     };
     let overall = OverallStatus {
         state: OverallState::Synced,
@@ -294,10 +292,7 @@ fn samples_file() -> (String, Vec<String>) {
             Signal::CalendarSyncStatusChanged(calendar_status.clone()),
         ]),
         samples(&[
-            SyncStatus::Syncing {
-                by_user: false,
-                first_sync: true,
-            },
+            SyncStatus::Syncing { by_user: false },
             SyncStatus::Synced,
             SyncStatus::Offline,
             SyncStatus::SyncError {

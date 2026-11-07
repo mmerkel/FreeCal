@@ -17,6 +17,7 @@
     AvailableCalendar,
     Calendar,
     CalendarId,
+    CalendarSyncStatus,
     SyncStatus,
     SyncStatuses,
   } from '../core/types';
@@ -72,14 +73,11 @@
     }
   }
 
-  /**
-   * What a row says about its Sync Status, when it isn't Synced. A
-   * Calendar on its first sync says that its Events are still loading.
-   */
+  /** What a row says about its Sync Status, when it isn't Synced. */
   function syncText(status: SyncStatus | undefined): string | undefined {
     switch (status?.kind) {
       case 'syncing':
-        return t(status.firstSync ? 'calendar.firstSync' : 'sync.syncing');
+        return t('sync.syncing');
       case 'offline':
         return t('sync.offline');
       case 'syncError':
@@ -95,8 +93,26 @@
     );
   }
 
-  function calendarReport(calendar: Calendar) {
-    return syncStatuses?.calendars.find((status) => status.calendarId === calendar.id)?.report;
+  function calendarSyncStatus(calendar: Calendar) {
+    return syncStatuses?.calendars.find((status) => status.calendarId === calendar.id);
+  }
+
+  /**
+   * What a Calendar's row says about its Sync Status. One whose First Sync
+   * is unfinished never just looks empty: it says so whatever its Sync
+   * Status.
+   */
+  function calendarSyncText(status: CalendarSyncStatus | undefined): string | undefined {
+    const text = syncText(status?.report.status);
+    if (!status?.firstSyncUnfinished) return text;
+    switch (status.report.status.kind) {
+      case 'syncing':
+        return t('calendar.firstSync');
+      case 'syncError':
+        return t('calendar.notFullyLoaded', { state: text ?? '' });
+      default:
+        return t('calendar.notLoaded');
+    }
   }
 
   function calendarsOf(account: Account): Calendar[] {
@@ -349,9 +365,9 @@
             {@const syncId = `sidebar-sync-${calendar.id}`}
             {@const unsentId = `sidebar-unsent-${calendar.id}`}
             {@const lockId = `sidebar-lock-${calendar.id}`}
-            {@const report = calendarReport(calendar)}
-            {@const syncState = syncText(report?.status)}
-            {@const unsent = report?.unsentChanges ?? 0}
+            {@const status = calendarSyncStatus(calendar)}
+            {@const syncState = calendarSyncText(status)}
+            {@const unsent = status?.report.unsentChanges ?? 0}
             {@const unsentText = tCount('calendar.unsent', unsent)}
             {@const stateId = `sidebar-state-${calendar.id}`}
             {@const tooltip = t(

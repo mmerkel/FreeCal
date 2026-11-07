@@ -31,7 +31,9 @@ function withServer() {
   core.statuses = {
     overall: { state: { kind: 'synced' }, lastSync: noon.at },
     accounts: [{ accountId: account.id, report: report({ kind: 'synced' }) }],
-    calendars: [{ calendarId: team.id, report: report({ kind: 'synced' }) }],
+    calendars: [
+      { calendarId: team.id, report: report({ kind: 'synced' }), firstSyncUnfinished: false },
+    ],
   };
   return { core, account: account.id, team: team.id };
 }
@@ -173,7 +175,7 @@ test('a sync FreeCal started shows as Syncing only after about a second', async 
   await showApp(core);
 
   core.setOverall({ state: { kind: 'syncing', byUser: false }, lastSync: noon.at });
-  core.reportAccount(account, report({ kind: 'syncing', byUser: false, firstSync: false }));
+  core.reportAccount(account, report({ kind: 'syncing', byUser: false }));
   await vi.waitFor(() =>
     expect(core.calls.filter((call) => call === 'syncStatuses')).toHaveLength(2),
   );
@@ -193,23 +195,61 @@ test('a sync the user started shows as Syncing at once', async () => {
   await showApp(core);
 
   core.setOverall({ state: { kind: 'syncing', byUser: true }, lastSync: noon.at });
-  core.reportAccount(account, report({ kind: 'syncing', byUser: true, firstSync: false }));
+  core.reportAccount(account, report({ kind: 'syncing', byUser: true }));
 
   await vi.waitFor(() => expect(statusText()).toBe('Syncing… · last sync 3 minutes ago'));
   expect(accountSection().getByText('Syncing…')).toBeInTheDocument();
 });
 
-test('a Calendar on its first sync says it is loading for the first time', async () => {
+test('a Calendar whose First Sync is unfinished says so, whatever its Sync Status', async () => {
+  const { core, team: id } = withServer();
+  await showApp(core);
+  const unfinished = (status: SyncStatus, lastSync: SyncStatusReport['lastSync']) =>
+    core.reportCalendar(id, { status, lastSync, unsentChanges: 0 }, true);
+  const refused = { code: 'serverRefused', status: 404, message: 'Not Found' } as const;
+
+  unfinished({ kind: 'syncing', byUser: true }, null);
+  await vi.waitFor(() =>
+    expect(team()).toHaveAccessibleDescription(/^Loading for the first time… /),
+  );
+
+  // Waiting for the next sync, as after a relaunch or a sync that didn't reach it.
+  unfinished({ kind: 'synced' }, null);
+  await vi.waitFor(() => expect(team()).toHaveAccessibleDescription(/^Not loaded yet /));
+
+  unfinished(
+    { kind: 'syncError', error: refused },
+    { at: noon.at, outcome: { kind: 'syncError', error: refused } },
+  );
+  await vi.waitFor(() =>
+    expect(team()).toHaveAccessibleDescription(/^Sync error: .*404.* · not fully loaded /),
+  );
+
+  // Once it finishes, it says nothing.
+  core.reportCalendar(id, report({ kind: 'synced' }));
+  await vi.waitFor(() => expect(team()).not.toHaveAccessibleDescription(/loaded/));
+});
+
+test('the overall status doesn’t show a Calendar whose First Sync is unfinished', async () => {
   const { core, team: id } = withServer();
   await showApp(core);
 
-  core.reportCalendar(id, {
-    status: { kind: 'syncing', byUser: true, firstSync: true },
-    lastSync: null,
-    unsentChanges: 0,
-  });
+  core.reportCalendar(id, report({ kind: 'synced' }), true);
 
-  await vi.waitFor(() => expect(team()).toHaveAccessibleDescription(/Loading for the first time…/));
+  await vi.waitFor(() => expect(team()).toHaveAccessibleDescription(/^Not loaded yet /));
+  expect(statusText()).toBe('Synced 3 minutes ago');
+});
+
+test('a Calendar whose First Sync is unfinished says “Not loaded yet” while its Account is Offline', async () => {
+  const { core, account, team: id } = withServer();
+  await showApp(core);
+  const offline = { at: '2026-10-03T10:01:00Z', outcome: { kind: 'offline' } } as const;
+
+  core.reportAccount(account, { status: { kind: 'offline' }, lastSync: offline, unsentChanges: 0 });
+  core.reportCalendar(id, { status: { kind: 'synced' }, lastSync: null, unsentChanges: 0 }, true);
+
+  await vi.waitFor(() => expect(team()).toHaveAccessibleDescription(/^Not loaded yet /));
+  expect(accountSection().getByText('Offline')).toBeInTheDocument();
 });
 
 test('“Sync now” in the main menu syncs every server Account', async () => {
