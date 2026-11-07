@@ -31,3 +31,4 @@
   - Sync Trigger (new term): something the desktop notices that syncs every server Account, a window focus or waking from sleep (`SyncTrigger`).
   - Sync Requests (new term): the syncs asked for and not started yet, each with who asked (`SyncRequests`).
   - Desktop Watch (new term): the shell's threads that watch the desktop for the network status and waking from sleep (`desktop_watch`).
+- 2026-11-07 (review with the user): Sync Scheduler, Poll, Sync Trigger, Sync Requests and Desktop Watch approved as code names.
