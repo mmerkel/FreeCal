@@ -2,7 +2,7 @@
 
 **What to build:** The user adds a Google Account by logging in through the browser with FreeCal's shared (unverified) client, chooses which of its Available Calendars to add, and sees them in FreeCal. "Manage Calendars…" on the Account line works as for CalDAV. Several Google Accounts can be connected.
 
-**Blocked by:** 15, 55, 56, 69, 87, 108
+**Blocked by:** 15, 55, 56, 69, 87, 108, 115
 
 **Status:** ready-for-agent
 
@@ -20,3 +20,4 @@
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009).
 - 2026-10-24: Blocked by 87: Google events are stored as server objects that mirror the server (ADR 0010), each resource, a Recurring Event or an Exception, an object of its own with its JSON as received.
+- 2026-11-07: Blocked by 115: Google's Sync Engine joins the Provider `match` of the Sync Engine entry (`core/src/sync/mod.rs`) beside CalDAV's; the core interface names neither.

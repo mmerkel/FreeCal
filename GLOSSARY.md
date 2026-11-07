@@ -226,6 +226,10 @@ _Avoid_: Sync timer, sync loop, syncer
 The regular sync of every server Account, every 5 minutes while the window is open and every 15 minutes in the background. Any sync of every Account restarts its period.
 _Avoid_: Refresh, periodic sync, tick
 
+**Running Sync**:
+One sync of a server Account or Calendar while it runs, from its start, which shows Syncing, to its end, which gives its Sync Status how it ended. Ending it is the only way a sync changes a Sync Status; one dropped without an end leaves the Sync Status as before the sync.
+_Avoid_: Sync job, sync handle, active sync
+
 **Transaction Origin**:
 Where a Journal Transaction's changes came from: a user action, an import, an undo, a First Sync or an Incoming Sync.
 _Avoid_: Origin (on its own), source, cause
@@ -241,3 +245,11 @@ _Avoid_: Risky undo, unsafe undo
 **Pinned Zone**:
 The Event Time Zone FreeCal gave an Event that arrived with floating times (ADR 0007). It stays until the user changes the Event's time.
 _Avoid_: Assumed zone, default zone
+
+**Window Model**:
+The frontend module that holds what the window shows (the Accounts and Calendars, the Sync Statuses, the Occurrences in view, the Event whose details are open, today and the view) and keeps it current by re-reading on Signals. It only reads; changes go through the core and come back as Signals, except the window's own view, sidebar and settings.
+_Avoid_: Store (on its own: the Local Store), app state, view model
+
+**Window Dialogs**:
+The frontend module that holds what is open over the calendar grid, one at a time, and the steps between them: an Event's details and editor, the recurrence scope question, import, notices, settings and About, with the message at the bottom of the window.
+_Avoid_: Modal manager, dialog stack, overlays
