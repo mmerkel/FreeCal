@@ -1,4 +1,4 @@
-//! Sync timing and triggers (ticket 16): polls every 2 minutes with the
+//! Sync timing and triggers (ticket 16): polls every 5 minutes with the
 //! window open and every 15 minutes in the background, syncs on window
 //! focus, on waking from sleep and after local edits, sync now, and the
 //! system's network status.
@@ -133,16 +133,16 @@ fn launching_syncs_every_server_account_at_once() {
 }
 
 #[test]
-fn with_the_window_open_it_polls_every_two_minutes() {
+fn with_the_window_open_it_polls_every_five_minutes() {
     let synced = Synced::new();
 
-    synced.at("12:01:59");
+    synced.at("12:04:59");
     assert_eq!(synced.run_and_take_syncs(), []);
-    synced.at("12:02:00");
+    synced.at("12:05:00");
     assert_eq!(synced.run_and_take_syncs(), synced.by_freecal());
-    synced.at("12:03:00");
+    synced.at("12:07:00");
     assert_eq!(synced.run_and_take_syncs(), []);
-    synced.at("12:04:00");
+    synced.at("12:10:00");
     assert_eq!(synced.run_and_take_syncs(), synced.by_freecal());
 }
 
@@ -158,7 +158,7 @@ fn in_the_background_it_polls_every_fifteen_minutes() {
 }
 
 #[test]
-fn opening_the_window_again_polls_once_two_minutes_have_passed() {
+fn opening_the_window_again_polls_once_five_minutes_have_passed() {
     let synced = Synced::new();
     synced.core.set_window_open(false);
     synced.at("12:05:00");
@@ -183,9 +183,9 @@ fn focusing_the_window_and_waking_from_sleep_sync_at_once() {
             "{trigger:?}"
         );
         // The trigger's sync counts as the poll.
-        synced.at("12:02:59");
+        synced.at("12:05:59");
         assert_eq!(synced.run_and_take_syncs(), [], "{trigger:?}");
-        synced.at("12:03:00");
+        synced.at("12:06:00");
         assert_eq!(
             synced.run_and_take_syncs(),
             synced.by_freecal(),

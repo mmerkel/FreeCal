@@ -420,7 +420,7 @@ impl Core {
     }
 
     /// Tells the Sync Scheduler whether the window is open, which polls
-    /// every 2 minutes, or FreeCal runs in the background, which polls every
+    /// every 5 minutes, or FreeCal runs in the background, which polls every
     /// 15 minutes. On launch the window is open.
     pub fn set_window_open(&self, open: bool) {
         self.scheduler().set_window_open(open);

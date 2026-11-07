@@ -1,5 +1,5 @@
 //! The Sync Scheduler (new term): decides when FreeCal syncs (spec: "Sync
-//! timing"). It polls every server Account every 2 minutes while the
+//! timing"). It polls every server Account every 5 minutes while the
 //! window is open and every 15 minutes in the background, and syncs on
 //! window focus, on waking from sleep, after local edits, when the network
 //! returns, and on sync now. With no network at all it syncs nothing.
@@ -14,8 +14,8 @@ use chrono::{DateTime, FixedOffset, TimeDelta};
 use crate::{AccountId, StartedBy};
 
 /// How often every server Account is polled while the window is open
-/// (US-64).
-const POLL_WITH_WINDOW: TimeDelta = TimeDelta::minutes(2);
+/// (US-64). The spec asks for 2 minutes; the user chose 5.
+const POLL_WITH_WINDOW: TimeDelta = TimeDelta::minutes(5);
 
 /// How often every server Account is polled while FreeCal runs in the
 /// background (US-65).
