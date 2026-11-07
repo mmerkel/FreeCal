@@ -3,6 +3,18 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] simplify work from implementation of ticket 109 on
 - [ ] code base architecture
+- [ ] ticket 17 -> first split
+- [ ] test by hand
+- [ ] simplify work from implementation of ticket 109 on
+- [ ] code base architecture
+- [ ] ticket 25 -> first split
+- [ ] simplify
+- [ ] code base architecture
+- [ ] ticket 20
+- [ ] simplify
+- [ ] code base architecture
+- [ ] ticket 13
+- [ ] finish tickets 15 and 16
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
