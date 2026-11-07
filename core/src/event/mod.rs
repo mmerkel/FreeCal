@@ -707,27 +707,19 @@ fn with_uid_of<'a>(
     })
 }
 
-/// Makes `events`, the Events of the UID `uid` that the Server Object
-/// `object` of the Calendar `calendar_id` holds now (at least one), the
-/// UID's Event Rows, as `object` is its Corresponding Server Object, the
-/// one CalDAV Server Object holding it, and changes no other Event Row
-/// (ADR 0015). Each Event replaces the Event Row for the same Occurrence
-/// ([`Loaded::pair`]), against the Recurring Event `object` holds, or else
-/// the one the Event Rows hold (ADR 0012), taking its recurrence ID as
-/// `object` gives it, or is added; the UID's other Event Rows are deleted.
+/// Makes `events`, the Events of the UID `uid` that its Corresponding
+/// Server Object in the Calendar `calendar_id` holds now (at least one),
+/// the UID's Event Rows, and changes no other Event Row (ADR 0015). Each
+/// Event replaces the Event Row for the same Occurrence ([`Loaded::pair`]),
+/// against the Recurring Event the Server Object holds, or else the one the
+/// Event Rows hold (ADR 0012), taking its recurrence ID as the Server Object
+/// gives it, or is added; the UID's other Event Rows are deleted.
 pub(crate) fn propagate_to_event_rows(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
-    object: ObjectId,
     uid: &str,
     events: &[ImportedEvent],
 ) -> Result<()> {
-    debug_assert_eq!(
-        journal_transaction
-            .database_transaction()
-            .corresponding_server_object(calendar_id, uid)?,
-        Some(object)
-    );
     let loaded = Loaded::of_uid(journal_transaction, calendar_id, uid)?;
     let held = events
         .iter()

@@ -307,16 +307,30 @@ pub(crate) fn preview(
 pub(crate) enum Holds {
     /// FreeCal can't read it.
     Unreadable,
-    /// Nothing FreeCal keeps: no Events, or Events of several UIDs. `uids`
-    /// are the UIDs it holds in the order of its Events, several for a
-    /// CalDAV resource that is ignored, none for one holding no Events.
-    Nothing { uids: Vec<String> },
+    /// No Events: nothing FreeCal keeps.
+    NoEvents,
+    /// Events of several UIDs, in the order of its Events, which RFC 4791
+    /// §4.1 forbids: an Ignored Resource.
+    SeveralUids(Vec<String>),
     /// The Events of one UID, never none, Exceptions as Events of their
     /// own, not yet paired with their Recurring Events.
     OneUid {
         uid: String,
         events: Vec<ImportedEvent>,
     },
+}
+
+impl Holds {
+    /// Whether a Server Object keeping `uid`, an Ambiguous UID or not, still
+    /// keeps it, holding this (ADR 0015): one FreeCal can't read keeps its UID, and one holding
+    /// no Events, several UIDs or another stops keeping it.
+    pub(crate) fn keeps(&self, uid: &str) -> bool {
+        match self {
+            Holds::Unreadable => true,
+            Holds::NoEvents | Holds::SeveralUids(_) => false,
+            Holds::OneUid { uid: holds, .. } => holds == uid,
+        }
+    }
 }
 
 /// CalDAV resources as a server holds them, each with what it holds
@@ -347,7 +361,8 @@ pub(crate) fn read_caldav_resource(object: &ServerObject, zone: Tz) -> Holds {
     }
     match <[String; 1]>::try_from(uids) {
         Ok([uid]) => Holds::OneUid { uid, events },
-        Err(uids) => Holds::Nothing { uids },
+        Err(uids) if uids.is_empty() => Holds::NoEvents,
+        Err(uids) => Holds::SeveralUids(uids),
     }
 }
 
@@ -855,11 +870,11 @@ mod tests {
         );
         assert!(matches!(
             holds(&format!("{moved}{}{weekly}", event("other", ""))),
-            Holds::Nothing { uids } if uids == ["other", "weekly"]
+            Holds::SeveralUids(uids) if uids == ["other", "weekly"]
         ));
         assert!(matches!(
             holds("BEGIN:VTODO\r\nUID:task\r\nEND:VTODO\r\n"),
-            Holds::Nothing { uids } if uids.is_empty()
+            Holds::NoEvents
         ));
         assert!(matches!(
             holds("BEGIN:VEVENT\r\nUID:no-start\r\nEND:VEVENT\r\n"),

@@ -1194,79 +1194,92 @@ fn titles_in(core: &Core, calendar_id: CalendarId) -> Vec<String> {
     titles
 }
 
+/// The Calendars "Home" and "Work", each holding what was imported into it.
+struct HomeAndWork {
+    core: Core,
+    _harness: Harness,
+    home: CalendarId,
+    work: CalendarId,
+}
+
+impl HomeAndWork {
+    fn new(at_home: &str, at_work: &str) -> Self {
+        let harness = Harness::new();
+        let core = harness.open();
+        let home = calendar(&core, "Home").id;
+        let work = calendar(&core, "Work").id;
+        import(&core, home, at_home);
+        import(&core, work, at_work);
+        Self {
+            core,
+            _harness: harness,
+            home,
+            work,
+        }
+    }
+
+    /// The first Occurrence in Home from `from` to `to`.
+    fn first_at_home(&self, from: &str, to: &str) -> Occurrence {
+        occurrences(&self.core, from, to)
+            .into_iter()
+            .find(|occurrence| occurrence.calendar_id == self.home)
+            .unwrap()
+    }
+
+    /// The draft of `occurrence`, moved into Work.
+    fn moved_to_work(&self, occurrence: &Occurrence) -> EventDraft {
+        EventDraft {
+            calendar_id: self.work,
+            ..draft_of(&self.core, occurrence)
+        }
+    }
+}
+
 #[test]
 fn an_event_moved_into_a_calendar_with_its_uid_gets_a_new_one() {
-    let harness = Harness::new();
-    let core = harness.open();
-    let home = calendar(&core, "Home");
-    let work = calendar(&core, "Work");
     let dentist = "BEGIN:VEVENT\nUID:dentist\nSUMMARY:Dentist\n\
          DTSTART;TZID=Europe/Berlin:20261005T090000\nDTEND;TZID=Europe/Berlin:20261005T100000\n\
          END:VEVENT\n";
-    import(&core, home.id, dentist);
-    import(
-        &core,
-        work.id,
-        &dentist.replace("Dentist", "Dentist at work"),
-    );
-    let at_home = occurrences(&core, "2026-10-05", "2026-10-06")
-        .into_iter()
-        .find(|occurrence| occurrence.calendar_id == home.id)
-        .unwrap();
+    let both = HomeAndWork::new(dentist, &dentist.replace("Dentist", "Dentist at work"));
+    let (core, home, work) = (&both.core, both.home, both.work);
+    let at_home = both.first_at_home("2026-10-05", "2026-10-06");
 
     let moved = core
-        .edit_event(
-            at_home.event_id,
-            EventDraft {
-                calendar_id: work.id,
-                ..draft_of(&core, &at_home)
-            },
-        )
+        .edit_event(at_home.event_id, both.moved_to_work(&at_home))
         .unwrap();
 
-    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
-    assert_eq!(titles_in(&core, work.id), ["Dentist", "Dentist at work"]);
-    assert_eq!(moved.value.calendar_id, work.id);
+    assert_eq!(titles_in(core, home), Vec::<String>::new());
+    assert_eq!(titles_in(core, work), ["Dentist", "Dentist at work"]);
+    assert_eq!(moved.value.calendar_id, work);
     assert_eq!(moved.value.title, "Dentist");
 
     core.undo_journal_transaction(moved.journal_transaction.unwrap())
         .unwrap();
-    assert_eq!(titles_in(&core, home.id), ["Dentist"]);
-    assert_eq!(titles_in(&core, work.id), ["Dentist at work"]);
+    assert_eq!(titles_in(core, home), ["Dentist"]);
+    assert_eq!(titles_in(core, work), ["Dentist at work"]);
 }
 
 #[test]
 fn a_recurring_event_moved_into_a_calendar_with_its_uid_takes_its_exceptions_to_a_new_one() {
-    let harness = Harness::new();
-    let core = harness.open();
-    let home = calendar(&core, "Home");
-    let work = calendar(&core, "Work");
-    import(&core, home.id, YOGA_WITH_EXCEPTION);
-    import(
-        &core,
-        work.id,
+    let both = HomeAndWork::new(
+        YOGA_WITH_EXCEPTION,
         &YOGA_WITH_EXCEPTION.replace("Yoga", "Work yoga"),
     );
-    let first = occurrences(&core, "2026-10-05", "2026-10-06")
-        .into_iter()
-        .find(|occurrence| occurrence.calendar_id == home.id)
+    let first = both.first_at_home("2026-10-05", "2026-10-06");
+
+    both.core
+        .edit_occurrence(
+            first.event_id,
+            rid(&first),
+            Scope::All,
+            false,
+            both.moved_to_work(&first),
+        )
         .unwrap();
 
-    core.edit_occurrence(
-        first.event_id,
-        rid(&first),
-        Scope::All,
-        false,
-        EventDraft {
-            calendar_id: work.id,
-            ..draft_of(&core, &first)
-        },
-    )
-    .unwrap();
-
-    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
+    assert_eq!(titles_in(&both.core, both.home), Vec::<String>::new());
     assert_eq!(
-        titles_in(&core, work.id),
+        titles_in(&both.core, both.work),
         [
             "Work yoga",
             "Work yoga",
@@ -1284,34 +1297,21 @@ fn a_recurring_event_moved_into_a_calendar_with_its_uid_takes_its_exceptions_to_
 /// has it, stays an Event of its own instead of joining it.
 #[test]
 fn a_lone_exception_moved_into_a_calendar_with_its_uid_stays_an_event_of_its_own() {
-    let harness = Harness::new();
-    let core = harness.open();
-    let home = calendar(&core, "Home");
-    let work = calendar(&core, "Work");
     let (recurring, exception) = YOGA_WITH_EXCEPTION.split_at(
         YOGA_WITH_EXCEPTION
             .find("BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga outside")
             .unwrap(),
     );
-    import(&core, home.id, exception);
-    import(&core, work.id, recurring);
-    let lone = occurrences(&core, "2026-10-12", "2026-10-13")
-        .into_iter()
-        .find(|occurrence| occurrence.calendar_id == home.id)
+    let both = HomeAndWork::new(exception, recurring);
+    let lone = both.first_at_home("2026-10-12", "2026-10-13");
+
+    both.core
+        .edit_event(lone.event_id, both.moved_to_work(&lone))
         .unwrap();
 
-    core.edit_event(
-        lone.event_id,
-        EventDraft {
-            calendar_id: work.id,
-            ..draft_of(&core, &lone)
-        },
-    )
-    .unwrap();
-
-    assert_eq!(titles_in(&core, home.id), Vec::<String>::new());
+    assert_eq!(titles_in(&both.core, both.home), Vec::<String>::new());
     assert_eq!(
-        titles_in(&core, work.id),
+        titles_in(&both.core, both.work),
         ["Yoga", "Yoga", "Yoga", "Yoga", "Yoga outside"]
     );
 }

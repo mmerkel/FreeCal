@@ -14,7 +14,6 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::import::Holds;
 use crate::remote::{Changes, FIRST_SYNC_PAGE, Fetched, Held, SyncPoint};
 use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
 
@@ -265,13 +264,12 @@ impl Client {
             Some((listing, removed)) => (listing, Some(removed)),
             None => (self.listing(&calendar, display)?, None),
         };
+        let path =
+            |href: &str| follow_href(&listing.calendar, href).map(|url| url.path().to_owned());
         // What FreeCal holds, by the path `member` gives each object.
         let held: HashMap<String, (&String, &Held)> = known_server_resources
             .iter()
-            .filter_map(|(href, etag)| {
-                let path = follow_href(&listing.calendar, href)?.path().to_owned();
-                Some((path, (href, etag)))
-            })
+            .filter_map(|(href, held)| Some((path(href)?, (href, held))))
             .collect();
         let removed: Vec<String> = match removed {
             Some(removed) => removed
@@ -323,14 +321,12 @@ impl Client {
         for hrefs in fetch.chunks(FIRST_SYNC_PAGE) {
             changed.extend(self.multiget(&listing.calendar, hrefs, zone)?);
         }
-        let path =
-            |href: &str| follow_href(&listing.calendar, href).map(|url| url.path().to_owned());
         let fetched: HashSet<String> = changed
             .iter()
             .filter_map(|fetched| path(&fetched.object.href))
             .chain(fetch)
             .collect();
-        let takeover: Vec<String> = takeover(known_server_resources, &removed, &changed, &path)
+        let takeover: Vec<String> = takeover(&held, &removed, &changed, &path)
             .into_iter()
             .filter(|path| !fetched.contains(path))
             .collect();
@@ -530,25 +526,21 @@ struct Listing {
     zone: Option<Tz>,
 }
 
-/// The paths, as `path` gives them, of the Ignored Resources among
-/// `known_server_resources` to fetch again for a takeover (ADR 0015): those
-/// holding a UID whose Server Object stops keeping it in this Incoming
-/// Sync, as it is among `removed` or `changed` holds something else now,
-/// another UID, several or nothing. One FreeCal can't read keeps its UID.
-/// Ignored Resources removed too are left out.
+/// The paths, as `path` gives them, of the Ignored Resources among `held`,
+/// the Known Server Resources by path with their addresses, to fetch again
+/// for a takeover (ADR 0015): those holding an Ambiguous UID whose Server
+/// Object stops keeping it in this Incoming Sync, as it is among `removed` or
+/// `changed` holds something else now ([`Holds::keeps`](crate::import::Holds::keeps)). Ignored Resources
+/// removed too are left out.
 fn takeover(
-    known_server_resources: &HashMap<String, Held>,
+    held: &HashMap<String, (&String, &Held)>,
     removed: &[String],
     changed: &[Fetched],
     path: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<String> {
-    let by_path: HashMap<String, &Held> = known_server_resources
-        .iter()
-        .filter_map(|(href, held)| Some((path(href)?, held)))
-        .collect();
     let kept_uid = |path: &str| {
-        by_path
-            .get(path)
+        held.get(path)
+            .map(|(_, held)| *held)
             .filter(|held| !held.ignored)
             .and_then(|held| held.uid.as_deref())
     };
@@ -558,18 +550,13 @@ fn takeover(
         let Some(uid) = path(&fetched.object.href).and_then(|path| kept_uid(&path)) else {
             continue;
         };
-        let keeps = match &fetched.holds {
-            Holds::Unreadable => true,
-            Holds::Nothing { .. } => false,
-            Holds::OneUid { uid: holds, .. } => holds == uid,
-        };
-        if !keeps {
+        if !fetched.holds.keeps(uid) {
             lost.insert(uid);
         }
     }
-    let mut paths: Vec<String> = by_path
+    let mut paths: Vec<String> = held
         .iter()
-        .filter(|(path, held)| {
+        .filter(|(path, (_, held))| {
             held.ignored
                 && held.uid.as_deref().is_some_and(|uid| lost.contains(uid))
                 && !removed.contains(*path)
@@ -1014,6 +1001,7 @@ fn parse(xml: &str) -> Option<Element> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import::Holds;
 
     #[test]
     fn a_propfind_body_names_each_property_in_its_namespace() {
@@ -1266,6 +1254,10 @@ mod tests {
         .into_iter()
         .map(|(href, held)| (href.to_owned(), held))
         .collect();
+        let known: HashMap<String, (&String, &Held)> = known
+            .iter()
+            .map(|(href, held)| (href.clone(), (href, held)))
+            .collect();
         let path = |href: &str| Some(href.to_owned());
         let at = |holds| Fetched {
             object: ServerObject {
@@ -1286,10 +1278,8 @@ mod tests {
         assert_eq!(takeover(&known, &removed_kept, &[], &path), fetched_again);
         for holds in [
             one_uid("c"),
-            Holds::Nothing {
-                uids: vec!["a".to_owned(), "c".to_owned()],
-            },
-            Holds::Nothing { uids: Vec::new() },
+            Holds::SeveralUids(vec!["a".to_owned(), "c".to_owned()]),
+            Holds::NoEvents,
         ] {
             assert_eq!(
                 takeover(&known, &removed, &[at(holds.clone())], &path),

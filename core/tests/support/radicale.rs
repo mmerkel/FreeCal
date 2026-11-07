@@ -445,21 +445,7 @@ pub fn redirect(location: &str) -> String {
 /// Reads a whole request, so that closing the connection after answering
 /// doesn't reset it, and returns its request line.
 fn read_request(stream: &mut impl Read) -> String {
-    let mut reader = BufReader::new(stream);
-    let mut request_line = String::new();
-    let _ = reader.read_line(&mut request_line);
-    let mut length = 0;
-    let mut line = String::new();
-    while reader.read_line(&mut line).is_ok_and(|read| read > 0) && line != "\r\n" {
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            length = value.trim().parse().unwrap_or(0);
-        }
-        line.clear();
-    }
-    let _ = reader.read_exact(&mut vec![0; length]);
-    request_line.trim_end().to_owned()
+    read_whole_request(stream).0
 }
 
 /// The URL of a server that isn't there: nothing listens on its port.

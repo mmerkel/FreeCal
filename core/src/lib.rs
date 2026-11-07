@@ -340,12 +340,7 @@ impl Core {
             self.signals.send(Signal::CalendarsChanged);
         }
         let synced = (|| {
-            let known_server_resources = {
-                let store = self.store();
-                let mut known = store.server_objects(id)?;
-                known.extend(store.ignored_resources(id)?);
-                known
-            };
+            let known_server_resources = self.store().known_server_resources(id)?;
             let token = state.and_then(|state| state.token);
             let changes = remote.changes(
                 url,

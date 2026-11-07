@@ -52,8 +52,8 @@ const LOGGED_UID_LENGTH: usize = 200;
 enum Ignored<'a> {
     /// It holds several UIDs, these.
     SeveralUids(&'a [String]),
-    /// It holds the UID `uid`, which the CalDAV Server Object at `kept_by`
-    /// keeps.
+    /// It holds the Ambiguous UID `uid`, which the CalDAV Server Object at
+    /// `kept_by` keeps.
     UidKept { uid: &'a str, kept_by: &'a str },
 }
 

@@ -625,9 +625,15 @@ mod tests {
             }
         }
 
-        /// Mirrors another Server Object at `href` in `calendar_id`, holding
-        /// `uid`.
-        fn mirror(&self, calendar_id: CalendarId, href: &str, uid: &str) -> Result<ObjectId> {
+        /// Mirrors a Server Object at `href` in `calendar_id`, holding `uid`,
+        /// over the Server Object `over` or as a new one.
+        fn mirror(
+            &self,
+            calendar_id: CalendarId,
+            href: &str,
+            uid: &str,
+            over: Option<ObjectId>,
+        ) -> Result<ObjectId> {
             let object = ServerObject {
                 href: href.to_owned(),
                 ..dentist_object()
@@ -641,7 +647,7 @@ mod tests {
                         journal_transaction,
                         calendar_id,
                         &object,
-                        None,
+                        over,
                         uid,
                     )
                 },
@@ -771,19 +777,11 @@ mod tests {
     fn a_second_server_object_at_one_address_fails() {
         let pulled = Pulled::new();
 
-        let second = record(
-            &pulled.store,
-            TransactionOrigin::IncomingSync,
-            0,
-            |journal_transaction| {
-                sync::caldav::testing::mirror(
-                    journal_transaction,
-                    pulled.event.calendar_id,
-                    &dentist_object(),
-                    None,
-                    "dentist",
-                )
-            },
+        let second = pulled.mirror(
+            pulled.event.calendar_id,
+            &dentist_object().href,
+            "dentist",
+            None,
         );
 
         assert!(
@@ -814,41 +812,24 @@ mod tests {
 
         assert!(
             pulled
-                .mirror(calendar_id, "/user/work/copy.ics", "dentist")
+                .mirror(calendar_id, "/user/work/copy.ics", "dentist", None)
                 .is_err(),
             "the unique index refuses it"
         );
         let other = pulled
-            .mirror(calendar_id, "/user/work/other.ics", "other")
+            .mirror(calendar_id, "/user/work/other.ics", "other", None)
             .unwrap();
-        let over = record(
-            &pulled.store,
-            TransactionOrigin::IncomingSync,
-            0,
-            |journal_transaction| {
-                let object = ServerObject {
-                    href: "/user/work/other.ics".to_owned(),
-                    ..dentist_object()
-                };
-                sync::caldav::testing::mirror(
-                    journal_transaction,
-                    calendar_id,
-                    &object,
-                    Some(other),
-                    "dentist",
-                )
-            },
-        );
+        let over = pulled.mirror(calendar_id, "/user/work/other.ics", "dentist", Some(other));
         assert!(over.is_err(), "written over, it is refused too");
 
         assert!(
             pulled
-                .mirror(calendar_id, "/user/work/upper.ics", "DENTIST")
+                .mirror(calendar_id, "/user/work/upper.ics", "DENTIST", None)
                 .is_ok()
         );
         assert!(
             pulled
-                .mirror(other_calendar, "/user/home/dentist.ics", "dentist")
+                .mirror(other_calendar, "/user/home/dentist.ics", "dentist", None)
                 .is_ok()
         );
         assert_eq!(pulled.corresponding_server_object(), Some(pulled.object));

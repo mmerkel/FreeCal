@@ -213,46 +213,29 @@ impl Store {
         })?)
     }
 
-    /// The Server Objects of a Calendar, by their address as the server
-    /// gave it, each with the UID it keeps.
-    pub fn server_objects(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
+    /// The Known Server Resources of a Calendar, by their address as the
+    /// server gave it: its Server Objects, each with the UID it keeps, and
+    /// its Ignored Resources, each with the UID it holds that a Server
+    /// Object keeps, none for one holding several.
+    pub fn known_server_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
         let mut stmt = self.conn.prepare(
-            "SELECT href, etag, unreadable, uid FROM caldav_server_object WHERE calendar_id = ?1",
+            "SELECT href, etag, unreadable, uid, FALSE FROM caldav_server_object \
+             WHERE calendar_id = ?1 \
+             UNION ALL SELECT href, etag, FALSE, uid, TRUE FROM caldav_ignored_resource \
+             WHERE calendar_id = ?1",
         )?;
-        let objects = readable(stmt.query_map([calendar_id.0], |row| {
+        let known = readable(stmt.query_map([calendar_id.0], |row| {
             Ok((
                 row.get(0)?,
                 Held {
                     etag: row.get(1)?,
                     unreadable: row.get(2)?,
                     uid: row.get(3)?,
-                    ignored: false,
+                    ignored: row.get(4)?,
                 },
             ))
         })?)?;
-        Ok(objects.into_iter().collect())
-    }
-
-    /// The Ignored Resources of a Calendar, by their address as the server
-    /// gave it, as an Incoming Sync knows them, each with the UID it holds
-    /// that a Server Object keeps; none for one holding several. Not a
-    /// query of the Mirror.
-    pub fn ignored_resources(&self, calendar_id: CalendarId) -> Result<HashMap<String, Held>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT href, etag, uid FROM caldav_ignored_resource WHERE calendar_id = ?1",
-        )?;
-        let ignored = readable(stmt.query_map([calendar_id.0], |row| {
-            Ok((
-                row.get(0)?,
-                Held {
-                    etag: row.get(1)?,
-                    unreadable: false,
-                    uid: row.get(2)?,
-                    ignored: true,
-                },
-            ))
-        })?)?;
-        Ok(ignored.into_iter().collect())
+        Ok(known.into_iter().collect())
     }
 
     /// Whether `href` in a Calendar is an Ignored Resource. Not a query of
@@ -266,14 +249,19 @@ impl Store {
         )?)
     }
 
-    /// The Server Object of a Calendar at `href`, if there is one.
-    pub fn object_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<ObjectId>> {
+    /// The Server Object of a Calendar at `href`, if there is one, with the
+    /// UID it keeps.
+    pub fn object_at(
+        &self,
+        calendar_id: CalendarId,
+        href: &str,
+    ) -> Result<Option<(ObjectId, String)>> {
         Ok(self
             .conn
             .query_row(
-                "SELECT id FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
+                "SELECT id, uid FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
                 params![calendar_id.0, href],
-                |row| row.get(0).map(ObjectId),
+                |row| Ok((ObjectId(row.get(0)?), row.get(1)?)),
             )
             .optional()?)
     }

@@ -154,6 +154,10 @@ _Avoid_: Skipped object, rejected resource
 Remove an Ignored Resource from the Sync Engine's memory, as an Incoming Sync finds it gone from the server, mirrored now, or holding nothing FreeCal keeps.
 _Avoid_: Unignore, release
 
+**Ambiguous UID**:
+A UID that more than one CalDAV resource of a Calendar holds, which RFC 4791 §4.1 forbids. One of them keeps the UID: it is mirrored, as the UID's Corresponding Server Object, and the others are Ignored Resources. The first by a fixed order keeps it among new ones; once mirrored, it keeps it for as long as it holds it, and when it stops, an Ignored Resource holding the UID takes over (ADR 0015). A resource holding several UIDs makes none of them ambiguous, as it is ignored for that.
+_Avoid_: Duplicate UID, shared UID
+
 **Known Server Resources**:
 The Server Objects FreeCal holds and the Ignored Resources it remembers in a Calendar, by address, with their versions: what an Incoming Sync compares the server's listing with, so that it fetches only what changed and finds what went.
 _Avoid_: Known set, known objects
