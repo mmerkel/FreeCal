@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-**Effort:** M
+**Effort:** S
 
 - [x] The scope dialog has radio buttons "This event", "This and following events", "All events", in that order, and a solid confirm button labelled for the change ("Change" or "Move"); "This event" is preselected and focused so Enter confirms. For a change of the repeat rule "This event" is shown disabled and "This and following events" is preselected
 - [x] A checkbox "Also change the N events changed on their own" (plural forms through `t()`) applies to Exceptions in the chosen scope whose title, location, description or time differs from what the Recurring Event had. Its count follows the selected scope; it is greyed out for "This event" and when the count is 0, and hidden when both counts are 0. Unchecked by default, which is today's behaviour; it keeps its value while greyed out and is then ignored
@@ -24,3 +24,4 @@ Out of scope: moving Exceptions to the new time instead of shifting them; noted 
   - Choice made: where shifting start and end would put an Exception's end before its start (the Recurring Event made shorter than the gap), the Exception moves by the start's amount and keeps its length (`rule::shifted_or_moved`), instead of the whole change failing.
   - Dialog: with "This event" selected, the greyed-out checkbox names the "all events" count.
   - The window asks for the counts before showing the dialog; a dropped Occurrence is held from the drop on, while they load.
+- 2026-11-07: Re-sized from M to S. Only box 5 is left, a core test that ticket 50 adds and then closes this ticket with.

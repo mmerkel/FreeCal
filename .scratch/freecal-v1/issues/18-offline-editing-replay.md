@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-**Effort:** L
+**Effort:** M
 
 - [ ] Edits while the Account is Offline succeed locally and are queued
 - [ ] Queued changes are replayed when the network returns, in order, through the same conditional requests and Change Journal recording
@@ -24,3 +24,4 @@
 - 2026-10-25 (grilling, ADR 0011): blocked by 91. The structure asked about above is decided: Unsent Changes are Combined Event Keys in `unsent_change` (Calendar, UID, recurrence ID, since), not a pending mark on Server Objects; the three cases are read off Event Rows and Server Objects per Combined Event Key. Order of replay and what the user sees remain for this ticket's grilling.
 - 2026-10-25: Re-sized from XL to L. Ticket 91 brings the record of unsent changes with their `since`, and ticket 17 the sender that replay reuses; what's left is the replay trigger and its order, the counts and outlines, the reason shown, and the quit flow.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.
+- 2026-11-07: Re-sized from L to M. Unsent Changes persist in the Local Store (ticket 92), so replay is ticket 17's Sender run when the network returns (ticket 16 watches it), and ticket 15 brings the unsent counts in "Sync status changed". What's left: the per-Occurrence unsent mark and outline, the reason shown, the quit flow, and the grilling on order and what the user sees.

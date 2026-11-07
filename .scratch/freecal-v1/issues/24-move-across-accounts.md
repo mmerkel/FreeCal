@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-**Effort:** M
+**Effort:** S
 
 - [ ] Changing an Event's Calendar to one in another Account creates it in the target and then deletes it from the source
 - [ ] Both steps are recorded in the Change Journal where they touch a server
@@ -15,3 +15,4 @@
 ## Comments
 
 - 2026-10-11: An Event whose zone was pinned (ADR 0007) is written to the target with the pinned zone made explicit, since the target Calendar may read floating times differently.
+- 2026-11-07: Re-sized from M to S. A Journal Transaction already adds Unsent Changes for both the previous and the new Event Version's Calendar (ADR 0015), so once ticket 17's Sender exists a move across Accounts sends a create to the target and a delete to the source without code of its own. What's left: the warning about Provider-specific details (only Google Events have them, tickets 25 and 26), the pinned zone made explicit, and tests.
