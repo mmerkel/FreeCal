@@ -2,6 +2,8 @@
 //! commands and forwards the core's Signals as Tauri events.
 
 #[cfg(target_os = "linux")]
+mod desktop_watch;
+#[cfg(target_os = "linux")]
 mod handoff;
 mod keyring;
 
@@ -14,8 +16,8 @@ use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
     Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents,
     ImportFile, ImportOutcome, ImportPreview, ImportSummary, JournalTransactionId, Occurrence,
-    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SystemClock,
-    View, When, link_allowed,
+    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SyncTrigger,
+    SystemClock, View, When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -28,6 +30,11 @@ const SIGNAL_EVENT: &str = "freecal://signal";
 /// thread doesn't count the time the computer was suspended, so a short
 /// period also catches waking up on a new day soon.
 const DATE_CHECK_PERIOD: Duration = Duration::from_secs(10);
+
+/// How long the thread that runs the scheduled syncs waits at most before
+/// it checks for a due poll again. Like [`DATE_CHECK_PERIOD`], short enough
+/// to notice soon after a sleep that a poll is due.
+const SYNC_CHECK_PERIOD: Duration = Duration::from_secs(10);
 
 /// The window starts hidden and the frontend shows it once it knows the
 /// appearance, so that it never flashes the wrong theme. Should the frontend
@@ -161,6 +168,13 @@ fn list_calendars(core: State<Core>) -> CommandResult<Vec<Calendar>> {
 #[tauri::command]
 fn sync_statuses(core: State<Core>) -> CommandResult<SyncStatuses> {
     core.sync_statuses().map_err(ErrorCode::from)
+}
+
+/// Sync now, of the Account `account_id`, or of every server Account.
+/// Returns at once; "Sync status changed" tells how it goes.
+#[tauri::command]
+fn sync_now(core: State<Core>, account_id: Option<i64>) {
+    core.sync_now(account_id.map(AccountId));
 }
 
 #[tauri::command]
@@ -516,6 +530,28 @@ fn hand_off_or_serve(app: &tauri::App, data_dir: &std::path::Path) {
     }
 }
 
+/// Runs the syncs the core's Sync Scheduler finds due, on a thread of its
+/// own, and tells it about the network and waking from sleep.
+fn run_scheduled_syncs(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let core = handle.state::<Core>();
+        loop {
+            core.run_scheduled_syncs();
+            core.wait_for_sync_request(SYNC_CHECK_PERIOD);
+        }
+    });
+    #[cfg(target_os = "linux")]
+    {
+        let handle = app.clone();
+        desktop_watch::watch_network(move |available| {
+            handle.state::<Core>().set_network_available(available)
+        });
+        let handle = app.clone();
+        desktop_watch::watch_wake(move || handle.state::<Core>().trigger_sync(SyncTrigger::Woke));
+    }
+}
+
 /// The most the Log file grows to before it starts again, the old one gone.
 const MAX_LOG_SIZE: u128 = 1_000_000;
 
@@ -559,6 +595,7 @@ fn main() {
                             handle.state::<Core>().check_date();
                         }
                     });
+                    run_scheduled_syncs(app.handle());
                 }
                 Err(error) => {
                     eprintln!("FreeCal could not open its Local Store: {error}");
@@ -572,14 +609,20 @@ fn main() {
             });
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Closing the startup error screen quits FreeCal, which has
             // nothing to keep running for.
-            if let WindowEvent::CloseRequested { .. } = event
-                && window.try_state::<StartupFailure>().is_some()
+            WindowEvent::CloseRequested { .. }
+                if window.try_state::<StartupFailure>().is_some() =>
             {
                 window.app_handle().exit(0);
             }
+            WindowEvent::Focused(true) => {
+                if let Some(core) = window.try_state::<Core>() {
+                    core.trigger_sync(SyncTrigger::WindowFocused);
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             today,
@@ -596,6 +639,7 @@ fn main() {
             remove_account,
             list_calendars,
             sync_statuses,
+            sync_now,
             create_calendar,
             rename_calendar,
             recolour_calendar,

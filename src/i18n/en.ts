@@ -27,6 +27,7 @@ export const en = {
   'nav.views': 'View',
   'nav.showMonth': 'Show {month}',
   'menu.main': 'Main menu',
+  'menu.syncNow': 'Sync now',
   'menu.import': 'Import…',
   'menu.settings': 'Settings…',
   'menu.about': 'About FreeCal',

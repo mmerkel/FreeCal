@@ -80,6 +80,12 @@ export interface CoreApi {
    * changed" says when it changes.
    */
   syncStatuses(): Promise<SyncStatuses>;
+  /**
+   * Sync now: syncs the server Account `accountId`, or every server Account
+   * with `null`, as started by the user. Resolves at once; "Sync status
+   * changed" tells how it goes.
+   */
+  syncNow(accountId: AccountId | null): Promise<void>;
   /** Creates a Calendar in the Local Account. `colour` is `#rrggbb`. */
   createCalendar(accountId: AccountId, name: string, colour: string): Promise<Calendar>;
   renameCalendar(id: CalendarId, name: string): Promise<void>;

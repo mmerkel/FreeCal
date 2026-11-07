@@ -19,6 +19,7 @@ mod signal;
 mod store;
 mod structured_text;
 mod sync;
+mod sync_scheduler;
 mod sync_status;
 #[cfg(test)]
 mod typescript;
@@ -28,7 +29,8 @@ use std::fs::{File, TryLockError};
 use std::path::Path;
 
 use chrono::NaiveDate;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 pub use account::{Account, AccountId, AddedAccount, CalDavLogin, Provider, ServerLogin};
 pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
@@ -49,6 +51,7 @@ pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
 pub use structured_text::{Piece, StructuredText, link_allowed};
+pub use sync_scheduler::SyncTrigger;
 pub use sync_status::{
     AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, StartedBy,
     SyncOutcome, SyncStatus, SyncStatusReport, SyncStatuses,
@@ -60,6 +63,7 @@ use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::{Remote, SyncPoint};
 use store::Store;
+use sync_scheduler::SyncScheduler;
 use sync_status::SyncStatusTracker;
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -79,6 +83,10 @@ pub struct Core {
     /// The Sync Status of each server Account and Calendar. Locked inside
     /// the Store lock, never around it.
     sync_statuses: Mutex<SyncStatusTracker>,
+    /// When to sync. Never locked together with the Store lock.
+    scheduler: Mutex<SyncScheduler>,
+    /// Wakes [`Core::wait_for_sync_request`] when a sync is asked for.
+    sync_requested: Condvar,
 }
 
 impl Core {
@@ -107,6 +115,8 @@ impl Core {
             keyring,
             date,
             sync_statuses: Mutex::new(sync_statuses),
+            scheduler: Mutex::new(SyncScheduler::default()),
+            sync_requested: Condvar::new(),
         })
     }
 
@@ -368,6 +378,123 @@ impl Core {
             .map_or(Ok(synced), Err)
     }
 
+    /// Runs the syncs the Sync Scheduler finds due now, one Account after
+    /// another, and returns once they end: polls, and the syncs asked for
+    /// since the last call. The shell calls it on a thread of its own, the
+    /// only one that does, every few seconds and whenever
+    /// [`Core::wait_for_sync_request`] returns. A sync's failure is its
+    /// Sync Status; one that isn't Offline is also logged.
+    pub fn run_scheduled_syncs(&self) {
+        let due = self.scheduler().take_due(self.clock.now());
+        if due.is_empty() {
+            return;
+        }
+        let accounts = if due.every_account() {
+            self.server_accounts()
+        } else {
+            Ok(due.accounts().collect())
+        };
+        let accounts = match accounts {
+            Ok(accounts) => accounts,
+            Err(error) => return log::warn!("Couldn't read the Accounts to sync: {error}"),
+        };
+        for id in accounts {
+            match self.sync_account(id, due.started_by(id)) {
+                Ok(_) | Err(CoreError::ServerUnreachable(_) | CoreError::AccountNotFound(_)) => {}
+                Err(error) => log::warn!("Syncing Account {} failed: {error}", id.0),
+            }
+        }
+    }
+
+    /// Waits until a sync is asked for, or at most `timeout`, for the
+    /// shell's thread that runs [`Core::run_scheduled_syncs`].
+    pub fn wait_for_sync_request(&self, timeout: Duration) {
+        let scheduler = self.scheduler();
+        let _ = self
+            .sync_requested
+            .wait_timeout_while(scheduler, timeout, |scheduler| !scheduler.has_requests());
+    }
+
+    /// Tells the Sync Scheduler whether the window is open, which polls
+    /// every 2 minutes, or FreeCal runs in the background, which polls every
+    /// 15 minutes. On launch the window is open.
+    pub fn set_window_open(&self, open: bool) {
+        self.scheduler().set_window_open(open);
+    }
+
+    /// Asks for a sync of every server Account because of `trigger`.
+    pub fn trigger_sync(&self, trigger: SyncTrigger) {
+        log::debug!("Syncing every Account on {trigger:?}");
+        self.ask_for_sync(|scheduler| scheduler.ask_every_account(StartedBy::FreeCal));
+    }
+
+    /// Sync now: asks for a sync of the Account `id`, or of every server
+    /// Account, as started by the user. Returns at once; the Sync Status
+    /// tells how it goes.
+    pub fn sync_now(&self, id: Option<AccountId>) {
+        self.ask_for_sync(|scheduler| match id {
+            Some(id) => scheduler.ask_account(id, StartedBy::User),
+            None => scheduler.ask_every_account(StartedBy::User),
+        });
+    }
+
+    /// Takes in the system's network status, as the shell reads it. When
+    /// the network goes away, every server Account not syncing right now is
+    /// Offline without trying, and nothing syncs until it returns. Its
+    /// return syncs every server Account at once, which sends what waited.
+    /// Otherwise whether an Account is Offline is decided by its requests.
+    pub fn set_network_available(&self, available: bool) {
+        let went_away = self.ask_for_sync(|scheduler| scheduler.set_network_available(available));
+        if went_away {
+            self.mark_offline_without_trying();
+        }
+    }
+
+    /// Makes every server Account not syncing right now Offline, as if its
+    /// sync had just found the network gone, and keeps its Sync Record.
+    fn mark_offline_without_trying(&self) {
+        let marked = (|| {
+            let store = self.store();
+            let accounts = server_accounts_of(&store)?;
+            let now = self.clock.now();
+            let mut marked = Vec::new();
+            for id in accounts {
+                let record = self.tracker(&store).account_offline(id, now);
+                if let Some(record) = record {
+                    store.write(|database_transaction| {
+                        database_transaction.set_account_sync_record(id, &record)
+                    })?;
+                    marked.push(id);
+                }
+            }
+            Ok::<_, CoreError>(marked)
+        })();
+        match marked {
+            Ok(marked) => self.send_sync_statuses(&marked, &[]),
+            Err(error) => log::warn!("Couldn't mark the Accounts Offline: {error}"),
+        }
+    }
+
+    /// Changes the Sync Scheduler with `ask` and wakes the thread that runs
+    /// the syncs when one is asked for now.
+    fn ask_for_sync<T>(&self, ask: impl FnOnce(&mut SyncScheduler) -> T) -> T {
+        let mut scheduler = self.scheduler();
+        let asked = ask(&mut scheduler);
+        if scheduler.has_requests() {
+            self.sync_requested.notify_all();
+        }
+        asked
+    }
+
+    fn scheduler(&self) -> std::sync::MutexGuard<'_, SyncScheduler> {
+        self.scheduler.lock().unwrap()
+    }
+
+    /// Every server Account, in the order they were added.
+    fn server_accounts(&self) -> Result<Vec<AccountId>> {
+        server_accounts_of(&self.store())
+    }
+
     /// Ends the Calendar `id`'s running sync, which failed with `failed` if
     /// given, keeps its Sync Record and sends its new Sync Status. A failure
     /// about its Account leaves its Sync Status as before the sync, and is
@@ -424,12 +551,7 @@ impl Core {
     }
 
     fn read_sync_statuses(&self, store: &Store) -> Result<SyncStatuses> {
-        let accounts: Vec<AccountId> = store
-            .list_accounts()?
-            .into_iter()
-            .filter(|account| account.provider != Provider::Local)
-            .map(|account| account.id)
-            .collect();
+        let accounts = server_accounts_of(store)?;
         let calendars = store.unsent_change_counts()?;
         let statuses = self.tracker(store);
         let zone = self.clock.time_zone();
@@ -937,7 +1059,8 @@ impl Core {
 
     /// Sends "Sync status changed" for those of `calendars` that are a
     /// server Account's, and for their Accounts, as their Unsent Changes may
-    /// have changed.
+    /// have changed, and asks for a sync of those Accounts, which sends the
+    /// change right after it.
     fn send_unsent_change_counts(&self, calendars: &[CalendarId]) {
         let accounts = match self.store().unsent_change_counts() {
             Ok(counts) => counts
@@ -949,6 +1072,11 @@ impl Core {
         };
         if !accounts.is_empty() {
             self.send_sync_statuses(&accounts, calendars);
+            self.ask_for_sync(|scheduler| {
+                for id in &accounts {
+                    scheduler.ask_account(*id, StartedBy::FreeCal);
+                }
+            });
         }
     }
 
@@ -979,6 +1107,16 @@ fn lock_local_store(data_dir: &Path) -> Result<File> {
         Err(TryLockError::WouldBlock) => Err(CoreError::LocalStoreInUse),
         Err(TryLockError::Error(error)) => Err(error.into()),
     }
+}
+
+/// Every server Account in the Local Store, in the order they were added.
+fn server_accounts_of(store: &Store) -> Result<Vec<AccountId>> {
+    Ok(store
+        .list_accounts()?
+        .into_iter()
+        .filter(|account| account.provider != Provider::Local)
+        .map(|account| account.id)
+        .collect())
 }
 
 /// Every Calendar a server offers, added or not; none without a server.

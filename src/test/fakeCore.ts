@@ -132,6 +132,8 @@ export class FakeCore implements CoreApi {
     accounts: [],
     calendars: [],
   };
+  /** Each sync now asked for: an Account's ID, or `null` for every server Account. */
+  syncedNow: (AccountId | null)[] = [];
   /** While set, first syncs run until it resolves. */
   private heldFirstSyncs?: Promise<void>;
   private journalTransactions = new Map<JournalTransactionId, JournalTransaction>();
@@ -236,6 +238,11 @@ export class FakeCore implements CoreApi {
     this.calls.push('syncStatuses');
     this.started();
     return structuredClone(this.statuses);
+  }
+
+  async syncNow(accountId: AccountId | null) {
+    this.calls.push('syncNow');
+    this.syncedNow.push(accountId);
   }
 
   async today() {

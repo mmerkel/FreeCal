@@ -1,6 +1,7 @@
 // The status indicator and the sidebar's Sync Status markers, run against
 // the fake core with a stand-in grid: they follow "Sync status changed".
 import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import App from './App.svelte';
 import type { SyncStatus, SyncStatusReport } from './core/types';
@@ -159,4 +160,43 @@ test('a Calendar on its first sync says it is loading for the first time', async
   });
 
   await vi.waitFor(() => expect(team()).toHaveAccessibleDescription(/Loading for the first time…/));
+});
+
+test('“Sync now” in the main menu syncs every server Account', async () => {
+  const user = userEvent.setup();
+  const { core } = withServer();
+  await showApp(core);
+
+  await user.click(screen.getByRole('button', { name: 'Main menu' }));
+  const menu = screen.getByRole('menu', { name: 'Main menu' });
+  await user.click(within(menu).getByRole('menuitem', { name: 'Sync now' }));
+
+  expect(core.syncedNow).toEqual([null]);
+});
+
+test('R syncs every server Account, but not while typing', async () => {
+  const user = userEvent.setup();
+  const { core } = withServer();
+  await showApp(core);
+
+  await user.keyboard('r');
+  expect(core.syncedNow).toEqual([null]);
+
+  await user.click(screen.getByRole('button', { name: 'Main menu' }));
+  await user.keyboard('r');
+  expect(core.syncedNow).toEqual([null]);
+});
+
+test('“Sync now” in an Account’s menu syncs that Account', async () => {
+  const user = userEvent.setup();
+  const { core, account } = withServer();
+  await showApp(core);
+
+  await user.click(
+    accountSection().getByRole('button', { name: 'Options for \u2068ada\u2069 (CalDAV)' }),
+  );
+  const menu = screen.getByRole('menu', { name: 'Options for \u2068ada\u2069 (CalDAV)' });
+  await user.click(within(menu).getByRole('menuitem', { name: 'Sync now' }));
+
+  expect(core.syncedNow).toEqual([account]);
 });

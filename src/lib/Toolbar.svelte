@@ -1,6 +1,6 @@
 <!--
   The toolbar over the grid: Today, previous and next,
-  the shown period, the view switch, the status indicator and the main menu (Import…, Settings…,
+  the shown period, the view switch, the status indicator and the main menu (Sync now, Import…, Settings…,
   About FreeCal and Quit). The Today button is a
   toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
@@ -38,6 +38,7 @@
     /** The overall status as shown, once read. */
     sync?: OverallStatus;
     today: Temporal.PlainDate;
+    onsyncnow: () => void;
     onimport: () => void;
     onsettings: () => void;
     onabout: () => void;
@@ -54,6 +55,7 @@
     onmonth,
     sync,
     today,
+    onsyncnow,
     onimport,
     onsettings,
     onabout,
@@ -187,6 +189,11 @@
     </button>
     {#if menuOpen && menuButton}
       <Menu label={t('menu.main')} anchor={menuButton} onclose={() => (menuOpen = false)}>
+        <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onsyncnow)}>
+          <RefreshCw size={14} aria-hidden="true" />
+          {t('menu.syncNow')}
+          <kbd aria-hidden="true">{shortcutKeys('sync')}</kbd>
+        </button>
         <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onimport)}>
           <ImportIcon size={14} aria-hidden="true" />
           {t('menu.import')}

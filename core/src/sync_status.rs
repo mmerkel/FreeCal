@@ -358,6 +358,22 @@ impl SyncStatusTracker {
         Some(state.record.clone())
     }
 
+    /// Makes the Account Offline at `at` without a sync, as when the
+    /// network went away. Returns its new Sync Record, for the Local Store;
+    /// none while it syncs, which finds out by itself.
+    pub fn account_offline(
+        &mut self,
+        id: AccountId,
+        at: DateTime<FixedOffset>,
+    ) -> Option<SyncRecord> {
+        let state = self.accounts.entry(id).or_default();
+        if state.running > 0 {
+            return None;
+        }
+        state.record.finish(at, SyncOutcome::Offline);
+        Some(state.record.clone())
+    }
+
     /// Whether a sync of the Calendar runs, which another one leaves out.
     pub fn calendar_syncing(&self, id: CalendarId) -> bool {
         self.calendars

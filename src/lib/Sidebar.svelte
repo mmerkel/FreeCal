@@ -7,6 +7,7 @@
   import Lock from '@lucide/svelte/icons/lock';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Plus from '@lucide/svelte/icons/plus';
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import Unplug from '@lucide/svelte/icons/unplug';
   import type { CoreApi } from '../core/CoreApi';
@@ -307,6 +308,15 @@
               >
                 <ListChecks size={14} aria-hidden="true" />
                 {t('account.manageCalendars')}
+              </button>
+              <button
+                type="button"
+                class="menu-item"
+                role="menuitem"
+                onclick={() => chooseForAccount(account.id, () => void core.syncNow(account.id))}
+              >
+                <RefreshCw size={14} aria-hidden="true" />
+                {t('menu.syncNow')}
               </button>
               <hr class="menu-separator" />
               <button

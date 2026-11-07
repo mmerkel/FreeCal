@@ -640,6 +640,11 @@
     );
   }
 
+  /** Sync now of every server Account; the Sync Status shows how it goes. */
+  function syncNow() {
+    void core.syncNow(null);
+  }
+
   function openSettings() {
     settingsFailure = undefined;
     open = { kind: 'settings' };
@@ -670,6 +675,7 @@
     previous: () => navigate(step(navigation!, -1)),
     // Unlike the Today button, `t` doesn't toggle: it always goes to today.
     today: () => navigate(goToToday(navigation!, today!)),
+    sync: syncNow,
     settings: openSettings,
     sidebar: toggleSidebar,
   };
@@ -726,6 +732,7 @@
         onmonth={(month) => navigate(openMonth(shown, month))}
         sync={shownSyncStatuses?.overall}
         {today}
+        onsyncnow={syncNow}
         onimport={startImport}
         onsettings={openSettings}
         onabout={openAbout}

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::AvailableCalendar;
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[cfg_attr(
     test,
     derive(ts_rs::TS),

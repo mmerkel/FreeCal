@@ -5,7 +5,16 @@
 import { t } from '../i18n';
 
 export type ShortcutAction =
-  'create' | 'day' | 'week' | 'month' | 'next' | 'previous' | 'today' | 'settings' | 'sidebar';
+  | 'create'
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'next'
+  | 'previous'
+  | 'today'
+  | 'sync'
+  | 'settings'
+  | 'sidebar';
 
 interface Shortcut {
   /** `KeyboardEvent.key`. */
@@ -23,6 +32,8 @@ const SHORTCUTS: Record<ShortcutAction, readonly Shortcut[]> = {
   next: [{ key: 'j' }, { key: 'n' }],
   previous: [{ key: 'k' }, { key: 'p' }],
   today: [{ key: 't' }],
+  // Google Calendar's "Refresh".
+  sync: [{ key: 'r' }],
   settings: [{ key: ',', ctrl: true }],
   sidebar: [{ key: 'F9' }],
 };
