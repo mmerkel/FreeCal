@@ -7,7 +7,7 @@ use freecal_core::{
     CalendarId, Core, CoreError, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
     ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
 };
-use support::{Harness, all_day, calendar, draft, ics, on, timed, weekly, yoga};
+use support::{Harness, all_day, calendar, draft, ics, on, timed, titles, weekly, yoga};
 
 fn occurrences(core: &Core, from: &str, to: &str) -> Vec<Occurrence> {
     core.occurrences(from.parse().unwrap(), to.parse().unwrap())
@@ -1183,17 +1183,6 @@ const YOGA_WITH_EXCEPTION: &str = "BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\n\
      DTSTART;TZID=Europe/Berlin:20261012T180000\nDTEND;TZID=Europe/Berlin:20261012T190000\n\
      END:VEVENT\n";
 
-/// The titles of a Calendar's Occurrences in October and November, sorted.
-fn titles_in(core: &Core, calendar_id: CalendarId) -> Vec<String> {
-    let mut titles: Vec<_> = occurrences(core, "2026-10-01", "2026-12-01")
-        .into_iter()
-        .filter(|occurrence| occurrence.calendar_id == calendar_id)
-        .map(|occurrence| occurrence.title)
-        .collect();
-    titles.sort();
-    titles
-}
-
 /// The Calendars "Home" and "Work", each holding what was imported into it.
 struct HomeAndWork {
     core: Core,
@@ -1248,15 +1237,15 @@ fn an_event_moved_into_a_calendar_with_its_uid_gets_a_new_one() {
         .edit_event(at_home.event_id, both.moved_to_work(&at_home))
         .unwrap();
 
-    assert_eq!(titles_in(core, home), Vec::<String>::new());
-    assert_eq!(titles_in(core, work), ["Dentist", "Dentist at work"]);
+    assert_eq!(titles(core, home), Vec::<String>::new());
+    assert_eq!(titles(core, work), ["Dentist at work", "Dentist"]);
     assert_eq!(moved.value.calendar_id, work);
     assert_eq!(moved.value.title, "Dentist");
 
     core.undo_journal_transaction(moved.journal_transaction.unwrap())
         .unwrap();
-    assert_eq!(titles_in(core, home), ["Dentist"]);
-    assert_eq!(titles_in(core, work), ["Dentist at work"]);
+    assert_eq!(titles(core, home), ["Dentist"]);
+    assert_eq!(titles(core, work), ["Dentist at work"]);
 }
 
 #[test]
@@ -1277,18 +1266,18 @@ fn a_recurring_event_moved_into_a_calendar_with_its_uid_takes_its_exceptions_to_
         )
         .unwrap();
 
-    assert_eq!(titles_in(&both.core, both.home), Vec::<String>::new());
+    assert_eq!(titles(&both.core, both.home), Vec::<String>::new());
     assert_eq!(
-        titles_in(&both.core, both.work),
+        titles(&both.core, both.work),
         [
             "Work yoga",
-            "Work yoga",
-            "Work yoga",
+            "Yoga",
             "Work yoga outside",
+            "Yoga outside",
+            "Work yoga",
             "Yoga",
-            "Yoga",
-            "Yoga",
-            "Yoga outside"
+            "Work yoga",
+            "Yoga"
         ]
     );
 }
@@ -1309,9 +1298,9 @@ fn a_lone_exception_moved_into_a_calendar_with_its_uid_stays_an_event_of_its_own
         .edit_event(lone.event_id, both.moved_to_work(&lone))
         .unwrap();
 
-    assert_eq!(titles_in(&both.core, both.home), Vec::<String>::new());
+    assert_eq!(titles(&both.core, both.home), Vec::<String>::new());
     assert_eq!(
-        titles_in(&both.core, both.work),
-        ["Yoga", "Yoga", "Yoga", "Yoga", "Yoga outside"]
+        titles(&both.core, both.work),
+        ["Yoga", "Yoga", "Yoga outside", "Yoga", "Yoga"]
     );
 }

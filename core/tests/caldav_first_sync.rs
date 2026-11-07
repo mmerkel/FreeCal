@@ -7,7 +7,7 @@ use freecal_core::{
     link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, all_day, date, draft, event, ics, make_writable, timed};
+use support::{Harness, all_day, date, draft, event, ics, make_writable, timed, titles};
 
 fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
     core.add_caldav_account(&CalDavLogin {
@@ -28,16 +28,6 @@ fn server_calendar(radicale: &Radicale, user: &User) -> String {
             ..NewCalendar::default()
         },
     )
-}
-
-/// The titles of a Calendar's Occurrences in October 2026, in order.
-fn titles(core: &Core, calendar_id: CalendarId) -> Vec<String> {
-    core.occurrences(date("2026-10-01"), date("2026-11-01"))
-        .unwrap()
-        .into_iter()
-        .filter(|occurrence| occurrence.calendar_id == calendar_id)
-        .map(|occurrence| occurrence.title)
-        .collect()
 }
 
 fn occurrences_changed(harness: &Harness, calendar_id: CalendarId) -> usize {

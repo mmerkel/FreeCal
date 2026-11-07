@@ -300,6 +300,16 @@ pub fn on(core: &Core, date: &str) -> Occurrence {
     found.remove(0)
 }
 
+/// The titles of a Calendar's Occurrences in October 2026, in order.
+pub fn titles(core: &Core, calendar_id: CalendarId) -> Vec<String> {
+    core.occurrences(date("2026-10-01"), date("2026-11-01"))
+        .unwrap()
+        .into_iter()
+        .filter(|occurrence| occurrence.calendar_id == calendar_id)
+        .map(|occurrence| occurrence.title)
+        .collect()
+}
+
 // Files to import, written as text.
 
 /// An `.ics` file with `body` between `BEGIN:VCALENDAR` and `END:VCALENDAR`,
