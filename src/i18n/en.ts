@@ -287,6 +287,7 @@ export const en = {
     'a repeat needs an interval and a number of times of at least 1, and can’t end before the event starts',
   'error.occurrenceNotFound': 'the event no longer has that date',
   'error.unreadableEventTime': 'an event has a time FreeCal can’t read',
+  'error.unreadableServerObject': 'an event as the server last sent it can’t be read',
   'error.emptyCalendarName': 'a calendar needs a name',
   'error.invalidColour': 'that isn’t a colour FreeCal can use',
   'error.localAccountCannotBeRemoved': 'the Local Account can’t be removed',

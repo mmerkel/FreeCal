@@ -11,9 +11,9 @@
 //! can't read gives no further Occurrences, so its Event shows as its first
 //! Occurrence only.
 //!
-//! A leaf of the Event module: outside it, only [`span`] and [`imported`]
-//! are open. Recurrence IDs here are in the Normal Form
-//! ([`super::recurrence_id`]).
+//! A leaf of the Event module: outside it, only [`span`], [`imported`] and,
+//! for writing iCalendar, [`written`] and [`cancelled_starts`] are open.
+//! Recurrence IDs here are in the Normal Form ([`super::recurrence_id`]).
 
 use std::str::FromStr;
 
@@ -194,6 +194,31 @@ fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
     }
     OccurrenceStarts::new(Rule::parse(&stored)?, when)?;
     Some(stored)
+}
+
+/// A Recurring Event's rule as an `RRULE` value to write: its parts as
+/// stored, `UNTIL` included; none when it has none, or one FreeCal can't
+/// expand, as the Event then shows as its first Occurrence only. A stored
+/// rule is untrusted, so one holding characters a rule can't hold is one
+/// FreeCal can't expand too.
+pub(crate) fn written(fields: &EventFields) -> Option<String> {
+    let rule = Rule::parse(fields.rule.as_deref()?)?;
+    OccurrenceStarts::of(fields)?;
+    let text = rule
+        .parts
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(";");
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '=' | ';' | ',' | '+' | '-');
+    text.chars().all(allowed).then_some(text)
+}
+
+/// The starts of a Recurring Event's cancelled Occurrences, from their
+/// recurrence IDs in the Normal Form, midnight for a date; those that
+/// aren't one are left out.
+pub(crate) fn cancelled_starts(fields: &EventFields) -> Vec<NaiveDateTime> {
+    split_ids(&fields.exdates).filter_map(start_of_id).collect()
 }
 
 /// The span of an Event's Occurrences: its derived start and end as Unix

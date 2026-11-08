@@ -53,6 +53,12 @@ impl RecurrenceId {
         &self.obtained
     }
 
+    /// The original start of the Occurrence it names, as obtained; none
+    /// when the text can't be read.
+    pub fn original(&self) -> Option<&Time> {
+        self.parsed.as_ref()
+    }
+
     /// The Normal Form of the Occurrence it names of a Recurring Event at
     /// `recurring`. With no Recurring Event, the recurrence ID as obtained,
     /// written as [`Self::of_original`] writes it. None when it can't be

@@ -12,12 +12,25 @@ Spec: "Local Store" (byte-preservation); "Attendees"; "Untrusted content". ADRs 
 
 **Blocked by:** 98, 100
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] Unknown fields (attendees, conference links, custom properties) are preserved byte-for-byte across edits, tested on texts from real servers and on edge cases
-- [ ] Exceptions added, changed and removed land in the right VEVENTs, matched by Occurrence
-- [ ] A create writes valid iCalendar with the VTIMEZONEs it needs; the text built reads back through the import's reader to the same Events
+- [x] Unknown fields (attendees, conference links, custom properties) are preserved byte-for-byte across edits, tested on texts from real servers and on edge cases
+- [x] Exceptions added, changed and removed land in the right VEVENTs, matched by Occurrence
+- [x] A create writes valid iCalendar with the VTIMEZONEs it needs; the text built reads back through the import's reader to the same Events
 
 ## Comments
+- 2026-11-08 (/implement): done. `resource_to_send` in `core/src/sync/caldav/resource/` builds the text from a `Loaded` and the Server Object's text, stamping new VEVENTs with a `now` the Sender passes.
+  - **What gets rewritten.** In each VEVENT, a group of FreeCal's Properties is written anew only when the Event Row differs from what Propagate would read from the VEVENT. Every other line is kept byte for byte, its folding included; only line ends become CRLF. An unchanged Event therefore sends the Server Object's text unchanged.
+  - **What a rewritten line loses.** A rewritten line drops its parameters (`SUMMARY;LANGUAGE=de-DE` becomes `SUMMARY`). An edited description also drops `X-ALT-DESC`, so clients don't keep showing the old HTML.
+  - **How VEVENTs are matched.** They are paired with Event Rows by Occurrence, through the Event module's pairing (`Loaded::pair_with_server`), against the Recurring Event the Event Rows hold, or else the server's. A paired VEVENT keeps its RECURRENCE-ID line.
+  - **New VTIMEZONEs.** They are made from chrono-tz's rules. They list every offset change from the year of the earliest time written through 2099, as DTSTART plus RDATEs, and are added only when the VCALENDAR has no VTIMEZONE with that IANA TZID.
+  - **Test texts.** Two are as a local Radicale 3.8.3 returned them after a PUT; Radicale reorders properties and puts some after the VALARM. The Nextcloud, Google, iCloud, Exchange and Evolution texts are written to match what each produces, not captured from those servers. Every resource built was also PUT to that Radicale by hand: all were accepted, and the hostile one was stored without an attendee. That check isn't automated.
+  - **New error.** `CoreError::UnreadableServerObject` (error code `unreadableServerObject`) covers Server Object text FreeCal can't read any more, including text with a control character other than a tab inside a line. That rule keeps a kept line from carrying in a property.
+  - **For 125: moves.** Moving a Recurring Event rewrites its Exceptions' recurrence IDs (ADR 0012), so their old VEVENTs no longer pair. They are replaced by new ones, and any attendees, alarms or `X-` properties on those Exceptions are lost.
+  - **For 123: one unreadable Event Row stops the whole UID.** An Event Row whose stored recurrence ID or time can't be read gives `UnreadableEventTime`, so nothing is built for the UID.
+  - **Undecided: SEQUENCE.** Edits don't raise SEQUENCE or change DTSTAMP or LAST-MODIFIED, because the ticket keeps those lines byte for byte. RFC 5545 expects SEQUENCE to rise when times change.
+  - **New terms:**
+    - **FreeCal's Properties** (new term): the properties of a VEVENT that an Event Row holds: title, times and their zones, location, description, repeat rule, excluded dates and recurrence ID.
+    - Code names: `ServerPairing` (a Server Object's Events paired with the Event Rows by Occurrence), `Group` (FreeCal's Properties kept or written as one), `Written` (content lines written, with the zones they need), and `ContentLine`, `Block` and `Item` (the Server Object's text as received).

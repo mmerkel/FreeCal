@@ -8,6 +8,11 @@
 //! ([`ignore`]), and the resources it can't read ([`unreadable`]).
 
 pub(crate) mod incoming;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the CalDAV Sender, ticket 123, sends it")
+)]
+pub(crate) mod resource;
 
 use std::collections::{HashMap, HashSet};
 

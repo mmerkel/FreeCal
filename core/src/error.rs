@@ -30,6 +30,10 @@ pub enum CoreError {
     OccurrenceNotFound(EventId),
     #[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
     UnreadableEventTime(String),
+    /// The stored text of a Server Object, which was readable when it was
+    /// mirrored (ADR 0015), can't be read as iCalendar any more.
+    #[error("the Local Store has a Server Object FreeCal can't read")]
+    UnreadableServerObject,
     #[error("a Calendar needs a name")]
     EmptyCalendarName,
     #[error("{0:?} is not a colour of the form #rrggbb")]
@@ -106,6 +110,7 @@ impl CoreError {
             CoreError::InvalidRepeat => ErrorCode::InvalidRepeat,
             CoreError::OccurrenceNotFound(_) => ErrorCode::OccurrenceNotFound,
             CoreError::UnreadableEventTime(_) => ErrorCode::UnreadableEventTime,
+            CoreError::UnreadableServerObject => ErrorCode::UnreadableServerObject,
             CoreError::EmptyCalendarName => ErrorCode::EmptyCalendarName,
             CoreError::InvalidColour(_) => ErrorCode::InvalidColour,
             CoreError::LocalAccountCannotBeRemoved => ErrorCode::LocalAccountCannotBeRemoved,
@@ -170,6 +175,7 @@ pub enum ErrorCode {
     InvalidRepeat,
     OccurrenceNotFound,
     UnreadableEventTime,
+    UnreadableServerObject,
     EmptyCalendarName,
     InvalidColour,
     LocalAccountCannotBeRemoved,
@@ -291,6 +297,7 @@ impl ErrorCode {
             ErrorCode::InvalidRepeat,
             ErrorCode::OccurrenceNotFound,
             ErrorCode::UnreadableEventTime,
+            ErrorCode::UnreadableServerObject,
             ErrorCode::EmptyCalendarName,
             ErrorCode::InvalidColour,
             ErrorCode::LocalAccountCannotBeRemoved,

@@ -38,6 +38,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   invalidRepeat: 'error.invalidRepeat',
   occurrenceNotFound: 'error.occurrenceNotFound',
   unreadableEventTime: 'error.unreadableEventTime',
+  unreadableServerObject: 'error.unreadableServerObject',
   emptyCalendarName: 'error.emptyCalendarName',
   invalidColour: 'error.invalidColour',
   localAccountCannotBeRemoved: 'error.localAccountCannotBeRemoved',

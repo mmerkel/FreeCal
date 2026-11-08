@@ -733,6 +733,9 @@ export const samples = {
       "code": "unreadableEventTime"
     },
     {
+      "code": "unreadableServerObject"
+    },
+    {
       "code": "emptyCalendarName"
     },
     {

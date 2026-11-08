@@ -461,6 +461,68 @@ impl Loaded {
         }
         Ok(())
     }
+
+    /// The UID these Events share.
+    pub fn uid(&self) -> &str {
+        &self.uid
+    }
+
+    /// Pairs `server`, the Events of the UID's Server Object as read, with
+    /// these Event Rows by Occurrence ([`Loaded::pair`]), against the
+    /// Recurring Event the Event Rows hold, or else the one `server` holds
+    /// (ADR 0012), as the CalDAV resource to send is built from them. With
+    /// no Server Object, `server` is empty and every Event Row is left.
+    pub fn pair_with_server<'a>(&'a self, server: &[ImportedEvent]) -> ServerPairing<'a> {
+        let held = server
+            .iter()
+            .find(|event| event.recurrence_id.is_none() && event.rule.is_some())
+            .map(|event| event.when);
+        let recurring = self.recurring_when().or(held);
+        let pairing = self.pair(server, recurring.as_ref());
+        let mut paired = vec![None; server.len()];
+        for (incoming, stored) in pairing.paired {
+            let index = server
+                .iter()
+                .position(|event| std::ptr::eq(event, incoming));
+            if let (Some(index), Some((_, fields))) = (index, stored) {
+                paired[index] = Some(fields);
+            }
+        }
+        let event_left = pairing
+            .event_left
+            .and_then(|_| self.event.as_ref().map(|(_, fields)| fields));
+        let exceptions_left = pairing.exceptions_left.into_iter().map(|left| &left.fields);
+        ServerPairing {
+            paired,
+            left: event_left.into_iter().chain(exceptions_left).collect(),
+            recurring,
+        }
+    }
+}
+
+/// The Events of a UID's Server Object paired with its Event Rows by
+/// Occurrence ([`Loaded::pair_with_server`]).
+pub(crate) struct ServerPairing<'a> {
+    /// For each Event of the Server Object, in its order, the Event Row for
+    /// its Occurrence; none when the Event Rows hold none, or when another
+    /// Event of the Server Object, a later revision of the same Occurrence
+    /// ([`latest`]), took it.
+    pub paired: Vec<Option<&'a EventFields>>,
+    /// The Event Rows no Event of the Server Object paired with: the Event
+    /// that isn't an Exception first, then the Exceptions in the order they
+    /// were added.
+    pub left: Vec<&'a EventFields>,
+    /// The time of the Recurring Event they were paired against, none when
+    /// neither holds one.
+    pub recurring: Option<ImportedWhen>,
+}
+
+/// The fields Propagate would give `row`, an Event Row, from `incoming`,
+/// its Server Object's Event for the same Occurrence, keeping its
+/// recurrence ID: those of `row`'s fields that differ from these differ
+/// from what the Server Object holds.
+pub(crate) fn as_propagated(incoming: &ImportedEvent, row: &EventFields) -> EventFields {
+    fields_over(incoming, row, row.recurrence_id.clone())
 }
 
 /// An Event as the window gives it, loaded: a single Event, a Recurring
