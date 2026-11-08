@@ -2,9 +2,10 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] tickets > 100 first
+- [ ] simplify work from implementation of ticket 110 on
 - [ ] ticket 17 -> first split
 - [ ] test by hand
-- [ ] simplify work from implementation of ticket 109 on
+- [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 25 -> first split
 - [ ] simplify
@@ -27,7 +28,6 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
   - [ ] all passes through tauri layer as single list of funciton calls, is there a more structured way? would that be better, or is it better the way it is?
   - [ ] once time zone stuff is done (or before) have a discussion about all the places where they appear
 - [ ] after architecture stuff: simplify code layout into files and directories, can all the frontent stuff be moved into src?
-- [ ] implement 15, 16
 - [ ] caldav sync:
     - [ ] I would like to understand the different authentication methods, and what was built in and why
 - [ ] journal::recompute_instants is weird - check again once the time zone stuff has been implemented
