@@ -429,7 +429,8 @@ fn assert_reads_back(text: &str, rows: Vec<UidEvent>) {
         assert_eq!(event.uid, loaded.uid());
         let read = as_propagated(event, row);
         for group in Group::ALL {
-            assert!(!group.differs(row, &read), "{group:?} of {text}");
+            let recurring = pairing.recurring.as_ref();
+            assert!(!group.differs(row, &read, recurring), "{group:?} of {text}");
         }
     }
 }
@@ -640,6 +641,37 @@ fn an_edited_exception_changes_only_its_vevent_matched_by_occurrence() {
         ),
     ];
     assert_eq!(sent, changed(NEXTCLOUD, &changes));
+    assert_reads_back(&sent, rows);
+}
+
+/// Moving a Recurring Event's time moves its Exceptions' recurrence IDs
+/// by as much (ADR 0012): each still pairs with its `VEVENT`, which keeps
+/// what FreeCal doesn't show and gets the new recurrence ID.
+#[test]
+fn an_exception_whose_recurring_event_moved_keeps_its_vevent() {
+    let mut rows = rows_of(NEXTCLOUD);
+    let recurring = event(&mut rows);
+    recurring.fields.when.start = "2026-10-12T10:00:00".to_owned();
+    recurring.fields.when.end = "2026-10-12T10:30:00".to_owned();
+    recurring.fields.exdates = "2026-10-14T10:00:00".to_owned();
+    let exception = rows
+        .iter_mut()
+        .find(|row| row.fields.recurrence_id.is_some())
+        .unwrap();
+    exception.fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-19T10:00:00"));
+
+    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+
+    assert_eq!(sent.matches("BEGIN:VEVENT").count(), 2);
+    assert!(
+        sent.contains("X-NEXTCLOUD-BC-FIELD-TYPE:link\r\n"),
+        "{sent}"
+    );
+    assert!(
+        sent.contains("RECURRENCE-ID;TZID=Europe/Berlin:20261019T100000\r\n"),
+        "{sent}"
+    );
+    assert!(!sent.contains("America/New_York:20261019T030000"), "{sent}");
     assert_reads_back(&sent, rows);
 }
 

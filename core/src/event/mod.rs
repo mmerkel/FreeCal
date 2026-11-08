@@ -470,14 +470,28 @@ impl Loaded {
     /// Pairs `server`, the Events of the UID's Server Object as read, with
     /// these Event Rows by Occurrence ([`Loaded::pair`]), against the
     /// Recurring Event the Event Rows hold, or else the one `server` holds
-    /// (ADR 0012), as the CalDAV resource to send is built from them. With
-    /// no Server Object, `server` is empty and every Event Row is left.
+    /// (ADR 0012), as the CalDAV resource to send is built from them. When
+    /// the Event Rows' Recurring Event moved from the time `server` holds,
+    /// its Exceptions' Occurrences moved by as much, so `server`'s are
+    /// paired where they moved to ([`moved_with`]) and their `VEVENT`s keep
+    /// what FreeCal doesn't show. With no Server Object, `server` is empty
+    /// and every Event Row is left.
     pub fn pair_with_server<'a>(&'a self, server: &[ImportedEvent]) -> ServerPairing<'a> {
         let held = server
             .iter()
             .find(|event| event.recurrence_id.is_none() && event.rule.is_some())
             .map(|event| event.when);
         let recurring = self.recurring_when().or(held);
+        let moved: Option<Vec<ImportedEvent>> = match (&held, self.recurring()) {
+            (Some(from), Some((_, to))) if Some(*from) != recurring => Some(
+                server
+                    .iter()
+                    .map(|event| moved_with(event, from, &to.when))
+                    .collect(),
+            ),
+            _ => None,
+        };
+        let server = moved.as_deref().unwrap_or(server);
         let pairing = self.pair(server, recurring.as_ref());
         let mut paired = vec![None; server.len()];
         for (incoming, stored) in pairing.paired {
@@ -500,6 +514,22 @@ impl Loaded {
     }
 }
 
+/// `event`, an Event of a Server Object whose Recurring Event is at `from`,
+/// with its recurrence ID moved as the Recurring Event moved to `to`, as
+/// moving a Recurring Event's time moves its Exceptions' (ADR 0012); as it
+/// is when it has no recurrence ID that is one.
+fn moved_with(event: &ImportedEvent, from: &ImportedWhen, to: &StoredWhen) -> ImportedEvent {
+    let moved = occurrence_key(event.recurrence_id.as_ref(), Some(from))
+        .flatten()
+        .and_then(|was| rule::moved_id(was.as_str(), &StoredWhen::imported(from), to));
+    ImportedEvent {
+        recurrence_id: moved
+            .map(RecurrenceId::obtained)
+            .or(event.recurrence_id.clone()),
+        ..event.clone()
+    }
+}
+
 /// The Events of a UID's Server Object paired with its Event Rows by
 /// Occurrence ([`Loaded::pair_with_server`]).
 pub(crate) struct ServerPairing<'a> {
@@ -518,11 +548,12 @@ pub(crate) struct ServerPairing<'a> {
 }
 
 /// The fields Propagate would give `row`, an Event Row, from `incoming`,
-/// its Server Object's Event for the same Occurrence, keeping its
-/// recurrence ID: those of `row`'s fields that differ from these differ
-/// from what the Server Object holds.
+/// its Server Object's Event it pairs with, recurrence ID as the Server
+/// Object holds it: those of `row`'s fields that differ from these differ
+/// from what the Server Object holds, recurrence IDs by Occurrence (ADR
+/// 0012).
 pub(crate) fn as_propagated(incoming: &ImportedEvent, row: &EventFields) -> EventFields {
-    fields_over(incoming, row, row.recurrence_id.clone())
+    fields_over(incoming, row, incoming.recurrence_id.clone())
 }
 
 /// An Event as the window gives it, loaded: a single Event, a Recurring
@@ -824,7 +855,10 @@ fn occurrence_key(
 /// The Normal Form of the recurrence ID of an Exception with `fields`
 /// against a Recurring Event at `recurring`; none for an Event that isn't
 /// an Exception, and for a recurrence ID that isn't one.
-fn normal_form(fields: &EventFields, recurring: Option<&ImportedWhen>) -> Option<NormalForm> {
+pub(crate) fn normal_form(
+    fields: &EventFields,
+    recurring: Option<&ImportedWhen>,
+) -> Option<NormalForm> {
     fields.recurrence_id.as_ref()?.normal_form(recurring)
 }
 

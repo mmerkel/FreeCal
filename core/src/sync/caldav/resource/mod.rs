@@ -25,7 +25,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
 use crate::event::{EventFields, Loaded, ServerPairing, as_propagated};
-use crate::import::{ImportedEvent, read_events};
+use crate::import::{ImportedEvent, ImportedWhen, read_events};
 use crate::{CoreError, Result};
 use write::{Group, Revision, Written, new_vevent, vtimezone};
 
@@ -118,7 +118,8 @@ fn update(loaded: &Loaded, server: &str, now: DateTime<Utc>) -> Result<String> {
     let mut rewritten: Vec<(Place, Written)> = Vec::new();
     for ((place, event), row) in places.iter().zip(&events).zip(&pairing.paired) {
         if let (Some(row), Item::Block(block)) = (row, &roots[place.0].items()[place.1]) {
-            rewritten.push((*place, rewrite(block, event, row, now)?));
+            let recurring = pairing.recurring.as_ref();
+            rewritten.push((*place, rewrite(block, event, row, recurring, now)?));
         }
     }
     let added = new_vevents(loaded, &pairing, now)?;
@@ -202,8 +203,9 @@ fn read_vevent(calendar: &Block, index: usize) -> Result<ImportedEvent> {
     }
 }
 
-/// `vevent`, which FreeCal reads as `server`, made to hold `row`: the
-/// groups of FreeCal's Properties whose field differs are written anew,
+/// `vevent`, which FreeCal reads as `server`, made to hold `row`, an Event
+/// Row of the Recurring Event at `recurring`, if it has one: the groups of
+/// FreeCal's Properties whose field differs are written anew,
 /// and with any of them its [`Revision`] properties, revised `now`: each
 /// in place of its first line, or before its first component, such as an
 /// alarm, if it had none. Every other line is kept.
@@ -211,12 +213,13 @@ fn rewrite(
     vevent: &Block,
     server: &ImportedEvent,
     row: &EventFields,
+    recurring: Option<&ImportedWhen>,
     now: DateTime<Utc>,
 ) -> Result<Written> {
     let read = as_propagated(server, row);
     let groups = Group::ALL
         .into_iter()
-        .filter(|group| group.differs(row, &read))
+        .filter(|group| group.differs(row, &read, recurring))
         .map(Part::Group);
     let mut pending: Vec<Part> = groups.collect();
     if !pending.is_empty() {
@@ -224,7 +227,7 @@ fn rewrite(
     }
     let changed = pending.clone();
     let write = |part: Part, out: &mut Written| match part {
-        Part::Group(group) => group.write(row, out),
+        Part::Group(group) => group.write(row, recurring, out),
         Part::Revision(revision) => {
             revision.write(server.sequence.saturating_add(1), now, out);
             Ok(())

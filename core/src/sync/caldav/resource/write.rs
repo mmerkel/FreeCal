@@ -16,7 +16,7 @@ use chrono_tz::{OffsetComponents, OffsetName, Tz};
 use icalendar::Property;
 use icalendar::parser::unfold;
 
-use crate::event::{EventFields, rule};
+use crate::event::{EventFields, normal_form, rule};
 use crate::import::{ImportedWhen, Time};
 use crate::{CoreError, Result};
 
@@ -161,10 +161,13 @@ fn text_value(text: &str) -> String {
 /// A group of FreeCal's Properties that is kept or written as one: a
 /// `VEVENT` keeps the content lines of a group whose field FreeCal reads
 /// from them as the Event Row holds it, and gets them written anew from the
-/// Event Row otherwise. The recurrence ID isn't one: an Event Row and the
-/// `VEVENT` it pairs with name the same Occurrence, so its line is kept.
+/// Event Row otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Group {
+    /// The recurrence ID. An Event Row and the `VEVENT` it pairs with name
+    /// the same Occurrence, but for an Exception whose Recurring Event's
+    /// time moved, which moved its Occurrence too (ADR 0012).
+    RecurrenceId,
     When,
     Rule,
     Cancelled,
@@ -175,7 +178,8 @@ pub(super) enum Group {
 
 impl Group {
     /// In the order a new `VEVENT` has them.
-    pub const ALL: [Group; 6] = [
+    pub const ALL: [Group; 7] = [
+        Group::RecurrenceId,
         Group::When,
         Group::Rule,
         Group::Cancelled,
@@ -188,6 +192,7 @@ impl Group {
     /// FreeCal's Properties.
     pub fn of(name: &str) -> Option<Group> {
         Some(match name {
+            "RECURRENCE-ID" => Group::RecurrenceId,
             "DTSTART" | "DTEND" | "DURATION" => Group::When,
             "RRULE" => Group::Rule,
             "EXDATE" => Group::Cancelled,
@@ -201,9 +206,17 @@ impl Group {
     }
 
     /// Whether `row`'s field of this group differs from `server`'s, the
-    /// fields FreeCal reads from the `VEVENT` for its Occurrence.
-    pub fn differs(self, row: &EventFields, server: &EventFields) -> bool {
+    /// fields FreeCal reads from the `VEVENT` it pairs with. Recurrence IDs
+    /// are compared by Occurrence, against the Recurring Event at
+    /// `recurring` (ADR 0012).
+    pub fn differs(
+        self,
+        row: &EventFields,
+        server: &EventFields,
+        recurring: Option<&ImportedWhen>,
+    ) -> bool {
         match self {
+            Group::RecurrenceId => normal_form(row, recurring) != normal_form(server, recurring),
             Group::When => row.when != server.when,
             Group::Rule => row.rule != server.rule,
             Group::Cancelled => row.exdates != server.exdates,
@@ -213,11 +226,35 @@ impl Group {
         }
     }
 
-    /// Writes this group's properties from `row`. A rule FreeCal can't
-    /// expand isn't written, nor its cancelled Occurrences, as the Event
-    /// shows as its first Occurrence only.
-    pub fn write(self, row: &EventFields, out: &mut Written) -> Result<()> {
+    /// Writes this group's properties from `row`, an Event Row of the
+    /// Recurring Event at `recurring`, if it has one. An Exception's
+    /// recurrence ID is written as obtained (ADR 0012); one in the Normal
+    /// Form, a wall time without a zone, is given in the Event Time Zone of
+    /// `recurring`, as it names the Occurrence there, and floats without
+    /// one. A rule FreeCal can't expand isn't written, nor its cancelled
+    /// Occurrences, as the Event shows as its first Occurrence only.
+    pub fn write(
+        self,
+        row: &EventFields,
+        recurring: Option<&ImportedWhen>,
+        out: &mut Written,
+    ) -> Result<()> {
         match self {
+            Group::RecurrenceId => {
+                if let Some(recurrence_id) = &row.recurrence_id {
+                    let original = recurrence_id.original().ok_or_else(|| {
+                        CoreError::UnreadableEventTime(recurrence_id.as_obtained().to_owned())
+                    })?;
+                    let original = match (original, recurring) {
+                        (
+                            &Time::Wall(wall, None),
+                            Some(&ImportedWhen::Timed { start_zone, .. }),
+                        ) => Time::Wall(wall, Some(start_zone)),
+                        (original, _) => original.clone(),
+                    };
+                    out.times("RECURRENCE-ID", &[original]);
+                }
+            }
             Group::When => match row.when.to_imported()? {
                 ImportedWhen::AllDay { start, end } => {
                     out.times("DTSTART", &[Time::Date(start)]);
@@ -300,11 +337,9 @@ impl Revision {
     }
 }
 
-/// Writes `row`, an Event Row of the UID `uid`, as a new `VEVENT`, stamped
-/// and last revised `now`; its `SEQUENCE` is 0, the default. An Exception's recurrence ID is written as obtained (ADR 0012);
-/// one in the Normal Form, a wall time without a zone, is given in the Event
-/// Time Zone of `recurring`, the Recurring Event's time, as it names the
-/// Occurrence there, and floats without one.
+/// Writes `row`, an Event Row of the UID `uid` and of the Recurring Event
+/// at `recurring`, if it has one, as a new `VEVENT`, stamped and last
+/// revised `now`; its `SEQUENCE` is 0, the default.
 pub(super) fn new_vevent(
     uid: &str,
     row: &EventFields,
@@ -316,20 +351,8 @@ pub(super) fn new_vevent(
     out.text_property("UID", uid);
     Revision::Stamp.write(0, now, out);
     Revision::Modified.write(0, now, out);
-    if let Some(recurrence_id) = &row.recurrence_id {
-        let original = recurrence_id.original().ok_or_else(|| {
-            CoreError::UnreadableEventTime(recurrence_id.as_obtained().to_owned())
-        })?;
-        let original = match (original, recurring) {
-            (&Time::Wall(wall, None), Some(&ImportedWhen::Timed { start_zone, .. })) => {
-                Time::Wall(wall, Some(start_zone))
-            }
-            (original, _) => original.clone(),
-        };
-        out.times("RECURRENCE-ID", &[original]);
-    }
     for group in Group::ALL {
-        group.write(row, out)?;
+        group.write(row, recurring, out)?;
     }
     out.end("VEVENT");
     Ok(())

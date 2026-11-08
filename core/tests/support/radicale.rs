@@ -227,6 +227,24 @@ impl Radicale {
         std::fs::write(file, ics).expect("write into Radicale's storage");
     }
 
+    /// The names of the resources the Calendar at `calendar_url` holds in
+    /// Radicale's storage, sorted, without `.ics`.
+    pub fn event_names(&self, calendar_url: &str) -> Vec<String> {
+        let path = calendar_url
+            .strip_prefix(&self.url)
+            .expect("a Calendar on this server");
+        let dir = self.dir.path().join("storage/collection-root").join(path);
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("read Radicale's storage")
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().into_string().unwrap();
+                name.strip_suffix(".ics").map(str::to_owned)
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
     /// The ETag and the iCalendar object of the Event `name` in a Calendar
     /// of `user`, as the server serves it.
     pub fn get_event(&self, user: &User, calendar_url: &str, name: &str) -> (String, String) {
