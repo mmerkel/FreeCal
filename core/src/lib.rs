@@ -29,7 +29,7 @@ mod view;
 use std::fs::{File, TryLockError};
 use std::path::Path;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -284,9 +284,11 @@ impl Core {
         Ok(added.calendars)
     }
 
-    /// Syncs a server Account on demand: each of its Calendars gets what
-    /// changed on its server since its last sync, fetching only that where
-    /// the server can tell (see [`Remote::changes`]). Each Calendar's
+    /// Syncs a server Account on demand: each writable Calendar's Unsent
+    /// Changes are sent first (see [`Core::sync_calendar`]), then each
+    /// Calendar gets what changed on its server since its last sync,
+    /// fetching only that where the server can tell (see
+    /// [`Remote::changes`]). Each Calendar's
     /// Incoming Sync is one Journal Transaction with the Transaction Origin
     /// Incoming Sync, in Read-only Calendars too, and sends one "Occurrences
     /// changed" once committed; an Incoming Sync that changes nothing records
@@ -491,10 +493,22 @@ impl Core {
         }
     }
 
-    /// Runs the Incoming Sync of `calendar` through its Account's server
-    /// `remote`, as the Sync Engine decides
-    /// (see [`sync::incoming`]). Returns the Calendar with its Journal
-    /// Transaction.
+    /// Syncs `calendar` both ways through its Account's server `remote`:
+    /// first its Outgoing Sync sends its Unsent Changes
+    /// ([`sync::outgoing`]), then its Incoming Sync brings in what changed
+    /// on the server, as the Sync Engine decides ([`sync::incoming`]).
+    /// Sending first gets the user's changes to the server soonest, and the
+    /// Incoming Sync right after fetches what the server stored of a write
+    /// answered without an ETag, and finds what failed a precondition. The
+    /// price: a server change since the last sync makes a write fail its
+    /// precondition, a request in vain, where an Incoming Sync first would
+    /// have read the new version beforehand. A failure of the Outgoing Sync
+    /// about the whole Account stops the sync; any other still lets the
+    /// Incoming Sync run, and is returned once it ran, so that the Calendar
+    /// shows a Sync Error; its Incoming Sync's Journal Transaction is then
+    /// committed but not returned. Otherwise returns the Calendar with the
+    /// Journal Transaction of its Incoming Sync, as the Outgoing Sync
+    /// records none.
     fn sync_calendar(
         &self,
         remote: &dyn Remote,
@@ -513,6 +527,11 @@ impl Core {
         if changed {
             self.signals.send(Signal::CalendarsChanged);
         }
+        let now = self.clock.now().with_timezone(&Utc);
+        let sent = match sync::outgoing(remote, &self.store, calendar, now) {
+            Err(error) if sync_status::about_account(&error) => return Err(error),
+            sent => sent,
+        };
         let journal_transaction = sync::incoming(
             remote,
             &self.store,
@@ -520,6 +539,7 @@ impl Core {
             self.clock.time_zone(),
             record,
         )?;
+        sent?;
         Ok(Changed {
             journal_transaction,
             value: calendar_id,

@@ -215,7 +215,7 @@ fn remove_at(
         .uid_at(calendar_id, href)?
         .filter(|uid| goes(uid));
     if let Some(uid) = &uid {
-        remove_object(journal_transaction, calendar_id, uid)?;
+        remove_object(journal_transaction.database_transaction(), calendar_id, uid)?;
     }
     Ok(uid)
 }
@@ -262,7 +262,7 @@ fn keep(
                     candidates[index].fixed_order() < fixed_order(&held.href, &events)
                 })
             {
-                remove_object(journal_transaction, calendar_id, uid)?;
+                remove_object(journal_transaction.database_transaction(), calendar_id, uid)?;
                 let kept_by = &candidates[index].object.href;
                 ignore(
                     journal_transaction,
@@ -287,7 +287,12 @@ fn keep(
         return Ok(());
     };
     let Candidate { object, events } = candidates[index];
-    mirror(journal_transaction, calendar_id, object, uid)?;
+    mirror(
+        journal_transaction.database_transaction(),
+        calendar_id,
+        object,
+        uid,
+    )?;
     event::propagate_to_event_rows(journal_transaction, calendar_id, uid, events)?;
     ignore_others(
         journal_transaction,

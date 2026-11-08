@@ -14,7 +14,9 @@ use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::{NsReader, Writer};
 use url::Url;
 
-use crate::remote::{Changes, FIRST_SYNC_PAGE, FetchToo, KnownVersions, SyncPoint};
+use crate::remote::{
+    Changes, FIRST_SYNC_PAGE, FetchToo, KnownVersions, Precondition, Put, SyncPoint, WriteOutcome,
+};
 use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
 
 const DAV: &str = "DAV:";
@@ -393,6 +395,83 @@ impl Client {
         })
     }
 
+    /// Writes `data` as the object at `href` in the Calendar at `calendar`
+    /// with a conditional `PUT` (RFC 4791 §5.3.2): an address as the server
+    /// gave it, or a name relative to the Calendar for a new object.
+    /// Returns its path and its ETag if the answer gives a strong one.
+    pub fn put(
+        &self,
+        calendar: &str,
+        href: &str,
+        data: &str,
+        precondition: Precondition,
+    ) -> Result<WriteOutcome<Put>> {
+        let url = self.object_url(calendar, href)?;
+        let (name, value) = match precondition {
+            Precondition::Absent => ("If-None-Match", "*"),
+            Precondition::Matches(etag) => ("If-Match", etag),
+        };
+        let request = ureq::http::Request::builder()
+            .method(ureq::http::Method::PUT)
+            .uri(url.as_str())
+            .header("Content-Type", "text/calendar; charset=utf-8")
+            .header(name, value);
+        let written = self.write(request, data.as_bytes().to_vec())?;
+        Ok(written.map(|response| Put {
+            href: url.path().to_owned(),
+            etag: response
+                .headers()
+                .get("ETag")
+                .and_then(|value| value.to_str().ok())
+                .and_then(strong_etag),
+        }))
+    }
+
+    /// Deletes the object at `href` in the Calendar at `calendar`, an
+    /// address as the server gave it, if the server holds the version with
+    /// the ETag `etag`.
+    pub fn delete(&self, calendar: &str, href: &str, etag: &str) -> Result<WriteOutcome<()>> {
+        let url = self.object_url(calendar, href)?;
+        let request = ureq::http::Request::builder()
+            .method(ureq::http::Method::DELETE)
+            .uri(url.as_str())
+            .header("If-Match", etag);
+        Ok(self.write(request, Vec::new())?.map(drop))
+    }
+
+    /// The URL of the object at `href` in the Calendar at `calendar`, as
+    /// [`Client::put`] takes them. An href the server gave that FreeCal
+    /// won't follow is the server answering not as a CalDAV server.
+    fn object_url(&self, calendar: &str, href: &str) -> Result<Url> {
+        let mut calendar = stored_url(&self.url, calendar)?;
+        // A collection's members are below it, whether or not its address
+        // was given with the closing slash.
+        if !calendar.path().ends_with('/') {
+            calendar.set_path(&format!("{}/", calendar.path()));
+        }
+        follow_href(&calendar, href).ok_or(CoreError::NotCalDavServer)
+    }
+
+    /// Sends a conditional write, `request` with `body`, following no
+    /// redirect: a failed precondition, or an object gone, is
+    /// [`WriteOutcome::ServerChanged`].
+    fn write(
+        &self,
+        request: ureq::http::request::Builder,
+        body: Vec<u8>,
+    ) -> Result<WriteOutcome<ureq::http::Response<ureq::Body>>> {
+        let request = request
+            .header("Authorization", &self.authorization)
+            .body(body)
+            .map_err(|_| CoreError::InvalidServerUrl)?;
+        let response = self.agent.run(request).map_err(transport_error)?;
+        match response.status().as_u16() {
+            200..=299 => Ok(WriteOutcome::Done(response)),
+            404 | 412 => Ok(WriteOutcome::ServerChanged),
+            _ => Err(refusal(response)),
+        }
+    }
+
     /// Lists the whole Calendar at `calendar`: its members with their
     /// ETags, its sync token and its time zone, `display` if it has none.
     fn listing(&self, calendar: &Url, display: Tz) -> Result<Listing> {
@@ -605,28 +684,46 @@ fn status_code(status: &Element) -> Option<&str> {
 
 /// Reads an answer to a `PROPFIND`: its `multistatus`, or why there is none.
 fn read_multistatus(response: ureq::http::Response<ureq::Body>) -> Result<Element> {
+    match response.status().as_u16() {
+        207 => parse(&response.into_body().read_to_string().unwrap_or_default())
+            .filter(|root| root.is(DAV, "multistatus"))
+            .ok_or(CoreError::NotCalDavServer),
+        200..=299 => Err(CoreError::NotCalDavServer),
+        _ => Err(refusal(response)),
+    }
+}
+
+/// Why the server refused a request, by the status of its answer
+/// `response`, which isn't a success: the login, or its own reason, with
+/// the server's text if it is plain.
+fn refusal(response: ureq::http::Response<ureq::Body>) -> CoreError {
     let status = response.status().as_u16();
+    if status == 401 {
+        return CoreError::WrongCredentials;
+    }
     let plain_text = response
         .headers()
         .get("Content-Type")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.trim_start().starts_with("text/plain"));
     let body = response.into_body().read_to_string().unwrap_or_default();
-    match status {
-        207 => parse(&body)
-            .filter(|root| root.is(DAV, "multistatus"))
-            .ok_or(CoreError::NotCalDavServer),
-        401 => Err(CoreError::WrongCredentials),
-        200..=299 => Err(CoreError::NotCalDavServer),
-        _ => Err(CoreError::ServerRefused {
-            status,
-            message: if plain_text {
-                plain_message(&body)
-            } else {
-                String::new()
-            },
-        }),
+    CoreError::ServerRefused {
+        status,
+        message: if plain_text {
+            plain_message(&body)
+        } else {
+            String::new()
+        },
     }
+}
+
+/// The ETag an `ETag` header `value` gives, if it is strong. A weak one
+/// (`W/"…"`) doesn't name the exact text, so `If-Match` can't use it, and
+/// RFC 4791 §5.3.4 has a server that changed the text it stored give no
+/// strong one.
+fn strong_etag(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty() && !value.starts_with("W/")).then(|| value.to_owned())
 }
 
 /// Whether a redirect from `from` to `to` stays with the server the user
@@ -1265,6 +1362,13 @@ mod tests {
             .collect();
 
         assert_eq!(members, ["/alice/work/a%20b.ics", "/alice/work/d.ics"]);
+    }
+
+    #[test]
+    fn only_a_strong_etag_names_the_text_written() {
+        assert_eq!(strong_etag(" \"1-a\" "), Some("\"1-a\"".to_owned()));
+        assert_eq!(strong_etag("W/\"1-a\""), None);
+        assert_eq!(strong_etag(""), None);
     }
 
     #[test]

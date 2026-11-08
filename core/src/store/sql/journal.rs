@@ -99,6 +99,21 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
+    /// Removes the Unsent Changes of the UID `uid` in a Calendar, whatever
+    /// their recurrence IDs, as they were sent.
+    pub(crate) fn delete_unsent_changes(
+        &self,
+        _: &JournalWritePermission,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<()> {
+        self.tx.execute(
+            "DELETE FROM unsent_change WHERE calendar_id = ?1 AND uid = ?2",
+            params![calendar_id.0, uid],
+        )?;
+        Ok(())
+    }
+
     /// Stores a new Journal Transaction, as `origin` records it, made at
     /// `made_at`.
     pub(crate) fn insert_journal_transaction(

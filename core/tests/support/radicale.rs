@@ -245,6 +245,11 @@ impl Radicale {
         assert_eq!(status, 200, "delete an Event on Radicale");
     }
 
+    /// The status the server answers a `GET` of `url` by `user` with.
+    pub fn status_of(&self, user: &User, url: &str) -> u16 {
+        self.request(user, "GET", url, "text/plain", Vec::new())
+    }
+
     /// Deletes a Calendar of `user` on the server.
     pub fn delete_calendar(&self, user: &User, url: &str) {
         let status = self.request(user, "DELETE", url, XML, Vec::new());
@@ -474,12 +479,15 @@ pub fn closed_port_url() -> String {
 /// [`RewritingProxy::stop_rewriting`] and [`RewritingProxy::start_rewriting`].
 /// It records the bodies of the requests it gets. Between
 /// [`RewritingProxy::go_away`] and [`RewritingProxy::come_back`] it closes
-/// each connection unanswered, as a server that can't be reached.
+/// each connection unanswered, as a server that can't be reached. After
+/// [`RewritingProxy::drop_etags_of_writes`] it answers a `PUT` without the
+/// ETag, as RFC 4791 §5.3.4 lets a server that changed the text it stored.
 pub struct RewritingProxy {
     pub url: String,
     bodies: Arc<Mutex<Vec<String>>>,
     rewriting: Arc<AtomicBool>,
     away: Arc<AtomicBool>,
+    etagless_writes: Arc<AtomicBool>,
 }
 
 impl RewritingProxy {
@@ -499,6 +507,8 @@ impl RewritingProxy {
         let rewrites = rewriting.clone();
         let away = Arc::new(AtomicBool::new(false));
         let gone = away.clone();
+        let etagless_writes = Arc::new(AtomicBool::new(false));
+        let without_etags = etagless_writes.clone();
         let (marker, replacement, proxy) = (marker.to_owned(), replacement.to_owned(), url.clone());
         std::thread::spawn(move || {
             // A fresh connection for each request: Radicale may close an
@@ -522,6 +532,7 @@ impl RewritingProxy {
                     .push(String::from_utf8_lossy(&body).into_owned());
                 let mut parts = request_line.split(' ');
                 let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or("/"));
+                let drop_etag = method == "PUT" && without_etags.load(Ordering::SeqCst);
                 let mut request = ureq::http::Request::builder()
                     .method(ureq::http::Method::from_bytes(method.as_bytes()).unwrap())
                     .uri(format!("{}{}", target.trim_end_matches('/'), path));
@@ -541,6 +552,7 @@ impl RewritingProxy {
                 for (name, value) in response.headers() {
                     if ["content-length", "transfer-encoding", "connection"]
                         .contains(&name.as_str())
+                        || (drop_etag && name.as_str() == "etag")
                     {
                         continue;
                     }
@@ -560,7 +572,13 @@ impl RewritingProxy {
             bodies,
             rewriting,
             away,
+            etagless_writes,
         }
+    }
+
+    /// Answers each `PUT` without its ETag from now on.
+    pub fn drop_etags_of_writes(&self) {
+        self.etagless_writes.store(true, Ordering::SeqCst);
     }
 
     /// Closes each connection unanswered from now on.

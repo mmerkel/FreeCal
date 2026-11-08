@@ -221,6 +221,50 @@ fn delete_calendar_within(
     database_transaction.delete_calendar_row(WRITE_PERMISSION, id)
 }
 
+/// The Event Rows of one Calendar and UID as the Sender read them to send
+/// them (new term: Sent Event Rows), each Event Version by its hash, so
+/// that [`sent`] can tell whether they changed while it sent them.
+pub(crate) struct SentEventRows {
+    calendar_id: CalendarId,
+    uid: String,
+    versions: Vec<(EventId, Vec<u8>)>,
+}
+
+/// The Event Rows of the UID `uid` in the Calendar `calendar_id` as they
+/// are now, which the Sender is about to send.
+pub(crate) fn sending(store: &Store, calendar_id: CalendarId, uid: &str) -> Result<SentEventRows> {
+    let versions = store
+        .events_with_uid(Uid::In(calendar_id, uid))?
+        .into_iter()
+        .map(|event_row| {
+            let version = StoredEvent {
+                calendar_id: event_row.calendar_id,
+                fields: event_row.fields,
+            };
+            (event_row.id, hash(uid, &version))
+        })
+        .collect();
+    Ok(SentEventRows {
+        calendar_id,
+        uid: uid.to_owned(),
+        versions,
+    })
+}
+
+/// Records that the Sender sent `sent`, with the Mirror's writes in the
+/// Database Transaction `database_transaction`: the Unsent Changes of its
+/// Calendar and UID go, whatever their recurrence IDs, unless its Event
+/// Rows changed since they were read, as a change made while they were
+/// sent is sent with the next Outgoing Sync. The Change Journal records
+/// nothing: every change is in it already, since it was made.
+pub(crate) fn sent(database_transaction: &DatabaseTransaction, sent: &SentEventRows) -> Result<()> {
+    let current = sending(database_transaction, sent.calendar_id, &sent.uid)?;
+    if current.versions != sent.versions {
+        return Ok(());
+    }
+    database_transaction.delete_unsent_changes(WRITE_PERMISSION, sent.calendar_id, &sent.uid)
+}
+
 /// One Journal Transaction being recorded, in its Database Transaction,
 /// which [`record`] commits. Each write reads the Event's previous Event
 /// Version itself.

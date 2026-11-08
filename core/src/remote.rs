@@ -51,6 +51,48 @@ pub(crate) struct Changes {
 /// Resources to fetch with them, in the same request.
 pub(crate) type FetchToo<'a> = &'a dyn Fn(&[String]) -> Vec<String>;
 
+/// The condition a write of a Server Object holds on, so that it never
+/// writes over a version FreeCal hasn't read (ADR 0015).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Precondition<'a> {
+    /// Nothing is at its address yet: a create (`If-None-Match: *`).
+    Absent,
+    /// The server holds the version with this ETag, the one the Mirror
+    /// holds (`If-Match`).
+    Matches(&'a str),
+}
+
+/// How a conditional write of a Server Object went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WriteOutcome<T> {
+    /// The server took it.
+    Done(T),
+    /// Its precondition failed: the server's version changed since FreeCal
+    /// read it, or it is gone. Finding that change is an Incoming Sync's.
+    ServerChanged,
+}
+
+impl<T> WriteOutcome<T> {
+    /// What it was done with, made by `done`.
+    pub(crate) fn map<U>(self, done: impl FnOnce(T) -> U) -> WriteOutcome<U> {
+        match self {
+            WriteOutcome::Done(value) => WriteOutcome::Done(done(value)),
+            WriteOutcome::ServerChanged => WriteOutcome::ServerChanged,
+        }
+    }
+}
+
+/// A Server Object the server took from a `PUT`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Put {
+    /// Its address as the server lists it.
+    pub href: String,
+    /// The ETag of what the server stored, if it gave one that names the
+    /// text sent: none when it gave none, or a weak one, as when it changed
+    /// the text (RFC 4791 §5.3.4).
+    pub etag: Option<String>,
+}
+
 /// A server Account's server, logged in.
 pub(crate) trait Remote {
     /// The Account's Provider, which [`connect`] logged in to; never the
@@ -95,6 +137,22 @@ pub(crate) trait Remote {
         display: Tz,
         fetch_too: FetchToo,
     ) -> Result<Changes>;
+
+    /// Writes `data` as the Server Object at `href` in the Calendar at
+    /// `calendar`, an address as the server gave it, or a name for a new
+    /// one, if `precondition` holds.
+    fn put(
+        &self,
+        calendar: &str,
+        href: &str,
+        data: &str,
+        precondition: Precondition,
+    ) -> Result<WriteOutcome<Put>>;
+
+    /// Deletes the Server Object at `href` in the Calendar at `calendar`,
+    /// an address as the server gave it, if the server holds the version
+    /// with the ETag `etag`.
+    fn delete(&self, calendar: &str, href: &str, etag: &str) -> Result<WriteOutcome<()>>;
 }
 
 impl Remote for caldav::Client {
@@ -128,6 +186,20 @@ impl Remote for caldav::Client {
         fetch_too: FetchToo,
     ) -> Result<Changes> {
         caldav::Client::changes(self, url, token, known_server_resources, display, fetch_too)
+    }
+
+    fn put(
+        &self,
+        calendar: &str,
+        href: &str,
+        data: &str,
+        precondition: Precondition,
+    ) -> Result<WriteOutcome<Put>> {
+        caldav::Client::put(self, calendar, href, data, precondition)
+    }
+
+    fn delete(&self, calendar: &str, href: &str, etag: &str) -> Result<WriteOutcome<()>> {
+        caldav::Client::delete(self, calendar, href, etag)
     }
 }
 

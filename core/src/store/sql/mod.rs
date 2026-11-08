@@ -502,6 +502,20 @@ impl Store {
             .optional()?)
     }
 
+    /// The UIDs the Unsent Changes of a Calendar are about, each once, in
+    /// the order their first Unsent Change was added.
+    pub(crate) fn unsent_uids(&self, calendar_id: CalendarId) -> Result<Vec<String>> {
+        let uids = self
+            .conn
+            .prepare(
+                "SELECT uid FROM unsent_change WHERE calendar_id = ?1 \
+                 GROUP BY uid ORDER BY MIN(rowid)",
+            )?
+            .query_map([calendar_id.0], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(uids)
+    }
+
     /// Every Unsent Change, in the order they were added.
     #[cfg(test)]
     pub fn unsent_changes(&self) -> Result<Vec<UnsentChange>> {

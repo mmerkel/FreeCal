@@ -1,11 +1,11 @@
 //! The Sync Engine: it exchanges a Calendar's changes with its server, by
-//! Incoming Syncs and, with ticket 123, Outgoing Syncs, and is the only code
-//! that changes the Mirror's server data: it is a Guard, and the Local
-//! Store's writes of the Mirror take a [`SyncEngineWritePermission`], which
-//! only this module can make. Each Provider's part lives in a module of its
-//! own, CalDAV's in [`caldav`] (ADR 0015); this module holds what every
-//! Provider and both directions share: the entry that picks the Provider's
-//! Sync Engine ([`incoming`]), the [`Recorder`] it opens Journal
+//! Incoming Syncs and Outgoing Syncs, and is the only code that changes the
+//! Mirror's server data: it is a Guard, and the Local Store's writes of the
+//! Mirror take a [`SyncEngineWritePermission`], which only this module can
+//! make. Each Provider's part lives in a module of its own, CalDAV's in
+//! [`caldav`] (ADR 0015); this module holds what every Provider and both
+//! directions share: the entries that pick the Provider's Sync Engine
+//! ([`incoming`], [`outgoing`]), the [`Recorder`] it opens Journal
 //! Transactions through, and the Write Permission. A Calendar's
 //! Event Rows with one UID belong to the UID's Corresponding Server Object,
 //! and only that Server Object writes them (ADR 0015).
@@ -14,6 +14,7 @@ pub(crate) mod caldav;
 
 use std::sync::Mutex;
 
+use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
 use crate::journal::{JournalTransaction, JournalTransactionId, TransactionOrigin};
@@ -50,6 +51,22 @@ pub(crate) fn incoming(
     match remote.provider() {
         Provider::Local => unreachable!("the Local Provider has no server"),
         Provider::CalDav => caldav::incoming::sync(remote, store, calendar, display, record),
+    }
+}
+
+/// Runs the Outgoing Sync of `calendar` through its Account's server
+/// `remote`, by the Sender of the Account's Provider, which sends the
+/// Calendar's Unsent Changes, with `now` as the time of revision of what
+/// it writes, and records nothing in the Change Journal.
+pub(crate) fn outgoing(
+    remote: &dyn Remote,
+    store: &Mutex<Store>,
+    calendar: &CalendarToSync,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    match remote.provider() {
+        Provider::Local => unreachable!("the Local Provider has no server"),
+        Provider::CalDav => caldav::sender::send(remote, store, calendar, now),
     }
 }
 

@@ -1,5 +1,7 @@
 //! The CalDAV part of the Sync Engine (ADR 0015): CalDAV's Incoming Sync
-//! ([`incoming`]), its writes of the Mirror, by Calendar and UID, its rules
+//! ([`incoming`]), its Outgoing Sync, the Sender ([`sender`]), with the
+//! resource it sends for a UID ([`resource`]), its writes of the Mirror, by
+//! Calendar and UID, its rules
 //! for which resource keeps a UID: the fixed order among resources holding
 //! one UID ([`fixed_order`]), whether a Server Object still keeps its UID
 //! ([`Holds::keeps`]) and the Ignored Resources fetched again for a
@@ -8,11 +10,8 @@
 //! ([`ignore`]), and the resources it can't read ([`unreadable`]).
 
 pub(crate) mod incoming;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the CalDAV Sender, ticket 123, sends it")
-)]
 pub(crate) mod resource;
+pub(crate) mod sender;
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +22,7 @@ use super::WRITE_PERMISSION;
 use crate::event::{Loaded, ServerObject};
 use crate::import::read_events;
 use crate::journal::JournalTransaction;
+use crate::store::DatabaseTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
 
 /// A Known Server Resource of a CalDAV Calendar as the CalDAV Sync Engine
@@ -211,22 +211,16 @@ fn ignored_line(calendar_id: CalendarId, href: &str, why: Ignored) -> String {
 
 /// Makes `object`, as the server holds it now, the Mirror's version of the
 /// CalDAV Server Object of a Calendar and the UID `uid`, address included
-/// (ADR 0015). An Ignored Resource at its address is forgotten in the same
-/// Database Transaction. Written in the Database Transaction of the
-/// Incoming Sync's `journal_transaction`, as only an Incoming Sync knows
-/// what the server holds, which checked that the Calendar is writable.
+/// (ADR 0015), in `database_transaction`: an Incoming Sync's, or the
+/// Sender's after the server took a write. An Ignored Resource at its
+/// address is forgotten in the same Database Transaction.
 fn mirror(
-    journal_transaction: &JournalTransaction,
+    database_transaction: &DatabaseTransaction,
     calendar_id: CalendarId,
     object: &ServerObject,
     uid: &str,
 ) -> Result<()> {
-    journal_transaction.database_transaction().write_object(
-        WRITE_PERMISSION,
-        calendar_id,
-        object,
-        uid,
-    )
+    database_transaction.write_object(WRITE_PERMISSION, calendar_id, object, uid)
 }
 
 /// Records that FreeCal couldn't read what the server holds now at `href` in
@@ -262,18 +256,16 @@ fn unreadable_line(calendar_id: CalendarId, href: &str) -> String {
 }
 
 /// Removes the Server Object of a Calendar and the UID `uid` from the
-/// Mirror, as an Incoming Sync finds it gone from the server or no longer
-/// keeping its UID. The Event Rows of its UID stay, for the Incoming Sync
-/// to propagate the Server Object taking over to, or delete
-/// ([`delete_if_unkept`]).
+/// Mirror, in `database_transaction`, as an Incoming Sync finds it gone
+/// from the server or no longer keeping its UID, or the Sender deleted it.
+/// The Event Rows of its UID stay, for the Incoming Sync to propagate the
+/// Server Object taking over to, or delete ([`delete_if_unkept`]).
 fn remove_object(
-    journal_transaction: &JournalTransaction,
+    database_transaction: &DatabaseTransaction,
     calendar_id: CalendarId,
     uid: &str,
 ) -> Result<()> {
-    journal_transaction
-        .database_transaction()
-        .delete_object(WRITE_PERMISSION, calendar_id, uid)
+    database_transaction.delete_object(WRITE_PERMISSION, calendar_id, uid)
 }
 
 /// Remembers `object`, a CalDAV resource of a Calendar that an Incoming
@@ -331,7 +323,12 @@ pub(crate) mod testing {
         object: &ServerObject,
         uid: &str,
     ) -> Result<()> {
-        super::mirror(journal_transaction, calendar_id, object, uid)
+        super::mirror(
+            journal_transaction.database_transaction(),
+            calendar_id,
+            object,
+            uid,
+        )
     }
 
     /// [`remove_object`](super::remove_object).
@@ -340,7 +337,7 @@ pub(crate) mod testing {
         calendar_id: CalendarId,
         uid: &str,
     ) -> Result<()> {
-        super::remove_object(journal_transaction, calendar_id, uid)
+        super::remove_object(journal_transaction.database_transaction(), calendar_id, uid)
     }
 }
 
