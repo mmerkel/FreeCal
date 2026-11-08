@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { tick } from 'svelte';
   import type { CoreApi } from './core/CoreApi';
   import type {
-    Account,
     Calendar,
     CalendarId,
     Event,
@@ -10,17 +8,11 @@
     EventId,
     ExceptionCounts,
     ExistingEvents,
-    Occurrence,
-    Settings,
-    SettingsUpdate,
-    SidebarState,
-    Signal,
-    SyncStatuses,
     JournalTransactionId,
     View,
     When,
   } from './core/types';
-  import { errorText, startupText, t } from './i18n';
+  import { errorText, t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
   import { followAppearance } from './lib/colourScheme';
@@ -29,29 +21,26 @@
   import EventEditor from './lib/EventEditor.svelte';
   import ImportDialog from './lib/ImportDialog.svelte';
   import {
-    dateChanged,
     goToToday,
     openDay,
-    opening,
     openMonth,
     periodTitle,
     step,
     switchView,
     toggleToday,
-    type Navigation,
   } from './lib/navigation';
   import { sameRepeat } from './lib/repeat';
   import ScopeDialog, { type ScopeChange, type ScopeChoice } from './lib/ScopeDialog.svelte';
-  import { DEFAULT_SETTINGS } from './lib/settings';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
-  import { overallSyncText, SyncingDelay } from './lib/syncDisplay.svelte';
+  import { overallSyncText } from './lib/syncDisplay.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
   import Toolbar from './lib/Toolbar.svelte';
-  import { whenForShortcut, type VisibleRange } from './lib/when';
+  import { whenForShortcut } from './lib/when';
+  import { WindowModel } from './lib/windowModel.svelte';
   import WorkingDialog from './lib/WorkingDialog.svelte';
 
   interface Props {
@@ -60,10 +49,9 @@
 
   let { core }: Props = $props();
 
-  interface Directory {
-    accounts: Account[];
-    calendars: Calendar[];
-  }
+  // The core stays the same for the window's life.
+  // svelte-ignore state_referenced_locally
+  const model = new WindowModel(core);
 
   /**
    * What is open over the grid, if anything. The Event of `details` and
@@ -86,49 +74,27 @@
     | { kind: 'settings' }
     | { kind: 'about' };
 
-  let settings = $state<Settings>({ ...DEFAULT_SETTINGS });
-  let settingsFailure = $state<string>();
   /** FreeCal's version, read when About first opens. */
   let version = $state<string>();
-  let today = $state<Temporal.PlainDate>();
-  let navigation = $state<Navigation>();
-  let viewSaveFailure = $state<string>();
-  let sidebar = $state<SidebarState>();
-  let sidebarSaveFailure = $state<string>();
   let quitFailure = $state<string>();
   let rescheduleFailure = $state<string>();
   /**
-   * Whether the user is pressing on the grid, as for a drag. A "Date
-   * changed" meanwhile moves the view only once the press ends, so that the
-   * grid doesn't move under the pointer.
+   * Releases the hold on "Date changed" while the user presses on the grid,
+   * as for a drag, so that the grid doesn't move under the pointer.
    */
-  let interacting = false;
-  let dateChangeHeld = false;
-  let directory = $state<Directory>();
-  /** The Sync Status of every server Account and Calendar, as last read. */
-  let syncStatuses = $state<SyncStatuses>();
-  const syncingDelay = new SyncingDelay();
-  /** The Sync Statuses as shown, with a routine sync's Syncing held back for a moment. */
-  const shownSyncStatuses = $derived(syncStatuses && syncingDelay.shown(syncStatuses));
+  let releasePress: (() => void) | undefined;
   /** Now, to the second, so that the time since the last sync counts up. */
   let now = $state(Temporal.Now.instant());
   /** What the status indicator says, once the Sync Statuses are read. */
   const overallText = $derived(
-    shownSyncStatuses && overallSyncText(shownSyncStatuses.overall, now),
+    model.syncStatuses && overallSyncText(model.syncStatuses.overall, now),
   );
 
   $effect(() => {
     const timer = setInterval(() => (now = Temporal.Now.instant()), 1000);
     return () => clearInterval(timer);
   });
-  /** Why FreeCal couldn't start, in words, for the startup error screen. */
-  let startupReason = $state<string>();
-  let readFailure = $state<string>();
-  let range = $state<VisibleRange>();
-  let occurrences = $state<Occurrence[]>([]);
   let open = $state<Open>();
-  /** The Event whose details are open, as last read from the core. */
-  let opened = $state<Event>();
   /** Why an action in the open details or About dialog failed. */
   let dialogFailure = $state<string>();
   /** Counts editor sessions, so that each one starts from its own draft. */
@@ -150,7 +116,7 @@
   let toast = $state<{ message: string; undo?: () => void }>();
 
   const writableCalendars = $derived(
-    directory?.calendars.filter((calendar) => !calendar.readOnly) ?? [],
+    model.directory?.calendars.filter((calendar) => !calendar.readOnly) ?? [],
   );
   const selectedEventId = $derived(
     open?.kind === 'details' || open?.kind === 'editing' ? open.id : undefined,
@@ -163,7 +129,7 @@
   /** The Occurrence of a Recurring Event whose details are open, as the grid shows it. */
   const openedOccurrence = $derived(
     open?.kind === 'details' && open.recurrenceId !== null
-      ? occurrences.find(
+      ? model.occurrences.find(
           (occurrence) =>
             occurrence.eventId === selectedEventId &&
             occurrence.recurrenceId === selectedRecurrenceId,
@@ -171,209 +137,34 @@
       : undefined,
   );
 
-  // Reads can overtake each other; only the latest one of each kind may land.
-  let latestDirectoryRead = 0;
-  let latestSyncStatusesRead = 0;
-  let latestOccurrencesRead = 0;
-  let latestEventRead = 0;
-
-  async function readDirectory() {
-    const read = ++latestDirectoryRead;
-    const [accounts, calendars] = await Promise.all([core.listAccounts(), core.listCalendars()]);
-    if (read === latestDirectoryRead) {
-      directory = { accounts, calendars };
-      readFailure = undefined;
-    }
-  }
-
-  async function readSyncStatuses() {
-    const read = ++latestSyncStatusesRead;
-    const statuses = await core.syncStatuses();
-    if (read === latestSyncStatusesRead) syncStatuses = statuses;
-  }
-
-  async function readOccurrences() {
-    if (!range) return;
-    const read = ++latestOccurrencesRead;
-    const found = await core.listOccurrences(range.from, range.to);
-    if (read === latestOccurrencesRead) occurrences = found;
-  }
-
-  /** Reads the Event whose details are open again; closes them if it is gone. */
-  async function readOpenedEvent() {
-    if (open?.kind !== 'details') return;
-    const id = open.id;
-    const read = ++latestEventRead;
-    try {
-      const event = await core.event(id);
-      if (read === latestEventRead && open?.kind === 'details' && open.id === id) opened = event;
-    } catch {
-      if (read === latestEventRead && open?.kind === 'details' && open.id === id) close();
-    }
-  }
-
-  function reportRead(error: unknown) {
-    readFailure = errorText(error);
-  }
-
-  /** Everything shown depends on the Calendars; re-reads after any change. */
-  function refreshAll() {
-    readDirectory().catch(reportRead);
-    readSyncStatuses().catch(reportRead);
-    readOccurrences().catch(reportRead);
-    readOpenedEvent();
-  }
-
-  function onSignal(signal: Signal) {
-    switch (signal.kind) {
-      case 'calendarsChanged':
-        refreshAll();
-        break;
-      case 'occurrencesChanged':
-        // The open details and the grid show the new state; an open editor
-        // keeps its draft.
-        readOccurrences().catch(reportRead);
-        readOpenedEvent();
-        break;
-      case 'dateChanged':
-        today = Temporal.PlainDate.from(signal.date);
-        followToday();
-        break;
-      case 'accountSyncStatusChanged':
-      case 'calendarSyncStatusChanged':
-        // Read whole, as the overall status comes with them.
-        readSyncStatuses().catch(reportRead);
-        break;
-    }
-  }
-
   /**
    * Whether the grid holds back a new today for a dropped Occurrence while
    * the user chooses its recurrence scope, as it does during the drag.
    */
   const dropHeld = $derived(scopePrompt?.change === 'move');
 
-  /** Moves the view to a new today if it tracks it and nothing holds it back. */
-  function followToday() {
-    if (interacting || dropHeld) {
-      dateChangeHeld = true;
-    } else if (navigation && today) {
-      navigation = dateChanged(navigation, today);
-    }
-  }
-
   function oninteract(active: boolean) {
-    interacting = active;
-    followHeldDateChange();
+    releasePress?.();
+    releasePress = active ? model.hold() : undefined;
   }
 
-  /** Follows a "Date changed" that was held back, once nothing holds it any more. */
-  function followHeldDateChange() {
-    if (dateChangeHeld && !interacting && !dropHeld) {
-      dateChangeHeld = false;
-      followToday();
-    }
-  }
+  $effect(() => followAppearance(model.settings.appearance));
 
-  $effect(() => followAppearance(settings.appearance));
-
-  /**
-   * Shows the window, which starts hidden. Should that fail, the shell shows
-   * it a few seconds later anyway.
-   */
-  function showWindow() {
-    core.showWindow().catch(() => {});
-  }
-
-  $effect(() => {
-    let stopped = false;
-    let unsubscribe: (() => void) | undefined;
-
-    async function start() {
-      const failure = await core.startupFailure();
-      if (failure) {
-        startupReason = startupText(failure);
-        showWindow();
-        return;
-      }
-      // Subscribe first, then read, so that no change falls in the gap.
-      const stop = await core.subscribe((signal) => {
-        if (!stopped) onSignal(signal);
-      });
-      if (stopped) return stop();
-      unsubscribe = stop;
-      // The window shows once its appearance is known, so that it never
-      // flashes the wrong theme.
-      settings = await core.settings();
-      await tick();
-      showWindow();
-      const [currentDate, view, sidebarState] = await Promise.all([
-        core.today(),
-        core.lastUsedView(),
-        core.sidebar(),
-        readDirectory(),
-        readSyncStatuses(),
-      ]);
-      // A "Date changed" that came in meanwhile is newer.
-      today ??= currentDate;
-      sidebar = sidebarState;
-      navigation = opening(view, today);
-    }
-
-    start().catch((error) => {
-      // Drawn with the default settings.
-      startupReason = t('app.loadFailed', { error: errorText(error) });
-      showWindow();
-    });
-    return () => {
-      stopped = true;
-      unsubscribe?.();
-      syncingDelay.stop();
-    };
-  });
-
-  /** Shows what `next` says, remembering a changed view as the last-used one. */
-  function navigate(next: Navigation) {
-    if (next.view !== navigation?.view) {
-      core.setLastUsedView(next.view).then(
-        () => (viewSaveFailure = undefined),
-        (error) => (viewSaveFailure = t('app.viewSaveFailed', { error: errorText(error) })),
-      );
-    }
-    navigation = next;
-  }
-
-  /** Shows the sidebar as `next` says and remembers it straight away. */
-  function changeSidebar(next: SidebarState) {
-    sidebar = next;
-    core.setSidebar(next).then(
-      () => (sidebarSaveFailure = undefined),
-      (error) => (sidebarSaveFailure = t('app.sidebarSaveFailed', { error: errorText(error) })),
-    );
-  }
-
-  function toggleSidebar() {
-    changeSidebar({ ...sidebar!, shown: !sidebar!.shown });
-  }
-
-  function onrangechange(visible: VisibleRange) {
-    range = visible;
-    readOccurrences().catch(reportRead);
-  }
+  $effect(() => model.start());
 
   /** Opens the editor for a new Event, or says where to create a Calendar first. */
   function startCreating(when: When) {
     const target = defaultCalendar();
     if (!target) {
-      open = {
+      show({
         kind: 'notice',
         title: t('event.noCalendarTitle'),
         body: t('event.noCalendarBody', { account: t('account.local') }),
-      };
+      });
       return;
     }
     session++;
-    open = {
+    show({
       kind: 'creating',
       draft: {
         calendarId: target.id,
@@ -383,14 +174,13 @@
         description: '',
         repeat: null,
       },
-    };
+    });
   }
 
   function openDetails(id: EventId, recurrenceId: string | null = null) {
-    opened = undefined;
     dialogFailure = undefined;
-    open = { kind: 'details', id, recurrenceId };
-    readOpenedEvent();
+    show({ kind: 'details', id, recurrenceId });
+    model.openDetails(id, close);
   }
 
   /**
@@ -399,7 +189,7 @@
    */
   function startEditing(event: Event, recurrenceId: string | null, when: When) {
     session++;
-    open = {
+    show({
       kind: 'editing',
       id: event.id,
       recurrenceId,
@@ -414,12 +204,18 @@
       customRepeat: event.customRepeat,
       // An Exception repeats with its Recurring Event, if that is still there.
       repeatable: event.recurrenceId === null || event.repeat !== null,
-    };
+    });
+  }
+
+  /** Opens `next` over the grid in place of what was open, or nothing. */
+  function show(next: Open | undefined) {
+    // The Window Model reads the Event of the open details only while they are open.
+    if (open?.kind === 'details') model.closeDetails();
+    open = next;
   }
 
   function close() {
-    open = undefined;
-    opened = undefined;
+    show(undefined);
     dialogFailure = undefined;
   }
 
@@ -440,6 +236,7 @@
   ): Promise<ScopeChoice | null> {
     // Open while the counts load too, so that a drop is held from the start.
     scopePrompt = { change };
+    const release = change === 'move' ? model.hold() : undefined;
     try {
       const counts = await core.exceptionCounts(id, recurrenceId);
       return await new Promise((choose) => {
@@ -447,7 +244,7 @@
       });
     } finally {
       scopePrompt = undefined;
-      followHeldDateChange();
+      release?.();
     }
   }
 
@@ -504,10 +301,10 @@
 
   /** A drag the grid refused, because the Occurrence's Calendar is read-only. */
   function refuseDrag(id: EventId, recurrenceId: string | null) {
-    const dragged = occurrences.find(
+    const dragged = model.occurrences.find(
       (occurrence) => occurrence.eventId === id && occurrence.recurrenceId === recurrenceId,
     );
-    const calendar = directory?.calendars.find((found) => found.id === dragged?.calendarId);
+    const calendar = model.directory?.calendars.find((found) => found.id === dragged?.calendarId);
     if (!dragged || !calendar) return;
     toast = {
       message: t('event.readOnlyDrag', {
@@ -551,22 +348,22 @@
   /** Asks for a file to import, then opens the import dialog for it. */
   async function startImport() {
     if (!defaultCalendar()) {
-      open = {
+      show({
         kind: 'notice',
         title: t('import.noCalendarTitle'),
         body: t('event.noCalendarBody', { account: t('account.local') }),
-      };
+      });
       return;
     }
     let file: string | null;
     try {
       file = await core.pickImportFile(t('import.fileDialogTitle'), t('import.fileFilter'));
     } catch (error) {
-      open = {
+      show({
         kind: 'notice',
         title: t('import.pickFailedTitle'),
         body: t('import.pickFailed', { error: errorText(error) }),
-      };
+      });
       return;
     }
     if (file === null) return;
@@ -577,7 +374,7 @@
       return;
     }
     importFailure = undefined;
-    open = { kind: 'importing', file, calendarId: target.id };
+    show({ kind: 'importing', file, calendarId: target.id });
   }
 
   function cancelImport() {
@@ -628,36 +425,19 @@
     }
   }
 
-  /** Writes one changed setting; it has taken effect before the core answers. */
-  function changeSettings(update: SettingsUpdate) {
-    settings = { ...settings, ...update };
-    core.updateSettings(update).then(
-      () => (settingsFailure = undefined),
-      (error) => {
-        settingsFailure = t('settings.saveFailed', { error: errorText(error) });
-        // Back to what the Local Store kept, so that the window doesn't show
-        // a setting it won't open with next time.
-        core.settings().then(
-          (stored) => (settings = stored),
-          () => {},
-        );
-      },
-    );
-  }
-
   /** Sync now of every server Account; the Sync Status shows how it goes. */
   function syncNow() {
     void core.syncNow(null);
   }
 
   function openSettings() {
-    settingsFailure = undefined;
-    open = { kind: 'settings' };
+    model.forgetSettingsFailure();
+    show({ kind: 'settings' });
   }
 
   function openAbout() {
     dialogFailure = undefined;
-    open = { kind: 'about' };
+    show({ kind: 'about' });
     // Without the version About still says everything else.
     if (version === undefined)
       core.version().then(
@@ -676,17 +456,17 @@
     day: () => showView('day'),
     week: () => showView('week'),
     month: () => showView('month'),
-    next: () => navigate(step(navigation!, 1)),
-    previous: () => navigate(step(navigation!, -1)),
+    next: () => model.navigate(step(model.navigation!, 1)),
+    previous: () => model.navigate(step(model.navigation!, -1)),
     // Unlike the Today button, `t` doesn't toggle: it always goes to today.
-    today: () => navigate(goToToday(navigation!, today!)),
+    today: () => model.navigate(goToToday(model.navigation!, model.today!)),
     sync: syncNow,
     settings: openSettings,
-    sidebar: toggleSidebar,
+    sidebar: () => model.toggleSidebar(),
   };
 
   function showView(view: View) {
-    navigate(switchView(navigation!, view));
+    model.navigate(switchView(model.navigation!, view));
   }
 
   /**
@@ -696,7 +476,7 @@
   function onkeydown(key: KeyboardEvent) {
     const shortcut = shortcutFor(key);
     if (!shortcut) return;
-    if (!navigation || open || document.querySelector('dialog[open]')) return;
+    if (!model.navigation || open || document.querySelector('dialog[open]')) return;
     const target = key.target;
     const typing = 'input, textarea, select, [contenteditable]';
     if (
@@ -712,18 +492,19 @@
 
 <svelte:window {onkeydown} />
 
-{#if startupReason}
-  <StartupError reason={startupReason} onquit={quit} />
-{:else if today && navigation && directory && sidebar}
-  {@const shown = navigation}
-  {@const sidebarState = sidebar}
+{#if model.startupReason}
+  <StartupError reason={model.startupReason} onquit={quit} />
+{:else if model.today && model.navigation && model.directory && model.sidebar}
+  {@const today = model.today}
+  {@const shown = model.navigation}
+  {@const directory = model.directory}
   <div class="app">
-    <SidebarPane sidebar={sidebarState} onchange={changeSidebar}>
+    <SidebarPane sidebar={model.sidebar} onchange={(next) => model.changeSidebar(next)}>
       <Sidebar
         {core}
         accounts={directory.accounts}
         calendars={directory.calendars}
-        syncStatuses={shownSyncStatuses}
+        syncStatuses={model.syncStatuses}
         {overallText}
       />
     </SidebarPane>
@@ -732,11 +513,11 @@
         view={shown.view}
         tracking={shown.tracking}
         title={periodTitle(shown)}
-        ontoday={() => navigate(toggleToday(shown, today!))}
-        onstep={(by) => navigate(step(shown, by))}
-        onview={(view) => navigate(switchView(shown, view))}
-        onmonth={(month) => navigate(openMonth(shown, month))}
-        syncState={shownSyncStatuses?.overall.state}
+        ontoday={() => model.navigate(toggleToday(shown, today))}
+        onstep={(by) => model.navigate(step(shown, by))}
+        onview={(view) => model.navigate(switchView(shown, view))}
+        onmonth={(month) => model.navigate(openMonth(shown, month))}
+        syncState={model.syncStatuses?.overall.state}
         {overallText}
         onsyncnow={syncNow}
         onimport={startImport}
@@ -744,14 +525,14 @@
         onabout={openAbout}
         onquit={quit}
       />
-      {#if readFailure}
-        <p role="alert">{t('app.readFailed', { error: readFailure })}</p>
+      {#if model.readFailure}
+        <p role="alert">{t('app.readFailed', { error: model.readFailure })}</p>
       {/if}
-      {#if viewSaveFailure}
-        <p role="alert">{viewSaveFailure}</p>
+      {#if model.viewSaveFailure}
+        <p role="alert">{model.viewSaveFailure}</p>
       {/if}
-      {#if sidebarSaveFailure}
-        <p role="alert">{sidebarSaveFailure}</p>
+      {#if model.sidebarSaveFailure}
+        <p role="alert">{model.sidebarSaveFailure}</p>
       {/if}
       {#if quitFailure}
         <p role="alert">{quitFailure}</p>
@@ -763,14 +544,14 @@
         view={shown.view}
         date={shown.date}
         {today}
-        {occurrences}
+        occurrences={model.occurrences}
         calendars={directory.calendars}
         {selectedEventId}
         {selectedRecurrenceId}
-        {onrangechange}
+        onrangechange={(range) => model.showRange(range)}
         onselectslot={startCreating}
         onopenevent={openDetails}
-        onopenday={(date) => navigate(openDay(date))}
+        onopenday={(date) => model.navigate(openDay(date))}
         onreschedule={reschedule}
         onrefusedrag={refuseDrag}
         {oninteract}
@@ -779,8 +560,8 @@
     </main>
   </div>
 
-  {#if open?.kind === 'details' && opened}
-    {@const event = opened}
+  {#if open?.kind === 'details' && model.opened}
+    {@const event = model.opened}
     {@const recurrenceId = open.recurrenceId}
     <EventDetails
       {event}
@@ -812,9 +593,9 @@
     {/key}
   {:else if open?.kind === 'settings'}
     <SettingsDialog
-      {settings}
-      failure={settingsFailure}
-      onchange={changeSettings}
+      settings={model.settings}
+      failure={model.settingsFailure}
+      onchange={(update) => model.changeSettings(update)}
       onclose={close}
     />
   {:else if open?.kind === 'about'}

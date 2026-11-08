@@ -15,10 +15,20 @@ Spec: "Testing Decisions" (Seam 2); "Signals"; US-68.
 
 **Blocked by:** 116
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] `App.svelte` holds no reads, no Signal handling, no failure state of the reads, no today, navigation or Date changed hold, and no remembered view, sidebar or settings state
-- [ ] The Window Model's tests, on `RecordingCore` without rendering, cover: subscribing before the first read; an older read never overwriting a newer one, for each kind of read; each Signal's re-reads; a "Date changed" held by a press and by a drop's scope prompt, and followed once the last hold is released; a failed settings write putting back the stored settings
-- [ ] The existing `App.*.test.ts` and `Sidebar*.test.ts` tests pass unchanged, on the old `FakeCore`
+- [x] `App.svelte` holds no reads, no Signal handling, no failure state of the reads, no today, navigation or Date changed hold, and no remembered view, sidebar or settings state
+- [x] The Window Model's tests, on `RecordingCore` without rendering, cover: subscribing before the first read; an older read never overwriting a newer one, for each kind of read; each Signal's re-reads; a "Date changed" held by a press and by a drop's scope prompt, and followed once the last hold is released; a failed settings write putting back the stored settings
+- [x] The existing `App.*.test.ts` and `Sidebar*.test.ts` tests pass unchanged, on the old `FakeCore`
+
+## Comments
+
+- 2026-11-08: Done in `src/lib/windowModel.svelte.ts`, with its tests in `src/lib/windowModel.test.ts` (on `RecordingCore`, without rendering). `App.svelte` went from 885 to about 670 lines.
+  - **Which details are open:** App tells the model with `model.openDetails(id, ongone)` and `model.closeDetails()`. Every change to what is open now goes through one function in App, `show()`, which tells the model when details close. `ongone` runs when the Event can't be read any more, and App closes the details then. Ticket 118 moves this into Window Dialogs.
+  - **Holds:** the grid's press and a drop's scope prompt each take a `model.hold()` in App. The grid's `held` prop still comes from App's scope prompt until ticket 118.
+  - **Behaviour change:** an older read's failure no longer shows as a read failure once a newer read has started. Before, it showed anyway. That is the same "newest read wins" rule, applied to failures too.
+  - **Settings failure:** opening the settings clears the last write's failure through `model.forgetSettingsFailure()`, as before.
+  - **Left for later (review judgement calls):** `model.navigate(step(model.navigation!, …))` repeats in App's shortcut table and toolbar callbacks. It could take a function of the current Navigation. Also, `readFailure` holds the bare error while the save failures hold the whole sentence, which is how it was before.
+  - **New terms**, for approval: **Newest Read** (`NewestRead`), reads of one kind where only the newest one started lands; **Directory** (`Directory`, carried over from App), the Accounts and Calendars as last read together; **Open Details** (`OpenDetails`), the Event whose details are open, as the window told the model, with its `ongone`; **hold** (`hold()`), a counted hold on "Date changed" that the view follows once the last holder releases; **Press**, the user pressing on the grid, as for a drag.
