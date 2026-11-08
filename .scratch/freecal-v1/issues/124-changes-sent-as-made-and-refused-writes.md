@@ -50,3 +50,4 @@ Spec: "Sync Error"; "Event details".
       - `beyond_uid`: a failure about the Account or Calendar, not the UID
       - `SyncScheduler::ask_calendar`, `SyncRequests::calendars_of`, `Core::sync_account_calendars`: a sync of some Calendars of an Account
 - 2026-11-08: the user approved syncing both ways after every change.
+- 2026-11-08: the user decided the open point on read-only Calendars: keep it as built. A Calendar the server reports read-only shows the Sync Error while Unsent Changes wait, even if the user marked it read-only too.
