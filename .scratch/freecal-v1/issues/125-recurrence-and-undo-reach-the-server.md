@@ -1,6 +1,6 @@
 # 125: Recurrence scopes, Exceptions and undos reach the server
 
-**What to build:** The last part of ticket 17 (read it for the history). End-to-end tests against Radicale, and the fixes they call for, showing that what ticket 123's Sender sends is right beyond single Events.
+**What to build:** The last part of ticket 17 (read it for the history). End-to-end tests against Radicale, and the fixes they call for, showing that what ticket 127's Sender sends is right beyond single Events.
 
 - Recurrence scope edits (this / this and following / all), moves and deletes, and new, changed and deleted Exceptions, reach the server as one resource per UID, and a fresh Incoming Sync from the server (or a second client) reads the same Events back.
 - An undo or redo of a change in a server Calendar is sent like any other change, under the original identity (same UID, same href).
@@ -10,7 +10,7 @@
 
 Spec: US-46; "Change Journal"; "Testing Decisions" (Seam 1). ADR 0012.
 
-**Blocked by:** 08, 69, 123
+**Blocked by:** 08, 69, 127, 128
 
 **Status:** ready-for-agent
 

@@ -16,9 +16,9 @@ Spec: "Untrusted content". ADRs 0011, 0014, 0015.
 
 **Blocked by:** 69, 91, 92, 97, 100, 122
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
-**Effort:** L
+**Split into:** 127, 128
 
 - [ ] Creates, edits, moves and deletes of single Events in a writable CalDAV Calendar reach the server with conditional requests (ETags), and a success updates the Mirror and clears the Unsent Changes
 - [ ] An update or delete without a stored ETag waits; a response without an ETag leaves the next Incoming Sync to fetch the server's text
@@ -27,3 +27,5 @@ Spec: "Untrusted content". ADRs 0011, 0014, 0015.
 - [ ] Tested against Radicale
 
 ## Comments
+
+- 2026-11-08: Split into 127 (the CalDAV Sender, run by every sync) and 128 (a sent DELETE hands its UID on to an Ignored Resource), so that each part's `/implement` fits one context window. 128 restates the hand-on in ADR 0015's terms: the other resource holding the UID is an Ignored Resource, not a second Server Object. Work from the parts; this file stays for its history.
