@@ -1,12 +1,14 @@
 //! The CalDAV Sender (ticket 127): every sync of an Account sends the
 //! Unsent Changes of its writable CalDAV Calendars, with conditional
-//! requests, before their Incoming Syncs. Tested against Radicale.
+//! requests, before their Incoming Syncs. A change is sent right after it
+//! is made, and a server refusing writes is a Sync Error of the Calendar
+//! (ticket 124). Tested against Radicale.
 
 mod support;
 
 use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Core, Event, EventDraft, JournalTransactionId,
-    ServerObject, StartedBy,
+    AccountId, CalDavLogin, CalendarId, Core, ErrorCode, Event, EventDraft, JournalTransactionId,
+    ServerObject, Signal, StartedBy, SyncStatus,
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
 use support::{Harness, calendar_sync_status, date, draft, ics, timed, user_login};
@@ -59,9 +61,30 @@ impl OnServer {
     /// holds on the server, which FreeCal reaches through the proxy at
     /// `through` if given.
     fn arranged(through: Option<&str>, arrange: impl FnOnce(&Radicale, &User, &str)) -> Self {
+        Self::set_up(through, Radicale::create_calendar, arrange)
+    }
+
+    /// Like [`OnServer::through`] with no Events, but the server lets the
+    /// user only read the Calendar; FreeCal takes it as writable while
+    /// `proxy` says so.
+    fn read_only_through(proxy: &RewritingProxy) -> Self {
+        Self::set_up(
+            Some(&proxy.url),
+            Radicale::create_read_only_calendar,
+            |_, _, _| {},
+        )
+    }
+
+    /// Like [`OnServer::arranged`], with the Calendar made by `create`.
+    fn set_up(
+        through: Option<&str>,
+        create: fn(&Radicale, &User, NewCalendar) -> String,
+        arrange: impl FnOnce(&Radicale, &User, &str),
+    ) -> Self {
         let radicale = Radicale::shared();
         let user = radicale.user();
-        let url = radicale.create_calendar(
+        let url = create(
+            radicale,
             &user,
             NewCalendar {
                 name: Some("Work"),
@@ -178,6 +201,36 @@ impl OnServer {
     /// The Unsent Changes of the Calendar `id`.
     fn unsent(&self, id: CalendarId) -> u32 {
         calendar_sync_status(&self.core, id).report.unsent_changes
+    }
+
+    /// The Sync Status of the Calendar `id`.
+    fn status(&self, id: CalendarId) -> SyncStatus {
+        calendar_sync_status(&self.core, id).report.status
+    }
+
+    /// Runs the syncs FreeCal launches with, and forgets their Signals.
+    fn launched(&self) {
+        self.core.run_scheduled_syncs();
+        self.harness.signals.clear();
+    }
+
+    /// Runs the syncs the Sync Scheduler finds due, and returns the
+    /// Calendars that synced, in order.
+    fn run_scheduled_syncs(&self) -> Vec<CalendarId> {
+        self.harness.signals.clear();
+        self.core.run_scheduled_syncs();
+        self.harness
+            .signals
+            .received()
+            .into_iter()
+            .filter_map(|signal| match signal {
+                Signal::CalendarSyncStatusChanged(status) => match status.report.status {
+                    SyncStatus::Syncing { .. } => Some(status.calendar_id),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -562,4 +615,200 @@ fn a_delete_with_no_readable_ignored_resource_holding_its_uid_leaves_no_event_ro
     on_server.sync();
     assert_eq!(titles(&on_server), ["Standup B"]);
     assert_eq!(on_server.unsent(on_server.work), 0);
+}
+
+/// Ticket 124: a change is sent right after it is made, by a sync of its
+/// Calendar alone, both ways.
+mod sent_as_made {
+    use super::*;
+
+    #[test]
+    fn a_change_is_sent_right_after_it_is_made() {
+        let on_server = OnServer::with(&[]);
+        on_server.launched();
+        on_server
+            .core
+            .create_event(dentist(on_server.work))
+            .unwrap();
+
+        assert_eq!(on_server.run_scheduled_syncs(), [on_server.work]);
+
+        let held = on_server.held("Dentist").expect("sent");
+        assert!(
+            on_server
+                .served(&on_server.url, &held.href)
+                .1
+                .contains("SUMMARY:Dentist")
+        );
+        assert_eq!(on_server.unsent(on_server.work), 0);
+    }
+
+    #[test]
+    fn a_change_syncs_only_the_calendars_it_changed() {
+        let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+        let (home, home_url) = on_server.add_home();
+        // A third Calendar the change leaves alone.
+        let url = on_server.radicale.create_calendar(
+            &on_server.user,
+            NewCalendar {
+                name: Some("Third"),
+                ..NewCalendar::default()
+            },
+        );
+        on_server
+            .core
+            .add_calendars(on_server.account, &[url])
+            .unwrap();
+        on_server.launched();
+
+        // Moving an Event changes the Calendar it leaves and the one it
+        // joins.
+        on_server.edit("Standup", "Standup", home);
+
+        assert_eq!(on_server.run_scheduled_syncs(), [on_server.work, home]);
+        let held = on_server.held("Standup").unwrap();
+        assert!(
+            on_server
+                .served(&home_url, &held.href)
+                .1
+                .contains("UID:standup")
+        );
+        assert_eq!(on_server.unsent(on_server.work), 0);
+        assert_eq!(on_server.unsent(home), 0);
+    }
+
+    /// Offline replay is ticket 18's: the Poll, or the network's return,
+    /// sends what waits. The harness clock starts at 12:00, when the
+    /// launch's Poll runs.
+    #[test]
+    fn a_change_while_its_account_is_offline_waits_for_the_next_sync() {
+        let proxy = RewritingProxy::passthrough(Radicale::shared());
+        let on_server = OnServer::through(&proxy, &[]);
+        on_server.launched();
+        proxy.go_away();
+        assert!(
+            on_server
+                .core
+                .sync_account(on_server.account, StartedBy::FreeCal)
+                .is_err()
+        );
+        proxy.come_back();
+
+        on_server
+            .core
+            .create_event(dentist(on_server.work))
+            .unwrap();
+
+        assert_eq!(on_server.run_scheduled_syncs(), []);
+        assert_eq!(on_server.unsent(on_server.work), 1);
+        on_server.harness.clock.set("2026-10-03T12:05:00+02:00");
+        assert_eq!(on_server.run_scheduled_syncs(), [on_server.work]);
+        assert_eq!(on_server.unsent(on_server.work), 0);
+    }
+
+    /// The sync right after a delete runs the Calendar's Incoming Sync
+    /// too, so an Ignored Resource holding the UID takes it over at once
+    /// (ticket 128).
+    #[test]
+    fn a_deleted_uid_is_handed_on_right_after_the_delete_is_sent() {
+        let on_server = OnServer::with_files(&[
+            ("a-standup", standup("Standup A")),
+            ("b-standup", standup("Standup B")),
+        ]);
+        on_server.launched();
+        on_server
+            .core
+            .delete_event(on_server.event("Standup A").id)
+            .unwrap();
+
+        on_server.run_scheduled_syncs();
+
+        assert_eq!(titles(&on_server), ["Standup B"]);
+    }
+}
+
+/// Ticket 124: a server refusing writes to a Calendar is a Sync Error of
+/// that Calendar, and its Unsent Changes stay.
+mod writes_refused {
+    use super::*;
+
+    /// Radicale lets the user only read the Calendar, and answers a write
+    /// with 403; the proxy says they may change it.
+    #[test]
+    fn a_write_the_server_refuses_is_a_sync_error_of_the_calendar() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = OnServer::read_only_through(&proxy);
+        on_server
+            .core
+            .create_event(dentist(on_server.work))
+            .unwrap();
+        on_server
+            .core
+            .create_event(EventDraft {
+                title: "Lunch".to_owned(),
+                ..dentist(on_server.work)
+            })
+            .unwrap();
+
+        let synced = on_server
+            .core
+            .sync_account(on_server.account, StartedBy::FreeCal);
+
+        assert_eq!(synced.unwrap_err().code(), ErrorCode::WritesRefused,);
+        assert_eq!(
+            on_server.status(on_server.work),
+            SyncStatus::SyncError {
+                error: ErrorCode::WritesRefused
+            }
+        );
+        assert_eq!(on_server.unsent(on_server.work), 2);
+        // Once refused, the Calendar's other changes aren't tried.
+        assert_eq!(proxy.requests_holding("BEGIN:VCALENDAR"), 1);
+    }
+
+    /// Privileges lost while Unsent Changes wait: the server says so
+    /// before any write.
+    #[test]
+    fn unsent_changes_of_a_calendar_the_server_made_read_only_are_a_sync_error() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = OnServer::read_only_through(&proxy);
+        on_server
+            .core
+            .create_event(dentist(on_server.work))
+            .unwrap();
+        proxy.stop_rewriting();
+
+        let synced = on_server
+            .core
+            .sync_account(on_server.account, StartedBy::FreeCal);
+
+        assert_eq!(synced.unwrap_err().code(), ErrorCode::WritesRefused);
+        assert_eq!(
+            on_server.status(on_server.work),
+            SyncStatus::SyncError {
+                error: ErrorCode::WritesRefused
+            }
+        );
+        assert_eq!(on_server.unsent(on_server.work), 1);
+        assert_eq!(proxy.requests_holding("BEGIN:VCALENDAR"), 0);
+    }
+
+    /// The user's own Read-only mark is their choice, not a refusal.
+    #[test]
+    fn unsent_changes_of_a_calendar_the_user_made_read_only_are_no_sync_error() {
+        let on_server = OnServer::with(&[]);
+        on_server
+            .core
+            .create_event(dentist(on_server.work))
+            .unwrap();
+        on_server
+            .core
+            .set_calendar_read_only(on_server.work, true)
+            .unwrap();
+
+        on_server.sync();
+
+        assert_eq!(on_server.status(on_server.work), SyncStatus::Synced);
+        assert_eq!(on_server.unsent(on_server.work), 1);
+    }
 }

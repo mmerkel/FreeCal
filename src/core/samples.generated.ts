@@ -808,6 +808,9 @@ export const samples = {
       "message": "Access to the requested resource forbidden."
     },
     {
+      "code": "writesRefused"
+    },
+    {
       "code": "keyringUnavailable"
     },
     {

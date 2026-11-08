@@ -26,6 +26,7 @@ mod sync_status;
 mod typescript;
 mod view;
 
+use std::collections::BTreeSet;
 use std::fs::{File, TryLockError};
 use std::path::Path;
 
@@ -312,6 +313,18 @@ impl Core {
         id: AccountId,
         started_by: StartedBy,
     ) -> Result<Vec<Changed<CalendarId>>> {
+        self.sync_account_calendars(id, None, started_by)
+    }
+
+    /// [`Core::sync_account`] for only the Calendars `only` of the Account,
+    /// or all of them when none is given. The Account's Sync Status says
+    /// Syncing while they sync, and ends as for a sync of all of them.
+    fn sync_account_calendars(
+        &self,
+        id: AccountId,
+        only: Option<&BTreeSet<CalendarId>>,
+        started_by: StartedBy,
+    ) -> Result<Vec<Changed<CalendarId>>> {
         let account = self.store().find_account(id)?;
         if account.ok_or(CoreError::AccountNotFound(id))?.provider == Provider::Local {
             return Ok(Vec::new());
@@ -328,6 +341,7 @@ impl Core {
                 remote.as_ref(),
                 calendars
                     .into_iter()
+                    .filter(|(calendar_id, ..)| only.is_none_or(|only| only.contains(calendar_id)))
                     .map(|calendar| (calendar, None))
                     .collect(),
             ),
@@ -385,7 +399,8 @@ impl Core {
 
     /// Runs the syncs the Sync Scheduler finds due now, one Account after
     /// another, and returns once they end: polls, and the syncs asked for
-    /// since the last call. The shell calls it on a thread of its own, the
+    /// since the last call, of whole Accounts or of some of their
+    /// Calendars. The shell calls it on a thread of its own, the
     /// only one that does, every few seconds and whenever
     /// [`Core::wait_for_sync_request`] returns. A sync's failure is its
     /// Sync Status; one that isn't Offline is also logged.
@@ -408,7 +423,7 @@ impl Core {
             if !self.scheduler().network_available() {
                 break;
             }
-            match self.sync_account(id, due.started_by(id)) {
+            match self.sync_account_calendars(id, due.calendars_of(id), due.started_by(id)) {
                 Ok(_) | Err(CoreError::ServerUnreachable(_) | CoreError::AccountNotFound(_)) => {}
                 Err(error) => log::warn!("Syncing Account {} failed: {error}", id.0),
             }
@@ -948,14 +963,18 @@ impl Core {
 
     /// Sends "Sync status changed" for those of `calendars` that are a
     /// server Account's, and for their Accounts, as their Unsent Changes may
-    /// have changed, and asks for a sync of those Accounts, which sends the
-    /// change right after it.
+    /// have changed, and asks for a sync of those Calendars alone, which
+    /// sends the change right after it. A sync of a Calendar runs both
+    /// ways, so its Incoming Sync also brings in at once what the change's
+    /// send leaves to it, such as a UID handed on after a delete. Nothing
+    /// is asked for a Calendar whose Account is Offline: a Poll, or the
+    /// network's return, sends its changes (ticket 18).
     fn after_local_change(&self, calendars: &[CalendarId]) {
-        let accounts = self.sync_status().after_local_change(calendars);
-        if !accounts.is_empty() {
+        let to_send = self.sync_status().after_local_change(calendars);
+        if !to_send.is_empty() {
             self.ask_for_sync(|scheduler| {
-                for id in &accounts {
-                    scheduler.ask_account(*id, StartedBy::FreeCal);
+                for (account, calendar) in &to_send {
+                    scheduler.ask_calendar(*account, *calendar);
                 }
             });
         }

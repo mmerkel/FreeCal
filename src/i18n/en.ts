@@ -312,6 +312,7 @@ export const en = {
   'error.notCalDavServer': 'there is no CalDAV server at that address',
   'error.serverRefused': 'the server refused (status {status}): “\u2068{message}\u2069”',
   'error.serverRefusedWithoutText': 'the server refused (status {status})',
+  'error.writesRefused': 'the server doesn’t allow changes to this calendar',
   'error.keyringUnavailable':
     'there is no system keyring to keep the password in, or it stayed locked',
   'error.passwordNotInKeyring': 'the system keyring no longer has the password for this account',

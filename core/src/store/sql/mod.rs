@@ -516,6 +516,22 @@ impl Store {
         Ok(uids)
     }
 
+    /// The Send Failure of each Unsent Change of a Calendar, as the Local
+    /// Store keeps it, untrusted, with its UID, in the order they were
+    /// added. Ticket 18 shows them.
+    #[cfg(test)]
+    pub fn send_failures(&self, calendar_id: CalendarId) -> Result<Vec<(String, Option<String>)>> {
+        let failures = self
+            .conn
+            .prepare(
+                "SELECT uid, send_failure FROM unsent_change WHERE calendar_id = ?1 \
+                 ORDER BY rowid",
+            )?
+            .query_map([calendar_id.0], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(failures)
+    }
+
     /// Every Unsent Change, in the order they were added.
     #[cfg(test)]
     pub fn unsent_changes(&self) -> Result<Vec<UnsentChange>> {

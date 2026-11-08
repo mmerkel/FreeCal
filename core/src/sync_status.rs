@@ -452,20 +452,31 @@ impl<'a> SyncStatusKeeper<'a> {
 
     /// Sends the Sync Status of those of `calendars` that are a server
     /// Account's, and of their Accounts, after a local change, as their
-    /// Unsent Changes may have changed. Returns those Accounts, none should
-    /// the Local Store fail.
-    pub fn after_local_change(&self, calendars: &[CalendarId]) -> Vec<AccountId> {
+    /// Unsent Changes may have changed. Returns those Calendars whose
+    /// Account isn't Offline, with their Accounts, to send the change at
+    /// once; none should the Local Store fail.
+    pub fn after_local_change(&self, calendars: &[CalendarId]) -> Vec<(AccountId, CalendarId)> {
         let Some(current) = self.read_to_send() else {
             return Vec::new();
         };
-        let accounts: Vec<AccountId> = current
+        let changed: Vec<&ServerCalendarState> = current
             .calendars
             .iter()
-            .filter(|(calendar, _)| calendars.contains(&calendar.calendar_id))
-            .map(|(calendar, _)| calendar.account_id)
+            .map(|(calendar, _)| calendar)
+            .filter(|calendar| calendars.contains(&calendar.calendar_id))
             .collect();
+        let accounts: Vec<AccountId> = changed.iter().map(|calendar| calendar.account_id).collect();
         self.send_signals(current.signals(&accounts, calendars));
-        accounts
+        let offline: Vec<AccountId> = current
+            .account_states()
+            .filter(|(_, state)| state.offline())
+            .map(|(id, _)| id)
+            .collect();
+        changed
+            .into_iter()
+            .filter(|calendar| !offline.contains(&calendar.account_id))
+            .map(|calendar| (calendar.account_id, calendar.calendar_id))
+            .collect()
     }
 
     /// The Sync Status of every server Account and Calendar, with the

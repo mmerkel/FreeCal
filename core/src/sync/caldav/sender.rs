@@ -24,18 +24,23 @@ use crate::event::{Loaded, ServerObject};
 use crate::journal::{self, SentEventRows};
 use crate::remote::{Precondition, Remote, WriteOutcome};
 use crate::store::{CalendarToSync, Store};
+use crate::sync::SendFailure;
 use crate::sync_status::about_account;
-use crate::{CalendarId, Result};
+use crate::{CalendarId, CoreError, Result};
 
 /// Sends the Unsent Changes of the CalDAV Calendar `calendar` through its
 /// Account's server `remote`, UID by UID, in the order they were first
 /// changed, building new `VEVENT`s with `now` as their time of revision. A
 /// Read-only Calendar's wait until it is writable, and so do those of a
 /// Calendar whose First Sync is unfinished, as the Mirror doesn't yet hold
-/// every Server Object, so a create could meet a UID the server holds. A
-/// failure about the whole Account stops it; any other failure of one UID
-/// leaves its Unsent Changes in place and the others are still sent, and
-/// the first is returned.
+/// every Server Object, so a create could meet a UID the server holds.
+/// Those of a Calendar its server reports read-only also fail with
+/// [`CoreError::WritesRefused`], the Calendar's Sync Error, as the server
+/// refuses them; the user's own Read-only mark is no failure. A failure
+/// about the whole Account stops it, and so does the server refusing
+/// writes to the Calendar. Any other failure of one UID leaves its Unsent
+/// Changes in place and the others are still sent, and the first is
+/// returned.
 pub(crate) fn send(
     remote: &dyn Remote,
     store: &Mutex<Store>,
@@ -47,10 +52,15 @@ pub(crate) fn send(
     }
     let uids = {
         let store = store.lock().unwrap();
-        if store.find_calendar(calendar_id)?.read_only {
+        let calendar = store.find_calendar(calendar_id)?;
+        let uids = store.unsent_uids(calendar_id)?;
+        if calendar.server_read_only && !uids.is_empty() {
+            return Err(CoreError::WritesRefused);
+        }
+        if calendar.read_only {
             return Ok(());
         }
-        store.unsent_uids(calendar_id)?
+        uids
     };
     let mut failed = None;
     for uid in uids {
@@ -61,11 +71,18 @@ pub(crate) fn send(
         };
         match to_send.send(remote, store, now) {
             Ok(()) => {}
-            Err(error) if about_account(&error) => return Err(error),
+            Err(error) if beyond_uid(&error) => return Err(error),
             Err(error) => _ = failed.get_or_insert(error),
         }
     }
     failed.map_or(Ok(()), Err)
+}
+
+/// Whether `error` is about more than the UID whose send met it: about the
+/// whole Account, or the server refusing writes to the whole Calendar. It
+/// stops the Calendar's Outgoing Sync and is no Send Failure.
+fn beyond_uid(error: &CoreError) -> bool {
+    about_account(error) || matches!(error, CoreError::WritesRefused)
 }
 
 /// The UID `uid` of the CalDAV Calendar `calendar_id` at `url`, whose
@@ -88,6 +105,34 @@ enum Mirrored {
 }
 
 impl ToSend<'_> {
+    /// Sends the UID's Event Rows as [`ToSend::try_send`] does. When they
+    /// aren't sent, keeps why with the UID's Unsent Changes, its Send
+    /// Failure, but for a failure about the whole Account or Calendar
+    /// ([`beyond_uid`]), which is that one's Sync Status. A failed request
+    /// is returned.
+    fn send(&self, remote: &dyn Remote, store: &Mutex<Store>, now: DateTime<Utc>) -> Result<()> {
+        let (send_failure, failed) = match self.try_send(remote, store, now) {
+            Ok(None) => return Ok(()),
+            Ok(Some(send_failure)) => (send_failure, None),
+            Err(error) if beyond_uid(&error) => return Err(error),
+            Err(error) => (
+                SendFailure::Failed {
+                    error: error.code(),
+                },
+                Some(error),
+            ),
+        };
+        store.lock().unwrap().write(|database_transaction| {
+            journal::not_sent(
+                database_transaction,
+                self.calendar_id,
+                self.uid,
+                &send_failure,
+            )
+        })?;
+        failed.map_or(Ok(()), Err)
+    }
+
     /// Sends the UID's Event Rows as one CalDAV resource, built on its
     /// Server Object's text ([`resource_to_send`]), or deletes the Server
     /// Object when it has no Event Rows. With neither, its Unsent Changes
@@ -97,8 +142,14 @@ impl ToSend<'_> {
     /// update or a delete waits while the Mirror holds no ETag of the Server
     /// Object (ADR 0015's amendment), and so does a UID whose resource can't
     /// be built, a problem of its Events, written to the Log. No network
-    /// request runs while the Local Store is locked.
-    fn send(&self, remote: &dyn Remote, store: &Mutex<Store>, now: DateTime<Utc>) -> Result<()> {
+    /// request runs while the Local Store is locked. Returns why they
+    /// weren't sent, none once they are.
+    fn try_send(
+        &self,
+        remote: &dyn Remote,
+        store: &Mutex<Store>,
+        now: DateTime<Utc>,
+    ) -> Result<Option<SendFailure>> {
         let (built, held, sending) = {
             let store = store.lock().unwrap();
             let loaded = Loaded::of_uid(&*store, self.calendar_id, self.uid)?;
@@ -112,9 +163,10 @@ impl ToSend<'_> {
             Ok(built) => built,
             Err(error) => {
                 log::warn!("{}", self.unbuilt_line(&error.to_string()));
-                return Ok(());
+                return Ok(Some(SendFailure::Unbuildable));
             }
         };
+        let creating = held.is_none();
         let outcome = match (built, held) {
             (None, None) => WriteOutcome::Done(Mirrored::NothingSent),
             (Some(text), Some(held)) if text == held.data => {
@@ -128,7 +180,7 @@ impl ToSend<'_> {
             }
             (built, Some(held)) => {
                 let Some(etag) = &held.etag else {
-                    return Ok(());
+                    return Ok(Some(SendFailure::WaitingForServerVersion));
                 };
                 match built {
                     Some(text) => remote
@@ -141,8 +193,9 @@ impl ToSend<'_> {
             }
         };
         match outcome {
-            WriteOutcome::Done(mirrored) => self.sent(store, &mirrored, &sending),
-            WriteOutcome::ServerChanged => Ok(()),
+            WriteOutcome::Done(mirrored) => self.sent(store, &mirrored, &sending).map(|()| None),
+            WriteOutcome::ServerChanged if creating => Ok(Some(SendFailure::AddressTaken)),
+            WriteOutcome::ServerChanged => Ok(Some(SendFailure::ServerChanged)),
         }
     }
 
@@ -231,7 +284,7 @@ mod tests {
     use crate::journal::{TransactionOrigin, record};
     use crate::remote::{Changes, FetchToo, KnownVersions, Put, SyncPoint};
     use crate::store::StoredEvent;
-    use crate::{AvailableCalendar, Provider};
+    use crate::{AvailableCalendar, ErrorCode, Provider};
 
     #[test]
     fn a_new_resource_is_named_after_its_uid_only_when_no_one_encodes_it() {
@@ -359,6 +412,245 @@ mod tests {
                 recurrence_id: None,
             },
         }
+    }
+
+    /// A server that gives every write the answer `answer` makes.
+    struct Answering(fn() -> Result<WriteOutcome<()>>);
+
+    impl Remote for Answering {
+        fn provider(&self) -> Provider {
+            Provider::CalDav
+        }
+
+        fn discover(&self) -> Result<Vec<AvailableCalendar>> {
+            unreachable!()
+        }
+
+        fn server_read_only(&self, _: &str) -> Result<bool> {
+            unreachable!()
+        }
+
+        fn all_events(
+            &self,
+            _: &str,
+            _: Tz,
+            _: &mut dyn FnMut(Vec<ServerObject>, Tz) -> Result<()>,
+        ) -> Result<SyncPoint> {
+            unreachable!()
+        }
+
+        fn changes(
+            &self,
+            _: &str,
+            _: Option<&str>,
+            _: &KnownVersions,
+            _: Tz,
+            _: FetchToo,
+        ) -> Result<Changes> {
+            unreachable!()
+        }
+
+        fn put(&self, _: &str, href: &str, _: &str, _: Precondition) -> Result<WriteOutcome<Put>> {
+            Ok((self.0)()?.map(|()| Put {
+                href: href.to_owned(),
+                etag: Some("\"2\"".to_owned()),
+            }))
+        }
+
+        fn delete(&self, _: &str, _: &str, _: &str) -> Result<WriteOutcome<()>> {
+            (self.0)()
+        }
+    }
+
+    /// A Local Store with a writable CalDAV Calendar holding "Dentist" as
+    /// an Unsent Change. With `held`, the Mirror holds a Server Object of
+    /// its UID with that ETag, if any, which makes the send an update.
+    fn with_dentist(held: Option<Option<&str>>) -> (tempfile::TempDir, Mutex<Store>, CalendarId) {
+        let directory = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
+        let calendar_id = store.writable_server_calendar();
+        record(
+            &store,
+            TransactionOrigin::UserAction,
+            0,
+            |journal_transaction| {
+                journal_transaction.create("dentist", &dentist(calendar_id, "Dentist"))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+        if let Some(etag) = held {
+            let object = ServerObject {
+                href: "/user/work/dentist.ics".to_owned(),
+                etag: etag.map(str::to_owned),
+                data: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Other//EN\r\n\
+                       BEGIN:VEVENT\r\nUID:dentist\r\nDTSTAMP:20261001T000000Z\r\n\
+                       SUMMARY:Dentist on the server\r\nDTSTART:20261005T070000Z\r\n\
+                       DTEND:20261005T080000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+                    .to_owned(),
+            };
+            store
+                .write(|database_transaction| {
+                    mirror(database_transaction, calendar_id, &object, "dentist")
+                })
+                .unwrap();
+        }
+        (directory, Mutex::new(store), calendar_id)
+    }
+
+    /// Sends the Unsent Changes of the Local Store `store`'s Calendar
+    /// through `server`, and returns how the send ended, with the Send
+    /// Failure of each Unsent Change left.
+    fn send_failures(
+        server: &Answering,
+        store: &Mutex<Store>,
+        calendar_id: CalendarId,
+    ) -> (Result<()>, Vec<Option<SendFailure>>) {
+        let calendar = (
+            calendar_id,
+            "/user/work/".to_owned(),
+            Some(SyncPoint { token: None }),
+        );
+        let sent = send(server, store, &calendar, Utc::now());
+        let failures = store
+            .lock()
+            .unwrap()
+            .send_failures(calendar_id)
+            .unwrap()
+            .into_iter()
+            .map(|(_, stored)| SendFailure::from_stored(&stored?))
+            .collect();
+        (sent, failures)
+    }
+
+    fn done() -> Result<WriteOutcome<()>> {
+        Ok(WriteOutcome::Done(()))
+    }
+
+    fn server_changed() -> Result<WriteOutcome<()>> {
+        Ok(WriteOutcome::ServerChanged)
+    }
+
+    #[test]
+    fn a_create_meeting_something_at_its_address_keeps_why() {
+        let (_directory, store, calendar_id) = with_dentist(None);
+
+        let (sent, failures) = send_failures(&Answering(server_changed), &store, calendar_id);
+
+        sent.unwrap();
+        assert_eq!(failures, [Some(SendFailure::AddressTaken)]);
+    }
+
+    #[test]
+    fn an_update_meeting_a_newer_server_version_keeps_why() {
+        let (_directory, store, calendar_id) = with_dentist(Some(Some("\"1\"")));
+
+        let (sent, failures) = send_failures(&Answering(server_changed), &store, calendar_id);
+
+        sent.unwrap();
+        assert_eq!(failures, [Some(SendFailure::ServerChanged)]);
+    }
+
+    #[test]
+    fn an_update_without_a_stored_etag_keeps_why_it_waits() {
+        let (_directory, store, calendar_id) = with_dentist(Some(None));
+
+        let (sent, failures) = send_failures(&Answering(|| unreachable!()), &store, calendar_id);
+
+        sent.unwrap();
+        assert_eq!(failures, [Some(SendFailure::WaitingForServerVersion)]);
+    }
+
+    #[test]
+    fn a_refused_write_keeps_the_servers_refusal_and_returns_it() {
+        let (_directory, store, calendar_id) = with_dentist(None);
+        let refused = || {
+            Err(CoreError::ServerRefused {
+                status: 507,
+                message: "Full".to_owned(),
+            })
+        };
+
+        let (sent, failures) = send_failures(&Answering(refused), &store, calendar_id);
+
+        assert!(matches!(
+            sent,
+            Err(CoreError::ServerRefused { status: 507, .. })
+        ));
+        assert_eq!(
+            failures,
+            [Some(SendFailure::Failed {
+                error: ErrorCode::ServerRefused {
+                    status: 507,
+                    message: "Full".to_owned()
+                }
+            })]
+        );
+    }
+
+    /// A server refusing writes is the Calendar's Sync Error, not the
+    /// UID's.
+    #[test]
+    fn writes_refused_keep_no_send_failure() {
+        let (_directory, store, calendar_id) = with_dentist(None);
+
+        let (sent, failures) = send_failures(
+            &Answering(|| Err(CoreError::WritesRefused)),
+            &store,
+            calendar_id,
+        );
+
+        assert!(matches!(sent, Err(CoreError::WritesRefused)));
+        assert_eq!(failures, [None]);
+    }
+
+    /// Being Offline is the Account's Sync Status, not the UID's.
+    #[test]
+    fn a_failure_about_the_account_keeps_no_send_failure() {
+        let (_directory, store, calendar_id) = with_dentist(None);
+        let unreachable = || Err(CoreError::ServerUnreachable("gone".to_owned()));
+
+        let (sent, failures) = send_failures(&Answering(unreachable), &store, calendar_id);
+
+        assert!(matches!(sent, Err(CoreError::ServerUnreachable(_))));
+        assert_eq!(failures, [None]);
+    }
+
+    #[test]
+    fn a_send_that_succeeds_takes_the_send_failure_with_its_unsent_changes() {
+        let (_directory, store, calendar_id) = with_dentist(None);
+        send_failures(&Answering(server_changed), &store, calendar_id)
+            .0
+            .unwrap();
+
+        let (sent, failures) = send_failures(&Answering(done), &store, calendar_id);
+
+        sent.unwrap();
+        assert_eq!(failures, []);
+    }
+
+    #[test]
+    fn a_stored_send_failure_is_read_back_untrusted() {
+        let failure = SendFailure::Failed {
+            error: ErrorCode::ServerRefused {
+                status: 500,
+                message: "No".to_owned(),
+            },
+        };
+        assert_eq!(SendFailure::from_stored(&failure.stored()), Some(failure));
+        assert_eq!(
+            SendFailure::from_stored(
+                r#"{"kind":"failed","error":{"code":"serverRefused","status":500,"message":"a\nb"}}"#
+            ),
+            Some(SendFailure::Failed {
+                error: ErrorCode::ServerRefused {
+                    status: 500,
+                    message: "a b".to_owned()
+                }
+            })
+        );
+        assert_eq!(SendFailure::from_stored("{\"kind\":\"other\"}"), None);
+        assert_eq!(SendFailure::from_stored("not json"), None);
     }
 
     /// Not visible through the core interface, as a change can't be made

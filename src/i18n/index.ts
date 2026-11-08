@@ -61,6 +61,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   secureConnectionFailed: 'error.secureConnectionFailed',
   notCalDavServer: 'error.notCalDavServer',
   serverRefused: 'error.serverRefused',
+  writesRefused: 'error.writesRefused',
   keyringUnavailable: 'error.keyringUnavailable',
   passwordNotInKeyring: 'error.passwordNotInKeyring',
   redirectedElsewhere: 'error.redirectedElsewhere',

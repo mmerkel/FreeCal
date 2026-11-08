@@ -7,11 +7,11 @@
 //! It only decides; [`crate::Core::run_scheduled_syncs`] runs the syncs it
 //! finds due, on the one thread the shell keeps for them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 
-use crate::{AccountId, StartedBy};
+use crate::{AccountId, CalendarId, StartedBy};
 
 /// How often every server Account is polled while the window is open
 /// (US-64).
@@ -36,16 +36,21 @@ pub enum SyncTrigger {
 }
 
 /// The syncs asked for and not started yet: of every server Account, of
-/// some, or both, each with who asked. The user wins over FreeCal.
+/// some, of some of their Calendars, or all of these, each with who asked.
+/// The user wins over FreeCal, and a sync of an Account takes in those of
+/// its Calendars.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct SyncRequests {
     every_account: Option<StartedBy>,
     accounts: BTreeMap<AccountId, StartedBy>,
+    /// Calendars to sync without the rest of their Account, by Account, as
+    /// after a local change; always asked for by FreeCal.
+    calendars: BTreeMap<AccountId, BTreeSet<CalendarId>>,
 }
 
 impl SyncRequests {
     pub fn is_empty(&self) -> bool {
-        self.every_account.is_none() && self.accounts.is_empty()
+        self.every_account.is_none() && self.accounts.is_empty() && self.calendars.is_empty()
     }
 
     /// Whether every server Account is to sync, not only those named.
@@ -53,10 +58,25 @@ impl SyncRequests {
         self.every_account.is_some()
     }
 
-    /// The Accounts named on their own, which [`SyncRequests::every_account`]
-    /// may add to.
+    /// The Accounts named on their own or by some of their Calendars, each
+    /// once, which [`SyncRequests::every_account`] may add to.
     pub fn accounts(&self) -> impl Iterator<Item = AccountId> + '_ {
-        self.accounts.keys().copied()
+        let named: BTreeSet<AccountId> = self
+            .accounts
+            .keys()
+            .chain(self.calendars.keys())
+            .copied()
+            .collect();
+        named.into_iter()
+    }
+
+    /// The Calendars of the Account `id` to sync: none for all of them,
+    /// as when the Account is to sync as a whole.
+    pub fn calendars_of(&self, id: AccountId) -> Option<&BTreeSet<CalendarId>> {
+        if self.every_account.is_some() || self.accounts.contains_key(&id) {
+            return None;
+        }
+        self.calendars.get(&id)
     }
 
     /// Who the sync of the Account `id` counts as started by.
@@ -73,6 +93,10 @@ impl SyncRequests {
     fn ask_account(&mut self, id: AccountId, by: StartedBy) {
         let asked = self.accounts.entry(id).or_insert(by);
         *asked = (*asked).max(by);
+    }
+
+    fn ask_calendar(&mut self, account: AccountId, calendar: CalendarId) {
+        self.calendars.entry(account).or_default().insert(calendar);
     }
 }
 
@@ -137,6 +161,12 @@ impl SyncScheduler {
 
     pub fn ask_account(&mut self, id: AccountId, by: StartedBy) {
         self.requests.ask_account(id, by);
+    }
+
+    /// Asks FreeCal for a sync of the Calendar `calendar` of the Account
+    /// `account`, without the rest of the Account.
+    pub fn ask_calendar(&mut self, account: AccountId, calendar: CalendarId) {
+        self.requests.ask_calendar(account, calendar);
     }
 
     pub fn has_requests(&self) -> bool {

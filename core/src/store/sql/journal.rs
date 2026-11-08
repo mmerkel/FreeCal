@@ -114,6 +114,23 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
+    /// Keeps `send_failure`, a Send Failure as the Local Store keeps it,
+    /// with the Unsent Changes of the UID `uid` in a Calendar, whatever
+    /// their recurrence IDs, in place of any they had.
+    pub(crate) fn set_send_failure(
+        &self,
+        _: &JournalWritePermission,
+        calendar_id: CalendarId,
+        uid: &str,
+        send_failure: &str,
+    ) -> Result<()> {
+        self.tx.execute(
+            "UPDATE unsent_change SET send_failure = ?3 WHERE calendar_id = ?1 AND uid = ?2",
+            params![calendar_id.0, uid, send_failure],
+        )?;
+        Ok(())
+    }
+
     /// Stores a new Journal Transaction, as `origin` records it, made at
     /// `made_at`.
     pub(crate) fn insert_journal_transaction(

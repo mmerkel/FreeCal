@@ -84,6 +84,11 @@ pub enum CoreError {
     /// [`crate::caldav`].
     #[error("the server refused with status {status}: {message:?}")]
     ServerRefused { status: u16, message: String },
+    /// The server doesn't let the user change a Calendar's Events: it
+    /// refused a write for want of privileges, or reports the Calendar
+    /// read-only while Unsent Changes of it wait.
+    #[error("the server doesn't allow changes to the Calendar")]
+    WritesRefused,
     #[error("the system keyring couldn't be used: {0}")]
     KeyringUnavailable(KeyringError),
     #[error("the system keyring has no password for the Account")]
@@ -144,6 +149,7 @@ impl CoreError {
                 status: *status,
                 message: message.clone(),
             },
+            CoreError::WritesRefused => ErrorCode::WritesRefused,
             CoreError::KeyringUnavailable(_) => ErrorCode::KeyringUnavailable,
             CoreError::PasswordNotInKeyring => ErrorCode::PasswordNotInKeyring,
             CoreError::RedirectedElsewhere(url) => ErrorCode::RedirectedElsewhere {
@@ -240,6 +246,10 @@ pub enum ErrorCode {
         status: u16,
         message: String,
     },
+    /// The server doesn't let the user change a Calendar's Events, though
+    /// Unsent Changes of it wait: it refused a write, or reports the
+    /// Calendar read-only.
+    WritesRefused,
     /// There is no working system keyring to keep a password in, or it
     /// stayed locked.
     KeyringUnavailable,
@@ -323,6 +333,7 @@ impl ErrorCode {
                 status: 403,
                 message: "Access to the requested resource forbidden.".to_owned(),
             },
+            ErrorCode::WritesRefused,
             ErrorCode::KeyringUnavailable,
             ErrorCode::PasswordNotInKeyring,
             ErrorCode::RedirectedElsewhere {

@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::event::{Source, rule};
 use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Uid, UidEvent};
+use crate::sync::SendFailure;
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
 /// The Change Journal's Write Permission (ADR 0015), which the writes of
@@ -263,6 +264,24 @@ pub(crate) fn sent(database_transaction: &DatabaseTransaction, sent: &SentEventR
         return Ok(());
     }
     database_transaction.delete_unsent_changes(WRITE_PERMISSION, sent.calendar_id, &sent.uid)
+}
+
+/// Records that the Sender tried to send the Unsent Changes of the UID
+/// `uid` in the Calendar `calendar_id` and didn't, because of
+/// `send_failure`: it is kept with them, in place of the last one, until
+/// a send succeeds and they go.
+pub(crate) fn not_sent(
+    database_transaction: &DatabaseTransaction,
+    calendar_id: CalendarId,
+    uid: &str,
+    send_failure: &SendFailure,
+) -> Result<()> {
+    database_transaction.set_send_failure(
+        WRITE_PERMISSION,
+        calendar_id,
+        uid,
+        &send_failure.stored(),
+    )
 }
 
 /// One Journal Transaction being recorded, in its Database Transaction,

@@ -214,6 +214,13 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE account ADD COLUMN own_addresses TEXT;
     ALTER TABLE caldav_server_object ADD COLUMN attendees TEXT NOT NULL DEFAULT '[]';
     ",
+    // Ticket 124: an Unsent Change's Send Failure, why the Sender's last
+    // try didn't send it, as the JSON of `SendFailure`; none before a try,
+    // or when a try failed for a reason its Account or Calendar shows.
+    // Untrusted when read.
+    "
+    ALTER TABLE unsent_change ADD COLUMN send_failure TEXT;
+    ",
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether

@@ -454,7 +454,8 @@ impl Client {
 
     /// Sends a conditional write, `request` with `body`, following no
     /// redirect: a failed precondition, or an object gone, is
-    /// [`WriteOutcome::ServerChanged`].
+    /// [`WriteOutcome::ServerChanged`], and a refusal for want of
+    /// privileges [`CoreError::WritesRefused`] ([`write_refusal`]).
     fn write(
         &self,
         request: ureq::http::request::Builder,
@@ -468,6 +469,9 @@ impl Client {
         match response.status().as_u16() {
             200..=299 => Ok(WriteOutcome::Done(response)),
             404 | 412 => Ok(WriteOutcome::ServerChanged),
+            403 => Err(write_refusal(
+                &response.into_body().read_to_string().unwrap_or_default(),
+            )),
             _ => Err(refusal(response)),
         }
     }
@@ -690,6 +694,28 @@ fn read_multistatus(response: ureq::http::Response<ureq::Body>) -> Result<Elemen
             .ok_or(CoreError::NotCalDavServer),
         200..=299 => Err(CoreError::NotCalDavServer),
         _ => Err(refusal(response)),
+    }
+}
+
+/// Why the server answered a write with 403 (Forbidden), by the answer's
+/// `body`. A server may refuse so for want of privileges (RFC 3744 §7.1.1),
+/// which is the Calendar refusing writes, [`CoreError::WritesRefused`].
+/// It also refuses so a resource whose content breaks a CalDAV
+/// precondition, such as `valid-calendar-data` (RFC 4791 §5.3.2.1), named
+/// in a `DAV:error` body: that is about the one resource, not the
+/// Calendar. A 403 naming nothing counts as the privileges', as most
+/// servers name neither.
+fn write_refusal(body: &str) -> CoreError {
+    let about_content = parse(body).is_some_and(|root| {
+        root.is(DAV, "error") && root.children.iter().any(|child| child.namespace == CALDAV)
+    });
+    if about_content {
+        CoreError::ServerRefused {
+            status: 403,
+            message: String::new(),
+        }
+    } else {
+        CoreError::WritesRefused
     }
 }
 
@@ -1108,6 +1134,29 @@ fn parse(xml: &str) -> Option<Element> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_write_refused_for_its_content_is_no_refusal_of_writes() {
+        assert!(matches!(
+            write_refusal(
+                r#"<D:error xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+                   <C:valid-calendar-data/></D:error>"#
+            ),
+            CoreError::ServerRefused { status: 403, .. }
+        ));
+        for privileges in [
+            r#"<D:error xmlns:D="DAV:"><D:need-privileges><D:resource>
+               <D:href>/work/</D:href><D:privilege><D:bind/></D:privilege>
+               </D:resource></D:need-privileges></D:error>"#,
+            "Access to the requested resource forbidden.",
+            "",
+        ] {
+            assert!(matches!(
+                write_refusal(privileges),
+                CoreError::WritesRefused
+            ));
+        }
+    }
 
     #[test]
     fn a_propfind_body_names_each_property_in_its_namespace() {

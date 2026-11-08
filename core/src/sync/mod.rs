@@ -16,11 +16,12 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
+use serde::{Deserialize, Serialize};
 
 use crate::journal::{JournalTransaction, JournalTransactionId, TransactionOrigin};
 use crate::remote::Remote;
 use crate::store::{CalendarToSync, Store};
-use crate::{Provider, Result};
+use crate::{ErrorCode, Provider, Result};
 
 /// Runs a change as one Journal Transaction of a Transaction Origin and then
 /// sends its Signals, as `Core::record` does, so that what follows a commit
@@ -67,6 +68,56 @@ pub(crate) fn outgoing(
     match remote.provider() {
         Provider::Local => unreachable!("the Local Provider has no server"),
         Provider::CalDav => caldav::sender::send(remote, store, calendar, now),
+    }
+}
+
+/// Why the Sender's last try to send the Unsent Changes of a UID didn't
+/// send them (new term: Send Failure), kept with them until a send
+/// succeeds, for "Not yet synced: <reason>" (spec: "Event details", shown by
+/// ticket 18). It covers only what is about the UID itself. What is about
+/// its Account or Calendar is that one's Sync Status instead, and stores
+/// none: the Account Offline, the Calendar's Sync Error (the server
+/// refusing writes, a paused Calendar), its Read-only mark, or its First
+/// Sync unfinished. An Unsent Change never tried has none either. The
+/// Local Store keeps it as its JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum SendFailure {
+    /// An update or a delete failed its precondition: the server holds a
+    /// version FreeCal hasn't read yet, which the Incoming Sync brings in
+    /// (a Conflict once tickets 20 and 21 raise them).
+    ServerChanged,
+    /// A create failed its precondition: something already is at the
+    /// address of the new resource, maybe holding another UID.
+    AddressTaken,
+    /// An update or a delete waits until the server's version reads, as
+    /// the Mirror holds no ETag to make it conditional on (ADR 0015's
+    /// amendment).
+    WaitingForServerVersion,
+    /// The resource to send can't be built from the UID's Event Rows, as
+    /// one has a time FreeCal can't read.
+    Unbuildable,
+    /// The request failed with `error`, as when the server refused it.
+    Failed { error: ErrorCode },
+}
+
+impl SendFailure {
+    /// The Send Failure as the Local Store keeps it, as JSON.
+    pub(crate) fn stored(&self) -> String {
+        serde_json::to_string(self).expect("a Send Failure always serializes")
+    }
+
+    /// Reads a stored Send Failure, untrusted: none when it can't be read,
+    /// and an error code checked as a Sync Record's is
+    /// ([`ErrorCode::checked`]).
+    #[cfg(test)]
+    pub(crate) fn from_stored(json: &str) -> Option<Self> {
+        match serde_json::from_str(json).ok()? {
+            SendFailure::Failed { error } => Some(SendFailure::Failed {
+                error: error.checked()?,
+            }),
+            failure => Some(failure),
+        }
     }
 }
 
