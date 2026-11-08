@@ -1,5 +1,5 @@
 // The status indicator and the sidebar's Sync Status markers, run against
-// the recording fake core with a stand-in grid: they follow "Sync status
+// the fake core with a stand-in grid: they follow "Sync status
 // changed", which the tests emit with the Sync Statuses they script.
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -14,7 +14,7 @@ import type {
 } from './core/types';
 import { SYNCING_DELAY_MS } from './lib/syncDisplay.svelte';
 import { caldavAccount, calendar, firstLaunch, localAccount } from './test/answers';
-import type { RecordingCore } from './test/recordingCore';
+import type { FakeCore } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
@@ -98,7 +98,7 @@ function withServer() {
   };
 }
 
-async function showApp(core: RecordingCore) {
+async function showApp(core: FakeCore) {
   render(App, { core });
   await screen.findByRole('list', { name: 'Grid' });
 }

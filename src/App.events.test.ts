@@ -1,5 +1,5 @@
 // The App's Event flows: creating, opening, editing and deleting Events, run
-// against the recording fake core with a stand-in grid (see StubGrid.svelte).
+// against the fake core with a stand-in grid (see StubGrid.svelte).
 // What a change does to the Events is the core's, tested at the core
 // interface; these tests check the calls made, and that the window follows
 // the "Occurrences changed" they emit as the core would.
@@ -12,7 +12,7 @@ import App from './App.svelte';
 import type { Calendar, Event, Occurrence, Repeat, StructuredText, When } from './core/types';
 import { calendar, event, firstLaunch, occurrence } from './test/answers';
 import { journalTransactionId } from './test/ids';
-import { failure, type RecordingCore } from './test/recordingCore';
+import { failure, type FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
@@ -37,12 +37,12 @@ function asOccurrence(shown: Event | Occurrence): Occurrence {
 }
 
 /** Scripts the Occurrences now shown and emits "Occurrences changed", as the core does after a change. */
-function occurrencesChanged(core: RecordingCore, events: (Event | Occurrence)[]) {
+function occurrencesChanged(core: FakeCore, events: (Event | Occurrence)[]) {
   core.answer('listOccurrences', events.map(asOccurrence));
   core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
 }
 
-async function showApp(core: RecordingCore) {
+async function showApp(core: FakeCore) {
   render(App, { core });
   return screen.findByRole('list', { name: 'Grid' });
 }
@@ -56,7 +56,7 @@ async function selectSlot(when: When) {
 /** Opens the Occurrence titled `title`, whose Event the core reads as `opened`. */
 async function openOccurrence(
   user: ReturnType<typeof userEvent.setup>,
-  core: RecordingCore,
+  core: FakeCore,
   opened: Event,
   title = opened.title,
 ) {

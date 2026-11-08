@@ -1,4 +1,4 @@
-// The main menu, Settings and About, run against the recording fake core
+// The main menu, Settings and About, run against the fake core
 // with a stand-in grid (see StubGrid.svelte).
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -7,7 +7,7 @@ import App from './App.svelte';
 import { expectAnchoredTo } from './test/anchored';
 import { systemDarkQuery } from './test/darkQuery';
 import { calendar, firstLaunch } from './test/answers';
-import { failure } from './test/recordingCore';
+import { failure } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 

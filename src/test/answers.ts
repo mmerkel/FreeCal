@@ -1,5 +1,5 @@
 // Scripted Answers for the tests of the whole window (`App.svelte`): a
-// RecordingCore scripted as a first launch, and builders for the core's types.
+// FakeCore scripted as a first launch, and builders for the core's types.
 // The builders only fill in fields the test leaves out; the test gives
 // everything the core would decide, such as an Occurrence's time or an
 // Event's structured text.
@@ -14,7 +14,7 @@ import type {
 } from '../core/types';
 import { DEFAULT_SETTINGS } from '../lib/settings';
 import { accountId, calendarId, eventId } from './ids';
-import { RecordingCore } from './recordingCore';
+import { FakeCore } from './fakeCore';
 
 /** The Local Account, as every Local Store has it. */
 export const localAccount: Account = { id: accountId(1), provider: 'local', server: null };
@@ -27,12 +27,12 @@ export const noSyncStatuses: SyncStatuses = {
 };
 
 /**
- * A RecordingCore answering as on a first launch on Saturday, October 3,
+ * A FakeCore answering as on a first launch on Saturday, October 3,
  * 2026: month view, the sidebar shown at its default width, the default
  * settings, and only the Local Account, with no Calendars and no Events.
  */
-export function firstLaunch(): RecordingCore {
-  const core = new RecordingCore();
+export function firstLaunch(): FakeCore {
+  const core = new FakeCore();
   core.answer('today', Temporal.PlainDate.from('2026-10-03'));
   core.answer('lastUsedView', 'month');
   core.answer('sidebar', { shown: true, width: null });
@@ -88,7 +88,7 @@ export function event(
   };
 }
 
-/** Text without links, as the core structures it: one paragraph per line. */
+/** Structured text with no links: each line a paragraph of one text piece. */
 export function plainText(text: string): StructuredText {
   return {
     paragraphs:
@@ -116,7 +116,7 @@ export function occurrence(of: Event, fields: Partial<Occurrence> = {}): Occurre
 
 /** Scripts the Calendars and the Occurrences of `events` for the next reads. */
 export function scriptWindow(
-  core: RecordingCore,
+  core: FakeCore,
   { calendars = [], events = [] }: { calendars?: Calendar[]; events?: Event[] },
 ) {
   core.answer('listCalendars', calendars);

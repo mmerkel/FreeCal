@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Changed, Event, EventDraft, Occurrence, Repeat, Signal } from '../core/types';
 import { calendarId, eventId } from '../test/ids';
-import { failure, RecordingCore } from '../test/recordingCore';
+import { failure, FakeCore } from '../test/fakeCore';
 import { WindowDialogs } from './windowDialogs.svelte';
 import { WindowModel } from './windowModel.svelte';
 
@@ -20,7 +20,7 @@ const changedEvent = samples.Changed[0] as Changed<Event>;
 const file = '/home/user/a.ics';
 
 /** Window Dialogs on a started Window Model, which shows the sample Occurrences. */
-async function started(core = new RecordingCore()) {
+async function started(core = new FakeCore()) {
   const model = new WindowModel(core);
   model.start();
   await settled();
@@ -298,7 +298,7 @@ describe('writes', () => {
   });
 
   test('without a writable Calendar, a notice says where to create one', async () => {
-    const core = new RecordingCore();
+    const core = new FakeCore();
     core.answer('listCalendars', []);
     const { dialogs } = await started(core);
 
@@ -370,7 +370,7 @@ describe('the import flow', () => {
   });
 
   test('without a writable Calendar, a notice says where to create one, and no file is asked for', async () => {
-    const core = new RecordingCore();
+    const core = new FakeCore();
     core.answer('listCalendars', []);
     const { dialogs } = await started(core);
 

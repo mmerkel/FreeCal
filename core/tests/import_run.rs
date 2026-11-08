@@ -225,6 +225,29 @@ fn an_import_that_changes_nothing_is_no_journal_transaction_and_sends_no_signal(
     assert_eq!(harness.signals.received(), []);
 }
 
+#[test]
+fn an_update_that_leaves_every_event_as_it_was_is_no_journal_transaction_and_sends_no_signal() {
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let home = calendar_with_kept(&harness, &core);
+    let kept = the_one(&core, "kept");
+
+    let outcome = import(
+        &core,
+        home.id,
+        ics(&event("kept", MONDAY.0, MONDAY.1)),
+        ExistingEvents::Update,
+    );
+
+    assert_eq!(
+        (outcome.imported, outcome.updated, outcome.skipped),
+        (0, 1, 0)
+    );
+    assert_eq!(outcome.journal_transaction, None);
+    assert_eq!(the_one(&core, "kept"), kept);
+    assert_eq!(harness.signals.received(), []);
+}
+
 mod pinned_zones {
     use super::*;
 

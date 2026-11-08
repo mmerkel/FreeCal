@@ -1,5 +1,5 @@
-// The App's views, navigation and tracking today, run against the recording
-// fake core with a stand-in grid (see StubGrid.svelte).
+// The App's views, navigation and tracking today, run against the fake
+// core with a stand-in grid (see StubGrid.svelte).
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
@@ -7,7 +7,7 @@ import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
 import type { Calendar, Event } from './core/types';
 import { calendar, event, firstLaunch, scriptWindow } from './test/answers';
-import type { RecordingCore } from './test/recordingCore';
+import type { FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
@@ -39,7 +39,7 @@ const monday = {
 } as const;
 
 /** Emits "Date changed" to `date`, as the core does at midnight. */
-function dateChanged(core: RecordingCore, date: string) {
+function dateChanged(core: FakeCore, date: string) {
   core.emit({ kind: 'dateChanged', date });
 }
 
@@ -47,7 +47,7 @@ function dateChanged(core: RecordingCore, date: string) {
  * Scripts the Occurrences of `events` in `home` and emits "Occurrences
  * changed", as the core does after a change.
  */
-function occurrencesChanged(core: RecordingCore, home: Calendar, events: Event[]) {
+function occurrencesChanged(core: FakeCore, home: Calendar, events: Event[]) {
   scriptWindow(core, { calendars: [home], events });
   core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
 }

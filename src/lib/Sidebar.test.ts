@@ -6,9 +6,9 @@ import { expectAnchoredTo } from '../test/anchored';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar } from '../core/types';
 import { caldavAccount, calendar, firstLaunch, localAccount } from '../test/answers';
-import { failure, type RecordingCore } from '../test/recordingCore';
+import { failure, type FakeCore } from '../test/fakeCore';
 
-// The sidebar's Calendars, run against the recording fake core. A test that
+// The sidebar's Calendars, run against the fake core. A test that
 // changes them checks the call, then scripts the Calendars as the core would
 // have them and emits "Calendars changed".
 
@@ -20,12 +20,12 @@ function withCalendars(...calendars: Calendar[]) {
 }
 
 /** Scripts `calendars` and emits "Calendars changed", as the core does after a change. */
-function calendarsChanged(core: RecordingCore, ...calendars: Calendar[]) {
+function calendarsChanged(core: FakeCore, ...calendars: Calendar[]) {
   core.answer('listCalendars', calendars);
   core.emit({ kind: 'calendarsChanged' });
 }
 
-async function showApp(core: RecordingCore) {
+async function showApp(core: FakeCore) {
   render(App, { core });
   return screen.findByRole('list', { name: 'Local' });
 }

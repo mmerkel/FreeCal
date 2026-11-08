@@ -1,5 +1,5 @@
 // Server Accounts in the sidebar: adding one, choosing its Calendars and
-// removing them, run against the recording fake core. What the server offers
+// removing them, run against the fake core. What the server offers
 // and what the core keeps are scripted; a test that changes them checks the
 // call, then scripts the result and emits the Signals the core would send.
 import { render, screen, waitFor, within } from '@testing-library/svelte';
@@ -9,7 +9,7 @@ import App from '../App.svelte';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Account, AvailableCalendar, Calendar, SyncStatusReport } from '../core/types';
 import { caldavAccount, calendar, firstLaunch, localAccount } from '../test/answers';
-import { failure, type RecordingCore } from '../test/recordingCore';
+import { failure, type FakeCore } from '../test/fakeCore';
 
 const work: AvailableCalendar = {
   url: 'https://dav.example.org/alice/work/',
@@ -53,13 +53,13 @@ function withAccounts(accounts: Account[], calendars: Calendar[] = []) {
 }
 
 /** Scripts the Accounts and Calendars and emits "Calendars changed", as the core does after a change. */
-function calendarsChanged(core: RecordingCore, accounts: Account[], calendars: Calendar[]) {
+function calendarsChanged(core: FakeCore, accounts: Account[], calendars: Calendar[]) {
   core.answer('listAccounts', [localAccount, ...accounts]);
   core.answer('listCalendars', calendars);
   core.emit({ kind: 'calendarsChanged' });
 }
 
-async function showApp(core: RecordingCore) {
+async function showApp(core: FakeCore) {
   render(App, { core });
   return screen.findByRole('list', { name: 'Local' });
 }

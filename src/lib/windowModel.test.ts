@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/types';
 import { eventId } from '../test/ids';
-import { failure, RecordingCore } from '../test/recordingCore';
+import { failure, FakeCore } from '../test/fakeCore';
 import { WindowModel } from './windowModel.svelte';
 
 const settled = () => new Promise((resolve) => setTimeout(resolve));
@@ -18,7 +18,7 @@ const sampleAccount = samples.Account[0] as Account;
 const sampleStatuses = samples.SyncStatuses[0] as SyncStatuses;
 
 /** A Window Model on `core`, started and done with its startup. */
-async function started(core = new RecordingCore()) {
+async function started(core = new FakeCore()) {
   const model = new WindowModel(core);
   const stop = model.start();
   await settled();
@@ -49,7 +49,7 @@ describe('startup', () => {
   });
 
   test('on a startup failure, says why and shows the window without subscribing', async () => {
-    const core = new RecordingCore();
+    const core = new FakeCore();
     core.answer('startupFailure', { code: 'localStoreInUse' });
 
     const { model } = await started(core);
@@ -59,7 +59,7 @@ describe('startup', () => {
   });
 
   test('when a first read fails, says why FreeCal could not load', async () => {
-    const core = new RecordingCore();
+    const core = new FakeCore();
     core.answer('listCalendars', failure({ code: 'localStoreFailed' }));
 
     const { model } = await started(core);
@@ -68,7 +68,7 @@ describe('startup', () => {
   });
 
   test('a "Date changed" during startup is newer than the date read', async () => {
-    const core = new RecordingCore();
+    const core = new FakeCore();
     const today = core.pending('today');
     const model = new WindowModel(core);
     model.start();

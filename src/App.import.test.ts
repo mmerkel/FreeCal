@@ -1,5 +1,5 @@
 // The import flow: picking a file, the preview, running and undoing an
-// import, run against the recording fake core with a stand-in grid (see
+// import, run against the fake core with a stand-in grid (see
 // StubGrid.svelte). What an import does to the Events is the core's, tested
 // at the core interface; these tests check the calls and what the window shows.
 import { render, screen, waitFor, within } from '@testing-library/svelte';
@@ -10,7 +10,7 @@ import App from './App.svelte';
 import type { Calendar, ImportSummary } from './core/types';
 import { calendar, event, firstLaunch, scriptWindow } from './test/answers';
 import { journalTransactionId } from './test/ids';
-import { failure, type RecordingCore } from './test/recordingCore';
+import { failure, type FakeCore } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
@@ -26,7 +26,7 @@ function preview(into: Calendar, fields: Partial<ImportSummary> = {}): ImportSum
   return { calendarId: into.id, newEvents: 2, existingEvents: 0, pinned: [], ...fields };
 }
 
-async function showApp(core: RecordingCore) {
+async function showApp(core: FakeCore) {
   render(App, { core });
   await screen.findByRole('list', { name: 'Grid' });
   return userEvent.setup();
@@ -40,7 +40,7 @@ async function chooseImport(user: ReturnType<typeof userEvent.setup>) {
 /** Lets the user pick `file`, opens the import dialog for it and waits for `summary`. */
 async function openImport(
   user: ReturnType<typeof userEvent.setup>,
-  core: RecordingCore,
+  core: FakeCore,
   summary: ImportSummary,
   file = 'work.ics',
 ) {
