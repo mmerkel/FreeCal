@@ -45,3 +45,4 @@ Spec: "Untrusted content". ADRs 0011, 0014, 0015.
   - **New terms:**
     - **Sent Event Rows** (new term, `journal::SentEventRows`): one Calendar and UID's Event Rows as the Sender read them to send them, each Event Version by its hash.
     - Code names: `Precondition` (what a write of a Server Object is conditional on: nothing there, or the ETag the Mirror holds), `WriteOutcome` with `ServerChanged` (how a conditional write went: done, or its precondition failed or the object is gone), `Put` (the href and strong ETag of what a server took), `ToSend` (one Calendar and UID whose Unsent Changes are sent), `Mirrored` (what the Mirror takes after a send: nothing sent, a Server Object written, or deleted), `unsent_uids`, `new_resource_name`, `strong_etag`, `refusal`.
+- 2026-11-08: New terms approved: Sent Event Rows, and the code names `Precondition`, `WriteOutcome` (`ServerChanged`), `Put`, `ToSend` and `Mirrored`.
