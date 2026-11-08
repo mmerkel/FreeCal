@@ -236,7 +236,8 @@ impl Store {
     /// order they were added.
     pub fn server_calendar_states(&self) -> Result<Vec<ServerCalendarState>> {
         let mut stmt = self.conn.prepare(
-            "SELECT calendar.id, calendar.account_id, \
+            "SELECT calendar.id, calendar.last_sync_at, calendar.last_sync_outcome, \
+                 calendar.last_synced_at, calendar.account_id, \
                  (SELECT COUNT(*) FROM unsent_change WHERE calendar_id = calendar.id), \
                  calendar.synced \
              FROM calendar JOIN account ON account.id = calendar.account_id \
@@ -245,34 +246,50 @@ impl Store {
         readable(stmt.query_map([], |row| {
             // Read as `server_calendars` reads it, so that the Sync Status
             // and the next sync agree.
-            let synced: bool = row.get(3)?;
+            let synced: bool = row.get(6)?;
             Ok(ServerCalendarState {
                 calendar_id: CalendarId(row.get(0)?),
-                account_id: AccountId(row.get(1)?),
-                unsent_changes: row.get(2)?,
+                account_id: AccountId(row.get(4)?),
+                record: sync_record(row)?,
+                unsent_changes: row.get(5)?,
                 first_sync_unfinished: !synced,
             })
         })?)
     }
 
-    /// The Sync Record of each server Account that has one.
+    /// Each server Account with its Sync Record, in the order they were
+    /// added.
     pub fn account_sync_records(&self) -> Result<Vec<(AccountId, SyncRecord)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, last_sync_at, last_sync_outcome, last_synced_at FROM account \
-             WHERE provider != 'local'",
+             WHERE provider != 'local' ORDER BY id",
         )?;
         readable(stmt.query_map([], |row| Ok((AccountId(row.get(0)?), sync_record(row)?)))?)
     }
 
-    /// The Sync Record of each server Account's Calendar.
-    pub fn calendar_sync_records(&self) -> Result<Vec<(CalendarId, SyncRecord)>> {
-        let mut stmt = self.conn.prepare(
+    /// The Sync Record of a server Account; none for one that isn't there.
+    pub fn account_sync_record(&self, id: AccountId) -> Result<Option<SyncRecord>> {
+        self.sync_record_of(
+            "SELECT id, last_sync_at, last_sync_outcome, last_synced_at FROM account \
+             WHERE id = ?1 AND provider != 'local'",
+            id.0,
+        )
+    }
+
+    /// The Sync Record of a server Account's Calendar; none for one that
+    /// isn't there.
+    pub fn calendar_sync_record(&self, id: CalendarId) -> Result<Option<SyncRecord>> {
+        self.sync_record_of(
             "SELECT calendar.id, calendar.last_sync_at, calendar.last_sync_outcome, \
                  calendar.last_synced_at \
              FROM calendar JOIN account ON account.id = calendar.account_id \
-             WHERE account.provider != 'local'",
-        )?;
-        readable(stmt.query_map([], |row| Ok((CalendarId(row.get(0)?), sync_record(row)?)))?)
+             WHERE calendar.id = ?1 AND account.provider != 'local'",
+            id.0,
+        )
+    }
+
+    fn sync_record_of(&self, sql: &str, id: i64) -> Result<Option<SyncRecord>> {
+        Ok(self.conn.query_row(sql, [id], sync_record).optional()?)
     }
 
     /// The Known Server Resources of a CalDAV Calendar, by their address as
@@ -579,12 +596,13 @@ impl Store {
 }
 
 /// What the Local Store holds toward a server Account's Calendar's Sync
-/// Status (new term: Server Calendar State): how many Unsent Changes it has,
-/// and whether its First Sync is unfinished.
-#[derive(Debug, Clone, Copy)]
+/// Status (new term: Server Calendar State): its Sync Record, how many
+/// Unsent Changes it has, and whether its First Sync is unfinished.
+#[derive(Debug, Clone)]
 pub struct ServerCalendarState {
     pub calendar_id: CalendarId,
     pub account_id: AccountId,
+    pub record: SyncRecord,
     pub unsent_changes: u32,
     pub first_sync_unfinished: bool,
 }

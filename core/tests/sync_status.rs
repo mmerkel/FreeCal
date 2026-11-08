@@ -840,3 +840,32 @@ fn a_calendar_quit_during_its_first_sync_says_so_after_a_relaunch_until_it_finis
         ]
     );
 }
+
+#[test]
+fn a_sync_ending_after_its_account_was_removed_says_nothing_about_it() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let proxy = RewritingProxy::passthrough(radicale);
+    let (harness, core, account, urls) = three_calendars(radicale, &user, &proxy);
+    let remover = Arc::downgrade(&core);
+    let signals = harness.signals.clone();
+    once_first_synced(&harness, &core, move || {
+        remover.upgrade().unwrap().remove_account(account).unwrap();
+        signals.clear();
+    });
+
+    let _ = core.add_calendars(account, &urls);
+
+    let after_removal = harness.signals.received();
+    assert!(
+        after_removal.iter().all(|signal| !matches!(
+            signal,
+            Signal::AccountSyncStatusChanged(_) | Signal::CalendarSyncStatusChanged(_)
+        )),
+        "{after_removal:?}"
+    );
+    let statuses = core.sync_statuses().unwrap();
+    assert!(statuses.accounts.is_empty());
+    assert!(statuses.calendars.is_empty());
+    assert_eq!(statuses.overall.state, OverallState::Synced);
+}

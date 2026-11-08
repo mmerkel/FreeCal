@@ -15,15 +15,18 @@ Spec: "Sync engine"; "Overall status"; "Untrusted content".
 
 **Blocked by:** 111
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] The in-memory sync state holds only the running syncs; the Sync Records are read from the Local Store
-- [ ] Removing an Account or Calendar needs no step for its Sync Status; a sync ending after its Calendar or Account was removed writes nothing and sends no "Sync status changed" for it
-- [ ] A Sync Record that can't be read is left out, as now (existing tests keep passing)
-- [ ] The existing Sync Status tests pass unchanged
-- [ ] Nothing outside `core/src/sync_status.rs` touches the running syncs, writes a Sync Record or sends "Sync status changed"; every sync start gives a Running Sync, and `Core::tracker` with its dummy `&Store` is gone
+- [x] The in-memory sync state holds only the running syncs; the Sync Records are read from the Local Store
+- [x] Removing an Account or Calendar needs no step for its Sync Status; a sync ending after its Calendar or Account was removed writes nothing and sends no "Sync status changed" for it
+- [x] A Sync Record that can't be read is left out, as now (existing tests keep passing)
+- [x] The existing Sync Status tests pass unchanged
+- [x] Nothing outside `core/src/sync_status.rs` touches the running syncs, writes a Sync Record or sends "Sync status changed"; every sync start gives a Running Sync, and `Core::tracker` with its dummy `&Store` is gone
 
 ## Comments
 - 2026-11-07: Amended by the architecture review (candidate 3): the Sync Status module and the Running Sync; effort S → M.
+- 2026-11-08: Done. The Sync Status Keeper (`SyncStatusKeeper`, `core/src/sync_status.rs`) is made on demand by `Core::sync_status` and alone locks the Running Syncs, whose mutex is private to the module, so the compiler keeps the rest of the core out. It takes the Store lock first, then its own. Every sync start gives a `RunningSync`; `end(result)` applies the old `end_calendar_sync` rules, and dropping one ends it as before the sync. The Sync Records are read with the Server Calendar States (`Store::server_calendar_states`, `Store::account_sync_records`). New test: `a_sync_ending_after_its_account_was_removed_says_nothing_about_it`.
+  - One new failure case: ending a sync now reads its Sync Record from the Local Store before writing it, so a failed read is returned like a failed write.
+  - New terms: **Sync Status Keeper** (new term), the only code that touches the Running Syncs, writes a Sync Record or sends "Sync status changed". Code names, not yet approved: `RunningSyncs`, every Running Sync in memory; `RunningSyncCounts` and `Running`, how many syncs of each Account or Calendar run and whether the user started one; `AddedCalendars`, Calendars just added with the Running Syncs of their First Syncs and of their Account's sync; `Current`, the Sync Records, Server Calendar States and Running Syncs read together.

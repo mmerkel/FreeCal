@@ -4,19 +4,26 @@
 //! indicator and the tray show. The Local Account and its Calendars have
 //! none.
 //!
-//! The running syncs live in memory, as [`SyncStatusTracker`]. How each
-//! one's last sync ended is its [`SyncRecord`], which the Local Store keeps
-//! too, so that a relaunch shows it until the next sync. Unsent Changes are
-//! counted, and whether a Calendar's First Sync is unfinished is read, from
-//! the Local Store whenever a [`SyncStatusReport`] is made.
+//! Only the Running Syncs live in memory, as [`RunningSyncs`]. How each
+//! one's last sync ended is its [`SyncRecord`], which only the Local Store
+//! keeps, so that a relaunch shows it until the next sync, and removing an
+//! Account or Calendar removes it. The Sync Records are read, the Unsent
+//! Changes counted and whether a Calendar's First Sync is unfinished read
+//! in one Local Store read whenever a [`SyncStatusReport`] is made.
+//!
+//! [`SyncStatusKeeper`] is the only code that touches the Running Syncs,
+//! writes a Sync Record or sends "Sync status changed".
 
 use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::store::ServerCalendarState;
-use crate::{AccountId, CalendarId, CoreError, ErrorCode};
+use crate::store::{ServerCalendarState, Store};
+use crate::{
+    AccountId, Calendar, CalendarId, Clock, CoreError, ErrorCode, Result, Signal, SignalSink,
+};
 
 /// Whether the user started a sync (sync now, adding Calendars), so that
 /// its Syncing shows at once, or FreeCal did (polls and the other
@@ -248,46 +255,90 @@ pub(crate) fn about_account(error: &CoreError) -> bool {
     )
 }
 
-/// One server Account's or Calendar's sync state, without its Unsent
-/// Changes.
-#[derive(Debug, Clone, Default)]
-struct SyncState {
-    /// How many syncs of it run, and whether the user started one of them.
-    running: u32,
+/// The running syncs of one server Account or Calendar: how many run, and
+/// whether the user started one of them.
+#[derive(Debug, Clone, Copy, Default)]
+struct Running {
+    syncs: u32,
     by_user: bool,
-    record: SyncRecord,
 }
 
-impl SyncState {
-    fn start(&mut self, started_by: StartedBy) {
-        self.running += 1;
-        self.by_user |= started_by == StartedBy::User;
+/// Every Running Sync: all the sync state that lives in memory. Only
+/// [`SyncStatusKeeper`] locks it.
+#[derive(Debug, Default)]
+pub(crate) struct RunningSyncs(Mutex<RunningSyncCounts>);
+
+/// The running syncs by the server Account or Calendar they sync. One with
+/// no entry runs no sync.
+#[derive(Debug, Default)]
+struct RunningSyncCounts {
+    accounts: HashMap<AccountId, Running>,
+    calendars: HashMap<CalendarId, Running>,
+}
+
+/// What a Running Sync syncs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Syncing {
+    Account(AccountId),
+    Calendar(CalendarId),
+}
+
+impl RunningSyncCounts {
+    fn of(&mut self, syncing: Syncing) -> &mut Running {
+        match syncing {
+            Syncing::Account(id) => self.accounts.entry(id).or_default(),
+            Syncing::Calendar(id) => self.calendars.entry(id).or_default(),
+        }
     }
 
-    /// Ends a running sync, with `last` when it finished, none when it
-    /// didn't get to.
-    fn end(&mut self, last: Option<(DateTime<FixedOffset>, SyncOutcome)>) {
-        self.running = self.running.saturating_sub(1);
-        if self.running == 0 {
-            self.by_user = false;
-        }
-        if let Some((at, outcome)) = last {
-            self.record.finish(at, outcome);
+    fn start(&mut self, syncing: Syncing, started_by: StartedBy) {
+        let running = self.of(syncing);
+        running.syncs += 1;
+        running.by_user |= started_by == StartedBy::User;
+    }
+
+    /// Ends one of the running syncs of `syncing`, and forgets it once none
+    /// runs.
+    fn end(&mut self, syncing: Syncing) {
+        let running = self.of(syncing);
+        running.syncs = running.syncs.saturating_sub(1);
+        if running.syncs == 0 {
+            match syncing {
+                Syncing::Account(id) => self.accounts.remove(&id),
+                Syncing::Calendar(id) => self.calendars.remove(&id),
+            };
         }
     }
 
+    fn account(&self, id: AccountId) -> Running {
+        self.accounts.get(&id).copied().unwrap_or_default()
+    }
+
+    fn calendar(&self, id: CalendarId) -> Running {
+        self.calendars.get(&id).copied().unwrap_or_default()
+    }
+}
+
+/// One server Account's or Calendar's sync state, without its Unsent
+/// Changes: its running syncs and its Sync Record.
+struct SyncState<'a> {
+    running: Running,
+    record: &'a SyncRecord,
+}
+
+impl SyncState<'_> {
     /// Whether it is Offline, or still taken as Offline while FreeCal
     /// tries it again by itself, so that the overall status doesn't flicker
     /// to Syncing on each try.
     fn offline(&self) -> bool {
         let last_offline = matches!(self.record.last, Some((_, SyncOutcome::Offline)));
-        last_offline && (self.running == 0 || !self.by_user)
+        last_offline && (self.running.syncs == 0 || !self.running.by_user)
     }
 
     fn status(&self) -> SyncStatus {
-        if self.running > 0 {
+        if self.running.syncs > 0 {
             return SyncStatus::Syncing {
-                by_user: self.by_user,
+                by_user: self.running.by_user,
             };
         }
         self.record
@@ -308,150 +359,312 @@ impl SyncState {
     }
 }
 
-/// The state of one that has never synced.
-const NEVER_SYNCED: SyncState = SyncState {
-    running: 0,
-    by_user: false,
-    record: SyncRecord {
-        last: None,
-        last_synced: None,
-    },
-};
-
-/// The sync state of every server Account and Calendar: the running syncs,
-/// and the Sync Records, loaded from the Local Store on launch. One with no
-/// entry has never synced: it is Synced.
-#[derive(Debug, Default)]
-pub(crate) struct SyncStatusTracker {
-    accounts: HashMap<AccountId, SyncState>,
-    calendars: HashMap<CalendarId, SyncState>,
+/// The Sync Status module (new term: Sync Status Keeper): the only code
+/// that touches the Running Syncs, writes a Sync Record or sends "Sync
+/// status changed". The core makes one on demand. It takes the Store lock
+/// and then its own, always in that order, and sends Signals only once
+/// both are released, so that a subscriber can read straight away.
+#[derive(Clone, Copy)]
+pub(crate) struct SyncStatusKeeper<'a> {
+    pub store: &'a Mutex<Store>,
+    pub running: &'a RunningSyncs,
+    pub clock: &'a dyn Clock,
+    pub signals: &'a dyn SignalSink,
 }
 
-impl SyncStatusTracker {
-    /// The Sync Records the Local Store keeps, on launch.
-    pub fn load(
-        accounts: Vec<(AccountId, SyncRecord)>,
-        calendars: Vec<(CalendarId, SyncRecord)>,
-    ) -> Self {
-        let state = |record| SyncState {
-            record,
-            ..SyncState::default()
+impl<'a> SyncStatusKeeper<'a> {
+    /// Locks the Local Store, then the Running Syncs.
+    fn lock(&self) -> (MutexGuard<'a, Store>, MutexGuard<'a, RunningSyncCounts>) {
+        let store = self.store.lock().unwrap();
+        (store, self.running.0.lock().unwrap())
+    }
+
+    /// Starts a sync of the server Account `id`, started by `started_by`,
+    /// and sends its Sync Status.
+    pub fn start_account(&self, id: AccountId, started_by: StartedBy) -> RunningSync<'a> {
+        self.lock().1.start(Syncing::Account(id), started_by);
+        self.send(&[id], &[]);
+        self.running_sync(Syncing::Account(id))
+    }
+
+    /// Starts a sync of the server Calendar `id`, started by `started_by`,
+    /// and sends its Sync Status; none while one of it runs already.
+    pub fn start_calendar(&self, id: CalendarId, started_by: StartedBy) -> Option<RunningSync<'a>> {
+        {
+            let (_store, mut running) = self.lock();
+            if running.calendar(id).syncs > 0 {
+                return None;
+            }
+            running.start(Syncing::Calendar(id), started_by);
+        }
+        self.send(&[], &[id]);
+        Some(self.running_sync(Syncing::Calendar(id)))
+    }
+
+    /// Adds Calendars to the server Account `account` through `add`, and
+    /// starts the syncs of the Account and of each Calendar added as the
+    /// user's, under the same Store lock, so that they say Syncing from when
+    /// they are added. Sends "Calendars changed", then their Sync Statuses.
+    /// Returns the Calendars added, with the Account's Running Sync and
+    /// theirs.
+    pub fn add_calendars(
+        &self,
+        account: AccountId,
+        add: impl FnOnce(&Store) -> Result<Vec<Calendar>>,
+    ) -> Result<AddedCalendars<'a>> {
+        let calendars = {
+            let (store, mut running) = self.lock();
+            let calendars = add(&store)?;
+            running.start(Syncing::Account(account), StartedBy::User);
+            for calendar in &calendars {
+                running.start(Syncing::Calendar(calendar.id), StartedBy::User);
+            }
+            calendars
         };
-        SyncStatusTracker {
-            accounts: accounts.into_iter().map(|(id, r)| (id, state(r))).collect(),
-            calendars: calendars
+        self.signals.send(Signal::CalendarsChanged);
+        let ids: Vec<CalendarId> = calendars.iter().map(|calendar| calendar.id).collect();
+        self.send(&[account], &ids);
+        Ok(AddedCalendars {
+            account_sync: self.running_sync(Syncing::Account(account)),
+            calendar_syncs: ids
                 .into_iter()
-                .map(|(id, r)| (id, state(r)))
+                .map(|id| self.running_sync(Syncing::Calendar(id)))
+                .collect(),
+            calendars,
+        })
+    }
+
+    fn running_sync(&self, syncing: Syncing) -> RunningSync<'a> {
+        RunningSync {
+            keeper: *self,
+            syncing,
+            ended: false,
+        }
+    }
+
+    /// Makes every server Account that runs no sync Offline, as if its sync
+    /// had just found the network gone, keeps its Sync Record and sends its
+    /// Sync Status.
+    pub fn mark_offline_without_trying(&self) {
+        let marked = (|| {
+            let (store, running) = self.lock();
+            let now = self.clock.now();
+            let marked: Vec<(AccountId, SyncRecord)> = store
+                .account_sync_records()?
+                .into_iter()
+                .filter(|(id, _)| running.account(*id).syncs == 0)
+                .map(|(id, mut record)| {
+                    record.finish(now, SyncOutcome::Offline);
+                    (id, record)
+                })
+                .collect();
+            store.write(|database_transaction| {
+                marked.iter().try_for_each(|(id, record)| {
+                    database_transaction.set_account_sync_record(*id, record)
+                })
+            })?;
+            Ok::<_, CoreError>(marked.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+        })();
+        match marked {
+            Ok(marked) => self.send(&marked, &[]),
+            Err(error) => log::warn!("Couldn't mark the Accounts Offline: {error}"),
+        }
+    }
+
+    /// Sends the Sync Status of those of `calendars` that are a server
+    /// Account's, and of their Accounts, after a local change, as their
+    /// Unsent Changes may have changed. Returns those Accounts, none should
+    /// the Local Store fail.
+    pub fn after_local_change(&self, calendars: &[CalendarId]) -> Vec<AccountId> {
+        let read = self.read().map(|current| {
+            let accounts: Vec<AccountId> = current
+                .calendars
+                .iter()
+                .filter(|calendar| calendars.contains(&calendar.calendar_id))
+                .map(|calendar| calendar.account_id)
+                .collect();
+            let signals = current.signals(&accounts, calendars);
+            (accounts, signals)
+        });
+        let (accounts, signals) = match read {
+            Ok((accounts, signals)) => (accounts, Ok(signals)),
+            Err(error) => (Vec::new(), Err(error)),
+        };
+        self.send_signals(signals);
+        accounts
+    }
+
+    /// The Sync Status of every server Account and Calendar, with the
+    /// overall status.
+    pub fn sync_statuses(&self) -> Result<SyncStatuses> {
+        self.read().map(|current| current.sync_statuses())
+    }
+
+    /// The Sync Records and Server Calendar States, read together with the
+    /// Running Syncs.
+    fn read(&self) -> Result<Current> {
+        let (store, running) = self.lock();
+        let calendars = store.server_calendar_states()?;
+        Ok(Current {
+            accounts: store
+                .account_sync_records()?
+                .into_iter()
+                .map(|(id, record)| (id, running.account(id), record))
+                .collect(),
+            calendar_running: calendars
+                .iter()
+                .map(|calendar| running.calendar(calendar.calendar_id))
+                .collect(),
+            calendars,
+        })
+    }
+
+    /// Sends "Sync status changed" for the server Accounts `accounts` and
+    /// Calendars `calendars` as they are now. Those not in the Local Store,
+    /// as the Local Account's and those removed meanwhile, are left out.
+    /// Should the Local Store fail, none is sent; the next one says it all
+    /// again.
+    fn send(&self, accounts: &[AccountId], calendars: &[CalendarId]) {
+        self.send_signals(
+            self.read()
+                .map(|current| current.signals(accounts, calendars)),
+        );
+    }
+
+    /// Sends "Sync status changed" for what a Running Sync syncs.
+    fn send_about(&self, syncing: Syncing) {
+        match syncing {
+            Syncing::Account(id) => self.send(&[id], &[]),
+            Syncing::Calendar(id) => self.send(&[], &[id]),
+        }
+    }
+
+    /// Sends the Sync Status Signals read, or logs why they couldn't be.
+    fn send_signals(&self, signals: Result<Vec<Signal>>) {
+        match signals {
+            Ok(signals) => signals
+                .into_iter()
+                .for_each(|signal| self.signals.send(signal)),
+            Err(error) => log::warn!("Couldn't read the Sync Status to send: {error}"),
+        }
+    }
+}
+
+/// Calendars just added with [`SyncStatusKeeper::add_calendars`], and the
+/// Running Syncs of their First Syncs and of their Account's sync.
+pub(crate) struct AddedCalendars<'a> {
+    pub calendars: Vec<Calendar>,
+    pub account_sync: RunningSync<'a>,
+    pub calendar_syncs: Vec<RunningSync<'a>>,
+}
+
+/// The server Accounts and Calendars with their Sync Records and running
+/// syncs, as read together.
+struct Current {
+    accounts: Vec<(AccountId, Running, SyncRecord)>,
+    calendars: Vec<ServerCalendarState>,
+    /// The running syncs of each of `calendars`, in their order.
+    calendar_running: Vec<Running>,
+}
+
+impl Current {
+    fn account_states(&self) -> impl Iterator<Item = (AccountId, SyncState<'_>)> {
+        self.accounts.iter().map(|(id, running, record)| {
+            (
+                *id,
+                SyncState {
+                    running: *running,
+                    record,
+                },
+            )
+        })
+    }
+
+    fn calendar_states(&self) -> impl Iterator<Item = (&ServerCalendarState, SyncState<'_>)> {
+        self.calendars
+            .iter()
+            .zip(&self.calendar_running)
+            .map(|(calendar, running)| {
+                (
+                    calendar,
+                    SyncState {
+                        running: *running,
+                        record: &calendar.record,
+                    },
+                )
+            })
+    }
+
+    fn account_status(&self, id: AccountId, state: &SyncState) -> AccountSyncStatus {
+        let unsent_changes = self
+            .calendars
+            .iter()
+            .filter(|calendar| calendar.account_id == id)
+            .map(|calendar| calendar.unsent_changes)
+            .sum();
+        AccountSyncStatus {
+            account_id: id,
+            report: state.report(unsent_changes),
+        }
+    }
+
+    fn calendar_status(calendar: &ServerCalendarState, state: &SyncState) -> CalendarSyncStatus {
+        CalendarSyncStatus {
+            calendar_id: calendar.calendar_id,
+            report: state.report(calendar.unsent_changes),
+            first_sync_unfinished: calendar.first_sync_unfinished,
+        }
+    }
+
+    /// "Sync status changed" for those of `accounts` and `calendars` read:
+    /// the Calendars' first, each in the order they were added.
+    fn signals(&self, accounts: &[AccountId], calendars: &[CalendarId]) -> Vec<Signal> {
+        let calendar_signals = self
+            .calendar_states()
+            .filter(|(calendar, _)| calendars.contains(&calendar.calendar_id))
+            .map(|(calendar, state)| {
+                Signal::CalendarSyncStatusChanged(Self::calendar_status(calendar, &state))
+            });
+        let account_signals = self
+            .account_states()
+            .filter(|(id, _)| accounts.contains(id))
+            .map(|(id, state)| Signal::AccountSyncStatusChanged(self.account_status(id, &state)));
+        calendar_signals.chain(account_signals).collect()
+    }
+
+    fn sync_statuses(&self) -> SyncStatuses {
+        SyncStatuses {
+            overall: self.overall(),
+            accounts: self
+                .account_states()
+                .map(|(id, state)| self.account_status(id, &state))
+                .collect(),
+            calendars: self
+                .calendar_states()
+                .map(|(calendar, state)| Self::calendar_status(calendar, &state))
                 .collect(),
         }
     }
 
-    pub fn start_account(&mut self, id: AccountId, started_by: StartedBy) {
-        self.accounts.entry(id).or_default().start(started_by);
-    }
-
-    /// Ends the Account's running sync. Returns its new Sync Record, for
-    /// the Local Store; none for an Account removed meanwhile.
-    pub fn end_account(
-        &mut self,
-        id: AccountId,
-        at: DateTime<FixedOffset>,
-        outcome: SyncOutcome,
-    ) -> Option<SyncRecord> {
-        let state = self.accounts.get_mut(&id)?;
-        state.end(Some((at, outcome)));
-        Some(state.record.clone())
-    }
-
-    /// Makes the Account Offline at `at` without a sync, as when the
-    /// network went away. Returns its new Sync Record, for the Local Store;
-    /// none while it syncs, which finds out by itself.
-    pub fn account_offline(
-        &mut self,
-        id: AccountId,
-        at: DateTime<FixedOffset>,
-    ) -> Option<SyncRecord> {
-        let state = self.accounts.entry(id).or_default();
-        if state.running > 0 {
-            return None;
-        }
-        state.record.finish(at, SyncOutcome::Offline);
-        Some(state.record.clone())
-    }
-
-    /// Whether a sync of the Calendar runs, which another one leaves out.
-    pub fn calendar_syncing(&self, id: CalendarId) -> bool {
-        self.calendars
-            .get(&id)
-            .is_some_and(|state| state.running > 0)
-    }
-
-    pub fn start_calendar(&mut self, id: CalendarId, started_by: StartedBy) {
-        self.calendars.entry(id).or_default().start(started_by);
-    }
-
-    /// Ends a Calendar's running sync: with how it finished, or none when it
-    /// didn't get to, as when its Account went Offline. Returns its new
-    /// Sync Record when it finished, for the Local Store. A Calendar removed
-    /// meanwhile stays forgotten.
-    pub fn end_calendar(
-        &mut self,
-        id: CalendarId,
-        finished: Option<(DateTime<FixedOffset>, SyncOutcome)>,
-    ) -> Option<SyncRecord> {
-        let state = self.calendars.get_mut(&id)?;
-        let ended = finished.is_some();
-        state.end(finished);
-        ended.then(|| state.record.clone())
-    }
-
-    /// Forgets a removed Calendar.
-    pub fn forget_calendar(&mut self, id: CalendarId) {
-        self.calendars.remove(&id);
-    }
-
-    /// Forgets a removed Account; its Calendars are forgotten one by one.
-    pub fn forget_account(&mut self, id: AccountId) {
-        self.accounts.remove(&id);
-    }
-
-    pub fn account(&self, id: AccountId, unsent_changes: u32) -> AccountSyncStatus {
-        AccountSyncStatus {
-            account_id: id,
-            report: state(&self.accounts, &id).report(unsent_changes),
-        }
-    }
-
-    /// The Calendar's Sync Status, with what the Local Store holds toward it.
-    pub fn calendar(&self, stored: &ServerCalendarState) -> CalendarSyncStatus {
-        let id = stored.calendar_id;
-        CalendarSyncStatus {
-            calendar_id: id,
-            report: state(&self.calendars, &id).report(stored.unsent_changes),
-            first_sync_unfinished: stored.first_sync_unfinished,
-        }
-    }
-
-    /// The overall status of the server Accounts `accounts` and their
-    /// Calendars `calendars`.
-    pub fn overall(&self, accounts: &[AccountId], calendars: &[CalendarId]) -> OverallStatus {
-        let account_states: Vec<&SyncState> = accounts
-            .iter()
-            .map(|id| state(&self.accounts, id))
-            .collect();
-        let account_statuses: Vec<SyncStatus> =
-            account_states.iter().map(|state| state.status()).collect();
-        let calendar_statuses: Vec<SyncStatus> = calendars
-            .iter()
-            .map(|id| state(&self.calendars, id).status())
-            .collect();
-        let all = || account_statuses.iter().chain(&calendar_statuses);
-        let syncing_by = |by_user: bool| {
-            all().any(|status| matches!(status, SyncStatus::Syncing { by_user: user, .. } if *user == by_user))
+    /// The overall status of every server Account and Calendar.
+    fn overall(&self) -> OverallStatus {
+        let account_states: Vec<SyncState> =
+            self.account_states().map(|(_, state)| state).collect();
+        let all_states = || {
+            self.account_states()
+                .map(|(_, state)| state)
+                .chain(self.calendar_states().map(|(_, state)| state))
         };
-        let state = if all().any(|status| matches!(status, SyncStatus::SyncError { .. })) {
+        let statuses: Vec<SyncStatus> = all_states().map(|state| state.status()).collect();
+        let syncing_by = |by_user: bool| {
+            statuses.iter().any(|status| matches!(status, SyncStatus::Syncing { by_user: user } if *user == by_user))
+        };
+        let state = if statuses
+            .iter()
+            .any(|status| matches!(status, SyncStatus::SyncError { .. }))
+        {
             OverallState::SyncError
-        } else if !account_states.is_empty() && account_states.iter().all(|state| state.offline()) {
+        } else if !account_states.is_empty() && account_states.iter().all(SyncState::offline) {
             OverallState::Offline
         } else if syncing_by(true) {
             OverallState::Syncing { by_user: true }
@@ -460,15 +673,8 @@ impl SyncStatusTracker {
         } else {
             OverallState::Synced
         };
-        let last_synced = |state: Option<&SyncState>| state?.record.last_synced;
-        let last_sync = accounts
-            .iter()
-            .map(|id| last_synced(self.accounts.get(id)))
-            .chain(
-                calendars
-                    .iter()
-                    .map(|id| last_synced(self.calendars.get(id))),
-            )
+        let last_sync = all_states()
+            .map(|state| state.record.last_synced)
             .collect::<Option<Vec<_>>>()
             .and_then(|times| times.into_iter().min())
             .map(|at| at.with_timezone(&Utc));
@@ -476,7 +682,86 @@ impl SyncStatusTracker {
     }
 }
 
-/// The sync state of `id`, which has never synced without an entry.
-fn state<'a, K: std::hash::Hash + Eq>(states: &'a HashMap<K, SyncState>, id: &K) -> &'a SyncState {
-    states.get(id).unwrap_or(&NEVER_SYNCED)
+/// A Running Sync: one sync of a server Account or Calendar while it runs,
+/// which says Syncing from its start. [`RunningSync::end`] gives its Sync
+/// Status how it ended; dropped without that, it ends as before the sync.
+#[must_use = "a Running Sync dropped at once ends as before the sync"]
+pub(crate) struct RunningSync<'a> {
+    keeper: SyncStatusKeeper<'a>,
+    syncing: Syncing,
+    ended: bool,
+}
+
+impl RunningSync<'_> {
+    /// The Calendar it syncs, none for an Account.
+    pub fn calendar(&self) -> Option<CalendarId> {
+        match self.syncing {
+            Syncing::Calendar(id) => Some(id),
+            Syncing::Account(_) => None,
+        }
+    }
+
+    /// Ends the sync with its `result`, keeps the Sync Record and sends the
+    /// new Sync Status.
+    ///
+    /// A failure ends it with a Sync Error, or Offline when its server
+    /// couldn't be reached at the network level, and is returned. For a
+    /// Calendar, a failure about the whole Account (see [`about_account`])
+    /// leaves its Sync Status as before the sync, and is returned for the
+    /// Account's; its removal meanwhile is no failure and gives none.
+    /// Failing to keep the Sync Record of a sync that succeeded is
+    /// returned. One removed meanwhile keeps nothing and sends nothing.
+    pub fn end<T>(mut self, result: Result<T>) -> Result<Option<T>> {
+        self.ended = true;
+        let syncing = self.syncing;
+        let (outcome, result) = match (syncing, result) {
+            (Syncing::Calendar(id), Err(CoreError::CalendarNotFound(removed))) if removed == id => {
+                (None, Ok(None))
+            }
+            (Syncing::Calendar(_), Err(error)) if about_account(&error) => (None, Err(error)),
+            (_, Err(error)) => (Some(SyncOutcome::of_failure(&error)), Err(error)),
+            (_, Ok(value)) => (Some(SyncOutcome::Synced), Ok(Some(value))),
+        };
+        let kept = self.finish(outcome);
+        self.keeper.send_about(syncing);
+        result.and_then(|value| kept.map(|()| value))
+    }
+
+    /// Ends one of the running syncs, with `outcome`, or as before the sync
+    /// with none, and keeps the Sync Record, in one hold of the locks.
+    fn finish(&self, outcome: Option<SyncOutcome>) -> Result<()> {
+        let (store, mut running) = self.keeper.lock();
+        running.end(self.syncing);
+        let Some(outcome) = outcome else {
+            return Ok(());
+        };
+        let now = self.keeper.clock.now();
+        let record = match self.syncing {
+            Syncing::Account(id) => store.account_sync_record(id)?,
+            Syncing::Calendar(id) => store.calendar_sync_record(id)?,
+        };
+        // Removed meanwhile.
+        let Some(mut record) = record else {
+            return Ok(());
+        };
+        record.finish(now, outcome);
+        store.write(|database_transaction| match self.syncing {
+            Syncing::Account(id) => database_transaction.set_account_sync_record(id, &record),
+            Syncing::Calendar(id) => database_transaction.set_calendar_sync_record(id, &record),
+        })
+    }
+}
+
+impl Drop for RunningSync<'_> {
+    /// Ends as before the sync, as for a Calendar a sync didn't reach.
+    fn drop(&mut self) {
+        // The locks may be poisoned while a panic unwinds.
+        if self.ended || std::thread::panicking() {
+            return;
+        }
+        if let Err(error) = self.finish(None) {
+            log::warn!("Couldn't end a sync: {error}");
+        }
+        self.keeper.send_about(self.syncing);
+    }
 }
