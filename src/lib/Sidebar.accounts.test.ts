@@ -2,14 +2,14 @@
 // removing them, run against the fake core. What the server offers
 // and what the core keeps are scripted; a test that changes them checks the
 // call, then scripts the result and emits the Signals the core would send.
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test } from 'vitest';
-import App from '../App.svelte';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Account, AvailableCalendar, Calendar, SyncStatusReport } from '../core/types';
 import { caldavAccount, calendar, calendarsChanged, firstLaunch } from '../test/answers';
-import { failure, type FakeCore } from '../test/fakeCore';
+import { failure } from '../test/fakeCore';
+import { showApp } from '../test/showApp';
 
 const work: AvailableCalendar = {
   url: 'https://dav.example.org/alice/work/',
@@ -42,11 +42,6 @@ function added(available: AvailableCalendar, account: Account = alice): Calendar
     colour: available.colour ?? '#808080',
     readOnly: true,
   });
-}
-
-async function showApp(core: FakeCore) {
-  render(App, { core });
-  return screen.findByRole('list', { name: 'Local' });
 }
 
 /** Fills in and sends the "Add account…" dialog. */

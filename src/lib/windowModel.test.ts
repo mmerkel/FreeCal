@@ -1,21 +1,20 @@
 import { describe, expect, test, vi } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/types';
+import { dateChanged } from '../test/answers';
 import { eventId } from '../test/ids';
-import { failure, FakeCore } from '../test/fakeCore';
+import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
 import { WindowModel } from './windowModel.svelte';
 
-const settled = () => new Promise((resolve) => setTimeout(resolve));
 const date = (iso: string) => Temporal.PlainDate.from(iso);
 /** The sample Signal of `kind`. */
 const signal = (kind: Signal['kind']) =>
-  samples.Signal.find((found) => found.kind === kind) as Signal;
-const dateChanged = (iso: string): Signal => ({ kind: 'dateChanged', date: iso });
+  branded<Signal>(samples.Signal.find((found) => found.kind === kind)!);
 const range = { from: date('2026-10-05'), to: date('2026-10-12') };
-const sampleEvent = samples.Event[0] as Event;
-const sampleOccurrence = samples.Occurrence[0] as Occurrence;
-const sampleAccount = samples.Account[0] as Account;
-const sampleStatuses = samples.SyncStatuses[0] as SyncStatuses;
+const sampleEvent = first<Event>(samples.Event);
+const sampleOccurrence = first<Occurrence>(samples.Occurrence);
+const sampleAccount = first<Account>(samples.Account);
+const sampleStatuses = first<SyncStatuses>(samples.SyncStatuses);
 
 /** A Window Model on `core`, started and done with its startup. */
 async function started(core = new FakeCore()) {
@@ -74,7 +73,7 @@ describe('startup', () => {
     model.start();
     await settled();
 
-    core.emit(dateChanged('2026-10-06'));
+    dateChanged(core, '2026-10-06');
     today.resolve();
     await settled();
 
@@ -87,7 +86,7 @@ describe('startup', () => {
     core.calls.splice(0);
 
     core.emit(signal('calendarsChanged'));
-    core.emit(dateChanged('2026-10-06'));
+    dateChanged(core, '2026-10-06');
     await settled();
 
     expect(core.calls).toEqual([]);
@@ -242,7 +241,7 @@ describe('a "Date changed"', () => {
   test('moves a view that tracks today at once', async () => {
     const { core, model } = await started();
 
-    core.emit(dateChanged('2026-10-05'));
+    dateChanged(core, '2026-10-05');
 
     expect(model.today?.toString()).toBe('2026-10-05');
     expect(model.navigation?.date.toString()).toBe('2026-10-05');
@@ -253,7 +252,7 @@ describe('a "Date changed"', () => {
     const releasePress = model.hold();
     const releaseScopePrompt = model.hold();
 
-    core.emit(dateChanged('2026-10-05'));
+    dateChanged(core, '2026-10-05');
     releasePress();
     releasePress();
 

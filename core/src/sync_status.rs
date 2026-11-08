@@ -81,6 +81,11 @@ impl From<SyncOutcome> for SyncStatus {
 impl SyncOutcome {
     /// Reads a stored Sync Outcome, untrusted: none when it can't be read,
     /// and a Sync Error's text made plain again (see [`ErrorCode::checked`]).
+    /// The Sync Outcome as the Local Store keeps it, as JSON.
+    pub(crate) fn stored(&self) -> String {
+        serde_json::to_string(self).expect("a Sync Outcome always serializes")
+    }
+
     fn from_stored(json: &str) -> Option<Self> {
         match serde_json::from_str(json).ok()? {
             SyncOutcome::SyncError { error } => Some(SyncOutcome::SyncError {
@@ -126,29 +131,6 @@ impl SyncRecord {
             last: time(last_at).zip(last_outcome.and_then(SyncOutcome::from_stored)),
             last_synced: time(last_synced_at),
         }
-    }
-
-    /// The Sync Record as the Local Store keeps it: when the last sync
-    /// finished, its Sync Outcome as JSON, and when the last successful one
-    /// finished.
-    pub fn stored(&self) -> (Option<i64>, Option<String>, Option<i64>) {
-        let (at, outcome) = self
-            .last
-            .as_ref()
-            .map(|(at, outcome)| {
-                let json =
-                    serde_json::to_string(outcome).expect("a Sync Outcome always serializes");
-                (at.timestamp(), json)
-            })
-            .unzip();
-        (at, outcome, self.last_synced.map(|at| at.timestamp()))
-    }
-
-    fn finish(&mut self, at: DateTime<FixedOffset>, outcome: SyncOutcome) {
-        if outcome == SyncOutcome::Synced {
-            self.last_synced = Some(at);
-        }
-        self.last = Some((at, outcome));
     }
 }
 
@@ -449,21 +431,18 @@ impl<'a> SyncStatusKeeper<'a> {
         let marked = (|| {
             let (store, running) = self.lock();
             let now = self.clock.now();
-            let marked: Vec<(AccountId, SyncRecord)> = store
+            let marked: Vec<AccountId> = store
                 .account_sync_records()?
                 .into_iter()
-                .filter(|(id, _)| running.account(*id).syncs == 0)
-                .map(|(id, mut record)| {
-                    record.finish(now, SyncOutcome::Offline);
-                    (id, record)
-                })
+                .map(|(id, _)| id)
+                .filter(|id| running.account(*id).syncs == 0)
                 .collect();
             store.write(|database_transaction| {
-                marked.iter().try_for_each(|(id, record)| {
-                    database_transaction.set_account_sync_record(*id, record)
+                marked.iter().try_for_each(|id| {
+                    database_transaction.finish_account_sync(*id, now, &SyncOutcome::Offline)
                 })
             })?;
-            Ok::<_, CoreError>(marked.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+            Ok::<_, CoreError>(marked)
         })();
         match marked {
             Ok(marked) => self.send(&marked, &[]),
@@ -476,21 +455,16 @@ impl<'a> SyncStatusKeeper<'a> {
     /// Unsent Changes may have changed. Returns those Accounts, none should
     /// the Local Store fail.
     pub fn after_local_change(&self, calendars: &[CalendarId]) -> Vec<AccountId> {
-        let read = self.read().map(|current| {
-            let accounts: Vec<AccountId> = current
-                .calendars
-                .iter()
-                .filter(|calendar| calendars.contains(&calendar.calendar_id))
-                .map(|calendar| calendar.account_id)
-                .collect();
-            let signals = current.signals(&accounts, calendars);
-            (accounts, signals)
-        });
-        let (accounts, signals) = match read {
-            Ok((accounts, signals)) => (accounts, Ok(signals)),
-            Err(error) => (Vec::new(), Err(error)),
+        let Some(current) = self.read_to_send() else {
+            return Vec::new();
         };
-        self.send_signals(signals);
+        let accounts: Vec<AccountId> = current
+            .calendars
+            .iter()
+            .filter(|(calendar, _)| calendars.contains(&calendar.calendar_id))
+            .map(|(calendar, _)| calendar.account_id)
+            .collect();
+        self.send_signals(current.signals(&accounts, calendars));
         accounts
     }
 
@@ -504,19 +478,29 @@ impl<'a> SyncStatusKeeper<'a> {
     /// Running Syncs.
     fn read(&self) -> Result<Current> {
         let (store, running) = self.lock();
-        let calendars = store.server_calendar_states()?;
         Ok(Current {
             accounts: store
                 .account_sync_records()?
                 .into_iter()
                 .map(|(id, record)| (id, running.account(id), record))
                 .collect(),
-            calendar_running: calendars
-                .iter()
-                .map(|calendar| running.calendar(calendar.calendar_id))
+            calendars: store
+                .server_calendar_states()?
+                .into_iter()
+                .map(|calendar| {
+                    let calendar_running = running.calendar(calendar.calendar_id);
+                    (calendar, calendar_running)
+                })
                 .collect(),
-            calendars,
         })
+    }
+
+    /// [`Self::read`] for sending Signals: should the Local Store fail, logs
+    /// why and gives none.
+    fn read_to_send(&self) -> Option<Current> {
+        self.read()
+            .inspect_err(|error| log::warn!("Couldn't read the Sync Status to send: {error}"))
+            .ok()
     }
 
     /// Sends "Sync status changed" for the server Accounts `accounts` and
@@ -525,10 +509,9 @@ impl<'a> SyncStatusKeeper<'a> {
     /// Should the Local Store fail, none is sent; the next one says it all
     /// again.
     fn send(&self, accounts: &[AccountId], calendars: &[CalendarId]) {
-        self.send_signals(
-            self.read()
-                .map(|current| current.signals(accounts, calendars)),
-        );
+        if let Some(current) = self.read_to_send() {
+            self.send_signals(current.signals(accounts, calendars));
+        }
     }
 
     /// Sends "Sync status changed" for what a Running Sync syncs.
@@ -539,14 +522,10 @@ impl<'a> SyncStatusKeeper<'a> {
         }
     }
 
-    /// Sends the Sync Status Signals read, or logs why they couldn't be.
-    fn send_signals(&self, signals: Result<Vec<Signal>>) {
-        match signals {
-            Ok(signals) => signals
-                .into_iter()
-                .for_each(|signal| self.signals.send(signal)),
-            Err(error) => log::warn!("Couldn't read the Sync Status to send: {error}"),
-        }
+    fn send_signals(&self, signals: Vec<Signal>) {
+        signals
+            .into_iter()
+            .for_each(|signal| self.signals.send(signal));
     }
 }
 
@@ -562,9 +541,7 @@ pub(crate) struct AddedCalendars<'a> {
 /// syncs, as read together.
 struct Current {
     accounts: Vec<(AccountId, Running, SyncRecord)>,
-    calendars: Vec<ServerCalendarState>,
-    /// The running syncs of each of `calendars`, in their order.
-    calendar_running: Vec<Running>,
+    calendars: Vec<(ServerCalendarState, Running)>,
 }
 
 impl Current {
@@ -581,26 +558,23 @@ impl Current {
     }
 
     fn calendar_states(&self) -> impl Iterator<Item = (&ServerCalendarState, SyncState<'_>)> {
-        self.calendars
-            .iter()
-            .zip(&self.calendar_running)
-            .map(|(calendar, running)| {
-                (
-                    calendar,
-                    SyncState {
-                        running: *running,
-                        record: &calendar.record,
-                    },
-                )
-            })
+        self.calendars.iter().map(|(calendar, running)| {
+            (
+                calendar,
+                SyncState {
+                    running: *running,
+                    record: &calendar.record,
+                },
+            )
+        })
     }
 
     fn account_status(&self, id: AccountId, state: &SyncState) -> AccountSyncStatus {
         let unsent_changes = self
             .calendars
             .iter()
-            .filter(|calendar| calendar.account_id == id)
-            .map(|calendar| calendar.unsent_changes)
+            .filter(|(calendar, _)| calendar.account_id == id)
+            .map(|(calendar, _)| calendar.unsent_changes)
             .sum();
         AccountSyncStatus {
             account_id: id,
@@ -693,14 +667,6 @@ pub(crate) struct RunningSync<'a> {
 }
 
 impl RunningSync<'_> {
-    /// The Calendar it syncs, none for an Account.
-    pub fn calendar(&self) -> Option<CalendarId> {
-        match self.syncing {
-            Syncing::Calendar(id) => Some(id),
-            Syncing::Account(_) => None,
-        }
-    }
-
     /// Ends the sync with its `result`, keeps the Sync Record and sends the
     /// new Sync Status.
     ///
@@ -736,18 +702,9 @@ impl RunningSync<'_> {
             return Ok(());
         };
         let now = self.keeper.clock.now();
-        let record = match self.syncing {
-            Syncing::Account(id) => store.account_sync_record(id)?,
-            Syncing::Calendar(id) => store.calendar_sync_record(id)?,
-        };
-        // Removed meanwhile.
-        let Some(mut record) = record else {
-            return Ok(());
-        };
-        record.finish(now, outcome);
         store.write(|database_transaction| match self.syncing {
-            Syncing::Account(id) => database_transaction.set_account_sync_record(id, &record),
-            Syncing::Calendar(id) => database_transaction.set_calendar_sync_record(id, &record),
+            Syncing::Account(id) => database_transaction.finish_account_sync(id, now, &outcome),
+            Syncing::Calendar(id) => database_transaction.finish_calendar_sync(id, now, &outcome),
         })
     }
 }

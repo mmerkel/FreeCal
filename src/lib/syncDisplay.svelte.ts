@@ -111,6 +111,27 @@ export function overallSyncText(overall: OverallStatus, now: Temporal.Instant): 
     : t('sync.lastSync', { state, ago });
 }
 
+/**
+ * When the status indicator's text may next change after `now`, for a last
+ * sync at `lastSync`: the next whole 30 seconds after it, from a minute on.
+ *
+ * That is exact only as long as the text shows no time under a minute and
+ * `timeAgo` rounds half up: then it changes at 60 seconds, and otherwise
+ * only where the count of its unit is a whole one and a half (1.5 minutes,
+ * 2.5 minutes, 1.5 hours, ...), each a whole 30 seconds after the last
+ * sync. Some steps change nothing, such as 2 minutes; none is late. Should
+ * either rule change, so must this.
+ */
+export function nextSyncTextChange(
+  lastSync: Temporal.Instant,
+  now: Temporal.Instant,
+): Temporal.Instant {
+  const step = 30_000;
+  const elapsed = now.epochMilliseconds - lastSync.epochMilliseconds;
+  const steps = Math.max(2, Math.floor(elapsed / step) + 1);
+  return lastSync.add({ milliseconds: steps * step });
+}
+
 /** The units the time ago is in, smallest first, with their length in seconds. */
 const units = [
   { unit: 'second', seconds: 1 },
@@ -118,6 +139,8 @@ const units = [
   { unit: 'hour', seconds: 60 * 60 },
   { unit: 'day', seconds: 24 * 60 * 60 },
 ] as const;
+
+const relativeTime = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'always' });
 
 /**
  * How long before `now` the instant `since` was, as "3 minutes ago": in
@@ -136,8 +159,5 @@ export function timeAgo(since: Temporal.Instant, now: Temporal.Instant): string 
     index++;
     count = Math.floor(seconds / next.seconds + 0.5);
   }
-  return new Intl.RelativeTimeFormat(LOCALE, { numeric: 'always' }).format(
-    -count,
-    units[index].unit,
-  );
+  return relativeTime.format(-count, units[index].unit);
 }

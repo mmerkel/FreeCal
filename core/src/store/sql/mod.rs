@@ -212,10 +212,7 @@ impl Store {
 
     /// Each Calendar of a server Account with its address on the server and
     /// how far it is synced: none until its first sync finished.
-    pub fn server_calendars(
-        &self,
-        account_id: AccountId,
-    ) -> Result<Vec<(CalendarId, String, Option<SyncPoint>)>> {
+    pub fn server_calendars(&self, account_id: AccountId) -> Result<Vec<CalendarToSync>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, url, synced, sync_token FROM calendar \
              WHERE account_id = ?1 AND url IS NOT NULL ORDER BY id",
@@ -265,31 +262,6 @@ impl Store {
              WHERE provider != 'local' ORDER BY id",
         )?;
         readable(stmt.query_map([], |row| Ok((AccountId(row.get(0)?), sync_record(row)?)))?)
-    }
-
-    /// The Sync Record of a server Account; none for one that isn't there.
-    pub fn account_sync_record(&self, id: AccountId) -> Result<Option<SyncRecord>> {
-        self.sync_record_of(
-            "SELECT id, last_sync_at, last_sync_outcome, last_synced_at FROM account \
-             WHERE id = ?1 AND provider != 'local'",
-            id.0,
-        )
-    }
-
-    /// The Sync Record of a server Account's Calendar; none for one that
-    /// isn't there.
-    pub fn calendar_sync_record(&self, id: CalendarId) -> Result<Option<SyncRecord>> {
-        self.sync_record_of(
-            "SELECT calendar.id, calendar.last_sync_at, calendar.last_sync_outcome, \
-                 calendar.last_synced_at \
-             FROM calendar JOIN account ON account.id = calendar.account_id \
-             WHERE calendar.id = ?1 AND account.provider != 'local'",
-            id.0,
-        )
-    }
-
-    fn sync_record_of(&self, sql: &str, id: i64) -> Result<Option<SyncRecord>> {
-        Ok(self.conn.query_row(sql, [id], sync_record).optional()?)
     }
 
     /// The Known Server Resources of a CalDAV Calendar, by their address as
@@ -594,6 +566,10 @@ impl Store {
         readable(stmt.query_map([], |row| Ok((EventId(row.get(0)?), event_fields(row, 1)?)))?)
     }
 }
+
+/// A server Calendar to sync: its address on the server, and how far it is
+/// synced, none while its First Sync is unfinished.
+pub type CalendarToSync = (CalendarId, String, Option<SyncPoint>);
 
 /// What the Local Store holds toward a server Account's Calendar's Sync
 /// Status (new term: Server Calendar State): its Sync Record, how many

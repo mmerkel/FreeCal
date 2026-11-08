@@ -12,9 +12,9 @@
 mod schema;
 mod sql;
 
-pub(crate) use sql::ServerCalendarState;
 #[cfg(test)]
 pub use sql::UnsentChange;
+pub(crate) use sql::{CalendarToSync, ServerCalendarState};
 
 use std::ops::Deref;
 use std::path::Path;

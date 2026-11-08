@@ -14,37 +14,15 @@ import type {
 } from '../core/types';
 import { errorText, startupText, t } from '../i18n';
 import { dateChanged, opening, type Navigation } from './navigation';
+import { NewestRead } from './newestRead';
 import { DEFAULT_SETTINGS } from './settings';
 import { SyncingDelay } from './syncDisplay.svelte';
 import type { VisibleRange } from './when';
 
 /** The Accounts and Calendars, as last read together (Directory, new term). */
-export interface Directory {
+interface Directory {
   accounts: Account[];
   calendars: Calendar[];
-}
-
-/**
- * Reads of one kind, which can overtake each other: only the newest one
- * started lands (Newest Read, new term).
- */
-class NewestRead {
-  #latest = 0;
-
-  /**
-   * Reads with `read` and lands its value with `land`, unless a newer read
-   * started meanwhile. Rejects only when the newest read fails, so that an
-   * older read's failure never overwrites a newer read either.
-   */
-  async run<T>(read: () => Promise<T>, land: (value: T) => void): Promise<void> {
-    const started = ++this.#latest;
-    try {
-      const value = await read();
-      if (started === this.#latest) land(value);
-    } catch (error) {
-      if (started === this.#latest) throw error;
-    }
-  }
 }
 
 /** The Event whose details are open, as the window told the model (Open Details, new term). */

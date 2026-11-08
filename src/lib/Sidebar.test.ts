@@ -1,10 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, onTestFinished, test, vi } from 'vitest';
-import App from '../App.svelte';
 import { expectAnchoredTo } from '../test/anchored';
 import hostile from '../../fixtures/hostile-event.json';
-import type { Calendar } from '../core/types';
 import {
   caldavAccount,
   calendar,
@@ -12,16 +10,12 @@ import {
   firstLaunch,
   localAccount,
 } from '../test/answers';
-import { failure, type FakeCore } from '../test/fakeCore';
+import { failure } from '../test/fakeCore';
+import { showApp } from '../test/showApp';
 
 // The sidebar's Calendars, run against the fake core. A test that
 // changes them checks the call, then scripts the Calendars as the core would
 // have them and emits "Calendars changed".
-
-async function showApp(core: FakeCore) {
-  render(App, { core });
-  return screen.findByRole('list', { name: 'Local' });
-}
 
 /** Opens a Calendar's menu with its ⋮ button. */
 async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
@@ -44,7 +38,8 @@ test('shows each Calendar under its Account as a switch', async () => {
     calendars: [calendar({ name: 'Home' }), calendar({ name: 'Work', shown: false })],
   });
 
-  const local = await showApp(core);
+  await showApp(core);
+  const local = screen.getByRole('list', { name: 'Local' });
 
   expect(within(local).getByRole('switch', { name: 'Home' })).toBeChecked();
   expect(within(local).getByRole('switch', { name: 'Work' })).not.toBeChecked();
@@ -106,7 +101,8 @@ test('a Read-only Calendar’s row shows a lock, which describes it', async () =
     calendars: [calendar({ name: 'Home' }), calendar({ name: 'Holidays', readOnly: true })],
   });
 
-  const local = await showApp(core);
+  await showApp(core);
+  const local = screen.getByRole('list', { name: 'Local' });
 
   const holidays = within(local).getByRole('switch', { name: 'Holidays' });
   expect(holidays).toHaveAccessibleDescription('Read-only Holidays: shown, click to hide');
@@ -150,7 +146,8 @@ test('a Calendar can be hidden with the keyboard', async () => {
 test('creates a Calendar in the Local Account', async () => {
   const user = userEvent.setup();
   const core = firstLaunch();
-  const local = await showApp(core);
+  await showApp(core);
+  const local = screen.getByRole('list', { name: 'Local' });
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Home{Enter}');
@@ -411,7 +408,8 @@ test('an open menu keeps its focus when the Calendars change', async () => {
 test('a scroll outside the open menu closes it, and focus returns to its ⋮', async () => {
   const user = userEvent.setup();
   const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
-  const local = await showApp(core);
+  await showApp(core);
+  const local = screen.getByRole('list', { name: 'Local' });
 
   await openMenu(user, 'Home');
   await fireEvent.scroll(local);
@@ -524,7 +522,8 @@ test('a hostile Calendar name is shown as text in the row, the menu and the dial
   const hostile = '<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
   const core = firstLaunch({ calendars: [calendar({ name: hostile })] });
 
-  const local = await showApp(core);
+  await showApp(core);
+  const local = screen.getByRole('list', { name: 'Local' });
   expect(within(local).getByRole('switch', { name: hostile })).toBeInTheDocument();
   const menu = await openMenu(user, hostile);
   await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));

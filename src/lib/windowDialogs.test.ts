@@ -1,22 +1,21 @@
 import { describe, expect, test } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Changed, Event, EventDraft, Occurrence, Repeat, Signal } from '../core/types';
+import { dateChanged } from '../test/answers';
 import { calendarId, eventId } from '../test/ids';
-import { failure, FakeCore } from '../test/fakeCore';
+import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
 import { WindowDialogs } from './windowDialogs.svelte';
 import { WindowModel } from './windowModel.svelte';
 
-const settled = () => new Promise((resolve) => setTimeout(resolve));
-const dateChanged = (iso: string): Signal => ({ kind: 'dateChanged', date: iso });
-const sampleEvent = samples.Event[0] as Event;
+const sampleEvent = first<Event>(samples.Event);
 /** The sample Occurrence of a Recurring Event. */
-const recurring = samples.Occurrence.find(
-  (occurrence) => occurrence.recurrenceId !== null,
-) as Occurrence;
+const recurring = branded<Occurrence>(
+  samples.Occurrence.find((occurrence) => occurrence.recurrenceId !== null)!,
+);
 const recurrenceId = recurring.recurrenceId!;
-const weekly: Repeat = samples.Repeat[0] as Repeat;
-const when = samples.When[1] as Event['when'];
-const changedEvent = samples.Changed[0] as Changed<Event>;
+const weekly = first<Repeat>(samples.Repeat);
+const when = branded<Event['when']>(samples.When[1]);
+const changedEvent = first<Changed<Event>>(samples.Changed);
 const file = '/home/user/a.ics';
 
 /** Window Dialogs on a started Window Model, which shows the sample Occurrences. */
@@ -188,7 +187,7 @@ describe('the Scope Prompt of a drop', () => {
     const counts = core.pending('exceptionCounts');
 
     const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
-    core.emit(dateChanged('2026-10-06'));
+    dateChanged(core, '2026-10-06');
     counts.resolve();
     await settled();
 

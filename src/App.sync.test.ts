@@ -14,7 +14,7 @@ import type {
 } from './core/types';
 import { SYNCING_DELAY_MS } from './lib/syncDisplay.svelte';
 import { caldavAccount, calendar, firstLaunch, localAccount } from './test/answers';
-import type { FakeCore } from './test/fakeCore';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
@@ -96,11 +96,6 @@ function withServer() {
     reportAccount,
     reportCalendar,
   };
-}
-
-async function showApp(core: FakeCore) {
-  render(App, { core });
-  await screen.findByRole('list', { name: 'Grid' });
 }
 
 function indicator() {

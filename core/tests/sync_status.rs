@@ -14,8 +14,8 @@ use freecal_core::{
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User, closed_port_url};
 use support::{
-    Harness, account_sync_status, add_account, calendar, calendar_sync_status, draft, event, ics,
-    make_writable, timed, titles, user_login, utc,
+    Harness, account_sync_status, add_account, add_account_with_calendar, calendar,
+    calendar_sync_status, draft, event, ics, make_writable, timed, titles, user_login, utc,
 };
 
 /// A user on Radicale with two Calendars, "Work" and "Home", both added
@@ -63,13 +63,7 @@ impl Server {
 
     /// Adds the Account of another Radicale user, with one Calendar.
     fn add_second_account(&self) -> AccountId {
-        let other = self.radicale.user();
-        let second = add_account(&self.core, self.radicale, &other);
-        let url = self
-            .radicale
-            .create_calendar(&other, NewCalendar::default());
-        self.core.add_calendars(second, &[url]).unwrap();
-        second
+        add_account_with_calendar(&self.core, self.radicale).0
     }
 
     /// Points the Account and its Calendars at a server that isn't there,
@@ -119,11 +113,11 @@ impl Server {
     }
 
     fn account_status(&self) -> SyncStatusReport {
-        account_sync_status(&self.core, self.account)
+        account_sync_status(&self.core, self.account).report
     }
 
     fn calendar_status(&self, id: CalendarId) -> SyncStatusReport {
-        calendar_sync_status(&self.core, id)
+        calendar_sync_status(&self.core, id).report
     }
 }
 
@@ -722,7 +716,7 @@ fn adding_calendars_stopped_by_a_failure_about_the_account_leaves_the_rest_for_t
         ]
     );
     assert_eq!(
-        account_sync_status(&core, account),
+        account_sync_status(&core, account).report,
         report(SyncStatus::Offline, Some(finished(SyncOutcome::Offline)))
     );
     assert_eq!(
@@ -738,13 +732,7 @@ fn adding_calendars_stopped_by_a_failure_about_the_account_leaves_the_rest_for_t
     core.sync_account(account, StartedBy::FreeCal).unwrap();
 
     for id in &ids {
-        let status = core
-            .sync_statuses()
-            .unwrap()
-            .calendars
-            .into_iter()
-            .find(|status| status.calendar_id == *id)
-            .unwrap();
+        let status = calendar_sync_status(&core, *id);
         assert_eq!(status.report.status, SyncStatus::Synced);
         assert!(!status.first_sync_unfinished);
     }
@@ -787,7 +775,7 @@ fn a_failure_about_one_calendar_while_adding_calendars_is_that_calendars_sync_er
     assert!(!c.first_sync_unfinished);
     assert_eq!(titles(&core, c.calendar_id), ["C"]);
     assert_eq!(
-        account_sync_status(&core, account),
+        account_sync_status(&core, account).report,
         report(SyncStatus::Synced, Some(noon()))
     );
     assert_eq!(statuses.overall.state, OverallState::SyncError);

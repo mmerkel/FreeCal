@@ -1,21 +1,14 @@
 // Hiding the sidebar and changing its width, run against the fake
 // core with a stand-in grid. jsdom has no layout: widths come from the state FreeCal
 // keeps, never from the page, and dragging is also checked in the real app.
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, screen } from '@testing-library/svelte';
 import { expect, test, vi } from 'vitest';
-import App from './App.svelte';
 import type { SidebarState } from './core/types';
 import { firstLaunch } from './test/answers';
 import { failure, type FakeCore } from './test/fakeCore';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
-
-async function showApp(core = firstLaunch()) {
-  render(App, { core });
-  await screen.findByRole('list', { name: 'Grid' });
-  return { core, user: userEvent.setup() };
-}
 
 /** A first launch whose sidebar was left as `stored`. */
 function leftAs(stored: SidebarState) {

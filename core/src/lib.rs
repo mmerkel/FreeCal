@@ -62,15 +62,11 @@ use calendar::calendar_name;
 use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::{Remote, SyncPoint};
-use store::Store;
+use store::{CalendarToSync, Store};
 use sync_scheduler::SyncScheduler;
 use sync_status::{RunningSync, RunningSyncs, SyncStatusKeeper};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
-
-/// A server Calendar to sync: its address on the server, and how far it is
-/// synced, none while its First Sync is unfinished.
-type CalendarToSync = (CalendarId, String, Option<SyncPoint>);
 
 /// The core application interface.
 pub struct Core {
@@ -265,14 +261,14 @@ impl Core {
             .calendars
             .iter()
             .zip(urls)
-            .map(|(calendar, url)| (calendar.id, url.clone(), None))
+            .zip(added.calendar_syncs)
+            .map(|((calendar, url), sync)| ((calendar.id, url.clone(), None), Some(sync)))
             .collect();
         self.sync_calendars(
             added.account_sync,
             StartedBy::User,
             remote.as_ref(),
             calendars,
-            added.calendar_syncs,
         )?;
         Ok(added.calendars)
     }
@@ -338,19 +334,25 @@ impl Core {
             Ok(remote.map(|remote| (remote, calendars)))
         });
         match to_sync {
-            Ok(Some((remote, calendars))) => {
-                self.sync_calendars(account_sync, started_by, remote.as_ref(), calendars, vec![])
-            }
-            Ok(None) => account_sync.end(Ok(())).map(|_| Vec::new()),
-            // About the Account, before any Calendar.
-            Err(error) => account_sync.end(Err::<(), _>(error)).map(|_| Vec::new()),
+            Ok(Some((remote, calendars))) => self.sync_calendars(
+                account_sync,
+                started_by,
+                remote.as_ref(),
+                calendars
+                    .into_iter()
+                    .map(|calendar| (calendar, None))
+                    .collect(),
+            ),
+            // No server to sync with, or a failure about the Account before
+            // any Calendar.
+            other => account_sync.end(other.map(drop)).map(|_| Vec::new()),
         }
     }
 
     /// Syncs the Calendars `calendars` of a server Account, in order,
     /// through its server `remote`, in the Account's Running Sync
     /// `account_sync`, started by `started_by`, and ends that. The Calendars
-    /// with a Running Sync in `started` are syncing already, as
+    /// paired with a Running Sync are syncing already, as
     /// [`Core::add_calendars`] starts them; any other syncing now is left
     /// out. A failure about the whole Account stops it: the Calendars it
     /// didn't reach keep their Sync Status as it was before, and the next
@@ -361,18 +363,16 @@ impl Core {
         account_sync: RunningSync,
         started_by: StartedBy,
         remote: &dyn Remote,
-        calendars: Vec<CalendarToSync>,
-        mut started: Vec<RunningSync>,
+        calendars: Vec<(CalendarToSync, Option<RunningSync>)>,
     ) -> Result<Vec<Changed<CalendarId>>> {
         let mut synced = Vec::new();
         let mut failed = None;
         let mut about_account = None;
-        for (calendar_id, url, state) in calendars {
-            let calendar_sync = match started
-                .iter()
-                .position(|sync| sync.calendar() == Some(calendar_id))
-            {
-                Some(index) => started.remove(index),
+        // The Calendars it doesn't reach end as before the sync, as the
+        // loop drops their Running Syncs.
+        for ((calendar_id, url, state), started) in calendars {
+            let calendar_sync = match started {
+                Some(calendar_sync) => calendar_sync,
                 None => match self.sync_status().start_calendar(calendar_id, started_by) {
                     Some(calendar_sync) => calendar_sync,
                     None => continue,
@@ -387,8 +387,6 @@ impl Core {
                 Err(error) => _ = failed.get_or_insert(error),
             }
         }
-        // The Calendars it didn't reach end as before the sync.
-        drop(started);
         let stopped = about_account.is_some();
         let ended = account_sync.end(about_account.map_or(Ok(()), Err));
         match failed {

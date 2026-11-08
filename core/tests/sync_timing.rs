@@ -6,8 +6,10 @@
 mod support;
 
 use freecal_core::{AccountId, CalendarId, Core, OverallState, Signal, SyncStatus, SyncTrigger};
-use support::radicale::{NewCalendar, Radicale};
-use support::{Harness, account_sync_status, calendar, draft, make_writable, timed};
+use support::radicale::Radicale;
+use support::{
+    Harness, account_sync_status, add_account_with_calendar, calendar, draft, make_writable, timed,
+};
 
 /// A new Core with two server Accounts on Radicale, each with one
 /// Calendar, and the Local Account with its starting Calendars. The
@@ -25,8 +27,8 @@ impl Synced {
         let radicale = Radicale::shared();
         let harness = Harness::new();
         let core = harness.open();
-        let (first, first_calendar) = add_account(&core, radicale);
-        let (second, _) = add_account(&core, radicale);
+        let (first, first_calendar) = add_account_with_calendar(&core, radicale);
+        let (second, _) = add_account_with_calendar(&core, radicale);
         core.run_scheduled_syncs();
         harness.signals.clear();
         Self {
@@ -72,17 +74,8 @@ impl Synced {
     }
 
     fn account_status(&self, id: AccountId) -> SyncStatus {
-        account_sync_status(&self.core, id).status
+        account_sync_status(&self.core, id).report.status
     }
-}
-
-/// Adds a CalDAV Account for a new Radicale user, with one Calendar.
-fn add_account(core: &Core, radicale: &Radicale) -> (AccountId, CalendarId) {
-    let user = radicale.user();
-    let url = radicale.create_calendar(&user, NewCalendar::default());
-    let account = support::add_account(core, radicale, &user);
-    let calendar = core.add_calendars(account, &[url]).unwrap()[0].id;
-    (account, calendar)
 }
 
 #[test]
@@ -90,8 +83,8 @@ fn launching_syncs_every_server_account_at_once() {
     let radicale = Radicale::shared();
     let harness = Harness::new();
     let core = harness.open();
-    let (first, _) = add_account(&core, radicale);
-    let (second, _) = add_account(&core, radicale);
+    let (first, _) = add_account_with_calendar(&core, radicale);
+    let (second, _) = add_account_with_calendar(&core, radicale);
     drop(core);
     let core = harness.open();
     harness.signals.clear();
@@ -280,16 +273,10 @@ fn with_no_network_every_server_account_is_offline_without_trying() {
             .harness
             .signals
             .received()
-            .contains(&Signal::AccountSyncStatusChanged(
-                synced
-                    .core
-                    .sync_statuses()
-                    .unwrap()
-                    .accounts
-                    .into_iter()
-                    .find(|status| status.account_id == synced.first)
-                    .unwrap()
-            ))
+            .contains(&Signal::AccountSyncStatusChanged(account_sync_status(
+                &synced.core,
+                synced.first
+            )))
     );
 }
 

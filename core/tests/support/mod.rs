@@ -13,13 +13,13 @@ use std::sync::{Arc, Mutex};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
-    AccountId, CalDavLogin, Calendar, CalendarId, Clock, Colour, Core, CoreError, EventDraft,
-    EventId, Frequency, Keyring, KeyringError, Occurrence, Repeat, RepeatEnd, Signal, SignalSink,
-    SyncStatusReport, When,
+    AccountId, AccountSyncStatus, CalDavLogin, Calendar, CalendarId, CalendarSyncStatus, Clock,
+    Colour, Core, CoreError, EventDraft, EventId, Frequency, Keyring, KeyringError, Occurrence,
+    Repeat, RepeatEnd, Signal, SignalSink, When,
 };
 use tempfile::TempDir;
 
-use radicale::{Radicale, User};
+use radicale::{NewCalendar, Radicale, User};
 
 pub struct Harness {
     data_dir: TempDir,
@@ -348,13 +348,27 @@ pub fn event(uid: &str, start: &str, end: &str) -> String {
     format!("BEGIN:VEVENT\nUID:{uid}\nSUMMARY:{uid}\n{start}\n{end}\nEND:VEVENT\n")
 }
 
+/// The CalDAV login at `url`.
+pub fn login(url: &str, username: &str, password: &str) -> CalDavLogin {
+    CalDavLogin {
+        url: url.to_owned(),
+        username: username.to_owned(),
+        password: password.to_owned(),
+    }
+}
+
 /// The login of `user` on `radicale`.
 pub fn user_login(radicale: &Radicale, user: &User) -> CalDavLogin {
-    CalDavLogin {
-        url: radicale.url(),
-        username: user.name.clone(),
-        password: user.password.clone(),
-    }
+    login(&radicale.url(), &user.name, &user.password)
+}
+
+/// Adds a CalDAV Account for a new Radicale user, with one Calendar.
+pub fn add_account_with_calendar(core: &Core, radicale: &Radicale) -> (AccountId, CalendarId) {
+    let user = radicale.user();
+    let url = radicale.create_calendar(&user, NewCalendar::default());
+    let account = add_account(core, radicale, &user);
+    let calendar = core.add_calendars(account, &[url]).unwrap()[0].id;
+    (account, calendar)
 }
 
 /// Adds the CalDAV Account of `user` on `radicale`.
@@ -366,23 +380,21 @@ pub fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
 }
 
 /// The Sync Status of the server Account `id`.
-pub fn account_sync_status(core: &Core, id: AccountId) -> SyncStatusReport {
+pub fn account_sync_status(core: &Core, id: AccountId) -> AccountSyncStatus {
     core.sync_statuses()
         .unwrap()
         .accounts
         .into_iter()
         .find(|status| status.account_id == id)
         .unwrap()
-        .report
 }
 
 /// The Sync Status of the server Calendar `id`.
-pub fn calendar_sync_status(core: &Core, id: CalendarId) -> SyncStatusReport {
+pub fn calendar_sync_status(core: &Core, id: CalendarId) -> CalendarSyncStatus {
     core.sync_statuses()
         .unwrap()
         .calendars
         .into_iter()
         .find(|status| status.calendar_id == id)
         .unwrap()
-        .report
 }

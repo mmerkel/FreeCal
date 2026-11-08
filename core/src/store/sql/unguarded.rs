@@ -2,10 +2,11 @@
 //! last-used view and the time zone rules. Each is a method of a
 //! [`DatabaseTransaction`] and takes no Write Permission.
 
+use chrono::{DateTime, FixedOffset};
 use rusqlite::params;
 
 use crate::store::DatabaseTransaction;
-use crate::sync_status::SyncRecord;
+use crate::sync_status::SyncOutcome;
 use crate::{
     Account, AccountId, Appearance, AvailableCalendar, Calendar, CalendarId, Colour, CoreError,
     Provider, Result, ServerLogin, SidebarState, View,
@@ -90,31 +91,53 @@ impl DatabaseTransaction<'_> {
         )
     }
 
-    /// Keeps the server Account's Sync Record; an Account removed
-    /// meanwhile is left as it is.
-    pub fn set_account_sync_record(&self, id: AccountId, record: &SyncRecord) -> Result<()> {
-        self.set_sync_record(
-            "UPDATE account SET last_sync_at = ?2, last_sync_outcome = ?3, last_synced_at = ?4 \
-             WHERE id = ?1",
+    /// Keeps in the server Account's Sync Record that a sync finished `at`
+    /// with `outcome`, and as its last successful one when Synced. An
+    /// Account removed meanwhile, or the Local Account, is left as it is.
+    pub fn finish_account_sync(
+        &self,
+        id: AccountId,
+        at: DateTime<FixedOffset>,
+        outcome: &SyncOutcome,
+    ) -> Result<()> {
+        self.finish_sync(
+            "UPDATE account SET last_sync_at = ?2, last_sync_outcome = ?3, \
+                 last_synced_at = CASE WHEN ?4 THEN ?2 ELSE last_synced_at END \
+             WHERE id = ?1 AND provider != 'local'",
             id.0,
-            record,
+            at,
+            outcome,
         )
     }
 
-    /// Keeps the server Calendar's Sync Record; a Calendar removed
-    /// meanwhile is left as it is.
-    pub fn set_calendar_sync_record(&self, id: CalendarId, record: &SyncRecord) -> Result<()> {
-        self.set_sync_record(
-            "UPDATE calendar SET last_sync_at = ?2, last_sync_outcome = ?3, last_synced_at = ?4 \
-             WHERE id = ?1",
+    /// [`Self::finish_account_sync`] for a server Account's Calendar.
+    pub fn finish_calendar_sync(
+        &self,
+        id: CalendarId,
+        at: DateTime<FixedOffset>,
+        outcome: &SyncOutcome,
+    ) -> Result<()> {
+        self.finish_sync(
+            "UPDATE calendar SET last_sync_at = ?2, last_sync_outcome = ?3, \
+                 last_synced_at = CASE WHEN ?4 THEN ?2 ELSE last_synced_at END \
+             WHERE id = ?1 \
+               AND account_id IN (SELECT id FROM account WHERE provider != 'local')",
             id.0,
-            record,
+            at,
+            outcome,
         )
     }
 
-    fn set_sync_record(&self, sql: &str, id: i64, record: &SyncRecord) -> Result<()> {
-        let (at, outcome, synced_at) = record.stored();
-        self.tx.execute(sql, params![id, at, outcome, synced_at])?;
+    fn finish_sync(
+        &self,
+        sql: &str,
+        id: i64,
+        at: DateTime<FixedOffset>,
+        outcome: &SyncOutcome,
+    ) -> Result<()> {
+        let synced = *outcome == SyncOutcome::Synced;
+        self.tx
+            .execute(sql, params![id, at.timestamp(), outcome.stored(), synced])?;
         Ok(())
     }
 

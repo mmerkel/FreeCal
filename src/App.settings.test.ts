@@ -8,14 +8,9 @@ import { expectAnchoredTo } from './test/anchored';
 import { systemDarkQuery } from './test/darkQuery';
 import { calendar, firstLaunch } from './test/answers';
 import { failure } from './test/fakeCore';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
-
-async function showApp(core = firstLaunch()) {
-  render(App, { core });
-  await screen.findByRole('list', { name: 'Grid' });
-  return { core, user: userEvent.setup() };
-}
 
 function colourScheme() {
   return document.documentElement.dataset.colorScheme;

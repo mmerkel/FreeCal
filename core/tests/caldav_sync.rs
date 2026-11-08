@@ -5,7 +5,7 @@ use freecal_core::{
     SyncStatus,
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
-use support::{Harness, date, event, ics, make_writable};
+use support::{Harness, date, event, ics, make_writable, user_login};
 
 /// A user on Radicale with a Calendar "Work", and a new Core with the
 /// user's Account added and that Calendar's first sync done.
@@ -114,8 +114,7 @@ impl Synced {
         let account = core
             .add_caldav_account(&CalDavLogin {
                 url: server.clone(),
-                username: user.name.clone(),
-                password: user.password.clone(),
+                ..user_login(radicale, &user)
             })
             .unwrap()
             .account

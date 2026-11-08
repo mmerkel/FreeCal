@@ -1,16 +1,8 @@
 mod support;
 
-use freecal_core::{CalDavLogin, CoreError, ErrorCode, Provider, ServerLogin, Signal};
-use support::Harness;
+use freecal_core::{CoreError, ErrorCode, Provider, ServerLogin, Signal};
 use support::radicale::{Radicale, closed_port_url, http_stub};
-
-fn login(url: &str, username: &str, password: &str) -> CalDavLogin {
-    CalDavLogin {
-        url: url.to_owned(),
-        username: username.to_owned(),
-        password: password.to_owned(),
-    }
-}
+use support::{Harness, login};
 
 #[test]
 fn adding_an_account_checks_its_credentials_and_keeps_its_password_in_the_keyring() {

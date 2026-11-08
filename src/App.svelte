@@ -22,7 +22,7 @@
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { shortcutFor, type ShortcutAction } from './lib/shortcuts';
   import Sidebar from './lib/Sidebar.svelte';
-  import { overallSyncText } from './lib/syncDisplay.svelte';
+  import { nextSyncTextChange, overallSyncText } from './lib/syncDisplay.svelte';
   import SidebarPane from './lib/SidebarPane.svelte';
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
@@ -50,17 +50,42 @@
    * as for a drag, so that the grid doesn't move under the pointer.
    */
   let releasePress: (() => void) | undefined;
-  /** Now, to the second, so that the time since the last sync counts up. */
+  /**
+   * Now, as of the last moment the status indicator's text could change,
+   * so that the time since the last sync counts up.
+   */
   let now = $state(Temporal.Now.instant());
+  /** Counts the times the window got the focus or became visible again. */
+  let woken = $state(0);
   /** What the status indicator says, once the Sync Statuses are read. */
   const overallText = $derived(
     model.syncStatuses && overallSyncText(model.syncStatuses.overall, now),
   );
 
+  // Updates `now` only when the text may change: a timer for each such
+  // moment, none before the first sync. A timer can fire late after the
+  // computer slept, so waking the window updates it at once too.
   $effect(() => {
-    const timer = setInterval(() => (now = Temporal.Now.instant()), 1000);
-    return () => clearInterval(timer);
+    void woken;
+    const lastSync = model.syncStatuses?.overall.lastSync;
+    if (!lastSync) return;
+    const since = Temporal.Instant.from(lastSync);
+    let timer: ReturnType<typeof setTimeout>;
+    const update = () => {
+      // A local, as reading `now` here would make it this effect's own
+      // dependency.
+      const current = Temporal.Now.instant();
+      now = current;
+      const due = nextSyncTextChange(since, current).epochMilliseconds - current.epochMilliseconds;
+      timer = setTimeout(update, due);
+    };
+    update();
+    return () => clearTimeout(timer);
   });
+
+  function onwake() {
+    if (document.visibilityState === 'visible') woken++;
+  }
 
   function oninteract(active: boolean) {
     releasePress?.();
@@ -121,7 +146,8 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} onfocus={onwake} />
+<svelte:document onvisibilitychange={onwake} />
 
 {#if model.startupReason}
   <StartupError reason={model.startupReason} onquit={quit} />

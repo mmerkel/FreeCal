@@ -1,20 +1,8 @@
 mod support;
 
-use freecal_core::{AccountId, AvailableCalendar, CalDavLogin, Colour, CoreError, ErrorCode};
-use support::Harness;
-use support::radicale::{NewCalendar, Radicale, RoutingStub, User, multistatus, redirect};
-
-fn login(url: &str, username: &str, password: &str) -> CalDavLogin {
-    CalDavLogin {
-        url: url.to_owned(),
-        username: username.to_owned(),
-        password: password.to_owned(),
-    }
-}
-
-fn user_login(radicale: &Radicale, user: &User) -> CalDavLogin {
-    login(&radicale.url(), &user.name, &user.password)
-}
+use freecal_core::{AccountId, AvailableCalendar, Colour, CoreError, ErrorCode};
+use support::radicale::{NewCalendar, Radicale, RoutingStub, multistatus, redirect};
+use support::{Harness, login, user_login};
 
 fn names(calendars: &[AvailableCalendar]) -> Vec<&str> {
     calendars

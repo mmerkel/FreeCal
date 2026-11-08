@@ -1,21 +1,13 @@
 // The App's views, navigation and tracking today, run against the fake
 // core with a stand-in grid (see StubGrid.svelte).
-import { render, screen, waitFor, within } from '@testing-library/svelte';
-import userEvent from '@testing-library/user-event';
+import { screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { expect, test, vi } from 'vitest';
-import App from './App.svelte';
-import { calendar, event, firstLaunch, occurrencesChanged } from './test/answers';
-import type { FakeCore } from './test/fakeCore';
+import { calendar, dateChanged, event, firstLaunch, occurrencesChanged } from './test/answers';
 import { stubGrid } from './test/stubGrid';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
-
-async function showApp(core = firstLaunch()) {
-  render(App, { core });
-  await screen.findByRole('list', { name: 'Grid' });
-  return { core, user: userEvent.setup() };
-}
 
 /** What the grid is told to show. */
 function shown() {
@@ -36,11 +28,6 @@ const monday = {
   start: '2026-10-05T09:00:00',
   end: '2026-10-05T10:00:00',
 } as const;
-
-/** Emits "Date changed" to `date`, as the core does at midnight. */
-function dateChanged(core: FakeCore, date: string) {
-  core.emit({ kind: 'dateChanged', date });
-}
 
 function title() {
   return screen.getByRole('heading', { level: 1 }).textContent;

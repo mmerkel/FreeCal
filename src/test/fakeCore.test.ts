@@ -3,10 +3,9 @@ import { samples } from '../core/samples.generated';
 import { tauriCore } from '../core/tauriCore';
 import type { Calendar, EventDraft, Signal } from '../core/types';
 import { accountId, calendarId, eventId, journalTransactionId } from './ids';
-import { failure, FakeCore } from './fakeCore';
+import { failure, FakeCore, first, settled } from './fakeCore';
 
-const draft = samples.EventDraft[0] as EventDraft;
-const settled = () => new Promise((resolve) => setTimeout(resolve));
+const draft = first<EventDraft>(samples.EventDraft);
 
 describe('a call nobody scripted', () => {
   test('answers with the generated samples of its type', async () => {

@@ -139,6 +139,11 @@ export function scriptWindow(core: FakeCore, { accounts, calendars, events }: Sc
   }
 }
 
+/** Emits "Date changed" to `date`, as the core does at midnight. */
+export function dateChanged(core: FakeCore, date: string) {
+  core.emit({ kind: 'dateChanged', date });
+}
+
 /** Scripts `window` and emits "Calendars changed", as the core does after a change to them. */
 export function calendarsChanged(core: FakeCore, window: ScriptedWindow) {
   scriptWindow(core, window);

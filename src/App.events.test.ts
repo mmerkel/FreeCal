@@ -3,17 +3,17 @@
 // What a change does to the Events is the core's, tested at the core
 // interface; these tests check the calls made, and that the window follows
 // the "Occurrences changed" they emit as the core would.
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
-import App from './App.svelte';
 import type { Event, Repeat, StructuredText, When } from './core/types';
 import { calendar, event, firstLaunch, occurrence, occurrencesChanged } from './test/answers';
 import { journalTransactionId } from './test/ids';
 import { failure, type FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
@@ -23,11 +23,6 @@ const monday: When = { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-1
 const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
 const home = calendar({ name: 'Home' });
 const locked = calendar({ name: 'Holidays', readOnly: true });
-
-async function showApp(core: FakeCore) {
-  render(App, { core });
-  return screen.findByRole('list', { name: 'Grid' });
-}
 
 /** The user selects a slot in the grid, as FullCalendar reports it. */
 async function selectSlot(when: When) {
@@ -51,7 +46,8 @@ async function openOccurrence(
 test('selecting a slot opens the editor with that time, and saving creates the Event', async () => {
   const user = userEvent.setup();
   const core = firstLaunch({ calendars: [home] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
 
   await selectSlot(monday);
   const editor = screen.getByRole('dialog', { name: 'New event' });
@@ -269,7 +265,8 @@ test('editing an Event changes it and returns to its details', async () => {
   const lunch = event({ calendarId: home.id, title: 'Lunch', when: monday });
   const longLunch = { ...lunch, title: 'Long lunch' };
   const core = firstLaunch({ calendars: [home], events: [lunch] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   const details = await openOccurrence(user, core, lunch);
   core.answer('editEvent', { journalTransaction: journalTransactionId(7), value: longLunch });
 
@@ -309,7 +306,8 @@ test('deleting an Event asks first, then deletes it through the core', async () 
   const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
   const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
   const core = firstLaunch({ calendars: [home], events: [doomed, kept] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   const details = await openOccurrence(user, core, doomed);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
@@ -351,7 +349,8 @@ test('“Occurrences changed” re-fetches the visible range and keeps the open 
   const standup = event({ calendarId: home.id, title: 'Standup', when: monday });
   const moved = { ...standup, title: 'Standup (moved)' };
   const core = firstLaunch({ calendars: [home], events: [standup] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   await openOccurrence(user, core, standup);
 
   // A change made elsewhere, such as a sync, that the core signals.
@@ -388,7 +387,8 @@ test('an open editor’s draft survives a re-fetch', async () => {
   const plan = event({ calendarId: home.id, title: 'Plan', when: monday });
   const theirs = { ...plan, title: 'Their plan' };
   const core = firstLaunch({ calendars: [home], events: [plan] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   await user.click(
     within(await openOccurrence(user, core, plan)).getByRole('button', { name: 'Edit' }),
   );
@@ -415,7 +415,8 @@ test('hiding a Calendar asks the core, and the grid follows “Calendars changed
   const atHome = event({ calendarId: home.id, title: 'At home', when: monday });
   const atWork = event({ calendarId: work.id, title: 'At work', when: monday });
   const core = firstLaunch({ calendars: [home, work], events: [atHome, atWork] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   await within(grid).findByRole('button', { name: 'At work' });
 
   await user.click(screen.getByRole('switch', { name: 'Work' }));
@@ -515,7 +516,8 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     description: hostile.expected.plainText as StructuredText,
   });
   const core = firstLaunch({ calendars: [home], events: [hostileHtml, hostileTitle] });
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   await within(grid).findByRole('button', { name: /onerror/ });
   const details = await openOccurrence(user, core, hostileHtml);
 
@@ -652,7 +654,8 @@ function occurrencesTitled(grid: HTMLElement, title: string) {
 async function openYoga(user: ReturnType<typeof userEvent.setup>, index: number) {
   const core = firstLaunch({ calendars: [home], events: yogaOccurrences });
   core.answer('event', yoga);
-  const grid = await showApp(core);
+  await showApp(core);
+  const grid = screen.getByRole('list', { name: 'Grid' });
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
   await user.click(occurrencesTitled(grid, 'Yoga')[index]);
   const details = await screen.findByRole('dialog', { name: 'Yoga' });

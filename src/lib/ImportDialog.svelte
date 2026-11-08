@@ -10,6 +10,7 @@
   import type { Calendar, CalendarId, ExistingEvents, ImportSummary } from '../core/types';
   import { errorText, t, tCount, type MessageKey } from '../i18n';
   import Dialog from './Dialog.svelte';
+  import { NewestRead } from './newestRead';
 
   interface Props {
     core: CoreApi;
@@ -42,7 +43,7 @@
   const empty = $derived(summary !== undefined && summary.newEvents + summary.existingEvents === 0);
 
   // Previews can overtake each other; only the one for the chosen Calendar may land.
-  let latestPreview = 0;
+  const preview = new NewestRead();
 
   // A Calendar deleted or made Read-only meanwhile is no longer offered.
   $effect(() => {
@@ -52,18 +53,14 @@
 
   $effect(() => {
     const chosen = calendarId;
-    const preview = ++latestPreview;
     summary = undefined;
     previewFailure = undefined;
-    core.previewImport(chosen).then(
-      (read) => {
-        if (preview === latestPreview) summary = read;
-      },
-      (error) => {
-        if (preview === latestPreview)
-          previewFailure = t('import.previewFailed', { error: errorText(error) });
-      },
-    );
+    preview
+      .run(
+        () => core.previewImport(chosen),
+        (read) => (summary = read),
+      )
+      .catch((error) => (previewFailure = t('import.previewFailed', { error: errorText(error) })));
   });
 </script>
 

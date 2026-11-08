@@ -2,27 +2,21 @@
 // import, run against the fake core with a stand-in grid (see
 // StubGrid.svelte). What an import does to the Events is the core's, tested
 // at the core interface; these tests check the calls and what the window shows.
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
-import App from './App.svelte';
 import type { Calendar, ImportSummary } from './core/types';
 import { calendar, event, firstLaunch, scriptWindow } from './test/answers';
 import { journalTransactionId } from './test/ids';
 import { failure, type FakeCore } from './test/fakeCore';
+import { showApp } from './test/showApp';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
 /** The preview of a file with `newEvents` Events, none of them in `into` yet. */
 function preview(into: Calendar, fields: Partial<ImportSummary> = {}): ImportSummary {
   return { calendarId: into.id, newEvents: 2, existingEvents: 0, pinned: [], ...fields };
-}
-
-async function showApp(core: FakeCore) {
-  render(App, { core });
-  await screen.findByRole('list', { name: 'Grid' });
-  return userEvent.setup();
 }
 
 async function chooseImport(user: ReturnType<typeof userEvent.setup>) {
@@ -51,7 +45,7 @@ function grid() {
 
 test('Import… asks for a file in the system’s file dialog, with translated words', async () => {
   const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   await chooseImport(user);
 
@@ -72,7 +66,7 @@ test('the import dialog offers only writable Calendars and previews the first sh
       home,
     ],
   });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   const dialog = await openImport(user, core, preview(home));
 
@@ -93,7 +87,7 @@ test('with Events already in the Calendar, the dialog asks once what to do with 
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
   const core = firstLaunch({ calendars: [home, work] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   expect(within(dialog).getByText('2 new events')).toBeInTheDocument();
 
@@ -120,7 +114,7 @@ test('with Events already in the Calendar, the dialog asks once what to do with 
 test('the preview names the zones floating times were pinned to', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   const dialog = await openImport(
     user,
@@ -148,7 +142,7 @@ test('a file without Events says so and can’t be imported', async () => {
   const core = firstLaunch({ calendars: [home] });
   core.answer('pickImportFile', 'empty.ics');
   core.answer('previewImport', preview(home, { newEvents: 0 }));
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   await chooseImport(user);
 
@@ -160,7 +154,7 @@ test('a file without Events says so and can’t be imported', async () => {
 test('the import runs under the modal “Working…” dialog, and the grid follows “Occurrences changed”', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const ran = core.pending('runImport');
 
@@ -191,7 +185,7 @@ test('the import runs under the modal “Working…” dialog, and the grid foll
 test('after an import, Undo undoes its Journal Transaction under “Working…”', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home, { newEvents: 1, existingEvents: 1 }));
   core.answer('runImport', {
     journalTransaction: journalTransactionId(7),
@@ -225,7 +219,7 @@ test('after an import, Undo undoes its Journal Transaction under “Working…�
 test('an import that changed nothing offers no Undo', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(
     user,
     core,
@@ -245,7 +239,7 @@ test('an import that changed nothing offers no Undo', async () => {
 test('a failed import stays in the dialog and says why', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   core.answer('runImport', failure({ code: 'calendarReadOnly' }));
 
@@ -261,7 +255,7 @@ test('a failed import stays in the dialog and says why', async () => {
 test('Cancel lets go of the picked file', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
 
   await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -274,7 +268,7 @@ test('Cancel lets go of the picked file', async () => {
 test('a file that can’t be read gives a message naming it', async () => {
   const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
   core.answer('pickImportFile', failure({ code: 'importTooLarge', file: 'takeout.zip' }));
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   await chooseImport(user);
 
@@ -288,7 +282,7 @@ test('a preview that fails says why and can’t be imported', async () => {
   const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
   core.answer('pickImportFile', 'work.ics');
   core.answer('previewImport', failure({ code: 'importNotCalendar', file: 'work.ics' }));
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   await chooseImport(user);
 
@@ -301,7 +295,7 @@ test('a preview that fails says why and can’t be imported', async () => {
 
 test('without a writable Calendar, Import… says where to create one first', async () => {
   const core = firstLaunch({ calendars: [calendar({ name: 'Holidays', readOnly: true })] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
 
   await chooseImport(user);
 
@@ -314,7 +308,7 @@ test('a preview for a Calendar chosen earlier never overwrites the latest one', 
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
   const core = firstLaunch({ calendars: [home, work] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const slow = core.pending('previewImport');
   const choice = within(dialog).getByRole('combobox', { name: 'Into calendar' });
@@ -332,7 +326,7 @@ test('a preview for a Calendar chosen earlier never overwrites the latest one', 
 test('the hostile file name and zone are shown only as text', async () => {
   const home = calendar({ name: 'Home' });
   const core = firstLaunch({ calendars: [home] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   core.answer('runImport', {
     journalTransaction: journalTransactionId(7),
     imported: 1,
@@ -358,7 +352,7 @@ test('a Calendar that becomes Read-only while the dialog is open is no longer ch
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
   const core = firstLaunch({ calendars: [home, work] });
-  const user = await showApp(core);
+  const { user } = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const choice = within(dialog).getByRole('combobox', { name: 'Into calendar' });
   expect(choice).toHaveDisplayValue('Home');

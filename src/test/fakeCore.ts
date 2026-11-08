@@ -7,7 +7,7 @@ type Args<M extends Method> = Parameters<CoreApi[M]>;
 type Answer<M extends Method> = Awaited<ReturnType<CoreApi[M]>>;
 
 /** One recorded call of the core interface: its method and its arguments. */
-export type Call = { [M in Method]: { method: M; args: Args<M> } }[Method];
+type Call = { [M in Method]: { method: M; args: Args<M> } }[Method];
 
 /** An error code a scripted answer rejects with, as the core's does when a method fails. */
 export class Failure {
@@ -44,10 +44,13 @@ const copyAsSent = <T>(value: T): T => {
   ) as T;
 };
 
+/** Lets every answer and Signal handler pending now run. */
+export const settled = () => new Promise((resolve) => setTimeout(resolve));
+
 /** A copy of a sample of the core interface's types, with its IDs branded as the core sends them. */
-const branded = <T>(sample: Unbranded<NoInfer<T>>): T => copyAsSent(sample) as unknown as T;
+export const branded = <T>(sample: Unbranded<NoInfer<T>>): T => copyAsSent(sample) as unknown as T;
 /** The first sample of a type. */
-const first = <T>(samplesOfType: readonly Unbranded<NoInfer<T>>[]): T =>
+export const first = <T>(samplesOfType: readonly Unbranded<NoInfer<T>>[]): T =>
   branded<T>(samplesOfType[0]);
 /** Every sample of a type. */
 const every = <T>(samplesOfType: readonly Unbranded<NoInfer<T>>[]): T[] =>

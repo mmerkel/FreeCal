@@ -19,7 +19,7 @@ import type { WindowModel } from './windowModel.svelte';
  * `editing` is the selected one, which the grid marks. `recurrenceId` says
  * which Occurrence of a Recurring Event was opened, none for the whole.
  */
-export type Open =
+type Open =
   | { kind: 'details'; id: EventId; recurrenceId: string | null }
   | {
       kind: 'editing';
@@ -41,13 +41,13 @@ export type Open =
  * term). It is asked once the core has counted the Exceptions it offers to
  * change too; until then it has no `counts`.
  */
-export interface ScopePrompt {
+interface ScopePrompt {
   change: ScopeChange;
   counts?: ExceptionCounts;
 }
 
 /** The message at the bottom of the window, with its Undo if it has one. */
-export interface Toast {
+interface Toast {
   message: string;
   undo?: () => void;
 }
@@ -149,9 +149,12 @@ export class WindowDialogs {
   get openedOccurrence() {
     const open = this.#open;
     if (open?.kind !== 'details' || open.recurrenceId === null) return undefined;
+    return this.#occurrence(open.id, open.recurrenceId);
+  }
+  /** The Occurrence in view of the Event `id` with `recurrenceId`. */
+  #occurrence(id: EventId, recurrenceId: string | null) {
     return this.#model.occurrences.find(
-      (occurrence) =>
-        occurrence.eventId === open.id && occurrence.recurrenceId === open.recurrenceId,
+      (occurrence) => occurrence.eventId === id && occurrence.recurrenceId === recurrenceId,
     );
   }
   /**
@@ -298,9 +301,7 @@ export class WindowDialogs {
 
   /** A drag the grid refused, because the Occurrence's Calendar is read-only. */
   refuseDrag(id: EventId, recurrenceId: string | null) {
-    const dragged = this.#model.occurrences.find(
-      (occurrence) => occurrence.eventId === id && occurrence.recurrenceId === recurrenceId,
-    );
+    const dragged = this.#occurrence(id, recurrenceId);
     const calendar = this.#model.directory?.calendars.find(
       (found) => found.id === dragged?.calendarId,
     );
