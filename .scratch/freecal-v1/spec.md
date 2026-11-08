@@ -79,6 +79,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - **US-44** As a user, I want to delete a single Occurrence, so that a cancelled meeting disappears without ending the series.
 - **US-45** As a user, I want my Exceptions kept when I change unrelated parts of a Recurring Event where possible, so that individual changes aren't lost.
 - **US-46** As a user, I want edits to Events in Read-only Calendars or with other attendees to be impossible, so that I can't cause damage by accident.
+- **US-151** As a user, I want to see an Event's attendees, answer invitations, invite people and edit Events with guests in FreeCal, so that I don't have to go to Google or my server for meetings.
 - **US-47** As a user, I want FreeCal to preserve every Event detail it doesn't show (attendees, conference links, custom properties) whenever it changes an Event, so that I never lose data elsewhere.
 - **US-48** As a user, I want to move an Event to a Calendar in another Account, so that I can turn a local draft into a real meeting.
 - **US-49** As a user, I want to be warned before such a move only if the Event has details that would be lost, so that I'm not nagged needlessly.
@@ -268,7 +269,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Ways to undo: Ctrl+Z undoes the user's own actions of this session, newest first, skipping undos; Ctrl+Shift+Z and Ctrl+Y redo until the user's next change. A toast after each of the user's actions offers Undo. An Event's details offer its History, its Journal Event Modifications each with Undo. The Change Journal list shows one timeline, newest first, with Journal Transactions that expand into their Events, and "undo everything in a Calendar since…". Ctrl+Z never undoes a sync.
 - **Snapshots**: daily, compressed, skipping Calendars unchanged since the last Snapshot, 14 kept. They include the Local Account's Calendars.
 - **Recurrence**: the core expands Recurring Events into Occurrences for the requested range. The frontend never interprets repeat rules. Editing supports this / this and following / all, and Exceptions are preserved where possible.
-- **Attendees**: no attendee features. Any Event with attendees other than the user is read-only, and its details say "has guests" (edit it in Google or on the server for now). Attendee data is never shown and always preserved.
+- **Attendees**: attendee features come before v1 (US-151); their design starts with a grilling session (ticket 126). Until they come, any Event with attendees other than the user is read-only, and its details say "has guests" (edit it in Google or on the server for now). Attendee data is never shown and always preserved.
 - **Choosing server Calendars**: when a CalDAV or Google Account is added, FreeCal lists the Calendars it discovered as Available Calendars and the user chooses which to add. Calendars that appear on the server later stay Available Calendars until the user adds them. The Account's line in the sidebar offers "Manage Calendars…", which fetches the server's current list and lets the user add Available Calendars or remove Calendars. Removing a server Calendar from FreeCal deletes only its local copy, never touches the server, and makes it an Available Calendar again.
 - **Writability**: a Calendar is read-only if the server says so or if the user marks it read-only in FreeCal. Before 1.0, newly added Google and CalDAV Calendars default to read-only.
 - **Moves across Accounts**: implemented as create in the target, then delete in the source, both recorded in the Change Journal. The warning is shown only when the Event has Provider-specific details that the target can't hold.
@@ -346,7 +347,6 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 
 ## Out of Scope
 
-- Attendee features: showing attendees, RSVP, inviting, and editing Events that have other attendees.
 - ICS feed subscriptions, Microsoft Graph / Outlook, Exchange EWS, GNOME Online Accounts, vdir folders.
 - Settings for sync timings, retention values and the default view; the secondary time-zone column; a keyboard shortcuts overview.
 - Field-level automatic merge of Conflicts (planned later as an opt-in setting).
