@@ -111,6 +111,7 @@ export const en = {
   'sync.errorShort': 'Sync error',
   'sync.conflict': 'Conflict',
   'calendar.readOnly': 'Read-only',
+  'calendar.serverReadOnly': 'The server doesn’t allow changes to this calendar.',
   'calendar.remove': 'Remove from FreeCal',
   'calendar.removeTitle': 'Remove “\u2068{name}\u2069” from FreeCal?',
   'calendar.removeBody':

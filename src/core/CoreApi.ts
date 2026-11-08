@@ -98,6 +98,11 @@ export interface CoreApi {
    */
   removeCalendar(id: CalendarId): Promise<void>;
   setCalendarShown(id: CalendarId, shown: boolean): Promise<void>;
+  /**
+   * Marks a Calendar read-only in FreeCal, or unmarks it. One the server
+   * reports read-only stays read-only whatever the mark.
+   */
+  setCalendarReadOnly(id: CalendarId, readOnly: boolean): Promise<void>;
   /** Shows this Calendar and hides every other Calendar in all Accounts. */
   showOnlyCalendar(id: CalendarId): Promise<void>;
   /**

@@ -34,6 +34,7 @@ export const tauriCore: CoreApi = {
   deleteCalendar: (id) => invoke('delete_calendar', { id }),
   removeCalendar: (id) => invoke('remove_calendar', { id }),
   setCalendarShown: (id, shown) => invoke('set_calendar_shown', { id, shown }),
+  setCalendarReadOnly: (id, readOnly) => invoke('set_calendar_read_only', { id, readOnly }),
   showOnlyCalendar: (id) => invoke('show_only_calendar', { id }),
   listOccurrences: (from, to) =>
     invoke('list_occurrences', { from: from.toString(), to: to.toString() }),

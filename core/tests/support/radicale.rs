@@ -460,7 +460,8 @@ pub fn closed_port_url() -> String {
 /// A stand-in for a server that keeps what Radicale refuses, such as a
 /// resource holding several UIDs: a proxy in front of Radicale that passes
 /// each request through and the answer back, with every `marker` in an
-/// answer replaced by `replacement` until [`RewritingProxy::stop_rewriting`].
+/// answer replaced by `replacement` except between
+/// [`RewritingProxy::stop_rewriting`] and [`RewritingProxy::start_rewriting`].
 /// It records the bodies of the requests it gets. Between
 /// [`RewritingProxy::go_away`] and [`RewritingProxy::come_back`] it closes
 /// each connection unanswered, as a server that can't be reached.
@@ -565,6 +566,11 @@ impl RewritingProxy {
     /// Passes answers back unchanged from now on.
     pub fn stop_rewriting(&self) {
         self.rewriting.store(false, Ordering::SeqCst);
+    }
+
+    /// Rewrites answers again from now on.
+    pub fn start_rewriting(&self) {
+        self.rewriting.store(true, Ordering::SeqCst);
     }
 
     /// How many requests it got whose body holds `text`.

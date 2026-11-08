@@ -15,7 +15,7 @@ use freecal_core::{
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User, closed_port_url};
 use support::{
     Harness, account_sync_status, add_account, add_account_with_calendar, calendar,
-    calendar_sync_status, draft, event, ics, make_writable, timed, titles, user_login, utc,
+    calendar_sync_status, draft, event, ics, timed, titles, user_login, utc,
 };
 
 /// A user on Radicale with two Calendars, "Work" and "Home", both added
@@ -539,7 +539,10 @@ fn a_stored_last_sync_is_untrusted() {
 #[test]
 fn a_change_in_a_server_calendar_reports_its_unsent_changes() {
     let server = Server::new();
-    make_writable(&server.harness, server.work);
+    server
+        .core
+        .set_calendar_read_only(server.work, false)
+        .unwrap();
 
     server
         .core

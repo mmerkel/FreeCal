@@ -5,7 +5,7 @@ use freecal_core::{
     SyncStatus,
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
-use support::{Harness, date, event, ics, make_writable, user_login};
+use support::{Harness, date, event, ics, user_login};
 
 /// A user on Radicale with a Calendar "Work", and a new Core with the
 /// user's Account added and that Calendar's first sync done.
@@ -68,7 +68,10 @@ impl Synced {
     /// its changes can be undone.
     fn writable(events: &[(&str, Vec<u8>)]) -> Self {
         let synced = Self::with(events);
-        make_writable(&synced.harness, synced.work);
+        synced
+            .core
+            .set_calendar_read_only(synced.work, false)
+            .unwrap();
         synced
     }
 
@@ -486,6 +489,54 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
 
     assert!(journal_transaction.is_some());
     assert_eq!(synced.titles(), ["Standup moved"]);
+}
+
+/// A permission the server revokes or grants after the Calendar was added
+/// reaches it with the next sync, with "Calendars changed" (spec:
+/// "Calendars changed"). Radicale lets the user only read the Calendar; the
+/// proxy says they may change it until it stops rewriting.
+#[test]
+fn each_sync_reads_whether_the_server_lets_the_user_change_the_calendar() {
+    let radicale = Radicale::shared();
+    let user = radicale.user();
+    let url = radicale.create_read_only_calendar(&user, NewCalendar::default());
+    let proxy = RewritingProxy::new(radicale, "<read />", "<all />");
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let account = core
+        .add_caldav_account(&CalDavLogin {
+            url: proxy.url.clone(),
+            ..user_login(radicale, &user)
+        })
+        .unwrap()
+        .account
+        .id;
+    let holidays = core
+        .add_calendars(account, &[url.replace(&radicale.url(), &proxy.url)])
+        .unwrap()[0]
+        .id;
+    core.set_calendar_read_only(holidays, false).unwrap();
+    let flags = || {
+        let calendar = core.list_calendars().unwrap().pop().unwrap();
+        (calendar.read_only, calendar.server_read_only)
+    };
+    let sync = || {
+        harness.signals.clear();
+        core.sync_account(account, StartedBy::FreeCal).unwrap();
+        harness.signals.received_but_sync_status()
+    };
+    assert_eq!(flags(), (false, false));
+
+    assert_eq!(sync(), []);
+
+    proxy.stop_rewriting();
+    assert_eq!(sync(), [Signal::CalendarsChanged]);
+    assert_eq!(flags(), (true, true));
+
+    proxy.start_rewriting();
+    assert_eq!(sync(), [Signal::CalendarsChanged]);
+    // The user's mark stayed as they left it.
+    assert_eq!(flags(), (false, false));
 }
 
 mod undo {

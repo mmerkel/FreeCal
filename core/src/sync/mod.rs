@@ -1,5 +1,5 @@
 //! The Sync Engine: it exchanges a Calendar's changes with its server, by
-//! Incoming Syncs and, with ticket 17, Outgoing Syncs, and is the only code
+//! Incoming Syncs and, with ticket 123, Outgoing Syncs, and is the only code
 //! that changes the Mirror's server data: it is a Guard, and the Local
 //! Store's writes of the Mirror take a [`SyncEngineWritePermission`], which
 //! only this module can make. Each Provider's part lives in a module of its

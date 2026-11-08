@@ -453,6 +453,64 @@ test('“Show only this” shows one Calendar and hides all others', async () =>
   expect(screen.getByRole('switch', { name: 'Birthdays' })).not.toBeChecked();
 });
 
+test('“Read-only” in a Calendar’s menu marks it read-only and writable again', async () => {
+  const user = userEvent.setup();
+  const home = calendar({ name: 'Home' });
+  const core = firstLaunch({ calendars: [home] });
+  await showApp(core);
+
+  let menu = await openMenu(user, 'Home');
+  let mark = within(menu).getByRole('menuitemcheckbox', { name: 'Read-only' });
+  expect(mark).not.toBeChecked();
+  await user.click(mark);
+
+  expect(core.callsOf('setCalendarReadOnly')).toEqual([[home.id, true]]);
+  expect(menu).not.toBeInTheDocument();
+  calendarsChanged(core, { calendars: [{ ...home, readOnly: true }] });
+  await waitFor(() =>
+    expect(screen.getByRole('switch', { name: 'Home' })).toHaveAccessibleDescription(
+      'Read-only Home: shown, click to hide',
+    ),
+  );
+
+  menu = await openMenu(user, 'Home');
+  mark = within(menu).getByRole('menuitemcheckbox', { name: 'Read-only' });
+  expect(mark).toBeChecked();
+  await user.click(mark);
+
+  expect(core.callsOf('setCalendarReadOnly')).toEqual([
+    [home.id, true],
+    [home.id, false],
+  ]);
+});
+
+test('a Calendar the server reports read-only isn’t offered as writable, saying why', async () => {
+  const user = userEvent.setup();
+  const account = caldavAccount('anna');
+  const holidays = calendar({
+    accountId: account.id,
+    name: 'Holidays',
+    readOnly: true,
+    serverReadOnly: true,
+  });
+  const core = firstLaunch({ calendars: [holidays] });
+  core.answer('listAccounts', [localAccount, account]);
+  await showApp(core);
+
+  const menu = await openMenu(user, 'Holidays');
+  const mark = within(menu).getByRole('menuitemcheckbox', { name: 'Read-only' });
+  expect(mark).toBeChecked();
+  expect(mark).toHaveAttribute('aria-disabled', 'true');
+  expect(mark).toHaveAccessibleDescription('The server doesn’t allow changes to this calendar.');
+  expect(
+    within(menu).getByText('The server doesn’t allow changes to this calendar.'),
+  ).toBeVisible();
+  await user.click(mark);
+
+  expect(core.callsOf('setCalendarReadOnly')).toEqual([]);
+  expect(menu).toBeInTheDocument();
+});
+
 test('deletes a Calendar only after confirming in a dialog', async () => {
   const user = userEvent.setup();
   const home = calendar({ name: 'Home' });

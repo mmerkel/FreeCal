@@ -2,7 +2,7 @@ mod support;
 
 use freecal_core::{AccountId, Calendar, Colour, Core, CoreError, ErrorCode, Signal};
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{Harness, add_account, calendar, draft, make_writable, timed};
+use support::{Harness, add_account, calendar, draft, timed};
 
 fn server_calendar(radicale: &Radicale, user: &User, name: &str) -> String {
     radicale.create_calendar(
@@ -86,9 +86,9 @@ fn a_calendar_the_server_doesnt_let_the_user_change_is_read_only_whatever_the_us
         .map(|calendar| (calendar.read_only, calendar.server_read_only))
         .collect();
     assert_eq!(flags, vec![(true, true), (true, false)]);
-    // Unmarked by the user, as ticket 17 will let them.
+    // The user unmarks both.
     for calendar in &added {
-        make_writable(&harness, calendar.id);
+        core.set_calendar_read_only(calendar.id, false).unwrap();
     }
     let calendars = core.list_calendars().unwrap();
     let read_only = |id| calendars.iter().find(|c| c.id == id).unwrap().read_only;
@@ -304,7 +304,7 @@ fn removing_a_calendar_deletes_only_its_local_copy_and_makes_it_available_again(
         .add_calendars(account, std::slice::from_ref(&work))
         .unwrap()[0]
         .clone();
-    make_writable(&harness, added.id);
+    core.set_calendar_read_only(added.id, false).unwrap();
     core.create_event(draft(
         added.id,
         "Stand-up",
@@ -394,7 +394,7 @@ fn removing_an_account_removes_its_calendars_their_events_and_their_history() {
         .unwrap();
     let account = add_account(&core, radicale, &user);
     let added = core.add_calendars(account, &[work]).unwrap()[0].clone();
-    make_writable(&harness, added.id);
+    core.set_calendar_read_only(added.id, false).unwrap();
     let created = core
         .create_event(draft(
             added.id,
@@ -444,10 +444,8 @@ fn several_accounts_side_by_side_each_keep_their_own_password_and_calendars() {
     assert_eq!(available_urls(&core, alices), vec![alices_work.clone()]);
     assert_eq!(available_urls(&core, bobs), vec![bobs_work.clone()]);
     core.add_calendars(alices, &[alices_work]).unwrap();
-    make_writable(
-        &harness,
-        core.add_calendars(bobs, &[bobs_work]).unwrap()[0].id,
-    );
+    core.set_calendar_read_only(core.add_calendars(bobs, &[bobs_work]).unwrap()[0].id, false)
+        .unwrap();
     let bobs_calendar = core.list_calendars().unwrap().pop().unwrap();
     let stand_up = core
         .create_event(draft(

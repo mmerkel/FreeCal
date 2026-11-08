@@ -212,6 +212,19 @@ impl Client {
         Ok(calendars)
     }
 
+    /// Whether the server doesn't let the user change the Events of the
+    /// Calendar at `calendar`, by its `current-user-privilege-set`.
+    pub fn server_read_only(&self, calendar: &str) -> Result<bool> {
+        let (answer, _) = self.propfind(
+            &stored_url(&self.url, calendar)?,
+            Depth::Zero,
+            &[CURRENT_USER_PRIVILEGE_SET],
+        )?;
+        Ok(server_read_only(
+            answer.property(CURRENT_USER_PRIVILEGE_SET),
+        ))
+    }
+
     /// Every object of the Calendar at `calendar`, handed to `page`
     /// [`FIRST_SYNC_PAGE`] at a time: the Calendar's members are listed,
     /// then fetched with `calendar-multiget` (RFC 4791). `page` gets them
@@ -634,17 +647,20 @@ fn available_calendar(home: &Url, response: &Element) -> Option<AvailableCalenda
     let colour = response
         .found(CALENDAR_COLOR)
         .and_then(|colour| calendar_colour(&colour.text));
-    // A server that doesn't say may well allow it; should it refuse a
-    // change, that becomes a Sync Error (ticket 17).
-    let read_only = response
-        .found(CURRENT_USER_PRIVILEGE_SET)
-        .is_some_and(|privileges| !may_change_events(privileges));
     Some(AvailableCalendar {
         url: url.to_string(),
         name,
         colour,
-        read_only,
+        read_only: server_read_only(response.found(CURRENT_USER_PRIVILEGE_SET)),
     })
+}
+
+/// Whether a Calendar whose `current-user-privilege-set` is `privileges`
+/// doesn't let the user change its Events. A server that doesn't say may
+/// well allow it; should it refuse a change, that becomes a Sync Error
+/// (ticket 124).
+fn server_read_only(privileges: Option<&Element>) -> bool {
+    privileges.is_some_and(|privileges| !may_change_events(privileges))
 }
 
 /// Whether a Calendar's `current-user-privilege-set` (RFC 3744) lets the

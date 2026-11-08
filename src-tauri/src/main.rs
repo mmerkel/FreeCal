@@ -221,6 +221,12 @@ fn set_calendar_shown(core: State<Core>, id: i64, shown: bool) -> CommandResult<
 }
 
 #[tauri::command]
+fn set_calendar_read_only(core: State<Core>, id: i64, read_only: bool) -> CommandResult<()> {
+    core.set_calendar_read_only(CalendarId(id), read_only)
+        .map_err(ErrorCode::from)
+}
+
+#[tauri::command]
 fn show_only_calendar(core: State<Core>, id: i64) -> CommandResult<()> {
     core.show_only_calendar(CalendarId(id))
         .map_err(ErrorCode::from)
@@ -646,6 +652,7 @@ fn main() {
             delete_calendar,
             remove_calendar,
             set_calendar_shown,
+            set_calendar_read_only,
             show_only_calendar,
             list_occurrences,
             event,

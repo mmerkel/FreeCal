@@ -552,12 +552,12 @@ mod tests {
         let store = Store::open(&directory.path().join("freecal.sqlite3")).unwrap();
         let mut event = dentist();
         event.calendar_id = store.list_calendars().unwrap()[0].id;
+        store
+            .write(|database_transaction| {
+                database_transaction.set_calendar_read_only(event.calendar_id, true)
+            })
+            .unwrap();
         let conn = store.connection();
-        conn.execute(
-            "UPDATE calendar SET read_only = 1 WHERE id = ?1",
-            [event.calendar_id.0],
-        )
-        .unwrap();
 
         let recorded = record(
             &store,

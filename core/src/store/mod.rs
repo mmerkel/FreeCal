@@ -106,22 +106,15 @@ impl Store {
             colour: None,
             read_only: false,
         };
-        let calendar_id = self
-            .write(|database_transaction| {
-                let account =
-                    database_transaction.insert_server_account(Provider::CalDav, &login, "key")?;
-                database_transaction.insert_server_calendar(account.id, &available)
-            })
-            .unwrap()
-            .id;
-        // A new server Calendar starts marked read-only.
-        self.conn
-            .execute(
-                "UPDATE calendar SET read_only = 0 WHERE id = ?1",
-                [calendar_id.0],
-            )
-            .unwrap();
-        calendar_id
+        self.write(|database_transaction| {
+            let account =
+                database_transaction.insert_server_account(Provider::CalDav, &login, "key")?;
+            let calendar = database_transaction.insert_server_calendar(account.id, &available)?;
+            // A new server Calendar starts marked read-only.
+            database_transaction.set_calendar_read_only(calendar.id, false)?;
+            Ok(calendar.id)
+        })
+        .unwrap()
     }
 
     /// Runs `write` in a Database Transaction of its own, and commits it

@@ -157,6 +157,26 @@ impl DatabaseTransaction<'_> {
         self.update_calendar("UPDATE calendar SET shown = ?2 WHERE id = ?1", id, shown)
     }
 
+    /// Sets the user's read-only mark of a Calendar (US-17, US-19).
+    pub fn set_calendar_read_only(&self, id: CalendarId, read_only: bool) -> Result<()> {
+        self.update_calendar(
+            "UPDATE calendar SET read_only = ?2 WHERE id = ?1",
+            id,
+            read_only,
+        )
+    }
+
+    /// Keeps whether a server Calendar's server doesn't let the user change
+    /// it, as a sync read it. Returns whether that changed; not for a
+    /// Calendar removed meanwhile.
+    pub fn set_server_read_only(&self, id: CalendarId, read_only: bool) -> Result<bool> {
+        let changed = self.tx.execute(
+            "UPDATE calendar SET server_read_only = ?2 WHERE id = ?1 AND server_read_only != ?2",
+            params![id.0, read_only],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Shows `id` and hides every other Calendar, in one statement so that
     /// nothing changes when `id` doesn't exist.
     pub fn show_only_calendar(&self, id: CalendarId) -> Result<()> {

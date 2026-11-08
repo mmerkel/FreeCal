@@ -54,7 +54,7 @@ pub struct Calendar {
     /// A Read-only Calendar: FreeCal never changes its Events. It is one
     /// when its server doesn't allow changing it or the user marked it
     /// read-only; until 1.0, every newly added server Calendar starts
-    /// marked. Marking comes with ticket 17.
+    /// marked.
     pub read_only: bool,
     /// Whether its server doesn't allow the user to change it, so that it
     /// stays read-only whatever the user marks.

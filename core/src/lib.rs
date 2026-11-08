@@ -493,7 +493,15 @@ impl Core {
             self.record(origin, change)
                 .map(|changed| changed.journal_transaction)
         };
-        let (calendar_id, ..) = *calendar;
+        let (calendar_id, ref url, _) = *calendar;
+        // A permission the server revokes or grants later is noticed here.
+        let server_read_only = remote.server_read_only(url)?;
+        let changed = self.store().write(|database_transaction| {
+            database_transaction.set_server_read_only(calendar_id, server_read_only)
+        })?;
+        if changed {
+            self.signals.send(Signal::CalendarsChanged);
+        }
         let journal_transaction = sync::incoming(
             remote,
             &self.store,
@@ -642,6 +650,17 @@ impl Core {
     pub fn set_calendar_shown(&self, id: CalendarId, shown: bool) -> Result<()> {
         self.store()
             .write(|database_transaction| database_transaction.set_calendar_shown(id, shown))?;
+        self.signals.send(Signal::CalendarsChanged);
+        Ok(())
+    }
+
+    /// Marks a Calendar read-only in FreeCal, or unmarks it (US-17, US-19).
+    /// A Calendar whose server doesn't let the user change it stays
+    /// read-only whatever the mark.
+    pub fn set_calendar_read_only(&self, id: CalendarId, read_only: bool) -> Result<()> {
+        self.store().write(|database_transaction| {
+            database_transaction.set_calendar_read_only(id, read_only)
+        })?;
         self.signals.send(Signal::CalendarsChanged);
         Ok(())
     }

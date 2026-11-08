@@ -7,9 +7,7 @@ mod support;
 
 use freecal_core::{AccountId, CalendarId, Core, OverallState, Signal, SyncStatus, SyncTrigger};
 use support::radicale::Radicale;
-use support::{
-    Harness, account_sync_status, add_account_with_calendar, calendar, draft, make_writable, timed,
-};
+use support::{Harness, account_sync_status, add_account_with_calendar, calendar, draft, timed};
 
 /// A new Core with two server Accounts on Radicale, each with one
 /// Calendar, and the Local Account with its starting Calendars. The
@@ -184,7 +182,10 @@ fn focusing_the_window_within_a_minute_of_a_sync_syncs_nothing() {
 #[test]
 fn a_local_edit_in_a_server_calendar_syncs_its_account() {
     let synced = Synced::new();
-    make_writable(&synced.harness, synced.first_calendar);
+    synced
+        .core
+        .set_calendar_read_only(synced.first_calendar, false)
+        .unwrap();
 
     synced
         .core

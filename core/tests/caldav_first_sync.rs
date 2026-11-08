@@ -6,9 +6,7 @@ use freecal_core::{
     CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal, SyncStatus, link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
-use support::{
-    Harness, add_account, all_day, date, draft, event, ics, make_writable, timed, titles,
-};
+use support::{Harness, add_account, all_day, date, draft, event, ics, timed, titles};
 
 fn server_calendar(radicale: &Radicale, user: &User) -> String {
     radicale.create_calendar(
@@ -139,7 +137,7 @@ fn pulled_standup() -> (Harness, Core, CalendarId, CalendarId) {
     let core = harness.open_without_starting_calendars();
     let account = add_account(&core, radicale, &user);
     let work = core.add_calendars(account, &[work]).unwrap()[0].id;
-    make_writable(&harness, work);
+    core.set_calendar_read_only(work, false).unwrap();
     let local = core.list_accounts().unwrap()[0].id;
     let home = core
         .create_calendar(local, "Home", Colour::parse("#3366cc").unwrap())

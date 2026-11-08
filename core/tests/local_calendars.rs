@@ -1,7 +1,7 @@
 mod support;
 
 use freecal_core::{AccountId, CalendarId, Colour, Core, CoreError, Signal};
-use support::Harness;
+use support::{Harness, all_day, draft};
 
 fn local_account(core: &Core) -> AccountId {
     core.list_accounts().unwrap()[0].id
@@ -226,6 +226,35 @@ fn hiding_and_showing_a_calendar_is_recorded_and_signalled() {
 }
 
 #[test]
+fn the_user_marks_a_calendar_read_only_and_writable_again() {
+    let harness = Harness::new();
+    let core = harness.open_without_starting_calendars();
+    let local = local_account(&core);
+    let home = core
+        .create_calendar(local, "Home", colour("#3366cc"))
+        .unwrap();
+    let day = all_day("2026-10-05", "2026-10-06");
+    harness.signals.clear();
+
+    core.set_calendar_read_only(home.id, true).unwrap();
+
+    let marked = &core.list_calendars().unwrap()[0];
+    assert!(marked.read_only);
+    assert!(!marked.server_read_only);
+    let refused = core.create_event(draft(home.id, "Dentist", day));
+    assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == home.id));
+
+    core.set_calendar_read_only(home.id, false).unwrap();
+
+    assert!(!core.list_calendars().unwrap()[0].read_only);
+    core.create_event(draft(home.id, "Dentist", day)).unwrap();
+    assert_eq!(
+        harness.signals.received()[..2],
+        [Signal::CalendarsChanged, Signal::CalendarsChanged]
+    );
+}
+
+#[test]
 fn showing_only_one_calendar_hides_all_others_with_one_signal() {
     let harness = Harness::new();
     let core = harness.open_without_starting_calendars();
@@ -272,6 +301,7 @@ fn changing_an_unknown_calendar_is_refused_without_a_signal() {
         core.delete_calendar(missing),
         core.set_calendar_shown(missing, false),
         core.show_only_calendar(missing),
+        core.set_calendar_read_only(missing, true),
     ];
 
     for result in results {

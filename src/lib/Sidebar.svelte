@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Check from '@lucide/svelte/icons/check';
   import CircleMinus from '@lucide/svelte/icons/circle-minus';
   import CloudUpload from '@lucide/svelte/icons/cloud-upload';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -452,6 +453,7 @@
 
               {#if menuFor === calendar.id}
                 {@const colourLabelId = `sidebar-colour-${calendar.id}`}
+                {@const serverNoteId = `sidebar-server-read-only-${calendar.id}`}
                 <Menu
                   label={optionsLabel}
                   anchor={moreButtons[calendar.id]}
@@ -496,6 +498,31 @@
                     <Eye size={14} aria-hidden="true" />
                     {t('calendar.showOnly')}
                   </button>
+                  <!-- A Calendar the server reports read-only can't be made
+                       writable; the item stays focusable and says why. -->
+                  <button
+                    type="button"
+                    class="menu-item"
+                    role="menuitemcheckbox"
+                    aria-checked={calendar.readOnly}
+                    aria-disabled={calendar.serverReadOnly || undefined}
+                    aria-describedby={calendar.serverReadOnly ? serverNoteId : undefined}
+                    onclick={() => {
+                      if (calendar.serverReadOnly) return;
+                      choose(calendar.id, () =>
+                        change(() => core.setCalendarReadOnly(calendar.id, !calendar.readOnly)),
+                      );
+                    }}
+                  >
+                    <Lock size={14} aria-hidden="true" />
+                    <span class="menu-item-label">{t('calendar.readOnly')}</span>
+                    {#if calendar.readOnly}
+                      <Check size={14} aria-hidden="true" />
+                    {/if}
+                  </button>
+                  {#if calendar.serverReadOnly}
+                    <p class="menu-note" id={serverNoteId}>{t('calendar.serverReadOnly')}</p>
+                  {/if}
                   <hr class="menu-separator" />
                   {#if fromServer(calendar)}
                     <button

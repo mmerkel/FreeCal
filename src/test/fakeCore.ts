@@ -116,6 +116,7 @@ export class FakeCore {
     deleteCalendar: () => undefined,
     removeCalendar: () => undefined,
     setCalendarShown: () => undefined,
+    setCalendarReadOnly: () => undefined,
     showOnlyCalendar: () => undefined,
     listOccurrences: () => every(samples.Occurrence),
     event: () => first(samples.Event),

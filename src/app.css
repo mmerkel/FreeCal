@@ -351,6 +351,32 @@ input[type='radio'] {
   background: var(--hover);
 }
 
+/* An item that can't be chosen now, such as "Read-only" for a Calendar the
+   server reports read-only; it stays focusable, so that its reason is read. */
+.menu-item[aria-disabled='true'] {
+  color: var(--foreground-muted);
+  cursor: default;
+}
+
+.menu-item[aria-disabled='true']:hover {
+  background: none;
+}
+
+/* The label of an item that ends in a mark, such as a check, which it
+   pushes to the item's end. */
+.menu-item-label {
+  flex: 1;
+}
+
+/* A short note in a menu about the item above it. */
+.menu-note {
+  max-width: 16rem;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  color: var(--foreground-muted);
+  font-size: var(--text-xs);
+}
+
 .menu-item.danger {
   color: var(--danger);
 }

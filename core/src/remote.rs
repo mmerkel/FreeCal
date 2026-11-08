@@ -60,6 +60,10 @@ pub(crate) trait Remote {
     /// The Calendars the Account has on its server that take Events.
     fn discover(&self) -> Result<Vec<AvailableCalendar>>;
 
+    /// Whether the server doesn't let the user change the Events of the
+    /// Calendar at `url`, as it says now.
+    fn server_read_only(&self, url: &str) -> Result<bool>;
+
     /// Fetches every Server Object of the Calendar at `url` and hands them,
     /// as received, to `page`, up to [`FIRST_SYNC_PAGE`] at a time,
     /// stopping at the first error, its own or `page`'s. `page` gets them
@@ -100,6 +104,10 @@ impl Remote for caldav::Client {
 
     fn discover(&self) -> Result<Vec<AvailableCalendar>> {
         caldav::Client::discover(self)
+    }
+
+    fn server_read_only(&self, url: &str) -> Result<bool> {
+        caldav::Client::server_read_only(self, url)
     }
 
     fn all_events(
