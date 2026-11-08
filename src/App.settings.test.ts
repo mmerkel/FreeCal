@@ -1,16 +1,17 @@
-// The main menu, Settings and About, run against the fake core with a
-// stand-in grid (see StubGrid.svelte).
+// The main menu, Settings and About, run against the recording fake core
+// with a stand-in grid (see StubGrid.svelte).
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
 import { expectAnchoredTo } from './test/anchored';
 import { systemDarkQuery } from './test/darkQuery';
-import { FakeCore } from './test/fakeCore';
+import { calendar, firstLaunch } from './test/answers';
+import { failure } from './test/recordingCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
-async function showApp(core = new FakeCore()) {
+async function showApp(core = firstLaunch()) {
   render(App, { core });
   await screen.findByRole('list', { name: 'Grid' });
   return { core, user: userEvent.setup() };
@@ -53,8 +54,8 @@ test('the main menu is a popover anchored to its button', async () => {
 });
 
 test('Ctrl+, opens Settings, also while typing, but not over another dialog', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = firstLaunch();
+  core.answer('listCalendars', [calendar({ name: 'Home' })]);
   const { user } = await showApp(core);
 
   await user.keyboard('{Control>},{/Control}');
@@ -79,38 +80,41 @@ test('choosing an appearance writes it once and applies it at once', async () =>
   expect(within(appearance).getByRole('radio', { name: 'System' })).toBeChecked();
   expect(within(appearance).getByRole('radio', { name: 'System' })).toHaveFocus();
 
+  core.answer('updateSettings', { appearance: 'dark' });
   await user.click(within(appearance).getByRole('radio', { name: 'Dark' }));
 
   expect(colourScheme()).toBe('dark');
   expect(within(appearance).getByRole('radio', { name: 'Dark' })).toBeChecked();
-  await waitFor(() => expect(core.settingsUpdates).toEqual([{ appearance: 'dark' }]));
-  expect(core.storedSettings.appearance).toBe('dark');
+  expect(core.callsOf('updateSettings')).toEqual([[{ appearance: 'dark' }]]);
   // Every change is saved at once, so there is nothing to save or cancel.
   expect(within(settings).queryByRole('button', { name: /save|cancel/i })).not.toBeInTheDocument();
 
+  core.answer('updateSettings', { appearance: 'system' });
   await user.click(within(appearance).getByRole('radio', { name: 'System' }));
   expect(colourScheme()).toBe('light');
   systemDarkQuery.flip(true);
   expect(colourScheme()).toBe('dark');
 });
 
-test('a setting that can’t be saved is reported and goes back to the stored one', async () => {
+test('a setting that can’t be saved is reported in words and goes back to the stored one', async () => {
   const { core, user } = await showApp();
-  vi.spyOn(core, 'updateSettings').mockRejectedValue(new Error('disk full'));
+  core.answer('updateSettings', failure({ code: 'localStoreFailed' }));
 
   await user.keyboard('{Control>},{/Control}');
   await user.click(screen.getByRole('radio', { name: 'Dark' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('disk full');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'The setting couldn’t be saved: FreeCal’s database couldn’t be read or written',
+  );
   await waitFor(() => expect(colourScheme()).toBe('light'));
   expect(screen.getByRole('radio', { name: 'System' })).toBeChecked();
 });
 
 test('opens with the stored appearance and shows the window once it is known', async () => {
-  const core = new FakeCore();
-  core.storedSettings = { appearance: 'dark' };
+  const core = firstLaunch();
+  core.answer('settings', { appearance: 'dark' });
   let schemeWhenShown: string | undefined;
-  const show = core.showWindow.bind(core);
+  const show = core.showWindow;
   core.showWindow = () => {
     schemeWhenShown = colourScheme();
     return show();
@@ -119,23 +123,21 @@ test('opens with the stored appearance and shows the window once it is known', a
   const { user } = await showApp(core);
 
   expect(colourScheme()).toBe('dark');
-  expect(core.windowShown).toBe(true);
+  expect(schemeWhenShown).toBe('dark');
   await user.keyboard('{Control>},{/Control}');
   expect(screen.getByRole('radio', { name: 'Dark' })).toHaveFocus();
-  expect(core.calls.indexOf('settings')).toBeLessThan(core.calls.indexOf('showWindow'));
-  expect(schemeWhenShown).toBe('dark');
 });
 
 test('a startup failure is drawn with the frontend’s default settings', async () => {
-  const core = new FakeCore();
-  core.storedSettings = { appearance: 'dark' };
-  core.startupError = { code: 'localStoreInUse' };
+  const core = firstLaunch();
+  core.answer('settings', { appearance: 'dark' });
+  core.answer('startupFailure', { code: 'localStoreInUse' });
 
   render(App, { core });
 
   expect(await screen.findByRole('heading', { name: 'FreeCal couldn’t start' })).toBeVisible();
   expect(colourScheme()).toBe('light');
-  expect(core.windowShown).toBe(true);
+  expect(core.callsOf('showWindow')).toEqual([[]]);
 });
 
 test.each([
@@ -143,41 +145,30 @@ test.each([
   ['newerLocalStore', 'Your calendar data was saved by a newer version of FreeCal.'],
   ['localStoreFailed', 'FreeCal couldn’t read its database. It may be damaged.'],
 ] as const)('the startup error screen says why FreeCal couldn’t start: %s', async (code, why) => {
-  const core = new FakeCore();
-  core.startupError = { code };
+  const core = firstLaunch();
+  core.answer('startupFailure', { code });
 
   render(App, { core });
 
   expect(await screen.findByRole('alert')).toHaveTextContent(why);
-  expect(core.calls).not.toContain('settings');
+  expect(core.callsOf('settings')).toEqual([]);
 });
 
 test('the startup error screen quits FreeCal', async () => {
-  const core = new FakeCore();
-  core.startupError = { code: 'newerLocalStore' };
+  const core = firstLaunch();
+  core.answer('startupFailure', { code: 'newerLocalStore' });
   render(App, { core });
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole('button', { name: 'Quit FreeCal' }));
 
-  expect(core.hasQuit).toBe(true);
-});
-
-test('a failure the core reports is shown in words, not as its code', async () => {
-  const core = new FakeCore();
-  vi.spyOn(core, 'updateSettings').mockRejectedValue({ code: 'localStoreFailed' });
-  const { user } = await showApp(core);
-
-  await user.keyboard('{Control>},{/Control}');
-  await user.click(screen.getByRole('radio', { name: 'Dark' }));
-
-  expect(await screen.findByRole('alert')).toHaveTextContent(
-    'The setting couldn’t be saved: FreeCal’s database couldn’t be read or written',
-  );
+  expect(core.callsOf('quit')).toEqual([[]]);
 });
 
 test('About FreeCal shows the version and the licence, and opens the source through the shell', async () => {
-  const { core, user } = await showApp();
+  const core = firstLaunch();
+  core.answer('version', '0.1.0');
+  const { user } = await showApp(core);
 
   await user.click(
     within(await openMainMenu(user)).getByRole('menuitem', { name: 'About FreeCal' }),
@@ -190,7 +181,7 @@ test('About FreeCal shows the version and the licence, and opens the source thro
   expect(about).toHaveTextContent('Copyright ©');
 
   await user.click(within(about).getByRole('button', { name: 'Source code' }));
-  expect(core.openedLinks).toEqual(['https://github.com/mmerkel/FreeCal']);
+  expect(core.callsOf('openLink')).toEqual([['https://github.com/mmerkel/FreeCal']]);
   expect(within(about).queryByRole('link')).not.toBeInTheDocument();
 });
 
@@ -221,5 +212,5 @@ test('Quit ends FreeCal', async () => {
 
   await user.click(within(await openMainMenu(user)).getByRole('menuitem', { name: 'Quit' }));
 
-  expect(core.hasQuit).toBe(true);
+  expect(core.callsOf('quit')).toEqual([[]]);
 });
