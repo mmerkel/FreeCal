@@ -25,4 +25,4 @@ Spec: US-17, US-18, US-19, US-30; "Writability"; "Calendars changed".
 - Open for the user (from /code-review):
   - While the server reports a Calendar read-only, the user can't change their own mark, and the menu shows the Calendar as read-only, not the mark. If the user had left it writable before the server revoked access, it becomes writable again when the server grants access. Showing and setting the mark separately would need the mark in the interface type `Calendar`.
   - The privilege read sits in `Core::sync_calendar`, not in the Sync Engine, since it writes the `calendar` table (an Unguarded Write) and Core sends the Signals.
-- New terms (unapproved): **Read-only mark** (new term), the user's own read-only flag on a Calendar (`calendar.read_only`), as opposed to the server's; **Server read-only** (new term), the server not letting the user change a Calendar's Events (`server_read_only`).
+- New terms (approved by the user, 2026-11-08): **Read-only mark**, the user's own read-only flag on a Calendar (`calendar.read_only`), as opposed to the server's; **Server read-only**, the server not letting the user change a Calendar's Events (`server_read_only`).
