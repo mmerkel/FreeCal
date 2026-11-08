@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
 use super::resource::resource_to_send;
-use super::{LOGGED_UID_LENGTH, mirror, remove_object};
+use super::{LOGGED_UID_LENGTH, deleted_by_sender, mirror};
 use crate::event::{Loaded, ServerObject};
 use crate::journal::{self, SentEventRows};
 use crate::remote::{Precondition, Remote, WriteOutcome};
@@ -150,7 +150,9 @@ impl ToSend<'_> {
     /// in one Database Transaction, so that the Mirror never holds a
     /// version whose Unsent Changes are still there to send, or the other
     /// way round. A Server Object written without an ETag is fetched by the
-    /// next Incoming Sync (ADR 0015).
+    /// next Incoming Sync (ADR 0015); so are the Ignored Resources holding
+    /// the UID of a deleted one, one of which takes it over
+    /// ([`deleted_by_sender`]).
     fn sent(
         &self,
         store: &Mutex<Store>,
@@ -164,7 +166,7 @@ impl ToSend<'_> {
                     mirror(database_transaction, self.calendar_id, object, self.uid)?;
                 }
                 Mirrored::Deleted => {
-                    remove_object(database_transaction, self.calendar_id, self.uid)?
+                    deleted_by_sender(database_transaction, self.calendar_id, self.uid)?
                 }
             }
             journal::sent(database_transaction, sending)

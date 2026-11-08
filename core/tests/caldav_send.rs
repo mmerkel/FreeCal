@@ -24,18 +24,41 @@ struct OnServer {
     work: CalendarId,
 }
 
+/// Puts `events` (name, iCalendar object) on the server, for
+/// [`OnServer::arranged`].
+fn put(events: &[(&str, Vec<u8>)]) -> impl FnOnce(&Radicale, &User, &str) {
+    move |radicale, user, url| {
+        for (name, ics) in events {
+            radicale.put_event(user, url, name, ics.clone());
+        }
+    }
+}
+
 impl OnServer {
     /// With `events` (name, iCalendar object) on the server first.
     fn with(events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(None, events)
+        Self::arranged(None, put(events))
+    }
+
+    /// Like [`OnServer::with`], writing `files` straight into the server's
+    /// storage, as Radicale refuses a second resource holding one UID.
+    fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(None, |radicale, _, url| {
+            for (name, ics) in files {
+                radicale.write_event_file(url, name, ics.clone());
+            }
+        })
     }
 
     /// Like [`OnServer::with`], reaching the server through `proxy`.
     fn through(proxy: &RewritingProxy, events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(Some(&proxy.url), events)
+        Self::arranged(Some(&proxy.url), put(events))
     }
 
-    fn arranged(through: Option<&str>, events: &[(&str, Vec<u8>)]) -> Self {
+    /// The Account and its Calendar once `arrange` put what the Calendar
+    /// holds on the server, which FreeCal reaches through the proxy at
+    /// `through` if given.
+    fn arranged(through: Option<&str>, arrange: impl FnOnce(&Radicale, &User, &str)) -> Self {
         let radicale = Radicale::shared();
         let user = radicale.user();
         let url = radicale.create_calendar(
@@ -45,9 +68,7 @@ impl OnServer {
                 ..NewCalendar::default()
             },
         );
-        for (name, ics) in events {
-            radicale.put_event(&user, &url, name, ics.clone());
-        }
+        arrange(radicale, &user, &url);
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
         let server = through.map_or_else(|| radicale.url(), str::to_owned);
@@ -446,5 +467,99 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
     let held = on_server.held("Standup").expect("created again");
     let text = on_server.served(&on_server.url, &held.href).1;
     assert!(text.contains("SUMMARY:Standup\r\n"), "{text}");
+    assert_eq!(on_server.unsent(on_server.work), 0);
+}
+
+/// The titles of the Occurrences in October 2026, in order.
+fn titles(on_server: &OnServer) -> Vec<String> {
+    on_server
+        .core
+        .occurrences(date("2026-10-01"), date("2026-11-01"))
+        .unwrap()
+        .into_iter()
+        .map(|occurrence| occurrence.title)
+        .collect()
+}
+
+/// Ticket 128 (ADR 0015): a sent DELETE frees its UID for the Ignored
+/// Resources holding it, and the first by the fixed order takes over in
+/// the same sync, as after an Incoming Sync, so the Event comes back. The
+/// Sync Engine writes it, so it is no Unsent Change, and the Sender
+/// deletes none of the Ignored Resources.
+#[test]
+fn a_delete_hands_its_uid_on_to_the_first_ignored_resource_holding_it() {
+    let on_server = OnServer::with_files(&[
+        ("a-standup", standup("Standup A")),
+        ("c-standup", standup("Standup C")),
+        ("b-standup", standup("Standup B")),
+    ]);
+    assert_eq!(titles(&on_server), ["Standup A"]);
+    on_server
+        .core
+        .delete_event(on_server.event("Standup A").id)
+        .unwrap();
+
+    on_server.sync();
+
+    let status = on_server
+        .radicale
+        .status_of(&on_server.user, &format!("{}a-standup.ics", on_server.url));
+    assert_eq!(status, 404);
+    assert_eq!(titles(&on_server), ["Standup B"]);
+    assert!(
+        on_server
+            .held("Standup B")
+            .unwrap()
+            .href
+            .ends_with("/b-standup.ics")
+    );
+    assert!(
+        on_server
+            .on_server("b-standup")
+            .contains("SUMMARY:Standup B")
+    );
+    assert!(
+        on_server
+            .on_server("c-standup")
+            .contains("SUMMARY:Standup C")
+    );
+    assert_eq!(on_server.unsent(on_server.work), 0);
+    assert_eq!(on_server.sync(), []);
+    assert_eq!(titles(&on_server), ["Standup B"]);
+}
+
+/// [`standup`] with a start FreeCal can't read: a UTC time with a zone,
+/// which Radicale takes.
+fn unreadable_standup(title: &str) -> Vec<u8> {
+    ics(&format!(
+        "BEGIN:VEVENT\nUID:standup\nSUMMARY:{title}\n\
+         DTSTART;TZID=Europe/Berlin:20261005T070000Z\n\
+         DTEND;TZID=Europe/Berlin:20261005T073000Z\nEND:VEVENT\n"
+    ))
+}
+
+/// With no Ignored Resource holding the UID readable, the UID stays
+/// without Event Rows; once one reads, it takes over.
+#[test]
+fn a_delete_with_no_readable_ignored_resource_holding_its_uid_leaves_no_event_rows() {
+    let on_server = OnServer::with_files(&[
+        ("a-standup", standup("Standup A")),
+        ("b-standup", unreadable_standup("Standup B")),
+    ]);
+    assert_eq!(titles(&on_server), ["Standup A"]);
+    on_server
+        .core
+        .delete_event(on_server.event("Standup A").id)
+        .unwrap();
+
+    on_server.sync();
+
+    assert_eq!(titles(&on_server), Vec::<String>::new());
+    assert_eq!(on_server.unsent(on_server.work), 0);
+    on_server
+        .radicale
+        .write_event_file(&on_server.url, "b-standup", standup("Standup B"));
+    on_server.sync();
+    assert_eq!(titles(&on_server), ["Standup B"]);
     assert_eq!(on_server.unsent(on_server.work), 0);
 }

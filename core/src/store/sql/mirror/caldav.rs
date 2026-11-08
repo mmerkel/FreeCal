@@ -147,6 +147,22 @@ impl DatabaseTransaction<'_> {
         Ok(ignored.is_none_or(|etag| etag.is_some()))
     }
 
+    /// Forgets the ETags of the Ignored Resources of a Calendar holding the
+    /// UID `uid`, so that the next Incoming Sync fetches them, as one fetches
+    /// every Known Server Resource without an ETag (ADR 0015).
+    pub(crate) fn forget_etags_holding(
+        &self,
+        _: &SyncEngineWritePermission,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<()> {
+        self.tx.execute(
+            "UPDATE caldav_ignored_resource SET etag = NULL WHERE calendar_id = ?1 AND uid = ?2",
+            params![calendar_id.0, uid],
+        )?;
+        Ok(())
+    }
+
     /// Deletes the CalDAV Server Object of a Calendar and the UID `uid`;
     /// Event Rows aren't written.
     pub(crate) fn delete_object(

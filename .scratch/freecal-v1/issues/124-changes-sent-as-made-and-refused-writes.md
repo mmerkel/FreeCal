@@ -20,3 +20,4 @@ Spec: "Sync Error"; "Event details".
 - [ ] Core tests with a controllable clock, and tested against Radicale
 
 ## Comments
+- 2026-11-08 (/implement 128): a sent DELETE of a UID that Ignored Resources also hold hands the UID on only at the next Incoming Sync (ADR 0015's amendment for ticket 128). An Outgoing Sync run right after a change, without an Incoming Sync, leaves the Event gone until the next sync. Decide whether such a send runs the Calendar's Incoming Sync too.

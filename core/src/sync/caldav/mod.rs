@@ -29,9 +29,11 @@ use crate::{CalendarId, ImportedEvent, Result};
 /// keeps it: a Server Object or an Ignored Resource, at an address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnownServerResource {
-    /// The ETag of the version FreeCal holds; none if the server gave none
-    /// or FreeCal couldn't read the server's version, so that it is fetched
-    /// on every Incoming Sync (ADR 0015).
+    /// The ETag of the version FreeCal holds; none if the server gave none,
+    /// FreeCal couldn't read the server's version, or the Sender deleted the
+    /// Server Object keeping the UID an Ignored Resource holds
+    /// ([`deleted_by_sender`]), so that it is fetched on every Incoming Sync until
+    /// it reads (ADR 0015).
     pub etag: Option<String>,
     /// The UID it holds as FreeCal last read it: the one a Server Object
     /// keeps, or the one an Ignored Resource holds that a Server Object
@@ -257,8 +259,8 @@ fn unreadable_line(calendar_id: CalendarId, href: &str) -> String {
 
 /// Removes the Server Object of a Calendar and the UID `uid` from the
 /// Mirror, in `database_transaction`, as an Incoming Sync finds it gone
-/// from the server or no longer keeping its UID, or the Sender deleted it.
-/// The Event Rows of its UID stay, for the Incoming Sync to propagate the
+/// from the server or no longer keeping its UID, or the Sender deleted it
+/// ([`deleted_by_sender`]). The Event Rows of its UID stay, for the Incoming Sync to propagate the
 /// Server Object taking over to, or delete ([`delete_if_unkept`]).
 fn remove_object(
     database_transaction: &DatabaseTransaction,
@@ -266,6 +268,25 @@ fn remove_object(
     uid: &str,
 ) -> Result<()> {
     database_transaction.delete_object(WRITE_PERMISSION, calendar_id, uid)
+}
+
+/// Removes the CalDAV Server Object of a Calendar and the UID `uid` from
+/// the Mirror once the Sender deleted it on the server, and hands the UID on
+/// to the Ignored Resources holding it, in `database_transaction`: their
+/// ETags are forgotten, so that the next Incoming Sync fetches them, and the
+/// first by the [`fixed_order`] takes over, as after a removal that Incoming
+/// Sync finds itself (`keep` in [`incoming`]). Their Events come back as it
+/// writes them, so they are no Unsent Changes. With none readable, the UID
+/// stays without Event Rows. Kept in the Local Store rather than fetched by
+/// the Sender, a takeover survives FreeCal stopping, or the Incoming Sync
+/// failing, before it happens.
+fn deleted_by_sender(
+    database_transaction: &DatabaseTransaction,
+    calendar_id: CalendarId,
+    uid: &str,
+) -> Result<()> {
+    remove_object(database_transaction, calendar_id, uid)?;
+    database_transaction.forget_etags_holding(WRITE_PERMISSION, calendar_id, uid)
 }
 
 /// Remembers `object`, a CalDAV resource of a Calendar that an Incoming
