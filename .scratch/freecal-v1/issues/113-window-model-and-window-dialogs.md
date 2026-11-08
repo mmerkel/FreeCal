@@ -24,12 +24,16 @@ Spec: "Testing Decisions" (Seam 2); "Signals"; US-68.
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
-**Effort:** L
+**Split into:** 116, 117, 118, 119
 
 - [ ] `App.svelte` holds no reads, no Signal handling, no `Open` state and no failure state of the reads, dialogs or import; it is about 250 lines
 - [ ] The Window Model's tests, on `RecordingCore` without rendering, cover: subscribing before the first read; an older read never overwriting a newer one, for each kind of read; each Signal's re-reads; a "Date changed" held by a press and by a drop's scope prompt, and followed once the last hold is released; a failed settings write putting back the stored settings
 - [ ] Window Dialogs' tests, on `RecordingCore`, cover: the scope prompt's choices and Cancel for an edit, a changed repeat and a drop; the import flow's "Working…" and the undo's retry; a file picked while something else opened being let go
 - [ ] `RecordingCore` answers, records and emits as above, and nothing in it decides what the core would do
 - [ ] The existing `App.*.test.ts` and `Sidebar*.test.ts` tests pass unchanged after each of the two commits
+
+## Comments
+
+- 2026-11-08: Split into 116 (the recording fake core), 117 (the Window Model), 118 (Window Dialogs, without the import flow) and 119 (the import flow joins Window Dialogs), so that each part's `/implement` fits one context window. Each part is one commit, with the existing `App.*.test.ts` and `Sidebar*.test.ts` passing unchanged. Work from those; this file stays for its history.
