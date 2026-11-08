@@ -163,7 +163,7 @@ The Server Objects FreeCal holds and the Ignored Resources it remembers in a Cal
 _Avoid_: Known set, known objects
 
 **Combined Event Key**:
-A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about, and what the Sender finds a Server Object by.
+A Calendar, a UID and a recurrence ID as the Event Row holds it, compared by Occurrence: what an Unsent Change is about. The Sender merges the Combined Event Keys of a Calendar and UID where a Server Object holds a whole UID, as on CalDAV.
 _Avoid_: Key (on its own), Event Key (on its own), Event Key in Calendar, Event ID (that is the Event Row's own ID)
 
 **Recurrence ID as obtained**:
@@ -215,8 +215,12 @@ The Sync Engine sending a Calendar's Unsent Changes through its Sender; each one
 _Avoid_: Send (on its own), push, upload
 
 **Sender**:
-The code that sends the Unsent Changes, comparing each Combined Event Key's Event Rows with its Server Object to decide between create, update and delete.
+The code that sends the Unsent Changes, comparing the Event Rows they are about with their Corresponding Server Object to decide between create, update and delete. On CalDAV it sends per Calendar and UID, one resource for all its Unsent Changes, whatever their recurrence IDs.
 _Avoid_: Uploader, pusher, outbox
+
+**Sent Event Rows**:
+The Event Rows of one Calendar and UID as the Sender read them to send them, each Event Version by its hash. A send that succeeds removes the UID's Unsent Changes only while its Event Rows still are the Sent Event Rows, so that a change made while it ran is sent next time.
+_Avoid_: Snapshot (a Snapshot is a backup file), sent version
 
 **Sync Scheduler**:
 The code that decides when FreeCal syncs: Polls, syncs on window focus, on waking from sleep and after local edits, sync now, and the system's network status. It only decides; the syncs run one Account after another on one thread.
