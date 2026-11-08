@@ -17,6 +17,7 @@ const recurrenceId = recurring.recurrenceId!;
 const weekly: Repeat = samples.Repeat[0] as Repeat;
 const when = samples.When[1] as Event['when'];
 const changedEvent = samples.Changed[0] as Changed<Event>;
+const file = '/home/user/a.ics';
 
 /** Window Dialogs on a started Window Model, which shows the sample Occurrences. */
 async function started(core = new RecordingCore()) {
@@ -238,26 +239,33 @@ describe('one dialog at a time', () => {
     expect(dialogs.selectedEventId).toBeUndefined();
   });
 
-  test('the import dialog opens only when nothing else is', async () => {
-    const { dialogs } = await started();
+  test('a file picked while something else opened is let go', async () => {
+    const { core, dialogs } = await started();
+    const picked = core.pending('pickImportFile');
+
+    const importing = dialogs.startImport();
+    await settled();
     dialogs.openAbout();
+    picked.resolve(file);
+    await importing;
 
-    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(false);
     expect(dialogs.open).toEqual({ kind: 'about' });
-
-    dialogs.close();
-
-    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(true);
-    expect(dialogs.open?.kind).toBe('importing');
+    expect(core.callsOf('discardImport')).toEqual([[]]);
   });
 
-  test('nor while a drop’s Scope Prompt is open', async () => {
-    const { dialogs } = await started();
+  test('so is one picked while a drop’s Scope Prompt opened', async () => {
+    const { core, dialogs } = await started();
+    const picked = core.pending('pickImportFile');
+
+    const importing = dialogs.startImport();
+    await settled();
     void dialogs.reschedule(eventId(3), recurrenceId, when).catch(() => {});
     await settled();
+    picked.resolve(file);
+    await importing;
 
-    expect(dialogs.isOpen).toBe(true);
-    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(false);
+    expect(dialogs.open).toBeUndefined();
+    expect(core.callsOf('discardImport')).toEqual([[]]);
 
     dialogs.chooseScope(null);
   });
@@ -320,5 +328,149 @@ describe('writes', () => {
     expect(dialogs.toast?.message).toContain('Home');
     dialogs.dismissToast();
     expect(dialogs.toast).toBeUndefined();
+  });
+});
+
+describe('the import flow', () => {
+  /** Window Dialogs with the import dialog open for `file`. */
+  async function importing() {
+    const opened = await started();
+    opened.core.answer('pickImportFile', file);
+    await opened.dialogs.startImport();
+    opened.core.calls.splice(0);
+    return opened;
+  }
+
+  test('the file picked opens the import dialog, into the first shown writable Calendar', async () => {
+    const { core, dialogs } = await started();
+    core.answer('pickImportFile', file);
+
+    await dialogs.startImport();
+
+    expect(dialogs.open).toEqual({ kind: 'importing', file, calendarId: calendarId(2) });
+    expect(dialogs.isOpen).toBe(true);
+  });
+
+  test('no file picked opens nothing', async () => {
+    const { core, dialogs } = await started();
+
+    await dialogs.startImport();
+
+    expect(dialogs.open).toBeUndefined();
+    expect(core.callsOf('discardImport')).toEqual([]);
+  });
+
+  test('a file that can’t be picked says why', async () => {
+    const { core, dialogs } = await started();
+    core.answer('pickImportFile', failure({ code: 'localStoreFailed' }));
+
+    await dialogs.startImport();
+
+    expect(dialogs.open?.kind).toBe('notice');
+  });
+
+  test('without a writable Calendar, a notice says where to create one, and no file is asked for', async () => {
+    const core = new RecordingCore();
+    core.answer('listCalendars', []);
+    const { dialogs } = await started(core);
+
+    await dialogs.startImport();
+
+    expect(dialogs.open?.kind).toBe('notice');
+    expect(core.callsOf('pickImportFile')).toEqual([]);
+  });
+
+  test('says "Working…" while it runs, then closes and offers Undo in the toast', async () => {
+    const { core, dialogs } = await importing();
+    const ran = core.pending('runImport');
+
+    const run = dialogs.runImport(calendarId(2), 'update');
+    await settled();
+
+    expect(dialogs.working).toContain('a.ics');
+    // Nothing closes the dialog while its import runs.
+    dialogs.cancelImport();
+    expect(dialogs.open?.kind).toBe('importing');
+    expect(core.callsOf('discardImport')).toEqual([]);
+
+    ran.resolve();
+    await run;
+
+    expect(core.callsOf('runImport')).toEqual([[calendarId(2), 'update']]);
+    expect(dialogs.working).toBeUndefined();
+    expect(dialogs.open).toBeUndefined();
+    expect(dialogs.toast?.message).toContain('a.ics');
+    expect(dialogs.toast?.undo).toBeDefined();
+  });
+
+  test('an import that changed nothing offers no Undo', async () => {
+    const { core, dialogs } = await importing();
+    core.answer('runImport', { journalTransaction: null, imported: 0, updated: 0, skipped: 3 });
+
+    await dialogs.runImport(calendarId(2), 'skip');
+
+    expect(dialogs.toast).toBeDefined();
+    expect(dialogs.toast?.undo).toBeUndefined();
+  });
+
+  test('a failed import says why in the dialog, which stays open', async () => {
+    const { core, dialogs } = await importing();
+    core.answer('runImport', failure({ code: 'localStoreFailed' }));
+
+    await dialogs.runImport(calendarId(2), 'update');
+
+    expect(dialogs.importFailure).toBeTruthy();
+    expect(dialogs.working).toBeUndefined();
+    expect(dialogs.open?.kind).toBe('importing');
+    expect(dialogs.toast).toBeUndefined();
+  });
+
+  test('Cancel discards the import and closes the dialog', async () => {
+    const { core, dialogs } = await importing();
+
+    dialogs.cancelImport();
+
+    expect(core.callsOf('discardImport')).toEqual([[]]);
+    expect(dialogs.open).toBeUndefined();
+  });
+
+  test('Undo says "Working…", then that the import was undone', async () => {
+    const { core, dialogs } = await importing();
+    await dialogs.runImport(calendarId(2), 'update');
+    const undone = core.pending('undoJournalTransaction');
+
+    dialogs.toast?.undo?.();
+    await settled();
+
+    expect(dialogs.working).toContain('a.ics');
+    expect(dialogs.toast).toBeUndefined();
+
+    undone.resolve();
+    await settled();
+
+    expect(core.callsOf('undoJournalTransaction')).toEqual([[4]]);
+    expect(dialogs.working).toBeUndefined();
+    expect(dialogs.toast?.message).toContain('a.ics');
+    expect(dialogs.toast?.undo).toBeUndefined();
+  });
+
+  test('a failed Undo says why and can be retried', async () => {
+    const { core, dialogs } = await importing();
+    await dialogs.runImport(calendarId(2), 'update');
+    core.answer('undoJournalTransaction', failure({ code: 'localStoreFailed' }));
+
+    dialogs.toast?.undo?.();
+    await settled();
+
+    expect(dialogs.working).toBeUndefined();
+    const retry = dialogs.toast?.undo;
+    expect(retry).toBeDefined();
+
+    core.answer('undoJournalTransaction', { ...changedEvent, value: null });
+    retry?.();
+    await settled();
+
+    expect(core.callsOf('undoJournalTransaction')).toEqual([[4], [4]]);
+    expect(dialogs.toast?.undo).toBeUndefined();
   });
 });

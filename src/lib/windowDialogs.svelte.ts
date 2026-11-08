@@ -5,6 +5,8 @@ import type {
   EventDraft,
   EventId,
   ExceptionCounts,
+  ExistingEvents,
+  JournalTransactionId,
   When,
 } from '../core/types';
 import { errorText, t } from '../i18n';
@@ -53,10 +55,11 @@ export interface Toast {
 /**
  * What is open over the calendar grid, one at a time, and the steps between
  * them: an Event's details and editor, the recurrence scope question,
- * import, notices, settings and About, with the message at the bottom of
- * the window. It writes through the core and tells the Window Model which
- * Event's details are open; the Window Model never knows about it. Read its
- * fields as `dialogs.x`; destructuring them loses their reactivity.
+ * import from asking for the file to its Undo, notices, settings and About,
+ * with the message at the bottom of the window and the modal "Working…".
+ * It writes through the core and tells the Window Model which Event's
+ * details are open; the Window Model never knows about it. Read its fields
+ * as `dialogs.x`; destructuring them loses their reactivity.
  */
 export class WindowDialogs {
   readonly #core: CoreApi;
@@ -74,6 +77,10 @@ export class WindowDialogs {
   #editorSession = $state(0);
   /** FreeCal's version, read when About first opens. */
   #version = $state<string>();
+  /** Why the last import from the open import dialog failed. */
+  #importFailure = $state<string>();
+  /** What the modal "Working…" dialog says while a long command runs. */
+  #working = $state<string>();
 
   /** The Calendars new and edited Events can go into. */
   readonly #writableCalendars: Calendar[];
@@ -115,6 +122,14 @@ export class WindowDialogs {
   get version() {
     return this.#version;
   }
+  /** Why the last import from the open import dialog failed. */
+  get importFailure() {
+    return this.#importFailure;
+  }
+  /** What the modal "Working…" dialog says while a long command runs. */
+  get working() {
+    return this.#working;
+  }
   /** The Calendars new and edited Events can go into. */
   get writableCalendars() {
     return this.#writableCalendars;
@@ -148,16 +163,16 @@ export class WindowDialogs {
   }
 
   /** The Calendar new things go into: the first shown writable one. */
-  defaultCalendar(): Calendar | undefined {
+  #defaultCalendar(): Calendar | undefined {
     const writable = this.writableCalendars;
     return writable.find((calendar) => calendar.shown) ?? writable[0];
   }
 
   /** Opens the editor for a new Event, or says where to create a Calendar first. */
   startCreating(when: When) {
-    const target = this.defaultCalendar();
+    const target = this.#defaultCalendar();
     if (!target) {
-      this.showNotice(
+      this.#showNotice(
         t('event.noCalendarTitle'),
         t('event.noCalendarBody', { account: t('account.local') }),
       );
@@ -337,23 +352,76 @@ export class WindowDialogs {
       );
   }
 
-  showNotice(title: string, body: string) {
-    this.#show({ kind: 'notice', title, body });
+  /** Asks for a file to import, then opens the import dialog for it. */
+  async startImport() {
+    if (!this.#defaultCalendar()) {
+      this.#showNotice(
+        t('import.noCalendarTitle'),
+        t('event.noCalendarBody', { account: t('account.local') }),
+      );
+      return;
+    }
+    let file: string | null;
+    try {
+      file = await this.#core.pickImportFile(t('import.fileDialogTitle'), t('import.fileFilter'));
+    } catch (error) {
+      this.#showNotice(
+        t('import.pickFailedTitle'),
+        t('import.pickFailed', { error: errorText(error) }),
+      );
+      return;
+    }
+    if (file === null) return;
+    const target = this.#defaultCalendar();
+    // The user may have opened something else while the file dialog was showing.
+    if (!target || this.isOpen) {
+      this.#discardImport();
+      return;
+    }
+    this.#importFailure = undefined;
+    this.#show({ kind: 'importing', file, calendarId: target.id });
+  }
+
+  /** Closes the import dialog and lets its file go, unless its import runs. */
+  cancelImport() {
+    // Nothing closes the dialog while its import runs, not even an Escape
+    // that reaches it under "Working…".
+    if (this.#working) return;
+    this.#discardImport();
+    if (this.#open?.kind === 'importing') this.close();
   }
 
   /**
-   * Opens the import dialog for `file`, unless something else is open, as
-   * the user may have opened it while the file dialog was showing. Returns
-   * whether it opened.
+   * Imports the open import dialog's file into `calendarId`, saying
+   * "Working…" meanwhile; once done, the toast says what changed and offers
+   * Undo. A failure stays in the dialog.
    */
-  openImport(file: string, calendarId: CalendarId): boolean {
-    if (this.isOpen) return false;
-    this.#show({ kind: 'importing', file, calendarId });
-    return true;
-  }
-
-  showToast(toast: Toast) {
-    this.#toast = toast;
+  async runImport(calendarId: CalendarId, existing: ExistingEvents) {
+    if (this.#open?.kind !== 'importing') return;
+    const { file } = this.#open;
+    this.#working = t('working.importing', { file });
+    try {
+      const outcome = await this.#core.runImport(calendarId, existing);
+      const { journalTransaction } = outcome;
+      this.close();
+      this.#toast = {
+        message: t('import.done', {
+          file,
+          imported: String(outcome.imported),
+          updated: String(outcome.updated),
+          skipped: String(outcome.skipped),
+        }),
+        // An import that changed nothing has no Journal Transaction to undo.
+        undo:
+          journalTransaction === null
+            ? undefined
+            : () => void this.#undoImport(file, journalTransaction),
+      };
+    } catch (error) {
+      this.#importFailure = t('import.failed', { error: errorText(error) });
+    } finally {
+      this.#working = undefined;
+    }
   }
 
   dismissToast() {
@@ -364,6 +432,32 @@ export class WindowDialogs {
   close() {
     this.#show(undefined);
     this.#failure = undefined;
+  }
+
+  #showNotice(title: string, body: string) {
+    this.#show({ kind: 'notice', title, body });
+  }
+
+  #discardImport() {
+    this.#core.discardImport().catch(() => {});
+  }
+
+  /** Undoes an import, saying "Working…" meanwhile; a failed undo can be retried. */
+  async #undoImport(file: string, id: JournalTransactionId) {
+    this.dismissToast();
+    this.#working = t('working.undoingImport', { file });
+    try {
+      await this.#core.undoJournalTransaction(id);
+      this.#toast = { message: t('import.undone', { file }) };
+    } catch (error) {
+      // Undo can succeed later, such as once the Calendar is writable again.
+      this.#toast = {
+        message: t('import.undoFailed', { file, error: errorText(error) }),
+        undo: () => void this.#undoImport(file, id),
+      };
+    } finally {
+      this.#working = undefined;
+    }
   }
 
   /** Opens `next` over the grid in place of what was open, or nothing. */

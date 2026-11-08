@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CoreApi } from './core/CoreApi';
-  import type { CalendarId, ExistingEvents, JournalTransactionId, View } from './core/types';
+  import type { View } from './core/types';
   import { errorText, t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
@@ -61,10 +61,6 @@
     const timer = setInterval(() => (now = Temporal.Now.instant()), 1000);
     return () => clearInterval(timer);
   });
-  /** Why the last import from the open import dialog failed. */
-  let importFailure = $state<string>();
-  /** What the modal "Working…" dialog says while a long command runs. */
-  let working = $state<string>();
 
   function oninteract(active: boolean) {
     releasePress?.();
@@ -74,80 +70,6 @@
   $effect(() => followAppearance(model.settings.appearance));
 
   $effect(() => model.start());
-
-  /** Asks for a file to import, then opens the import dialog for it. */
-  async function startImport() {
-    if (!dialogs.defaultCalendar()) {
-      dialogs.showNotice(
-        t('import.noCalendarTitle'),
-        t('event.noCalendarBody', { account: t('account.local') }),
-      );
-      return;
-    }
-    let file: string | null;
-    try {
-      file = await core.pickImportFile(t('import.fileDialogTitle'), t('import.fileFilter'));
-    } catch (error) {
-      dialogs.showNotice(
-        t('import.pickFailedTitle'),
-        t('import.pickFailed', { error: errorText(error) }),
-      );
-      return;
-    }
-    if (file === null) return;
-    const target = dialogs.defaultCalendar();
-    importFailure = undefined;
-    // The user may have opened something else while the file dialog was showing.
-    if (!target || !dialogs.openImport(file, target.id)) cancelImport();
-  }
-
-  function cancelImport() {
-    // Nothing closes the dialog while its import runs, not even an Escape
-    // that reaches it under "Working…".
-    if (working) return;
-    core.discardImport().catch(() => {});
-    if (dialogs.open?.kind === 'importing') dialogs.close();
-  }
-
-  async function runImport(file: string, calendarId: CalendarId, existing: ExistingEvents) {
-    working = t('working.importing', { file });
-    try {
-      const outcome = await core.runImport(calendarId, existing);
-      const { journalTransaction } = outcome;
-      dialogs.close();
-      dialogs.showToast({
-        message: t('import.done', {
-          file,
-          imported: String(outcome.imported),
-          updated: String(outcome.updated),
-          skipped: String(outcome.skipped),
-        }),
-        // An import that changed nothing has no Journal Transaction to undo.
-        undo: journalTransaction === null ? undefined : () => undoImport(file, journalTransaction),
-      });
-    } catch (error) {
-      importFailure = t('import.failed', { error: errorText(error) });
-    } finally {
-      working = undefined;
-    }
-  }
-
-  async function undoImport(file: string, id: JournalTransactionId) {
-    dialogs.dismissToast();
-    working = t('working.undoingImport', { file });
-    try {
-      await core.undoJournalTransaction(id);
-      dialogs.showToast({ message: t('import.undone', { file }) });
-    } catch (error) {
-      // Undo can succeed later, such as once the Calendar is writable again.
-      dialogs.showToast({
-        message: t('import.undoFailed', { file, error: errorText(error) }),
-        undo: () => undoImport(file, id),
-      });
-    } finally {
-      working = undefined;
-    }
-  }
 
   /** Sync now of every server Account; the Sync Status shows how it goes. */
   function syncNow() {
@@ -229,7 +151,7 @@
         syncState={model.syncStatuses?.overall.state}
         {overallText}
         onsyncnow={syncNow}
-        onimport={startImport}
+        onimport={() => dialogs.startImport()}
         onsettings={() => dialogs.openSettings()}
         onabout={() => dialogs.openAbout()}
         onquit={quit}
@@ -318,9 +240,9 @@
       file={importing.file}
       calendars={dialogs.writableCalendars}
       initialCalendarId={importing.calendarId}
-      failure={importFailure}
-      onimport={(calendarId, existing) => runImport(importing.file, calendarId, existing)}
-      oncancel={cancelImport}
+      failure={dialogs.importFailure}
+      onimport={(calendarId, existing) => dialogs.runImport(calendarId, existing)}
+      oncancel={() => dialogs.cancelImport()}
     />
   {:else if dialogs.open?.kind === 'notice'}
     <Dialog title={dialogs.open.title} onclose={() => dialogs.close()}>
@@ -354,8 +276,8 @@
       ondismiss={() => dialogs.dismissToast()}
     />
   {/if}
-  {#if working}
-    <WorkingDialog message={working} />
+  {#if dialogs.working}
+    <WorkingDialog message={dialogs.working} />
   {/if}
 {:else}
   <p>{t('app.loading')}</p>
