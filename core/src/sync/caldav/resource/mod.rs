@@ -6,8 +6,9 @@
 //! With a Server Object, its text is the starting point, and FreeCal
 //! changes no more of it than the Event Rows differ from it: in each
 //! `VEVENT`, only the groups of FreeCal's Properties whose fields differ
-//! from what FreeCal reads from them are written anew ([`write::Group`]);
-//! every other content line, attendees, conference links, alarms, custom
+//! from what FreeCal reads from them are written anew ([`write::Group`]),
+//! and with them `DTSTAMP`, `LAST-MODIFIED` and a higher `SEQUENCE`
+//! ([`write::Revision`]); every other content line, attendees, conference links, alarms, custom
 //! and `X-` properties and other components among them, is kept byte for
 //! byte, as are its folding and parameters. Only line ends become CRLF, as
 //! RFC 5545 requires. `VEVENT`s are paired with Event Rows by Occurrence
@@ -26,7 +27,7 @@ use chrono_tz::Tz;
 use crate::event::{EventFields, Loaded, ServerPairing, as_propagated};
 use crate::import::{ImportedEvent, read_events};
 use crate::{CoreError, Result};
-use write::{Group, Written, new_vevent, vtimezone};
+use write::{Group, Revision, Written, new_vevent, vtimezone};
 
 /// The iCalendar text of the CalDAV resource to send for `loaded`, the
 /// Event Rows of one Calendar and UID, built on `server`, the text of its
@@ -117,7 +118,7 @@ fn update(loaded: &Loaded, server: &str, now: DateTime<Utc>) -> Result<String> {
     let mut rewritten: Vec<(Place, Written)> = Vec::new();
     for ((place, event), row) in places.iter().zip(&events).zip(&pairing.paired) {
         if let (Some(row), Item::Block(block)) = (row, &roots[place.0].items()[place.1]) {
-            rewritten.push((*place, rewrite(block, event, row)?));
+            rewritten.push((*place, rewrite(block, event, row, now)?));
         }
     }
     let added = new_vevents(loaded, &pairing, now)?;
@@ -202,42 +203,75 @@ fn read_vevent(calendar: &Block, index: usize) -> Result<ImportedEvent> {
 }
 
 /// `vevent`, which FreeCal reads as `server`, made to hold `row`: the
-/// groups of FreeCal's Properties whose field differs are written anew in
-/// place of their first line, or before its first component, such as an
-/// alarm, if it had none; every other line is kept.
-fn rewrite(vevent: &Block, server: &ImportedEvent, row: &EventFields) -> Result<Written> {
+/// groups of FreeCal's Properties whose field differs are written anew,
+/// and with any of them its [`Revision`] properties, revised `now`: each
+/// in place of its first line, or before its first component, such as an
+/// alarm, if it had none. Every other line is kept.
+fn rewrite(
+    vevent: &Block,
+    server: &ImportedEvent,
+    row: &EventFields,
+    now: DateTime<Utc>,
+) -> Result<Written> {
     let read = as_propagated(server, row);
-    let mut pending: Vec<Group> = Group::ALL
+    let groups = Group::ALL
         .into_iter()
         .filter(|group| group.differs(row, &read))
-        .collect();
+        .map(Part::Group);
+    let mut pending: Vec<Part> = groups.collect();
+    if !pending.is_empty() {
+        pending.extend(Revision::ALL.map(Part::Revision));
+    }
     let changed = pending.clone();
+    let write = |part: Part, out: &mut Written| match part {
+        Part::Group(group) => group.write(row, out),
+        Part::Revision(revision) => {
+            revision.write(server.sequence.saturating_add(1), now, out);
+            Ok(())
+        }
+    };
     let mut out = Written::new();
     out.kept(&vevent.begin.physical);
     for item in &vevent.items {
         match item {
-            Item::Line(line) => match Group::of(&line.name()) {
-                Some(group) if changed.contains(&group) => {
-                    if let Some(at) = pending.iter().position(|left| *left == group) {
+            Item::Line(line) => match Part::of(&line.name()) {
+                Some(part) if changed.contains(&part) => {
+                    if let Some(at) = pending.iter().position(|left| *left == part) {
                         pending.remove(at);
-                        group.write(row, &mut out)?;
+                        write(part, &mut out)?;
                     }
                 }
                 _ => out.kept(&line.physical),
             },
             Item::Block(_) => {
-                for group in pending.drain(..) {
-                    group.write(row, &mut out)?;
+                for part in pending.drain(..) {
+                    write(part, &mut out)?;
                 }
                 item.keep(&mut out);
             }
         }
     }
-    for group in pending {
-        group.write(row, &mut out)?;
+    for part in pending {
+        write(part, &mut out)?;
     }
     out.kept(&vevent.end.physical);
     Ok(out)
+}
+
+/// What [`rewrite`] writes anew as one: a group of FreeCal's Properties
+/// that changed, or a property saying the `VEVENT` was revised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Group(Group),
+    Revision(Revision),
+}
+
+impl Part {
+    fn of(name: &str) -> Option<Part> {
+        Group::of(name)
+            .map(Part::Group)
+            .or_else(|| Revision::of(name).map(Part::Revision))
+    }
 }
 
 /// A content line as received: its physical lines without their line

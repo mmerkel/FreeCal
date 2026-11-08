@@ -448,6 +448,61 @@ fn assert_well_formed(text: &str) {
     assert!(components(text).is_some());
 }
 
+/// `text` with each line `(old, new)` of `changes`, which it holds once,
+/// changed.
+fn changed(text: &str, changes: &[(&str, &str)]) -> String {
+    let mut text = text.to_owned();
+    for (old, new) in changes {
+        assert_eq!(text.matches(old).count(), 1, "{old}");
+        text = text.replace(old, new);
+    }
+    text
+}
+
+const STAMP: &str = "DTSTAMP:20261108T120000Z\r\n";
+const MODIFIED: &str = "LAST-MODIFIED:20261108T120000Z\r\n";
+
+/// The changes a revision made `now()` makes to the revision properties of
+/// the `VEVENT` of `server` that isn't an Exception: `DTSTAMP` and
+/// `LAST-MODIFIED` are `now()`, written where they were or added, and
+/// `SEQUENCE` one higher.
+fn revision_of(server: &str) -> Vec<(&'static str, &'static str)> {
+    match server {
+        NEXTCLOUD | RADICALE_NEXTCLOUD => vec![
+            ("DTSTAMP:20261001T080512Z\r\n", STAMP),
+            ("LAST-MODIFIED:20261001T080512Z\r\n", MODIFIED),
+            ("SEQUENCE:2\r\n", "SEQUENCE:3\r\n"),
+        ],
+        GOOGLE | RADICALE_GOOGLE => vec![
+            ("DTSTAMP:20261008T101010Z\r\n", STAMP),
+            ("LAST-MODIFIED:20261008T101010Z\r\n", MODIFIED),
+            ("SEQUENCE:0\r\n", "SEQUENCE:1\r\n"),
+        ],
+        ICLOUD => vec![
+            ("DTSTAMP:20261009T120000Z\r\n", STAMP),
+            ("LAST-MODIFIED:20261009T120000Z\r\n", MODIFIED),
+            ("SEQUENCE:1\r\n", "SEQUENCE:2\r\n"),
+        ],
+        EXCHANGE => vec![
+            ("DTSTAMP:20261009T090000Z\r\n", STAMP),
+            ("\r\nSEQUENCE:0\r\n", "\r\nSEQUENCE:1\r\n"),
+            (
+                "COUNTER:FALSE\r\nEND:VEVENT",
+                "COUNTER:FALSE\r\nLAST-MODIFIED:20261108T120000Z\r\nEND:VEVENT",
+            ),
+        ],
+        EVOLUTION => vec![
+            ("DTSTAMP:20261001T101010Z\r\n", STAMP),
+            ("SEQUENCE:1\r\n", "SEQUENCE:2\r\n"),
+            (
+                "1234.ics\r\nEND:VEVENT",
+                "1234.ics\r\nLAST-MODIFIED:20261108T120000Z\r\nEND:VEVENT",
+            ),
+        ],
+        _ => unreachable!(),
+    }
+}
+
 fn wall(text: &str) -> NaiveDateTime {
     text.parse().unwrap()
 }
@@ -469,7 +524,7 @@ fn event_rows_as_the_server_object_holds_them_send_it_byte_for_byte() {
 }
 
 #[test]
-fn an_edited_title_changes_only_its_line() {
+fn an_edited_title_changes_only_its_line_and_the_revision() {
     let edits = [
         (NEXTCLOUD, "SUMMARY:Standup\r\n"),
         (GOOGLE, "SUMMARY:Planning\r\n"),
@@ -485,9 +540,9 @@ fn an_edited_title_changes_only_its_line() {
 
         let sent = send(rows, Some(server));
 
-        assert_eq!(server.matches(line).count(), 1);
-        let expected = server.replace(line, "SUMMARY:Retro\\; with Bob\\, at 10\r\n");
-        assert_eq!(sent, expected);
+        let mut changes = revision_of(server);
+        changes.push((line, "SUMMARY:Retro\\; with Bob\\, at 10\r\n"));
+        assert_eq!(sent, changed(server, &changes));
     }
 }
 
@@ -526,10 +581,10 @@ fn a_utc_time_is_written_in_utc_without_a_vtimezone() {
 
     let sent = send(rows.iter().map(copy).collect(), Some(GOOGLE));
 
-    let expected = GOOGLE
-        .replace("DTSTART:20261013T130000Z", "DTSTART:20261013T150000Z")
-        .replace("DTEND:20261013T140000Z", "DTEND:20261013T160000Z");
-    assert_eq!(sent, expected);
+    let mut changes = revision_of(GOOGLE);
+    changes.push(("DTSTART:20261013T130000Z", "DTSTART:20261013T150000Z"));
+    changes.push(("DTEND:20261013T140000Z", "DTEND:20261013T160000Z"));
+    assert_eq!(sent, changed(GOOGLE, &changes));
     assert_reads_back(&sent, rows);
 }
 
@@ -576,8 +631,15 @@ fn an_edited_exception_changes_only_its_vevent_matched_by_occurrence() {
 
     let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
 
-    let expected = NEXTCLOUD.replace("SUMMARY:Standup (moved)\r\n", "SUMMARY:Standup (later)\r\n");
-    assert_eq!(sent, expected);
+    let changes = [
+        ("SUMMARY:Standup (moved)\r\n", "SUMMARY:Standup (later)\r\n"),
+        ("DTSTAMP:20261002T090000Z\r\n", STAMP),
+        (
+            "link\r\nEND:VEVENT",
+            "link\r\nSEQUENCE:1\r\nLAST-MODIFIED:20261108T120000Z\r\nEND:VEVENT",
+        ),
+    ];
+    assert_eq!(sent, changed(NEXTCLOUD, &changes));
     assert_reads_back(&sent, rows);
 }
 
@@ -606,6 +668,7 @@ fn an_exception_the_event_rows_add_gets_a_vevent_after_the_last() {
     let added = "BEGIN:VEVENT\r\n\
         UID:5f1c2a9e-5d1b-4bd6-a1b2-nextcloud\r\n\
         DTSTAMP:20261108T120000Z\r\n\
+        LAST-MODIFIED:20261108T120000Z\r\n\
         RECURRENCE-ID;TZID=Europe/Berlin:20261021T090000\r\n\
         DTSTART;TZID=Europe/Berlin:20261021T110000\r\n\
         DTEND;TZID=Europe/Berlin:20261021T113000\r\n\
@@ -643,11 +706,12 @@ fn an_edited_description_goes_without_its_html() {
 
     let sent = send(rows.iter().map(copy).collect(), Some(&server));
 
-    let expected = EVOLUTION.replace(
+    let mut changes = revision_of(EVOLUTION);
+    changes.push((
         "SUMMARY:Birthday\r\n",
         "SUMMARY:Birthday\r\nDESCRIPTION:Pie\r\n",
-    );
-    assert_eq!(sent, expected);
+    ));
+    assert_eq!(sent, changed(EVOLUTION, &changes));
 }
 
 #[test]
@@ -657,11 +721,12 @@ fn a_cancelled_occurrence_rewrites_the_excluded_dates() {
 
     let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
 
-    let expected = NEXTCLOUD.replace(
+    let mut changes = revision_of(NEXTCLOUD);
+    changes.push((
         "EXDATE;TZID=Europe/Berlin:20261014T090000\r\n",
         "EXDATE;TZID=Europe/Berlin:20261014T090000,20261026T090000\r\n",
-    );
-    assert_eq!(sent, expected);
+    ));
+    assert_eq!(sent, changed(NEXTCLOUD, &changes));
     assert_reads_back(&sent, rows);
 }
 

@@ -262,8 +262,46 @@ impl Group {
     }
 }
 
+/// The properties that say when a `VEVENT` was last revised and how often
+/// (RFC 5545 §3.8.7): a `VEVENT` whose FreeCal's Properties are written
+/// anew gets them written anew too, as `DTSTAMP` means `LAST-MODIFIED`
+/// without a `METHOD`, and RFC 5546 §2.1.4 asks for a higher `SEQUENCE`
+/// when times, the repeat rule or excluded dates change. One rule covers
+/// every change: other changes may raise it too, and a higher `SEQUENCE`
+/// only marks the version as the later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Revision {
+    Sequence,
+    Stamp,
+    Modified,
+}
+
+impl Revision {
+    pub const ALL: [Revision; 3] = [Revision::Sequence, Revision::Stamp, Revision::Modified];
+
+    /// The revision property `name`, in upper case, if it is one.
+    pub fn of(name: &str) -> Option<Revision> {
+        Some(match name {
+            "SEQUENCE" => Revision::Sequence,
+            "DTSTAMP" => Revision::Stamp,
+            "LAST-MODIFIED" => Revision::Modified,
+            _ => return None,
+        })
+    }
+
+    /// Writes it for a revision made `now`, the `sequence`th.
+    pub fn write(self, sequence: i64, now: DateTime<Utc>, out: &mut Written) {
+        let now = [Time::Wall(now.naive_utc(), Some(Tz::UTC))];
+        match self {
+            Revision::Sequence => out.property(Property::new("SEQUENCE", sequence.to_string())),
+            Revision::Stamp => out.times("DTSTAMP", &now),
+            Revision::Modified => out.times("LAST-MODIFIED", &now),
+        }
+    }
+}
+
 /// Writes `row`, an Event Row of the UID `uid`, as a new `VEVENT`, stamped
-/// `now`. An Exception's recurrence ID is written as obtained (ADR 0012);
+/// and last revised `now`; its `SEQUENCE` is 0, the default. An Exception's recurrence ID is written as obtained (ADR 0012);
 /// one in the Normal Form, a wall time without a zone, is given in the Event
 /// Time Zone of `recurring`, the Recurring Event's time, as it names the
 /// Occurrence there, and floats without one.
@@ -276,7 +314,8 @@ pub(super) fn new_vevent(
 ) -> Result<()> {
     out.begin("VEVENT");
     out.text_property("UID", uid);
-    out.times("DTSTAMP", &[Time::Wall(now.naive_utc(), Some(Tz::UTC))]);
+    Revision::Stamp.write(0, now, out);
+    Revision::Modified.write(0, now, out);
     if let Some(recurrence_id) = &row.recurrence_id {
         let original = recurrence_id.original().ok_or_else(|| {
             CoreError::UnreadableEventTime(recurrence_id.as_obtained().to_owned())
