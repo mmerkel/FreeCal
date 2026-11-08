@@ -29,7 +29,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
   - [ ] once time zone stuff is done (or before) have a discussion about all the places where they appear
 - [ ] after architecture stuff: simplify code layout into files and directories, can all the frontent stuff be moved into src?
 - [ ] frontend:
-  - [ ] syncing text next to calendars and account:  all this text should become just a symbol (like the read-only symbol), e.g. syncing -> rotating thing.
+  - [ ] syncing text next to calendars and account:  all this text should become just a symbol (like the read-only symbol), e.g. syncing -> rotating thing; or warning sign for an error, or some symbol for offline
 - [ ] caldav sync:
     - [ ] I would like to understand the different authentication methods, and what was built in and why
 - [ ] journal::recompute_instants is weird - check again once the time zone stuff has been implemented
