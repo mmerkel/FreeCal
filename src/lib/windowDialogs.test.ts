@@ -1,0 +1,324 @@
+import { describe, expect, test } from 'vitest';
+import { samples } from '../core/samples.generated';
+import type { Changed, Event, EventDraft, Occurrence, Repeat, Signal } from '../core/types';
+import { calendarId, eventId } from '../test/ids';
+import { failure, RecordingCore } from '../test/recordingCore';
+import { WindowDialogs } from './windowDialogs.svelte';
+import { WindowModel } from './windowModel.svelte';
+
+const settled = () => new Promise((resolve) => setTimeout(resolve));
+const dateChanged = (iso: string): Signal => ({ kind: 'dateChanged', date: iso });
+const sampleEvent = samples.Event[0] as Event;
+/** The sample Occurrence of a Recurring Event. */
+const recurring = samples.Occurrence.find(
+  (occurrence) => occurrence.recurrenceId !== null,
+) as Occurrence;
+const recurrenceId = recurring.recurrenceId!;
+const weekly: Repeat = samples.Repeat[0] as Repeat;
+const when = samples.When[1] as Event['when'];
+const changedEvent = samples.Changed[0] as Changed<Event>;
+
+/** Window Dialogs on a started Window Model, which shows the sample Occurrences. */
+async function started(core = new RecordingCore()) {
+  const model = new WindowModel(core);
+  model.start();
+  await settled();
+  model.showRange({
+    from: Temporal.PlainDate.from('2026-10-05'),
+    to: Temporal.PlainDate.from('2026-10-12'),
+  });
+  await settled();
+  const dialogs = new WindowDialogs(core, model);
+  core.calls.splice(0);
+  return { core, model, dialogs };
+}
+
+/** Opens the editor for the Occurrence `recurrenceId` of a Recurring Event repeating `repeat`. */
+async function editingOccurrence(repeat: Repeat | null = weekly) {
+  const opened = started();
+  const { core, dialogs } = await opened;
+  core.answer('event', { ...sampleEvent, repeat });
+  dialogs.openDetails(eventId(3), recurrenceId);
+  await settled();
+  dialogs.startEditing();
+  core.calls.splice(0);
+  return opened;
+}
+
+/** The draft the open editor started from. */
+const draftOf = (dialogs: WindowDialogs): EventDraft => {
+  const open = dialogs.open;
+  if (open?.kind !== 'editing' && open?.kind !== 'creating') throw new Error('No editor is open');
+  return open.draft;
+};
+
+describe('the Scope Prompt of an edit', () => {
+  test('asks once the Exceptions are counted, and saves for the scope chosen', async () => {
+    const { core, dialogs } = await editingOccurrence();
+    const draft = { ...draftOf(dialogs), title: 'Changed' };
+    const counts = core.pending('exceptionCounts');
+    core.answer('editOccurrence', { ...changedEvent, value: recurring });
+
+    const saved = dialogs.save(draft);
+    await settled();
+
+    expect(dialogs.scopePrompt).toEqual({ change: 'edit' });
+    expect(dialogs.isOpen).toBe(true);
+
+    counts.resolve({ thisAndFollowing: 4, all: 5 });
+    await settled();
+
+    expect(dialogs.scopePrompt).toEqual({
+      change: 'edit',
+      counts: { thisAndFollowing: 4, all: 5 },
+    });
+
+    dialogs.chooseScope({ scope: 'thisAndFollowing', exceptionsToo: true });
+    await saved;
+
+    expect(core.callsOf('exceptionCounts')).toEqual([[eventId(3), recurrenceId]]);
+    expect(core.callsOf('editOccurrence')).toEqual([
+      [eventId(3), recurrenceId, 'thisAndFollowing', true, draft],
+    ]);
+    expect(dialogs.scopePrompt).toBeUndefined();
+    expect(dialogs.open).toEqual({
+      kind: 'details',
+      id: eventId(recurring.eventId),
+      recurrenceId,
+    });
+  });
+
+  test('Cancel leaves the editor open and saves nothing', async () => {
+    const { core, dialogs } = await editingOccurrence();
+    const editor = dialogs.open;
+
+    const saved = dialogs.save(draftOf(dialogs));
+    await settled();
+    dialogs.chooseScope(null);
+    await saved;
+
+    expect(core.callsOf('editOccurrence')).toEqual([]);
+    expect(dialogs.scopePrompt).toBeUndefined();
+    expect(dialogs.open).toEqual(editor);
+  });
+
+  test('an edit of a single Event asks nothing', async () => {
+    const { core, dialogs } = await started();
+    dialogs.openDetails(eventId(3));
+    await settled();
+    dialogs.startEditing();
+    const draft = draftOf(dialogs);
+
+    await dialogs.save(draft);
+
+    expect(core.callsOf('exceptionCounts')).toEqual([]);
+    expect(core.callsOf('editEvent')).toEqual([[eventId(3), draft]]);
+    expect(dialogs.open?.kind).toBe('details');
+  });
+});
+
+describe('the Scope Prompt of a changed repeat', () => {
+  test('asks about the repeat, and saves for the scope chosen', async () => {
+    const { core, dialogs } = await editingOccurrence();
+    const draft = { ...draftOf(dialogs), repeat: { ...weekly, interval: 3 } };
+
+    const saved = dialogs.save(draft);
+    await settled();
+
+    expect(dialogs.scopePrompt?.change).toBe('editRepeat');
+
+    dialogs.chooseScope({ scope: 'all', exceptionsToo: false });
+    await saved;
+
+    expect(core.callsOf('editOccurrence')).toEqual([
+      [eventId(3), recurrenceId, 'all', false, draft],
+    ]);
+  });
+
+  test('Cancel leaves the editor open and saves nothing', async () => {
+    const { core, dialogs } = await editingOccurrence();
+
+    const saved = dialogs.save({ ...draftOf(dialogs), repeat: null });
+    await settled();
+
+    expect(dialogs.scopePrompt?.change).toBe('editRepeat');
+
+    dialogs.chooseScope(null);
+    await saved;
+
+    expect(core.callsOf('editOccurrence')).toEqual([]);
+    expect(dialogs.open?.kind).toBe('editing');
+  });
+});
+
+describe('the Scope Prompt of a drop', () => {
+  test('asks which Occurrences move, and moves those chosen', async () => {
+    const { core, dialogs } = await started();
+
+    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    await settled();
+
+    expect(dialogs.scopePrompt?.change).toBe('move');
+    expect(dialogs.dropHeld).toBe(true);
+
+    dialogs.chooseScope({ scope: 'this', exceptionsToo: false });
+    await moved;
+
+    expect(core.callsOf('rescheduleOccurrence')).toEqual([
+      [eventId(3), recurrenceId, 'this', false, when],
+    ]);
+    expect(dialogs.dropHeld).toBe(false);
+  });
+
+  test('Cancel rejects, so that the grid puts the Occurrence back, and moves nothing', async () => {
+    const { core, dialogs } = await started();
+
+    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    await settled();
+    dialogs.chooseScope(null);
+
+    await expect(moved).rejects.toThrow();
+    expect(core.callsOf('rescheduleOccurrence')).toEqual([]);
+    expect(dialogs.scopePrompt).toBeUndefined();
+  });
+
+  test('holds a "Date changed" from the start until it is answered', async () => {
+    const { core, model, dialogs } = await started();
+    const counts = core.pending('exceptionCounts');
+
+    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    core.emit(dateChanged('2026-10-06'));
+    counts.resolve();
+    await settled();
+
+    expect(model.navigation?.date.toString()).toBe('2026-10-04');
+
+    dialogs.chooseScope(null);
+    await expect(moved).rejects.toThrow();
+
+    expect(model.navigation?.date.toString()).toBe('2026-10-06');
+  });
+
+  test('a single Event moves without asking', async () => {
+    const { core, dialogs } = await started();
+
+    await dialogs.reschedule(eventId(3), null, when);
+
+    expect(core.callsOf('exceptionCounts')).toEqual([]);
+    expect(core.callsOf('rescheduleEvent')).toEqual([[eventId(3), when]]);
+  });
+
+  test('a failed move says why and rejects, until a move succeeds', async () => {
+    const { core, dialogs } = await started();
+    core.answer('rescheduleEvent', failure({ code: 'localStoreFailed' }));
+
+    await expect(dialogs.reschedule(eventId(3), null, when)).rejects.toBeDefined();
+
+    expect(dialogs.rescheduleFailure).toBeTruthy();
+
+    core.answer('rescheduleEvent', changedEvent);
+    await dialogs.reschedule(eventId(3), null, when);
+
+    expect(dialogs.rescheduleFailure).toBeUndefined();
+  });
+});
+
+describe('one dialog at a time', () => {
+  test('opening one closes the one open, and the Window Model stops reading closed details', async () => {
+    const { model, dialogs } = await started();
+    dialogs.openDetails(eventId(3));
+    await settled();
+
+    expect(model.opened).toBeDefined();
+
+    dialogs.openSettings();
+
+    expect(dialogs.open).toEqual({ kind: 'settings' });
+    expect(model.opened).toBeUndefined();
+    expect(dialogs.selectedEventId).toBeUndefined();
+  });
+
+  test('the import dialog opens only when nothing else is', async () => {
+    const { dialogs } = await started();
+    dialogs.openAbout();
+
+    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(false);
+    expect(dialogs.open).toEqual({ kind: 'about' });
+
+    dialogs.close();
+
+    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(true);
+    expect(dialogs.open?.kind).toBe('importing');
+  });
+
+  test('nor while a drop’s Scope Prompt is open', async () => {
+    const { dialogs } = await started();
+    void dialogs.reschedule(eventId(3), recurrenceId, when).catch(() => {});
+    await settled();
+
+    expect(dialogs.isOpen).toBe(true);
+    expect(dialogs.openImport('/home/user/a.ics', calendarId(2))).toBe(false);
+
+    dialogs.chooseScope(null);
+  });
+
+  test('details close once their Event is gone', async () => {
+    const { core, dialogs } = await started();
+    dialogs.openDetails(eventId(3));
+    await settled();
+
+    core.answer('event', failure({ code: 'localStoreFailed' }));
+    core.emit(samples.Signal.find((found) => found.kind === 'occurrencesChanged') as Signal);
+    await settled();
+
+    expect(dialogs.open).toBeUndefined();
+  });
+});
+
+describe('writes', () => {
+  test('a new Event goes into the first shown writable Calendar', async () => {
+    const { core, dialogs } = await started();
+    dialogs.startCreating(when);
+    const draft = draftOf(dialogs);
+
+    expect(draft.calendarId).toBe(calendarId(2));
+
+    await dialogs.save(draft);
+
+    expect(core.callsOf('createEvent')).toEqual([[draft]]);
+    expect(dialogs.open).toBeUndefined();
+  });
+
+  test('without a writable Calendar, a notice says where to create one', async () => {
+    const core = new RecordingCore();
+    core.answer('listCalendars', []);
+    const { dialogs } = await started(core);
+
+    dialogs.startCreating(when);
+
+    expect(dialogs.open?.kind).toBe('notice');
+  });
+
+  test('a failed delete says why and leaves the details open', async () => {
+    const { core, dialogs } = await started();
+    core.answer('deleteOccurrence', failure({ code: 'localStoreFailed' }));
+    dialogs.openDetails(eventId(3), recurrenceId);
+    await settled();
+
+    await dialogs.removeOccurrence();
+
+    expect(core.callsOf('deleteOccurrence')).toEqual([[eventId(3), recurrenceId]]);
+    expect(dialogs.failure).toBeTruthy();
+    expect(dialogs.open?.kind).toBe('details');
+  });
+
+  test('a refused drag says the Calendar is read-only in the toast', async () => {
+    const { dialogs } = await started();
+
+    dialogs.refuseDrag(eventId(3), recurrenceId);
+
+    expect(dialogs.toast?.message).toContain('Home');
+    dialogs.dismissToast();
+    expect(dialogs.toast).toBeUndefined();
+  });
+});
