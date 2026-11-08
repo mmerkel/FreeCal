@@ -1,13 +1,18 @@
 // The App's Event flows: creating, opening, editing and deleting Events, run
-// against the fake core with a stand-in grid (see StubGrid.svelte).
+// against the recording fake core with a stand-in grid (see StubGrid.svelte).
+// What a change does to the Events is the core's, tested at the core
+// interface; these tests check the calls made, and that the window follows
+// the "Occurrences changed" they emit as the core would.
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
 import App from './App.svelte';
-import type { Repeat, StructuredText, When } from './core/types';
-import { FakeCore } from './test/fakeCore';
+import type { Calendar, Event, Occurrence, Repeat, StructuredText, When } from './core/types';
+import { calendar, event, firstLaunch, occurrence } from './test/answers';
+import { journalTransactionId } from './test/ids';
+import { failure, type RecordingCore } from './test/recordingCore';
 import { stubGrid } from './test/stubGrid';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
@@ -15,8 +20,29 @@ vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 afterEach(() => vi.useRealTimers());
 
 const monday: When = { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:30:00' };
+const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
+const home = calendar({ name: 'Home' });
+const locked = calendar({ name: 'Holidays', readOnly: true });
 
-async function showApp(core: FakeCore) {
+/** A first launch showing `calendars` and the Occurrences of `events`. */
+function showing(calendars: Calendar[], events: (Event | Occurrence)[] = []) {
+  const core = firstLaunch();
+  core.answer('listCalendars', calendars);
+  core.answer('listOccurrences', events.map(asOccurrence));
+  return core;
+}
+
+function asOccurrence(shown: Event | Occurrence): Occurrence {
+  return 'eventId' in shown ? shown : occurrence(shown);
+}
+
+/** Scripts the Occurrences now shown and emits "Occurrences changed", as the core does after a change. */
+function occurrencesChanged(core: RecordingCore, events: (Event | Occurrence)[]) {
+  core.answer('listOccurrences', events.map(asOccurrence));
+  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+}
+
+async function showApp(core: RecordingCore) {
   render(App, { core });
   return screen.findByRole('list', { name: 'Grid' });
 }
@@ -27,7 +53,14 @@ async function selectSlot(when: When) {
   await tick();
 }
 
-async function openOccurrence(user: ReturnType<typeof userEvent.setup>, title: string) {
+/** Opens the Occurrence titled `title`, whose Event the core reads as `opened`. */
+async function openOccurrence(
+  user: ReturnType<typeof userEvent.setup>,
+  core: RecordingCore,
+  opened: Event,
+  title = opened.title,
+) {
+  core.answer('event', opened);
   const grid = screen.getByRole('list', { name: 'Grid' });
   await user.click(await within(grid).findByRole('button', { name: title }));
   return screen.findByRole('dialog', { name: title });
@@ -35,8 +68,7 @@ async function openOccurrence(user: ReturnType<typeof userEvent.setup>, title: s
 
 test('selecting a slot opens the editor with that time, and saving creates the Event', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
+  const core = showing([home]);
   const grid = await showApp(core);
 
   await selectSlot(monday);
@@ -46,17 +78,17 @@ test('selecting a slot opens the editor with that time, and saving creates the E
   expect(within(editor).getByLabelText('End time')).toHaveValue('10:30');
   await user.type(within(editor).getByRole('textbox', { name: 'Title' }), 'Dentist{Enter}');
 
-  expect(await within(grid).findByRole('button', { name: 'Dentist' })).toBeInTheDocument();
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(core.events).toEqual([
-    expect.objectContaining({ calendarId: home.id, title: 'Dentist', when: monday }),
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(core.callsOf('createEvent')).toEqual([
+    [expect.objectContaining({ calendarId: home.id, title: 'Dentist', when: monday })],
   ]);
+  occurrencesChanged(core, [event({ calendarId: home.id, title: 'Dentist', when: monday })]);
+  expect(await within(grid).findByRole('button', { name: 'Dentist' })).toBeInTheDocument();
 });
 
 test('a selection of whole days creates an all-day Event', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = showing([home]);
   await showApp(core);
 
   await selectSlot({ kind: 'allDay', start: '2026-10-07', end: '2026-10-09' });
@@ -65,19 +97,18 @@ test('a selection of whole days creates an all-day Event', async () => {
   await user.click(screen.getByRole('button', { name: 'Save' }));
 
   await waitFor(() =>
-    expect(core.events[0]?.when).toEqual({
-      kind: 'allDay',
-      start: '2026-10-07',
-      end: '2026-10-09',
-    }),
+    expect(core.callsOf('createEvent')).toEqual([
+      [
+        expect.objectContaining({
+          when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-09' },
+        }),
+      ],
+    ]),
   );
 });
 
 test('the editor offers only writable Calendars, the first shown one first', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Hidden', shown: false });
-  core.addCalendar({ name: 'Locked', readOnly: true });
-  core.addCalendar({ name: 'Home' });
+  const core = showing([calendar({ name: 'Hidden', shown: false }), locked, home]);
   await showApp(core);
 
   await selectSlot(monday);
@@ -93,9 +124,7 @@ test('the editor offers only writable Calendars, the first shown one first', asy
 
 test('without a writable Calendar, creating points to the + next to the Local Account', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Locked', readOnly: true });
-  await showApp(core);
+  await showApp(showing([locked]));
 
   await selectSlot(monday);
   const hint = screen.getByRole('dialog', { name: 'No calendar for new events' });
@@ -112,9 +141,7 @@ test('without a writable Calendar, creating points to the + next to the Local Ac
 test('c creates an Event at the next full hour', async () => {
   vi.useFakeTimers({ now: new Date(2026, 9, 3, 14, 20), shouldAdvanceTime: true });
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  await showApp(core);
+  await showApp(showing([home]));
 
   await user.keyboard('c');
 
@@ -127,9 +154,7 @@ test('c creates an Event at the next full hour', async () => {
 
 test('c does nothing while typing or with a modifier', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  await showApp(core);
+  await showApp(showing([home]));
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'calendar');
@@ -141,19 +166,19 @@ test('c does nothing while typing or with a modifier', async () => {
 
 test('an Event’s details show its title, time, location, description and Calendar', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({
+  const dentist = event({
     calendarId: home.id,
     title: 'Dentist',
     when: monday,
     location: 'Main Street 1',
     description: 'Bring the card',
   });
+  const core = showing([home], [dentist]);
   await showApp(core);
 
-  const details = await openOccurrence(user, 'Dentist');
+  const details = await openOccurrence(user, core, dentist);
 
+  expect(core.callsOf('event')).toEqual([[dentist.id]]);
   expect(details).toHaveTextContent('Monday, October 5, 2026');
   expect(details).toHaveTextContent('9:00');
   expect(details).toHaveTextContent('10:30');
@@ -167,35 +192,33 @@ test('an Event’s details show its title, time, location, description and Calen
 
 test('the details of an Event that had no time zone say which zone FreeCal gave it', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({
+  const floating = event({
     calendarId: home.id,
     title: 'Floating',
     when: monday,
     pinnedZone: 'Europe/Berlin',
   });
-  core.addEvent({ calendarId: home.id, title: 'Zoned', when: monday });
+  const zoned = event({ calendarId: home.id, title: 'Zoned', when: monday });
+  const core = showing([home], [floating, zoned]);
   await showApp(core);
 
-  const floating = await openOccurrence(user, 'Floating');
-  expect(floating).toHaveTextContent(
+  const floatingDetails = await openOccurrence(user, core, floating);
+  expect(floatingDetails).toHaveTextContent(
     'The original has no time zone, so FreeCal uses Europe/Berlin.',
   );
-  await user.click(within(floating).getByRole('button', { name: 'Close' }));
+  await user.click(within(floatingDetails).getByRole('button', { name: 'Close' }));
 
-  const zoned = await openOccurrence(user, 'Zoned');
-  expect(zoned).not.toHaveTextContent('no time zone');
+  const zonedDetails = await openOccurrence(user, core, zoned);
+  expect(zonedDetails).not.toHaveTextContent('no time zone');
 });
 
 test('an Event of a Read-only Calendar can’t be edited or deleted', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const locked = core.addCalendar({ name: 'Locked', readOnly: true });
-  core.addEvent({ calendarId: locked.id, title: 'Fixed', when: monday });
+  const fixed = event({ calendarId: locked.id, title: 'Fixed', when: monday });
+  const core = showing([locked], [fixed]);
   await showApp(core);
 
-  const details = await openOccurrence(user, 'Fixed');
+  const details = await openOccurrence(user, core, fixed);
 
   expect(
     within(details)
@@ -207,12 +230,11 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
 
 test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
+  const core = showing([home], [dentist]);
   await showApp(core);
 
-  const details = await openOccurrence(user, 'Dentist');
+  const details = await openOccurrence(user, core, dentist);
 
   const buttons = within(details).getAllByRole('button');
   expect(buttons.map((button) => [button.getAttribute('aria-label'), button.title])).toEqual([
@@ -222,20 +244,20 @@ test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focus
   ]);
   expect(buttons.every((button) => button.querySelector('svg'))).toBe(true);
   expect(within(details).getByRole('button', { name: 'Close' })).toHaveFocus();
+  expect(within(details).queryByText(/read-only/)).toBeNull();
 });
 
 test('✕ and a click on the backdrop close the details', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
+  const core = showing([home], [dentist]);
   await showApp(core);
 
-  let details = await openOccurrence(user, 'Dentist');
+  let details = await openOccurrence(user, core, dentist);
   await user.click(within(details).getByRole('button', { name: 'Close' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 
-  details = await openOccurrence(user, 'Dentist');
+  details = await openOccurrence(user, core, dentist);
   await user.click(within(details).getByText('Home'));
   expect(details).toBeInTheDocument();
   // The backdrop belongs to the dialog element itself; its content doesn't.
@@ -245,9 +267,7 @@ test('✕ and a click on the backdrop close the details', async () => {
 
 test('a click on the editor’s backdrop doesn’t close it', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  await showApp(core);
+  await showApp(showing([home]));
 
   await selectSlot(monday);
   const editor = screen.getByRole('dialog', { name: 'New event' });
@@ -256,46 +276,36 @@ test('a click on the editor’s backdrop doesn’t close it', async () => {
   expect(editor).toBeInTheDocument();
 });
 
-test('an Event of a writable Calendar doesn’t say it is read-only', async () => {
-  const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
-  await showApp(core);
-
-  const details = await openOccurrence(user, 'Dentist');
-
-  expect(within(details).queryByText(/read-only/)).toBeNull();
-});
-
 test('editing an Event changes it and returns to its details', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const event = core.addEvent({ calendarId: home.id, title: 'Lunch', when: monday });
-  await showApp(core);
-  const details = await openOccurrence(user, 'Lunch');
+  const lunch = event({ calendarId: home.id, title: 'Lunch', when: monday });
+  const longLunch = { ...lunch, title: 'Long lunch' };
+  const core = showing([home], [lunch]);
+  const grid = await showApp(core);
+  const details = await openOccurrence(user, core, lunch);
+  core.answer('editEvent', { journalTransaction: journalTransactionId(7), value: longLunch });
 
   await user.click(within(details).getByRole('button', { name: 'Edit' }));
   const editor = screen.getByRole('dialog', { name: 'Edit event' });
   const title = within(editor).getByRole('textbox', { name: 'Title' });
   await user.clear(title);
   await user.type(title, 'Long lunch{Enter}');
+  core.answer('event', longLunch);
+  occurrencesChanged(core, [longLunch]);
 
   expect(await screen.findByRole('dialog', { name: 'Long lunch' })).toBeInTheDocument();
-  expect(core.events[0]).toMatchObject({ id: event.id, title: 'Long lunch', when: monday });
-  expect(
-    within(screen.getByRole('list', { name: 'Grid' })).getByRole('button', { name: 'Long lunch' }),
-  ).toBeInTheDocument();
+  expect(core.callsOf('editEvent')).toEqual([
+    [lunch.id, expect.objectContaining({ title: 'Long lunch', when: monday })],
+  ]);
+  expect(await within(grid).findByRole('button', { name: 'Long lunch' })).toBeInTheDocument();
 });
 
 test('cancelling an edit returns to the unchanged details', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Lunch', when: monday });
+  const lunch = event({ calendarId: home.id, title: 'Lunch', when: monday });
+  const core = showing([home], [lunch]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Lunch');
+  const details = await openOccurrence(user, core, lunch);
 
   await user.click(within(details).getByRole('button', { name: 'Edit' }));
   await user.type(screen.getByRole('textbox', { name: 'Title' }), ' changed');
@@ -303,37 +313,37 @@ test('cancelling an edit returns to the unchanged details', async () => {
   await user.click(screen.getByRole('button', { name: 'Discard' }));
 
   expect(await screen.findByRole('dialog', { name: 'Lunch' })).toBeInTheDocument();
-  expect(core.calls).not.toContain('editEvent');
+  expect(core.callsOf('editEvent')).toEqual([]);
 });
 
-test('deleting an Event removes it from the grid', async () => {
+test('deleting an Event asks first, then deletes it through the core', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Doomed', when: monday });
-  core.addEvent({ calendarId: home.id, title: 'Kept', when: monday });
+  const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
+  const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
+  const core = showing([home], [doomed, kept]);
   const grid = await showApp(core);
-  const details = await openOccurrence(user, 'Doomed');
+  const details = await openOccurrence(user, core, doomed);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
-  expect(ask).toHaveTextContent('“\u2068Doomed\u2069” will be deleted.');
+  expect(ask).toHaveTextContent('“⁨Doomed⁩” will be deleted.');
   expect(within(ask).queryByRole('button', { name: 'Close' })).toBeNull();
-  expect(core.calls).not.toContain('deleteEvent');
+  expect(core.callsOf('deleteEvent')).toEqual([]);
   await user.click(within(ask).getByRole('button', { name: 'Delete' }));
 
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(core.callsOf('deleteEvent')).toEqual([[doomed.id]]);
+  occurrencesChanged(core, [kept]);
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'Doomed' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'Kept' })).toBeInTheDocument();
-  expect(screen.queryByRole('dialog')).toBeNull();
 });
 
 test('Cancel and Escape in the delete question keep the Event', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Kept', when: monday });
+  const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
+  const core = showing([home], [kept]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Kept');
+  const details = await openOccurrence(user, core, kept);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
@@ -345,22 +355,20 @@ test('Cancel and Escape in the delete question keep the Event', async () => {
 
   expect(screen.queryByRole('alertdialog')).toBeNull();
   expect(screen.getByRole('dialog', { name: 'Kept' })).toBeInTheDocument();
-  expect(core.calls).not.toContain('deleteEvent');
-  expect(core.events).toHaveLength(1);
+  expect(core.callsOf('deleteEvent')).toEqual([]);
 });
 
 test('“Occurrences changed” re-fetches the visible range and keeps the open Event', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const event = core.addEvent({ calendarId: home.id, title: 'Standup', when: monday });
+  const standup = event({ calendarId: home.id, title: 'Standup', when: monday });
+  const moved = { ...standup, title: 'Standup (moved)' };
+  const core = showing([home], [standup]);
   const grid = await showApp(core);
-  await openOccurrence(user, 'Standup');
+  await openOccurrence(user, core, standup);
 
   // A change made elsewhere, such as a sync, that the core signals.
-  event.title = 'Standup (moved)';
-  core.addEvent({ calendarId: home.id, title: 'Retro', when: monday });
-  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+  core.answer('event', moved);
+  occurrencesChanged(core, [moved, event({ calendarId: home.id, title: 'Retro', when: monday })]);
 
   expect(await within(grid).findByRole('button', { name: 'Retro' })).toBeInTheDocument();
   expect(await screen.findByRole('dialog', { name: 'Standup (moved)' })).toBeInTheDocument();
@@ -372,51 +380,57 @@ test('“Occurrences changed” re-fetches the visible range and keeps the open 
 
 test('the open details close when their Event is deleted elsewhere', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Gone', when: monday });
+  const gone = event({ calendarId: home.id, title: 'Gone', when: monday });
+  const core = showing([home], [gone]);
   await showApp(core);
-  await openOccurrence(user, 'Gone');
+  await openOccurrence(user, core, gone);
 
-  core.events = [];
-  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+  core.answer('event', failure({ code: 'eventNotFound' }));
+  occurrencesChanged(core, []);
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });
 
 test('an open editor’s draft survives a re-fetch', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const event = core.addEvent({ calendarId: home.id, title: 'Plan', when: monday });
+  const plan = event({ calendarId: home.id, title: 'Plan', when: monday });
+  const theirs = { ...plan, title: 'Their plan' };
+  const core = showing([home], [plan]);
   const grid = await showApp(core);
   await user.click(
-    within(await openOccurrence(user, 'Plan')).getByRole('button', { name: 'Edit' }),
+    within(await openOccurrence(user, core, plan)).getByRole('button', { name: 'Edit' }),
   );
   const title = screen.getByRole('textbox', { name: 'Title' });
   await user.clear(title);
   await user.type(title, 'My plan');
 
-  event.title = 'Their plan';
-  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+  core.answer('event', theirs);
+  occurrencesChanged(core, [theirs]);
   await within(grid).findByRole('button', { name: 'Their plan' });
 
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My plan');
   await user.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(core.events[0]?.title).toBe('My plan'));
+  await waitFor(() =>
+    expect(core.callsOf('editEvent')).toEqual([
+      [plan.id, expect.objectContaining({ title: 'My plan' })],
+    ]),
+  );
 });
 
-test('hiding a Calendar hides its Events', async () => {
+test('hiding a Calendar asks the core, and the grid follows “Calendars changed”', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const work = core.addCalendar({ name: 'Work' });
-  core.addEvent({ calendarId: home.id, title: 'At home', when: monday });
-  core.addEvent({ calendarId: work.id, title: 'At work', when: monday });
+  const work = calendar({ name: 'Work' });
+  const atHome = event({ calendarId: home.id, title: 'At home', when: monday });
+  const atWork = event({ calendarId: work.id, title: 'At work', when: monday });
+  const core = showing([home, work], [atHome, atWork]);
   const grid = await showApp(core);
   await within(grid).findByRole('button', { name: 'At work' });
 
   await user.click(screen.getByRole('switch', { name: 'Work' }));
+  expect(core.callsOf('setCalendarShown')).toEqual([[work.id, false]]);
+  core.answer('listCalendars', [home, { ...work, shown: false }]);
+  core.answer('listOccurrences', [occurrence(atHome)]);
+  core.emit({ kind: 'calendarsChanged' });
 
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'At work' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'At home' })).toBeInTheDocument();
@@ -424,29 +438,26 @@ test('hiding a Calendar hides its Events', async () => {
 
 test('a link whose text is its URL opens straight away', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
   const url = 'https://example.org/plain';
-  core.addEvent({
+  const linked = event({
     calendarId: home.id,
     title: 'Linked',
     when: monday,
     description: { paragraphs: [[{ kind: 'link', text: url, url }]], text: url },
   });
+  const core = showing([home], [linked]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Linked');
+  const details = await openOccurrence(user, core, linked);
 
   await user.click(within(details).getByRole('button', { name: url }));
 
-  expect(core.openedLinks).toEqual([url]);
+  expect(core.callsOf('openLink')).toEqual([[url]]);
 });
 
 test('a link in the location opens like one in the description', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
   const url = 'https://zoom.us/j/123';
-  core.addEvent({
+  const call = event({
     calendarId: home.id,
     title: 'Call',
     when: monday,
@@ -460,46 +471,44 @@ test('a link in the location opens like one in the description', async () => {
       text: `Zoom: ${url}`,
     },
   });
+  const core = showing([home], [call]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Call');
+  const details = await openOccurrence(user, core, call);
 
   expect(details).toHaveTextContent(`Zoom: ${url}`);
   await user.click(within(details).getByRole('button', { name: url }));
 
-  expect(core.openedLinks).toEqual([url]);
+  expect(core.callsOf('openLink')).toEqual([[url]]);
 });
 
 test('a link whose text differs from its URL asks first', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
   const url = 'https://example.com/agenda';
-  core.addEvent({
+  const linked = event({
     calendarId: home.id,
     title: 'Linked',
     when: monday,
     description: { paragraphs: [[{ kind: 'link', text: 'the agenda', url }]], text: '' },
   });
+  const core = showing([home], [linked]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Linked');
+  const details = await openOccurrence(user, core, linked);
 
   await user.click(within(details).getByRole('button', { name: 'the agenda' }));
   const ask = screen.getByRole('alertdialog', { name: 'Open this link?' });
   expect(ask).toHaveTextContent(`Open ${url} in your browser?`);
   await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
-  expect(core.openedLinks).toEqual([]);
+  expect(core.callsOf('openLink')).toEqual([]);
   expect(screen.getByRole('dialog', { name: 'Linked' })).toBeInTheDocument();
 
   await user.click(within(details).getByRole('button', { name: 'the agenda' }));
   await user.click(screen.getByRole('button', { name: 'Open' }));
-  expect(core.openedLinks).toEqual([url]);
+  expect(core.callsOf('openLink')).toEqual([[url]]);
 });
 
 test('the hostile Event goes through the grid, its details and the editor as text', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({
+  const hostileHtml = event({
     calendarId: home.id,
     title: 'Hostile',
     when: monday,
@@ -507,15 +516,16 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     description: hostile.expected.html as StructuredText,
     pinnedZone: hostile.pinnedZone,
   });
-  core.addEvent({
+  const hostileTitle = event({
     calendarId: home.id,
     title: hostile.title,
     when: monday,
     description: hostile.expected.plainText as StructuredText,
   });
+  const core = showing([home], [hostileHtml, hostileTitle]);
   const grid = await showApp(core);
   await within(grid).findByRole('button', { name: /onerror/ });
-  const details = await openOccurrence(user, 'Hostile');
+  const details = await openOccurrence(user, core, hostileHtml);
 
   expect(details).toHaveTextContent(hostile.location);
   expect(details).toHaveTextContent(hostile.expected.pinnedZoneNote);
@@ -539,68 +549,66 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   );
   expect(screen.getByRole('textbox', { name: 'Location' })).toHaveValue(hostile.location);
   await user.click(screen.getByRole('button', { name: 'Save' }));
-  // Untouched, the description keeps the core's original.
+  // Untouched, the fields go back to the core as they came.
   await screen.findByRole('dialog', { name: 'Hostile' });
-  expect(core.events[0]?.description).toEqual(hostile.expected.html);
+  expect(core.callsOf('editEvent')).toEqual([
+    [
+      hostileHtml.id,
+      expect.objectContaining({
+        title: 'Hostile',
+        location: hostile.location,
+        description: hostile.expected.html.text,
+      }),
+    ],
+  ]);
 
   await user.click(screen.getByRole('button', { name: 'Close' }));
-  await openOccurrence(user, hostile.title.replace(/\r\n/g, ' '));
+  await openOccurrence(user, core, hostileTitle, hostile.title.replace(/\r\n/g, ' '));
   expect(document.querySelector('img, script, b, i')).toBeNull();
 });
 
 test('dragging an Event to another time reschedules it through the core', async () => {
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const dentist = core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
+  const core = showing([home], [dentist]);
   await showApp(core);
-  const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
 
   await stubGrid.props!.onreschedule!(dentist.id, null, later);
 
-  expect(core.calls.filter((call) => call === 'rescheduleEvent')).toHaveLength(1);
-  expect(core.events[0]).toMatchObject({ title: 'Dentist', when: later });
+  expect(core.callsOf('rescheduleEvent')).toEqual([[dentist.id, later]]);
+  occurrencesChanged(core, [{ ...dentist, when: later }]);
   await waitFor(() => expect(stubGrid.props!.occurrences[0]?.when).toEqual(later));
 });
 
 test('a refused drag says why and tells the grid to put the Event back', async () => {
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const dentist = core.addEvent({ calendarId: home.id, title: 'Dentist', when: monday });
+  const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
+  const core = showing([home], [dentist]);
   await showApp(core);
-  vi.spyOn(core, 'rescheduleEvent').mockRejectedValueOnce(new Error('disk full'));
-  const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
+  core.answer('rescheduleEvent', failure({ code: 'localStoreFailed' }));
 
-  await expect(stubGrid.props!.onreschedule!(dentist.id, null, later)).rejects.toThrow('disk full');
+  await expect(stubGrid.props!.onreschedule!(dentist.id, null, later)).rejects.toBeDefined();
 
   expect(await screen.findByRole('alert')).toHaveTextContent(
-    'The event couldn’t be moved: Error: disk full',
+    'The event couldn’t be moved: FreeCal’s database couldn’t be read or written',
   );
-  expect(core.events[0]?.when).toEqual(monday);
-
-  await stubGrid.props!.onreschedule!(dentist.id, null, later);
-
-  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
 
 test('trying to drag an Event of a Read-only Calendar says why it can’t move', async () => {
-  const core = new FakeCore();
-  const locked = core.addCalendar({ name: 'Holidays', readOnly: true });
-  const fixed = core.addEvent({ calendarId: locked.id, title: 'Fixed', when: monday });
+  const fixed = event({ calendarId: locked.id, title: 'Fixed', when: monday });
+  const core = showing([locked], [fixed]);
   await showApp(core);
 
   stubGrid.props!.onrefusedrag!(fixed.id, null);
 
   expect(await screen.findByRole('status')).toHaveTextContent(
-    '“\u2068Fixed\u2069” can’t be changed: its calendar “\u2068Holidays\u2069” is read-only.',
+    '“⁨Fixed⁩” can’t be changed: its calendar “⁨Holidays⁩” is read-only.',
   );
-  expect(core.calls).not.toContain('rescheduleEvent');
+  expect(core.callsOf('rescheduleEvent')).toEqual([]);
 });
 
 test('a refused drag names a hostile Event and Calendar as text', async () => {
-  const core = new FakeCore();
-  const locked = core.addCalendar({ name: hostile.calendarName, readOnly: true });
-  const fixed = core.addEvent({ calendarId: locked.id, title: hostile.title, when: monday });
-  await showApp(core);
+  const hostileCalendar = calendar({ name: hostile.calendarName, readOnly: true });
+  const fixed = event({ calendarId: hostileCalendar.id, title: hostile.title, when: monday });
+  await showApp(showing([hostileCalendar], [fixed]));
 
   stubGrid.props!.onrefusedrag!(fixed.id, null);
 
@@ -611,11 +619,15 @@ test('a refused drag names a hostile Event and Calendar as text', async () => {
 
 test('the delete question names a hostile Event as text', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: hostile.title, when: monday });
+  const hostileTitle = event({ calendarId: home.id, title: hostile.title, when: monday });
+  const core = showing([home], [hostileTitle]);
   await showApp(core);
-  const details = await openOccurrence(user, hostile.title.replace(/\r\n/g, ' '));
+  const details = await openOccurrence(
+    user,
+    core,
+    hostileTitle,
+    hostile.title.replace(/\r\n/g, ' '),
+  );
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
 
@@ -629,22 +641,35 @@ const weeklyThreeTimes: Repeat = {
   interval: 1,
   end: { kind: 'count', count: 3 },
 };
+/** Yoga, every Monday three times from October 5. */
+const yoga = event({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+/** The Occurrences of Yoga, as the core gives them. */
+const yogaOccurrences = ['2026-10-05', '2026-10-12', '2026-10-19'].map((date) =>
+  occurrence(yoga, {
+    when: { kind: 'timed', start: `${date}T09:00:00`, end: `${date}T10:30:00` },
+    recurrenceId: `${date}T09:00:00`,
+  }),
+);
 
 /** The Occurrences the grid shows titled `title`, as its buttons. */
 function occurrencesTitled(grid: HTMLElement, title: string) {
   return within(grid).queryAllByRole('button', { name: title });
 }
 
-test('a Recurring Event is on every date, and an Occurrence opens with its date and repeat', async () => {
-  const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
+/** Opens the details of Yoga's Occurrence `index`. */
+async function openYoga(user: ReturnType<typeof userEvent.setup>, index: number) {
+  const core = showing([home], yogaOccurrences);
+  core.answer('event', yoga);
   const grid = await showApp(core);
-
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
-  await user.click(occurrencesTitled(grid, 'Yoga')[1]);
+  await user.click(occurrencesTitled(grid, 'Yoga')[index]);
   const details = await screen.findByRole('dialog', { name: 'Yoga' });
+  return { core, grid, details };
+}
+
+test('an Occurrence of a Recurring Event opens with its own date and the repeat', async () => {
+  const user = userEvent.setup();
+  const { grid, details } = await openYoga(user, 1);
 
   expect(details).toHaveTextContent('Monday, October 12, 2026');
   expect(details).toHaveTextContent('Every week, 3 times');
@@ -657,38 +682,23 @@ test('a Recurring Event is on every date, and an Occurrence opens with its date 
 
 test('deleting an Occurrence asks, and “This event” deletes only that one', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const event = core.addEvent({
-    calendarId: home.id,
-    title: 'Yoga',
-    when: monday,
-    repeat: weeklyThreeTimes,
-  });
-  const grid = await showApp(core);
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
-  await user.click(occurrencesTitled(grid, 'Yoga')[1]);
-  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+  const { core, grid, details } = await openYoga(user, 1);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
   expect(ask).toHaveTextContent('Delete only this event, or all events it repeats with?');
   await user.click(within(ask).getByRole('button', { name: 'This event' }));
 
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(core.callsOf('deleteOccurrence')).toEqual([[yoga.id, '2026-10-12T09:00:00']]);
+  expect(core.callsOf('deleteEvent')).toEqual([]);
+  occurrencesChanged(core, [yogaOccurrences[0], yogaOccurrences[2]]);
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2));
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(core.cancelled.get(event.id)).toEqual(['2026-10-12T09:00:00']);
 });
 
 test('“All events” deletes the whole Recurring Event, and Cancel keeps it', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({ calendarId: home.id, title: 'Yoga', when: monday, repeat: weeklyThreeTimes });
-  const grid = await showApp(core);
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
-  await user.click(occurrencesTitled(grid, 'Yoga')[2]);
-  const details = await screen.findByRole('dialog', { name: 'Yoga' });
+  const { core, details } = await openYoga(user, 2);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
@@ -698,15 +708,14 @@ test('“All events” deletes the whole Recurring Event, and Cancel keeps it', 
     within(screen.getByRole('alertdialog')).getByRole('button', { name: 'All events' }),
   );
 
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(0));
-  expect(core.events).toEqual([]);
+  await waitFor(() => expect(core.callsOf('deleteEvent')).toEqual([[yoga.id]]));
+  expect(core.callsOf('deleteOccurrence')).toEqual([]);
 });
 
 test('a new Event can repeat', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  const grid = await showApp(core);
+  const core = showing([home]);
+  await showApp(core);
 
   await selectSlot(monday);
   const editor = screen.getByRole('dialog', { name: 'New event' });
@@ -715,212 +724,83 @@ test('a new Event can repeat', async () => {
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
 
   await waitFor(() =>
-    expect(core.events[0]?.repeat).toEqual({
-      frequency: 'daily',
-      interval: 1,
-      end: { kind: 'never' },
-    }),
+    expect(core.callsOf('createEvent')).toEqual([
+      [
+        expect.objectContaining({
+          repeat: { frequency: 'daily', interval: 1, end: { kind: 'never' } },
+        }),
+      ],
+    ]),
   );
-  expect(occurrencesTitled(grid, 'Yoga').length).toBeGreaterThan(20);
 });
-
-/** Opens the Occurrence of Yoga on `index`'s date, of three weekly ones from Monday, in the editor. */
-async function editYoga(user: ReturnType<typeof userEvent.setup>, index: number) {
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const yoga = core.addEvent({
-    calendarId: home.id,
-    title: 'Yoga',
-    when: monday,
-    repeat: weeklyThreeTimes,
-  });
-  const grid = await showApp(core);
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
-  await user.click(occurrencesTitled(grid, 'Yoga')[index]);
-  const details = await screen.findByRole('dialog', { name: 'Yoga' });
-  await user.click(within(details).getByRole('button', { name: 'Edit' }));
-  return { core, grid, yoga, editor: screen.getByRole('dialog', { name: 'Edit event' }) };
-}
 
 test('editing an Occurrence starts from its date and asks which events to change on Save', async () => {
   const user = userEvent.setup();
-  const { core, yoga, editor } = await editYoga(user, 2);
+  const { core, details } = await openYoga(user, 2);
+  const pilates = { ...yogaOccurrences[2], title: 'Pilates' };
+  core.answer('editOccurrence', { journalTransaction: journalTransactionId(7), value: pilates });
 
+  await user.click(within(details).getByRole('button', { name: 'Edit' }));
+  const editor = screen.getByRole('dialog', { name: 'Edit event' });
   expect(within(editor).getByLabelText('Start date')).toHaveValue('2026-10-19');
   expect(within(editor).getByRole('combobox', { name: 'Repeat' })).toHaveDisplayValue('Weekly');
   const title = within(editor).getByRole('textbox', { name: 'Title' });
   await user.clear(title);
   await user.type(title, 'Pilates');
   await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = screen.getByRole('dialog', { name: 'Change a recurring event' });
+  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
   expect(prompt).toHaveTextContent(
     'Change only this event, this and following events, or all events?',
   );
   await user.click(within(prompt).getByRole('radio', { name: 'This and following events' }));
+  core.answer('event', { ...yoga, title: 'Pilates' });
   await user.click(within(prompt).getByRole('button', { name: 'Change' }));
 
-  expect(core.scopedChanges).toEqual([
-    {
-      id: yoga.id,
-      recurrenceId: '2026-10-19T09:00:00',
-      scope: 'thisAndFollowing',
-      exceptionsToo: false,
-      draft: expect.objectContaining({
-        title: 'Pilates',
-        when: { ...monday, start: '2026-10-19T09:00:00', end: '2026-10-19T10:30:00' },
-      }),
-    },
+  expect(core.callsOf('editOccurrence')).toEqual([
+    [
+      yoga.id,
+      '2026-10-19T09:00:00',
+      'thisAndFollowing',
+      false,
+      expect.objectContaining({ title: 'Pilates', when: yogaOccurrences[2].when }),
+    ],
   ]);
+  occurrencesChanged(core, [...yogaOccurrences.slice(0, 2), pilates]);
   expect(await screen.findByRole('dialog', { name: 'Pilates' })).toHaveTextContent(
     'Monday, October 19, 2026',
   );
 });
 
-test('“This event” changes only that Occurrence, “All events” the whole', async () => {
-  const user = userEvent.setup();
-  const { core, grid, yoga, editor } = await editYoga(user, 1);
-
-  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
-  await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
-  await user.click(within(prompt).getByRole('button', { name: 'Change' }));
-
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga outside')).toHaveLength(1));
-  expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2);
-  await user.click(
-    within(screen.getByRole('dialog', { name: 'Yoga outside' })).getByRole('button', {
-      name: 'Close',
-    }),
-  );
-
-  await user.click(occurrencesTitled(grid, 'Yoga')[0]);
-  await user.click(
-    within(await screen.findByRole('dialog', { name: 'Yoga' })).getByRole('button', {
-      name: 'Edit',
-    }),
-  );
-  const again = screen.getByRole('dialog', { name: 'Edit event' });
-  await user.type(within(again).getByRole('textbox', { name: 'Title' }), ' class');
-  await user.click(within(again).getByRole('button', { name: 'Save' }));
-  const all = await screen.findByRole('dialog', { name: 'Change a recurring event' });
-  await user.click(within(all).getByRole('radio', { name: 'All events' }));
-  await user.click(within(all).getByRole('button', { name: 'Change' }));
-
-  await waitFor(() => expect(occurrencesTitled(grid, 'Yoga class')).toHaveLength(2));
-  expect(core.scopedChanges.map(({ id, scope }) => [id, scope])).toEqual([
-    [yoga.id, 'this'],
-    [yoga.id, 'all'],
-  ]);
-});
-
-test('cancelling the question keeps the editor open with what was typed', async () => {
-  const user = userEvent.setup();
-  const { core, editor } = await editYoga(user, 1);
-
-  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
-  await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  await user.click(
-    within(await screen.findByRole('dialog', { name: 'Change a recurring event' })).getByRole(
-      'button',
-      { name: 'Cancel' },
-    ),
-  );
-
-  expect(screen.queryByRole('dialog', { name: 'Change a recurring event' })).toBeNull();
-  expect(within(editor).getByRole('textbox', { name: 'Title' })).toHaveValue('Yoga outside');
-  expect(core.scopedChanges).toEqual([]);
-});
-
-test('a changed repeat can’t be for this event alone', async () => {
-  const user = userEvent.setup();
-  const { editor } = await editYoga(user, 1);
-
-  await user.selectOptions(within(editor).getByRole('combobox', { name: 'Repeat' }), 'Daily');
-  await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
-
-  expect(prompt).toHaveTextContent('Change this and following events, or all events?');
-  expect(within(prompt).getByRole('radio', { name: 'This event' })).toBeDisabled();
-  expect(within(prompt).getByRole('radio', { name: 'This and following events' })).toBeChecked();
-});
-
-test('the question offers the Exceptions changed on their own, as the core counts them', async () => {
-  const user = userEvent.setup();
-  const { core, yoga, editor } = await editYoga(user, 1);
-  core.givenExceptionCounts = { thisAndFollowing: 1, all: 2 };
-
-  await user.type(within(editor).getByRole('textbox', { name: 'Title' }), ' outside');
-  await user.click(within(editor).getByRole('button', { name: 'Save' }));
-  const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
-  await user.click(within(prompt).getByRole('radio', { name: 'All events' }));
-  await user.click(
-    within(prompt).getByRole('checkbox', {
-      name: 'Also change the 2 events changed on their own',
-    }),
-  );
-  await user.click(within(prompt).getByRole('button', { name: 'Change' }));
-
-  await waitFor(() => expect(core.scopedChanges).toHaveLength(1));
-  expect(core.scopedChanges[0]).toMatchObject({
-    id: yoga.id,
-    recurrenceId: '2026-10-12T09:00:00',
-    scope: 'all',
-    exceptionsToo: true,
-  });
-  expect(
-    core.calls.filter((call) => call.endsWith('Occurrence') || call === 'exceptionCounts'),
-  ).toEqual(['exceptionCounts', 'editOccurrence']);
-});
-
-test('dropping an Occurrence asks which events to move, and Cancel puts it back', async () => {
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const yoga = core.addEvent({
-    calendarId: home.id,
-    title: 'Yoga',
-    when: monday,
-    repeat: weeklyThreeTimes,
-  });
+test('dropping an Occurrence asks which events to move, and moves them through the core', async () => {
+  const core = showing([home], yogaOccurrences);
   await showApp(core);
-  const later: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
+  const moved: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
 
-  const cancelled = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
+  const dropped = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', moved);
   const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
   expect(prompt).toHaveTextContent(
     'Move only this event, this and following events, or all events?',
   );
-  within(prompt).getByRole('button', { name: 'Cancel' }).click();
-  await expect(cancelled).rejects.toBeDefined();
-  expect(core.scopedChanges).toEqual([]);
-  expect(screen.queryByRole('alert')).toBeNull();
+  within(prompt).getByRole('button', { name: 'Move' }).click();
+  await dropped;
 
-  const moved = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', later);
-  (await screen.findByRole('button', { name: 'Move' })).click();
-  await moved;
-  expect(core.scopedChanges).toEqual([
-    {
-      id: yoga.id,
-      recurrenceId: '2026-10-12T09:00:00',
-      scope: 'this',
-      exceptionsToo: false,
-      when: later,
-    },
+  expect(core.callsOf('rescheduleOccurrence')).toEqual([
+    [yoga.id, '2026-10-12T09:00:00', 'this', false, moved],
   ]);
-  expect(core.calls).not.toContain('rescheduleEvent');
+  expect(core.callsOf('rescheduleEvent')).toEqual([]);
 });
 
 test('an Exception edits without a repeat, and Delete still asks', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  core.addEvent({
+  const exception = event({
     calendarId: home.id,
     title: 'Moved',
     when: monday,
     recurrenceId: '2026-10-05T08:00:00',
   });
+  const core = showing([home], [exception]);
   await showApp(core);
-  const details = await openOccurrence(user, 'Moved');
+  const details = await openOccurrence(user, core, exception);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
