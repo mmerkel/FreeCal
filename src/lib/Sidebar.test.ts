@@ -4,10 +4,28 @@ import { expect, onTestFinished, test, vi } from 'vitest';
 import App from '../App.svelte';
 import { expectAnchoredTo } from '../test/anchored';
 import hostile from '../../fixtures/hostile-event.json';
-import { FakeCore } from '../test/fakeCore';
-import { accountId } from '../test/ids';
+import type { Calendar } from '../core/types';
+import { caldavAccount, calendar, firstLaunch, localAccount } from '../test/answers';
+import { failure, type RecordingCore } from '../test/recordingCore';
 
-async function showApp(core: FakeCore) {
+// The sidebar's Calendars, run against the recording fake core. A test that
+// changes them checks the call, then scripts the Calendars as the core would
+// have them and emits "Calendars changed".
+
+/** A first launch with `calendars` in the Local Account. */
+function withCalendars(...calendars: Calendar[]) {
+  const core = firstLaunch();
+  core.answer('listCalendars', calendars);
+  return core;
+}
+
+/** Scripts `calendars` and emits "Calendars changed", as the core does after a change. */
+function calendarsChanged(core: RecordingCore, ...calendars: Calendar[]) {
+  core.answer('listCalendars', calendars);
+  core.emit({ kind: 'calendarsChanged' });
+}
+
+async function showApp(core: RecordingCore) {
   render(App, { core });
   return screen.findByRole('list', { name: 'Local' });
 }
@@ -18,23 +36,9 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string) 
   return screen.getByRole('menu', { name: `Options for ${name}` });
 }
 
-test('subscribes to Signals before reading anything a Signal could change', async () => {
-  const core = new FakeCore();
-
-  await showApp(core);
-
-  // Whether FreeCal started comes first; no Signal changes that.
-  expect(core.calls.slice(0, 2)).toEqual(['startupFailure', 'subscribe']);
-  expect(core.calls).toContain('listCalendars');
-});
-
 test('a CalDAV Account is named by its hostile username as text', async () => {
-  const core = new FakeCore();
-  core.accounts.push({
-    id: accountId(2),
-    provider: 'caldav',
-    server: { url: 'https://dav.example.org/', username: hostile.username },
-  });
+  const core = firstLaunch();
+  core.answer('listAccounts', [localAccount, caldavAccount(hostile.username)]);
 
   await showApp(core);
 
@@ -43,9 +47,7 @@ test('a CalDAV Account is named by its hostile username as text', async () => {
 });
 
 test('shows each Calendar under its Account as a switch', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Work', shown: false });
+  const core = withCalendars(calendar({ name: 'Home' }), calendar({ name: 'Work', shown: false }));
 
   const local = await showApp(core);
 
@@ -54,7 +56,7 @@ test('shows each Calendar under its Account as a switch', async () => {
 });
 
 test('an Account’s full name is in its heading’s tooltip', async () => {
-  const core = new FakeCore();
+  const core = withCalendars();
 
   await showApp(core);
 
@@ -63,7 +65,7 @@ test('an Account’s full name is in its heading’s tooltip', async () => {
 
 test('with no Calendars, the Local Account shows a hint until one is created', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
+  const core = withCalendars();
   await showApp(core);
   const hint = 'No calendars yet. Use + to create one.';
 
@@ -71,6 +73,7 @@ test('with no Calendars, the Local Account shows a hint until one is created', a
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Home{Enter}');
+  calendarsChanged(core, calendar({ name: 'Home' }));
 
   await screen.findByRole('switch', { name: 'Home' });
   expect(screen.queryByText(hint)).not.toBeInTheDocument();
@@ -78,9 +81,9 @@ test('with no Calendars, the Local Account shows a hint until one is created', a
 
 test('a Calendar’s tooltip says whether it is shown and what a click does', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Work', shown: false });
+  const home = calendar({ name: 'Home' });
+  const work = calendar({ name: 'Work', shown: false });
+  const core = withCalendars(home, work);
   await showApp(core);
 
   expect(screen.getByRole('switch', { name: 'Home' })).toHaveAttribute(
@@ -93,6 +96,7 @@ test('a Calendar’s tooltip says whether it is shown and what a click does', as
   );
 
   await user.click(screen.getByRole('switch', { name: 'Home' }));
+  calendarsChanged(core, { ...home, shown: false }, work);
 
   await waitFor(() =>
     expect(screen.getByRole('switch', { name: 'Home' })).toHaveAttribute(
@@ -103,9 +107,10 @@ test('a Calendar’s tooltip says whether it is shown and what a click does', as
 });
 
 test('a Read-only Calendar’s row shows a lock, which describes it', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Holidays', readOnly: true });
+  const core = withCalendars(
+    calendar({ name: 'Home' }),
+    calendar({ name: 'Holidays', readOnly: true }),
+  );
 
   const local = await showApp(core);
 
@@ -119,59 +124,65 @@ test('a Read-only Calendar’s row shows a lock, which describes it', async () =
 
 test('clicking a Calendar’s row hides and shows it', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
+  const home = calendar({ name: 'Home' });
+  const core = withCalendars(home);
   await showApp(core);
 
   await user.click(screen.getByRole('switch', { name: 'Home' }));
+  expect(core.callsOf('setCalendarShown')).toEqual([[home.id, false]]);
+  calendarsChanged(core, { ...home, shown: false });
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Home' })).not.toBeChecked());
-  expect(core.calendars.find((calendar) => calendar.id === home.id)?.shown).toBe(false);
 
   await user.click(screen.getByRole('switch', { name: 'Home' }));
+  expect(core.callsOf('setCalendarShown')).toEqual([
+    [home.id, false],
+    [home.id, true],
+  ]);
+  calendarsChanged(core, home);
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Home' })).toBeChecked());
 });
 
 test('a Calendar can be hidden with the keyboard', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   screen.getByRole('switch', { name: 'Home' }).focus();
   await user.keyboard(' ');
 
-  await waitFor(() => expect(screen.getByRole('switch', { name: 'Home' })).not.toBeChecked());
+  expect(core.callsOf('setCalendarShown')).toEqual([[expect.anything(), false]]);
 });
 
 test('creates a Calendar in the Local Account', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
+  const core = withCalendars();
   const local = await showApp(core);
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Home{Enter}');
 
-  expect(await within(local).findByRole('switch', { name: 'Home' })).toBeChecked();
-  expect(core.calendars).toMatchObject([{ accountId: 1, name: 'Home' }]);
-  expect(core.calendars[0].colour).toMatch(/^#[0-9a-f]{6}$/);
+  expect(core.callsOf('createCalendar')).toEqual([
+    [localAccount.id, 'Home', expect.stringMatching(/^#[0-9a-f]{6}$/)],
+  ]);
   expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument();
+  calendarsChanged(core, calendar({ name: 'Home' }));
+  expect(await within(local).findByRole('switch', { name: 'Home' })).toBeChecked();
 });
 
 test('a new Calendar takes the next colour in turn that no Calendar uses yet', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home', colour: '#ad1457' });
+  const home = calendar({ name: 'Home', colour: '#ad1457' });
+  const core = withCalendars(home);
   await showApp(core);
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Work{Enter}');
+  calendarsChanged(core, home, calendar({ name: 'Work', colour: '#3f51b5' }));
   await screen.findByRole('switch', { name: 'Work' });
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Birthdays{Enter}');
-  await screen.findByRole('switch', { name: 'Birthdays' });
 
-  expect(core.calendars.map((calendar) => calendar.colour)).toEqual([
-    '#ad1457',
+  expect(core.callsOf('createCalendar').map(([, , colour]) => colour)).toEqual([
     '#3f51b5',
     '#c0ca33',
   ]);
@@ -179,8 +190,7 @@ test('a new Calendar takes the next colour in turn that no Calendar uses yet', a
 
 test('a Calendar’s menu offers 24 colours', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -190,20 +200,20 @@ test('a Calendar’s menu offers 24 colours', async () => {
 
 test('cancelling a new Calendar creates nothing', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
+  const core = withCalendars();
   await showApp(core);
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Home{Escape}');
 
   expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument();
-  expect(core.calls).not.toContain('createCalendar');
+  expect(core.callsOf('createCalendar')).toEqual([]);
 });
 
 test('renames a Calendar from its menu', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const home = calendar({ name: 'Home' });
+  const core = withCalendars(home);
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -213,14 +223,14 @@ test('renames a Calendar from its menu', async () => {
   await user.clear(name);
   await user.type(name, 'Family{Enter}');
 
+  expect(core.callsOf('renameCalendar')).toEqual([[home.id, 'Family']]);
+  calendarsChanged(core, { ...home, name: 'Family' });
   expect(await screen.findByRole('switch', { name: 'Family' })).toBeInTheDocument();
-  expect(core.calendars[0].name).toBe('Family');
 });
 
 test('Escape leaves a Calendar’s name unchanged', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -228,29 +238,34 @@ test('Escape leaves a Calendar’s name unchanged', async () => {
   await user.type(screen.getByRole('textbox', { name: 'Name' }), ' and away{Escape}');
 
   expect(screen.getByRole('switch', { name: 'Home' })).toBeInTheDocument();
-  expect(core.calls).not.toContain('renameCalendar');
+  expect(core.callsOf('renameCalendar')).toEqual([]);
 });
 
 test('recolours a Calendar from the swatches in its menu', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home', colour: '#039be5' });
+  const home = calendar({ name: 'Home', colour: '#039be5' });
+  const core = withCalendars(home);
   await showApp(core);
 
   let menu = await openMenu(user, 'Home');
   expect(within(menu).getByRole('menuitemradio', { name: 'Light blue' })).toBeChecked();
   await user.click(within(menu).getByRole('menuitemradio', { name: 'Green' }));
 
-  await waitFor(() => expect(core.calendars[0].colour).toBe('#0b8043'));
+  expect(core.callsOf('recolourCalendar')).toEqual([[home.id, '#0b8043']]);
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  calendarsChanged(core, { ...home, colour: '#0b8043' });
+  await waitFor(() =>
+    expect(screen.getByRole('switch', { name: 'Home' }).querySelector('.calendar-dot')).toHaveStyle(
+      { '--colour': '#0b8043' },
+    ),
+  );
   menu = await openMenu(user, 'Home');
   expect(within(menu).getByRole('menuitemradio', { name: 'Green' })).toBeChecked();
   expect(within(menu).getByRole('menuitemradio', { name: 'Light blue' })).not.toBeChecked();
 });
 
 test('right-click on a Calendar’s row opens its menu', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const notPrevented = await fireEvent.contextMenu(screen.getByRole('switch', { name: 'Home' }));
@@ -263,9 +278,7 @@ test.each(['{Shift>}{F10}{/Shift}', '{ContextMenu}'])(
   '%s on a focused Calendar row opens its menu',
   async (keys) => {
     const user = userEvent.setup();
-    const core = new FakeCore();
-    core.addCalendar({ name: 'Home' });
-    await showApp(core);
+    await showApp(withCalendars(calendar({ name: 'Home' })));
 
     screen.getByRole('switch', { name: 'Home' }).focus();
     await user.keyboard(keys);
@@ -278,8 +291,7 @@ test.each(['{Shift>}{F10}{/Shift}', '{ContextMenu}'])(
 
 test('the menu is used with arrow keys and closed with Escape', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -300,8 +312,7 @@ test('the menu is used with arrow keys and closed with Escape', async () => {
 
 test('a click elsewhere closes the menu', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   await openMenu(user, 'Home');
@@ -312,8 +323,7 @@ test('a click elsewhere closes the menu', async () => {
 
 test('the ⋮ button closes the menu it opened', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   await openMenu(user, 'Home');
@@ -324,8 +334,7 @@ test('the ⋮ button closes the menu it opened', async () => {
 
 test('a menu opened by right-click closes on a click elsewhere', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
   (document.activeElement as HTMLElement | null)?.blur();
 
@@ -338,23 +347,20 @@ test('a menu opened by right-click closes on a click elsewhere', async () => {
 
 test('a click on another Calendar while a menu is open only closes the menu', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Work' });
+  const core = withCalendars(calendar({ name: 'Home' }), calendar({ name: 'Work' }));
   await showApp(core);
 
   await openMenu(user, 'Home');
   await user.click(screen.getByRole('switch', { name: 'Work' }));
 
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(core.calls).not.toContain('setCalendarShown');
+  expect(core.callsOf('setCalendarShown')).toEqual([]);
   expect(screen.getByRole('switch', { name: 'Work' })).toBeChecked();
 });
 
 test('a click on its own row only closes a menu opened by right-click', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   await fireEvent.contextMenu(screen.getByRole('switch', { name: 'Home' }));
@@ -362,13 +368,12 @@ test('a click on its own row only closes a menu opened by right-click', async ()
   await user.click(screen.getByRole('switch', { name: 'Home' }));
 
   expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-  expect(core.calls).not.toContain('setCalendarShown');
+  expect(core.callsOf('setCalendarShown')).toEqual([]);
 });
 
 test('a Calendar’s menu is shown as a popover anchored to its ⋮ button', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
   const shown = vi.spyOn(HTMLElement.prototype, 'showPopover');
   onTestFinished(() => shown.mockRestore());
@@ -381,8 +386,7 @@ test('a Calendar’s menu is shown as a popover anchored to its ⋮ button', asy
 });
 
 test('a menu opened by right-click on a row is anchored to its ⋮ button', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   await fireEvent.contextMenu(screen.getByRole('switch', { name: 'Home' }));
@@ -395,16 +399,15 @@ test('a menu opened by right-click on a row is anchored to its ⋮ button', asyn
 
 test('an open menu keeps its focus when the Calendars change', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const home = calendar({ name: 'Home' });
+  const core = withCalendars(home);
   await showApp(core);
   const shown = vi.spyOn(HTMLElement.prototype, 'showPopover');
   onTestFinished(() => shown.mockRestore());
 
   const menu = await openMenu(user, 'Home');
   await user.keyboard('{End}');
-  core.addCalendar({ name: 'Work' });
-  core.emit({ kind: 'calendarsChanged' });
+  calendarsChanged(core, home, calendar({ name: 'Work' }));
   await screen.findByRole('switch', { name: 'Work' });
 
   expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toHaveFocus();
@@ -413,8 +416,7 @@ test('an open menu keeps its focus when the Calendars change', async () => {
 
 test('a scroll outside the open menu closes it, and focus returns to its ⋮', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   const local = await showApp(core);
 
   await openMenu(user, 'Home');
@@ -426,8 +428,7 @@ test('a scroll outside the open menu closes it, and focus returns to its ⋮', a
 
 test('a scroll inside the open menu leaves it open', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -438,26 +439,32 @@ test('a scroll inside the open menu leaves it open', async () => {
 
 test('“Show only this” shows one Calendar and hides all others', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Work', shown: false });
-  core.addCalendar({ name: 'Birthdays' });
+  const home = calendar({ name: 'Home' });
+  const work = calendar({ name: 'Work', shown: false });
+  const birthdays = calendar({ name: 'Birthdays' });
+  const core = withCalendars(home, work, birthdays);
   await showApp(core);
 
   const menu = await openMenu(user, 'Work');
   await user.click(within(menu).getByRole('menuitem', { name: 'Show only this' }));
 
+  expect(core.callsOf('showOnlyCalendar')).toEqual([[work.id]]);
+  calendarsChanged(
+    core,
+    { ...home, shown: false },
+    { ...work, shown: true },
+    { ...birthdays, shown: false },
+  );
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Work' })).toBeChecked());
   expect(screen.getByRole('switch', { name: 'Home' })).not.toBeChecked();
   expect(screen.getByRole('switch', { name: 'Birthdays' })).not.toBeChecked();
-  expect(core.calls.filter((call) => call === 'showOnlyCalendar')).toHaveLength(1);
 });
 
 test('deletes a Calendar only after confirming in a dialog', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.addCalendar({ name: 'Work' });
+  const home = calendar({ name: 'Home' });
+  const work = calendar({ name: 'Work' });
+  const core = withCalendars(home, work);
   await showApp(core);
 
   let menu = await openMenu(user, 'Home');
@@ -466,24 +473,25 @@ test('deletes a Calendar only after confirming in a dialog', async () => {
   expect(within(confirmation).getByRole('button', { name: 'Cancel' })).toHaveFocus();
   await user.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-  expect(core.calls).not.toContain('deleteCalendar');
+  expect(core.callsOf('deleteCalendar')).toEqual([]);
   expect(screen.getByRole('button', { name: 'Options for Home' })).toHaveFocus();
 
   menu = await openMenu(user, 'Home');
   await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
   await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
+  expect(core.callsOf('deleteCalendar')).toEqual([[home.id]]);
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  calendarsChanged(core, work);
   await waitFor(() =>
     expect(screen.queryByRole('switch', { name: 'Home' })).not.toBeInTheDocument(),
   );
-  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   expect(screen.getByRole('switch', { name: 'Work' })).toBeInTheDocument();
 });
 
 test('Escape cancels deleting a Calendar', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = withCalendars(calendar({ name: 'Home' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
@@ -491,38 +499,35 @@ test('Escape cancels deleting a Calendar', async () => {
   await user.keyboard('{Escape}');
 
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-  expect(core.calls).not.toContain('deleteCalendar');
+  expect(core.callsOf('deleteCalendar')).toEqual([]);
 });
 
 test('reads the Calendars again on “Calendars changed”', async () => {
-  const core = new FakeCore();
+  const core = withCalendars();
   await showApp(core);
 
-  core.addCalendar({ name: 'Added elsewhere' });
-  core.emit({ kind: 'calendarsChanged' });
+  calendarsChanged(core, calendar({ name: 'Added elsewhere' }));
 
   expect(await screen.findByRole('switch', { name: 'Added elsewhere' })).toBeInTheDocument();
 });
 
 test('a failed change is reported', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.setCalendarShown = async () => {
-    throw 'the Local Store failed: disk full';
-  };
+  const core = withCalendars(calendar({ name: 'Home' }));
+  core.answer('setCalendarShown', failure({ code: 'localStoreFailed' }));
   await showApp(core);
 
   await user.click(screen.getByRole('switch', { name: 'Home' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('disk full');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'FreeCal’s database couldn’t be read or written',
+  );
 });
 
 test('a hostile Calendar name is shown as text in the row, the menu and the dialog', async () => {
   const user = userEvent.setup();
   const hostile = '<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
-  const core = new FakeCore();
-  core.addCalendar({ name: hostile });
+  const core = withCalendars(calendar({ name: hostile }));
 
   const local = await showApp(core);
   expect(within(local).getByRole('switch', { name: hostile })).toBeInTheDocument();
@@ -535,11 +540,8 @@ test('a hostile Calendar name is shown as text in the row, the menu and the dial
 
 test('cancelling clears the report of a failed change', async () => {
   const user = userEvent.setup();
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
-  core.renameCalendar = async () => {
-    throw 'a Calendar needs a name';
-  };
+  const core = withCalendars(calendar({ name: 'Home' }));
+  core.answer('renameCalendar', failure({ code: 'emptyCalendarName' }));
   await showApp(core);
 
   const menu = await openMenu(user, 'Home');
