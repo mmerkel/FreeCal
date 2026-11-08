@@ -28,7 +28,7 @@ Spec: "Sync Error"; "Event details".
   - **Refused writes (decision).** A write answered 403 is the new error `WritesRefused` ("the server doesn't allow changes to this calendar"), the Calendar's Sync Error. It stops the Calendar's Outgoing Sync, the Unsent Changes stay, and the Incoming Sync still runs.
     - **Not about the Calendar:** a 403 whose body is a `DAV:error` naming a CalDAV precondition, such as `valid-calendar-data`, is about that one resource. It stays `ServerRefused` (`write_refusal`, `core/src/caldav.rs`).
     - **Lost privileges:** a Calendar its server reports read-only while Unsent Changes of it wait is `WritesRefused` too, with no request sent. The user's own Read-only mark alone is no Sync Error, and the changes wait.
-    - **Open for the user:** a Calendar both marked read-only by the user and reported read-only by the server still shows the Sync Error, as the Local Store's Calendar doesn't tell the two apart (ticket 120's comment).
+    - **Open for the user:** a Calendar both marked read-only by the user and reported read-only by the server still shows the Sync Error. The Local Store keeps both flags, but the Calendar the Sender reads (`Store::find_calendar`) merges them into `read_only`, so the Sender checks the server's flag first.
   - **Not yet synced: <reason> (decision, for ticket 18).** A Send Failure is kept per UID in `unsent_change.send_failure` (migration 4), as JSON of `SendFailure` (`core/src/sync/mod.rs`). The Sender overwrites it on each try, and it goes with the Unsent Changes once they are sent.
     - **Stored reasons, about the UID itself:**
       - the server changed it (an update or delete failed its precondition; a Conflict once tickets 20 and 21 land)
@@ -49,3 +49,4 @@ Spec: "Sync Error"; "Event details".
       - `write_refusal`: classifies a 403 answer to a write
       - `beyond_uid`: a failure about the Account or Calendar, not the UID
       - `SyncScheduler::ask_calendar`, `SyncRequests::calendars_of`, `Core::sync_account_calendars`: a sync of some Calendars of an Account
+- 2026-11-08: the user approved syncing both ways after every change.
