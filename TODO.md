@@ -1,9 +1,8 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] ticket 17 -> first split
-- [ ] test by hand
-- [ ] simplify -> from ticket 120 on
+- [ ] ticket 130
+- [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 25 -> first split
 - [ ] simplify
