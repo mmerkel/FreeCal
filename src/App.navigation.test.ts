@@ -5,8 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import type { Calendar, Event } from './core/types';
-import { calendar, event, firstLaunch, scriptWindow } from './test/answers';
+import { calendar, event, firstLaunch, occurrencesChanged } from './test/answers';
 import type { FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
 
@@ -41,15 +40,6 @@ const monday = {
 /** Emits "Date changed" to `date`, as the core does at midnight. */
 function dateChanged(core: FakeCore, date: string) {
   core.emit({ kind: 'dateChanged', date });
-}
-
-/**
- * Scripts the Occurrences of `events` in `home` and emits "Occurrences
- * changed", as the core does after a change.
- */
-function occurrencesChanged(core: FakeCore, home: Calendar, events: Event[]) {
-  scriptWindow(core, { calendars: [home], events });
-  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
 }
 
 function title() {
@@ -255,7 +245,7 @@ test('selecting, creating and editing Events keeps tracking today', async () => 
   });
   await tick();
   await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Dentist{Enter}');
-  occurrencesChanged(core, home, [dentist]);
+  occurrencesChanged(core, [home], [dentist]);
   core.answer('event', dentist);
   await user.click(await within(grid).findByRole('button', { name: 'Dentist' }));
   await user.click(
@@ -265,7 +255,7 @@ test('selecting, creating and editing Events keeps tracking today', async () => 
   );
   await user.type(screen.getByRole('textbox', { name: 'Title' }), ' at 9');
   await user.click(screen.getByRole('button', { name: 'Save' }));
-  occurrencesChanged(core, home, [{ ...dentist, title: 'Dentist at 9' }]);
+  occurrencesChanged(core, [home], [{ ...dentist, title: 'Dentist at 9' }]);
   await within(grid).findByRole('button', { name: 'Dentist at 9' });
 
   expect(core.callsOf('createEvent')).toHaveLength(1);

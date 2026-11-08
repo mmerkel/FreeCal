@@ -8,7 +8,7 @@ import { expect, test } from 'vitest';
 import App from '../App.svelte';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Account, AvailableCalendar, Calendar, SyncStatusReport } from '../core/types';
-import { caldavAccount, calendar, firstLaunch, localAccount } from '../test/answers';
+import { caldavAccount, calendar, calendarsChanged, firstLaunch } from '../test/answers';
 import { failure, type FakeCore } from '../test/fakeCore';
 
 const work: AvailableCalendar = {
@@ -42,21 +42,6 @@ function added(available: AvailableCalendar, account: Account = alice): Calendar
     colour: available.colour ?? '#808080',
     readOnly: true,
   });
-}
-
-/** A first launch with `accounts` besides the Local Account, and `calendars`. */
-function withAccounts(accounts: Account[], calendars: Calendar[] = []) {
-  const core = firstLaunch();
-  core.answer('listAccounts', [localAccount, ...accounts]);
-  core.answer('listCalendars', calendars);
-  return core;
-}
-
-/** Scripts the Accounts and Calendars and emits "Calendars changed", as the core does after a change. */
-function calendarsChanged(core: FakeCore, accounts: Account[], calendars: Calendar[]) {
-  core.answer('listAccounts', [localAccount, ...accounts]);
-  core.answer('listCalendars', calendars);
-  core.emit({ kind: 'calendarsChanged' });
 }
 
 async function showApp(core: FakeCore) {
@@ -98,7 +83,7 @@ test('adds a CalDAV Account, then the Calendars the user chooses, which load for
   expect(core.callsOf('addCalDavAccount')).toEqual([
     ['https://dav.example.org/', 'alice', 'secret'],
   ]);
-  calendarsChanged(core, [alice], []);
+  calendarsChanged(core, { accounts: [alice], calendars: [] });
   expect(within(chooser).getByRole('checkbox', { name: 'Work' })).toBeChecked();
   expect(within(chooser).getByRole('checkbox', { name: 'Home' })).toBeChecked();
   await user.click(within(chooser).getByRole('checkbox', { name: 'Home' }));
@@ -122,7 +107,7 @@ test('adds a CalDAV Account, then the Calendars the user chooses, which load for
       firstSyncUnfinished,
     });
   };
-  calendarsChanged(core, [alice], [workCalendar]);
+  calendarsChanged(core, { accounts: [alice], calendars: [workCalendar] });
   syncing({ kind: 'syncing', byUser: true }, true);
   const list = await screen.findByRole('list', { name: ALICE });
   await waitFor(() =>
@@ -152,7 +137,7 @@ test('a server that offers no Calendars says so after adding its Account', async
 
   const chooser = await screen.findByRole('dialog', { name: `Calendars of ${ALICE}` });
   expect(within(chooser).getByText('The server offers no calendars.')).toBeInTheDocument();
-  calendarsChanged(core, [alice], []);
+  calendarsChanged(core, { accounts: [alice], calendars: [] });
   await user.click(within(chooser).getByRole('button', { name: 'Save' }));
   expect(core.callsOf('addCalendars')).toEqual([]);
   expect(
@@ -227,7 +212,7 @@ test('cancelling “Add account…” adds nothing', async () => {
 test('“Manage calendars…” lists the Account’s Calendars checked and the server’s Available Calendars unchecked', async () => {
   const user = userEvent.setup();
   const workCalendar = added(work);
-  const core = withAccounts([alice], [workCalendar]);
+  const core = firstLaunch({ accounts: [alice], calendars: [workCalendar] });
   core.answer('availableCalendars', [home, birthdays]);
   await showApp(core);
 
@@ -242,7 +227,7 @@ test('“Manage calendars…” lists the Account’s Calendars checked and the 
 
   await waitFor(() => expect(core.callsOf('addCalendars')).toEqual([[alice.id, [birthdays.url]]]));
   expect(core.callsOf('removeCalendar')).toEqual([]);
-  calendarsChanged(core, [alice], [workCalendar, added(birthdays)]);
+  calendarsChanged(core, { accounts: [alice], calendars: [workCalendar, added(birthdays)] });
   const list = screen.getByRole('list', { name: ALICE });
   expect(await within(list).findByRole('switch', { name: 'Birthdays' })).toBeInTheDocument();
 });
@@ -250,7 +235,7 @@ test('“Manage calendars…” lists the Account’s Calendars checked and the 
 test('“Manage calendars…” says while it asks the server, and without it still removes Calendars', async () => {
   const user = userEvent.setup();
   const workCalendar = added(work);
-  const core = withAccounts([alice], [workCalendar]);
+  const core = firstLaunch({ accounts: [alice], calendars: [workCalendar] });
   const available = core.pending('availableCalendars');
   await showApp(core);
 
@@ -266,7 +251,7 @@ test('“Manage calendars…” says while it asks the server, and without it st
   await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
   await waitFor(() => expect(core.callsOf('removeCalendar')).toEqual([[workCalendar.id]]));
-  calendarsChanged(core, [alice], []);
+  calendarsChanged(core, { accounts: [alice], calendars: [] });
   await waitFor(() =>
     expect(screen.queryByRole('switch', { name: 'Work' })).not.toBeInTheDocument(),
   );
@@ -276,7 +261,7 @@ test('unchecking a Calendar in “Manage calendars…” says what happens, and 
   const user = userEvent.setup();
   const workCalendar = added(work);
   const homeCalendar = added(home);
-  const core = withAccounts([alice], [workCalendar, homeCalendar]);
+  const core = firstLaunch({ accounts: [alice], calendars: [workCalendar, homeCalendar] });
   core.answer('availableCalendars', []);
   await showApp(core);
 
@@ -295,7 +280,7 @@ test('unchecking a Calendar in “Manage calendars…” says what happens, and 
 
 test('Calendars that couldn’t be added or loaded are reported in the sidebar', async () => {
   const user = userEvent.setup();
-  const core = withAccounts([alice]);
+  const core = firstLaunch({ accounts: [alice] });
   core.answer('availableCalendars', [work]);
   core.answer('addCalendars', failure({ code: 'serverUnreachable' }));
   await showApp(core);
@@ -312,7 +297,7 @@ test('Calendars that couldn’t be added or loaded are reported in the sidebar',
 test('a server Calendar’s menu offers “Remove from FreeCal” instead of Delete, after confirming', async () => {
   const user = userEvent.setup();
   const workCalendar = added(work);
-  const core = withAccounts([alice], [workCalendar]);
+  const core = firstLaunch({ accounts: [alice], calendars: [workCalendar] });
   await showApp(core);
 
   await user.click(screen.getByRole('button', { name: 'Options for Work' }));
@@ -327,7 +312,7 @@ test('a server Calendar’s menu offers “Remove from FreeCal” instead of Del
 
   expect(core.callsOf('removeCalendar')).toEqual([[workCalendar.id]]);
   expect(core.callsOf('deleteCalendar')).toEqual([]);
-  calendarsChanged(core, [alice], []);
+  calendarsChanged(core, { accounts: [alice], calendars: [] });
   await waitFor(() =>
     expect(screen.queryByRole('switch', { name: 'Work' })).not.toBeInTheDocument(),
   );
@@ -335,7 +320,7 @@ test('a server Calendar’s menu offers “Remove from FreeCal” instead of Del
 
 test('a Local Calendar’s menu still offers Delete', async () => {
   const user = userEvent.setup();
-  await showApp(withAccounts([], [calendar({ name: 'Notes' })]));
+  await showApp(firstLaunch({ accounts: [], calendars: [calendar({ name: 'Notes' })] }));
 
   await user.click(screen.getByRole('button', { name: 'Options for Notes' }));
 
@@ -348,7 +333,7 @@ test('a Local Calendar’s menu still offers Delete', async () => {
 
 test('removes a whole Account only after confirming', async () => {
   const user = userEvent.setup();
-  const core = withAccounts([alice], [added(work)]);
+  const core = firstLaunch({ accounts: [alice], calendars: [added(work)] });
   await showApp(core);
   const remove = async () => {
     await user.click(screen.getByRole('button', { name: `Options for ${ALICE}` }));
@@ -367,7 +352,7 @@ test('removes a whole Account only after confirming', async () => {
   await user.click(within(confirmation).getByRole('button', { name: 'Remove account' }));
 
   expect(core.callsOf('removeAccount')).toEqual([[alice.id]]);
-  calendarsChanged(core, [], []);
+  calendarsChanged(core, { accounts: [], calendars: [] });
   await waitFor(() => expect(screen.queryByRole('list', { name: ALICE })).not.toBeInTheDocument());
   expect(screen.getByRole('list', { name: 'Local' })).toBeInTheDocument();
 });
@@ -394,7 +379,7 @@ test('hostile Calendar names from the server are text in the chooser, the sideba
   const chooser = await screen.findByRole('dialog', { name: `Calendars of ${ALICE}` });
   expect(within(chooser).getByRole('checkbox', { name: hostile.calendarName })).toBeChecked();
   await user.click(within(chooser).getByRole('button', { name: 'Save' }));
-  calendarsChanged(core, [alice], [added(hostileCalendar)]);
+  calendarsChanged(core, { accounts: [alice], calendars: [added(hostileCalendar)] });
   const list = await screen.findByRole('list', { name: ALICE });
   await within(list).findByRole('switch', { name: hostile.calendarName });
   await user.click(screen.getByRole('button', { name: `Options for ${hostile.calendarName}` }));
@@ -408,7 +393,7 @@ test('hostile Calendar names from the server are text in the chooser, the sideba
 
 test('a hostile username is text in the Account’s menu, “Manage calendars…” and the remove dialog', async () => {
   const user = userEvent.setup();
-  await showApp(withAccounts([caldavAccount(hostile.username)]));
+  await showApp(firstLaunch({ accounts: [caldavAccount(hostile.username)] }));
   const name = hostile.expected.accountName;
 
   const dialog = await manage(user, name);

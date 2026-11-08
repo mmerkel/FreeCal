@@ -20,18 +20,30 @@ import { FakeCore } from './fakeCore';
 export const localAccount: Account = { id: accountId(1), provider: 'local', server: null };
 
 /** The Sync Statuses with no server Account. */
-export const noSyncStatuses: SyncStatuses = {
+const noSyncStatuses: SyncStatuses = {
   overall: { state: { kind: 'synced' }, lastSync: null },
   accounts: [],
   calendars: [],
 };
 
 /**
+ * What the window reads of the Local Store: the server Accounts besides the
+ * Local Account, the Calendars, and the Events or Occurrences of the visible
+ * range. An Event stands for its Occurrence at its own time.
+ */
+export interface ScriptedWindow {
+  accounts?: Account[];
+  calendars?: Calendar[];
+  events?: (Event | Occurrence)[];
+}
+
+/**
  * A FakeCore answering as on a first launch on Saturday, October 3,
  * 2026: month view, the sidebar shown at its default width, the default
- * settings, and only the Local Account, with no Calendars and no Events.
+ * settings, and only the Local Account, with no Calendars and no Events,
+ * unless `window` gives them.
  */
-export function firstLaunch(): FakeCore {
+export function firstLaunch(window: ScriptedWindow = {}): FakeCore {
   const core = new FakeCore();
   core.answer('today', Temporal.PlainDate.from('2026-10-03'));
   core.answer('lastUsedView', 'month');
@@ -41,6 +53,7 @@ export function firstLaunch(): FakeCore {
   core.answer('listCalendars', []);
   core.answer('syncStatuses', noSyncStatuses);
   core.answer('listOccurrences', []);
+  scriptWindow(core, window);
   return core;
 }
 
@@ -114,14 +127,33 @@ export function occurrence(of: Event, fields: Partial<Occurrence> = {}): Occurre
   };
 }
 
-/** Scripts the Calendars and the Occurrences of `events` for the next reads. */
-export function scriptWindow(
+/** Scripts what `window` gives for the next reads, and leaves the rest as it was scripted. */
+export function scriptWindow(core: FakeCore, { accounts, calendars, events }: ScriptedWindow) {
+  if (accounts) core.answer('listAccounts', [localAccount, ...accounts]);
+  if (calendars) core.answer('listCalendars', calendars);
+  if (events) {
+    core.answer(
+      'listOccurrences',
+      events.map((shown) => ('eventId' in shown ? shown : occurrence(shown))),
+    );
+  }
+}
+
+/** Scripts `window` and emits "Calendars changed", as the core does after a change to them. */
+export function calendarsChanged(core: FakeCore, window: ScriptedWindow) {
+  scriptWindow(core, window);
+  core.emit({ kind: 'calendarsChanged' });
+}
+
+/**
+ * Scripts the Occurrences of `events` and emits "Occurrences changed" for
+ * `calendars`, as the core does after a change to Events.
+ */
+export function occurrencesChanged(
   core: FakeCore,
-  { calendars = [], events = [] }: { calendars?: Calendar[]; events?: Event[] },
+  calendars: Calendar[],
+  events: ScriptedWindow['events'],
 ) {
-  core.answer('listCalendars', calendars);
-  core.answer(
-    'listOccurrences',
-    events.map((each) => occurrence(each)),
-  );
+  scriptWindow(core, { events });
+  core.emit({ kind: 'occurrencesChanged', calendarIds: calendars.map((each) => each.id) });
 }

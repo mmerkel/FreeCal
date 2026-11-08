@@ -9,8 +9,8 @@ import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
 import App from './App.svelte';
-import type { Calendar, Event, Occurrence, Repeat, StructuredText, When } from './core/types';
-import { calendar, event, firstLaunch, occurrence } from './test/answers';
+import type { Event, Repeat, StructuredText, When } from './core/types';
+import { calendar, event, firstLaunch, occurrence, occurrencesChanged } from './test/answers';
 import { journalTransactionId } from './test/ids';
 import { failure, type FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
@@ -23,24 +23,6 @@ const monday: When = { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-1
 const later: When = { kind: 'timed', start: '2026-10-06T14:00:00', end: '2026-10-06T15:30:00' };
 const home = calendar({ name: 'Home' });
 const locked = calendar({ name: 'Holidays', readOnly: true });
-
-/** A first launch showing `calendars` and the Occurrences of `events`. */
-function showing(calendars: Calendar[], events: (Event | Occurrence)[] = []) {
-  const core = firstLaunch();
-  core.answer('listCalendars', calendars);
-  core.answer('listOccurrences', events.map(asOccurrence));
-  return core;
-}
-
-function asOccurrence(shown: Event | Occurrence): Occurrence {
-  return 'eventId' in shown ? shown : occurrence(shown);
-}
-
-/** Scripts the Occurrences now shown and emits "Occurrences changed", as the core does after a change. */
-function occurrencesChanged(core: FakeCore, events: (Event | Occurrence)[]) {
-  core.answer('listOccurrences', events.map(asOccurrence));
-  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
-}
 
 async function showApp(core: FakeCore) {
   render(App, { core });
@@ -68,7 +50,7 @@ async function openOccurrence(
 
 test('selecting a slot opens the editor with that time, and saving creates the Event', async () => {
   const user = userEvent.setup();
-  const core = showing([home]);
+  const core = firstLaunch({ calendars: [home] });
   const grid = await showApp(core);
 
   await selectSlot(monday);
@@ -82,13 +64,17 @@ test('selecting a slot opens the editor with that time, and saving creates the E
   expect(core.callsOf('createEvent')).toEqual([
     [expect.objectContaining({ calendarId: home.id, title: 'Dentist', when: monday })],
   ]);
-  occurrencesChanged(core, [event({ calendarId: home.id, title: 'Dentist', when: monday })]);
+  occurrencesChanged(
+    core,
+    [home],
+    [event({ calendarId: home.id, title: 'Dentist', when: monday })],
+  );
   expect(await within(grid).findByRole('button', { name: 'Dentist' })).toBeInTheDocument();
 });
 
 test('a selection of whole days creates an all-day Event', async () => {
   const user = userEvent.setup();
-  const core = showing([home]);
+  const core = firstLaunch({ calendars: [home] });
   await showApp(core);
 
   await selectSlot({ kind: 'allDay', start: '2026-10-07', end: '2026-10-09' });
@@ -108,7 +94,9 @@ test('a selection of whole days creates an all-day Event', async () => {
 });
 
 test('the editor offers only writable Calendars, the first shown one first', async () => {
-  const core = showing([calendar({ name: 'Hidden', shown: false }), locked, home]);
+  const core = firstLaunch({
+    calendars: [calendar({ name: 'Hidden', shown: false }), locked, home],
+  });
   await showApp(core);
 
   await selectSlot(monday);
@@ -124,7 +112,7 @@ test('the editor offers only writable Calendars, the first shown one first', asy
 
 test('without a writable Calendar, creating points to the + next to the Local Account', async () => {
   const user = userEvent.setup();
-  await showApp(showing([locked]));
+  await showApp(firstLaunch({ calendars: [locked] }));
 
   await selectSlot(monday);
   const hint = screen.getByRole('dialog', { name: 'No calendar for new events' });
@@ -141,7 +129,7 @@ test('without a writable Calendar, creating points to the + next to the Local Ac
 test('c creates an Event at the next full hour', async () => {
   vi.useFakeTimers({ now: new Date(2026, 9, 3, 14, 20), shouldAdvanceTime: true });
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  await showApp(showing([home]));
+  await showApp(firstLaunch({ calendars: [home] }));
 
   await user.keyboard('c');
 
@@ -154,7 +142,7 @@ test('c creates an Event at the next full hour', async () => {
 
 test('c does nothing while typing or with a modifier', async () => {
   const user = userEvent.setup();
-  await showApp(showing([home]));
+  await showApp(firstLaunch({ calendars: [home] }));
 
   await user.click(screen.getByRole('button', { name: 'New calendar' }));
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'calendar');
@@ -173,7 +161,7 @@ test('an Event’s details show its title, time, location, description and Calen
     location: 'Main Street 1',
     description: 'Bring the card',
   });
-  const core = showing([home], [dentist]);
+  const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
 
   const details = await openOccurrence(user, core, dentist);
@@ -199,7 +187,7 @@ test('the details of an Event that had no time zone say which zone FreeCal gave 
     pinnedZone: 'Europe/Berlin',
   });
   const zoned = event({ calendarId: home.id, title: 'Zoned', when: monday });
-  const core = showing([home], [floating, zoned]);
+  const core = firstLaunch({ calendars: [home], events: [floating, zoned] });
   await showApp(core);
 
   const floatingDetails = await openOccurrence(user, core, floating);
@@ -215,7 +203,7 @@ test('the details of an Event that had no time zone say which zone FreeCal gave 
 test('an Event of a Read-only Calendar can’t be edited or deleted', async () => {
   const user = userEvent.setup();
   const fixed = event({ calendarId: locked.id, title: 'Fixed', when: monday });
-  const core = showing([locked], [fixed]);
+  const core = firstLaunch({ calendars: [locked], events: [fixed] });
   await showApp(core);
 
   const details = await openOccurrence(user, core, fixed);
@@ -231,7 +219,7 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
 test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
   const user = userEvent.setup();
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
-  const core = showing([home], [dentist]);
+  const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
 
   const details = await openOccurrence(user, core, dentist);
@@ -250,7 +238,7 @@ test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focus
 test('✕ and a click on the backdrop close the details', async () => {
   const user = userEvent.setup();
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
-  const core = showing([home], [dentist]);
+  const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
 
   let details = await openOccurrence(user, core, dentist);
@@ -267,7 +255,7 @@ test('✕ and a click on the backdrop close the details', async () => {
 
 test('a click on the editor’s backdrop doesn’t close it', async () => {
   const user = userEvent.setup();
-  await showApp(showing([home]));
+  await showApp(firstLaunch({ calendars: [home] }));
 
   await selectSlot(monday);
   const editor = screen.getByRole('dialog', { name: 'New event' });
@@ -280,7 +268,7 @@ test('editing an Event changes it and returns to its details', async () => {
   const user = userEvent.setup();
   const lunch = event({ calendarId: home.id, title: 'Lunch', when: monday });
   const longLunch = { ...lunch, title: 'Long lunch' };
-  const core = showing([home], [lunch]);
+  const core = firstLaunch({ calendars: [home], events: [lunch] });
   const grid = await showApp(core);
   const details = await openOccurrence(user, core, lunch);
   core.answer('editEvent', { journalTransaction: journalTransactionId(7), value: longLunch });
@@ -291,7 +279,7 @@ test('editing an Event changes it and returns to its details', async () => {
   await user.clear(title);
   await user.type(title, 'Long lunch{Enter}');
   core.answer('event', longLunch);
-  occurrencesChanged(core, [longLunch]);
+  occurrencesChanged(core, [home], [longLunch]);
 
   expect(await screen.findByRole('dialog', { name: 'Long lunch' })).toBeInTheDocument();
   expect(core.callsOf('editEvent')).toEqual([
@@ -303,7 +291,7 @@ test('editing an Event changes it and returns to its details', async () => {
 test('cancelling an edit returns to the unchanged details', async () => {
   const user = userEvent.setup();
   const lunch = event({ calendarId: home.id, title: 'Lunch', when: monday });
-  const core = showing([home], [lunch]);
+  const core = firstLaunch({ calendars: [home], events: [lunch] });
   await showApp(core);
   const details = await openOccurrence(user, core, lunch);
 
@@ -320,7 +308,7 @@ test('deleting an Event asks first, then deletes it through the core', async () 
   const user = userEvent.setup();
   const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
   const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
-  const core = showing([home], [doomed, kept]);
+  const core = firstLaunch({ calendars: [home], events: [doomed, kept] });
   const grid = await showApp(core);
   const details = await openOccurrence(user, core, doomed);
 
@@ -333,7 +321,7 @@ test('deleting an Event asks first, then deletes it through the core', async () 
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(core.callsOf('deleteEvent')).toEqual([[doomed.id]]);
-  occurrencesChanged(core, [kept]);
+  occurrencesChanged(core, [home], [kept]);
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'Doomed' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'Kept' })).toBeInTheDocument();
 });
@@ -341,7 +329,7 @@ test('deleting an Event asks first, then deletes it through the core', async () 
 test('Cancel and Escape in the delete question keep the Event', async () => {
   const user = userEvent.setup();
   const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
-  const core = showing([home], [kept]);
+  const core = firstLaunch({ calendars: [home], events: [kept] });
   await showApp(core);
   const details = await openOccurrence(user, core, kept);
 
@@ -362,13 +350,17 @@ test('“Occurrences changed” re-fetches the visible range and keeps the open 
   const user = userEvent.setup();
   const standup = event({ calendarId: home.id, title: 'Standup', when: monday });
   const moved = { ...standup, title: 'Standup (moved)' };
-  const core = showing([home], [standup]);
+  const core = firstLaunch({ calendars: [home], events: [standup] });
   const grid = await showApp(core);
   await openOccurrence(user, core, standup);
 
   // A change made elsewhere, such as a sync, that the core signals.
   core.answer('event', moved);
-  occurrencesChanged(core, [moved, event({ calendarId: home.id, title: 'Retro', when: monday })]);
+  occurrencesChanged(
+    core,
+    [home],
+    [moved, event({ calendarId: home.id, title: 'Retro', when: monday })],
+  );
 
   expect(await within(grid).findByRole('button', { name: 'Retro' })).toBeInTheDocument();
   expect(await screen.findByRole('dialog', { name: 'Standup (moved)' })).toBeInTheDocument();
@@ -381,12 +373,12 @@ test('“Occurrences changed” re-fetches the visible range and keeps the open 
 test('the open details close when their Event is deleted elsewhere', async () => {
   const user = userEvent.setup();
   const gone = event({ calendarId: home.id, title: 'Gone', when: monday });
-  const core = showing([home], [gone]);
+  const core = firstLaunch({ calendars: [home], events: [gone] });
   await showApp(core);
   await openOccurrence(user, core, gone);
 
   core.answer('event', failure({ code: 'eventNotFound' }));
-  occurrencesChanged(core, []);
+  occurrencesChanged(core, [home], []);
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 });
@@ -395,7 +387,7 @@ test('an open editor’s draft survives a re-fetch', async () => {
   const user = userEvent.setup();
   const plan = event({ calendarId: home.id, title: 'Plan', when: monday });
   const theirs = { ...plan, title: 'Their plan' };
-  const core = showing([home], [plan]);
+  const core = firstLaunch({ calendars: [home], events: [plan] });
   const grid = await showApp(core);
   await user.click(
     within(await openOccurrence(user, core, plan)).getByRole('button', { name: 'Edit' }),
@@ -405,7 +397,7 @@ test('an open editor’s draft survives a re-fetch', async () => {
   await user.type(title, 'My plan');
 
   core.answer('event', theirs);
-  occurrencesChanged(core, [theirs]);
+  occurrencesChanged(core, [home], [theirs]);
   await within(grid).findByRole('button', { name: 'Their plan' });
 
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My plan');
@@ -422,7 +414,7 @@ test('hiding a Calendar asks the core, and the grid follows “Calendars changed
   const work = calendar({ name: 'Work' });
   const atHome = event({ calendarId: home.id, title: 'At home', when: monday });
   const atWork = event({ calendarId: work.id, title: 'At work', when: monday });
-  const core = showing([home, work], [atHome, atWork]);
+  const core = firstLaunch({ calendars: [home, work], events: [atHome, atWork] });
   const grid = await showApp(core);
   await within(grid).findByRole('button', { name: 'At work' });
 
@@ -445,7 +437,7 @@ test('a link whose text is its URL opens straight away', async () => {
     when: monday,
     description: { paragraphs: [[{ kind: 'link', text: url, url }]], text: url },
   });
-  const core = showing([home], [linked]);
+  const core = firstLaunch({ calendars: [home], events: [linked] });
   await showApp(core);
   const details = await openOccurrence(user, core, linked);
 
@@ -471,7 +463,7 @@ test('a link in the location opens like one in the description', async () => {
       text: `Zoom: ${url}`,
     },
   });
-  const core = showing([home], [call]);
+  const core = firstLaunch({ calendars: [home], events: [call] });
   await showApp(core);
   const details = await openOccurrence(user, core, call);
 
@@ -490,7 +482,7 @@ test('a link whose text differs from its URL asks first', async () => {
     when: monday,
     description: { paragraphs: [[{ kind: 'link', text: 'the agenda', url }]], text: '' },
   });
-  const core = showing([home], [linked]);
+  const core = firstLaunch({ calendars: [home], events: [linked] });
   await showApp(core);
   const details = await openOccurrence(user, core, linked);
 
@@ -522,7 +514,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
     when: monday,
     description: hostile.expected.plainText as StructuredText,
   });
-  const core = showing([home], [hostileHtml, hostileTitle]);
+  const core = firstLaunch({ calendars: [home], events: [hostileHtml, hostileTitle] });
   const grid = await showApp(core);
   await within(grid).findByRole('button', { name: /onerror/ });
   const details = await openOccurrence(user, core, hostileHtml);
@@ -569,19 +561,19 @@ test('the hostile Event goes through the grid, its details and the editor as tex
 
 test('dragging an Event to another time reschedules it through the core', async () => {
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
-  const core = showing([home], [dentist]);
+  const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
 
   await stubGrid.props!.onreschedule!(dentist.id, null, later);
 
   expect(core.callsOf('rescheduleEvent')).toEqual([[dentist.id, later]]);
-  occurrencesChanged(core, [{ ...dentist, when: later }]);
+  occurrencesChanged(core, [home], [{ ...dentist, when: later }]);
   await waitFor(() => expect(stubGrid.props!.occurrences[0]?.when).toEqual(later));
 });
 
 test('a refused drag says why and tells the grid to put the Event back', async () => {
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
-  const core = showing([home], [dentist]);
+  const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
   core.answer('rescheduleEvent', failure({ code: 'localStoreFailed' }));
 
@@ -594,7 +586,7 @@ test('a refused drag says why and tells the grid to put the Event back', async (
 
 test('trying to drag an Event of a Read-only Calendar says why it can’t move', async () => {
   const fixed = event({ calendarId: locked.id, title: 'Fixed', when: monday });
-  const core = showing([locked], [fixed]);
+  const core = firstLaunch({ calendars: [locked], events: [fixed] });
   await showApp(core);
 
   stubGrid.props!.onrefusedrag!(fixed.id, null);
@@ -608,7 +600,7 @@ test('trying to drag an Event of a Read-only Calendar says why it can’t move',
 test('a refused drag names a hostile Event and Calendar as text', async () => {
   const hostileCalendar = calendar({ name: hostile.calendarName, readOnly: true });
   const fixed = event({ calendarId: hostileCalendar.id, title: hostile.title, when: monday });
-  await showApp(showing([hostileCalendar], [fixed]));
+  await showApp(firstLaunch({ calendars: [hostileCalendar], events: [fixed] }));
 
   stubGrid.props!.onrefusedrag!(fixed.id, null);
 
@@ -620,7 +612,7 @@ test('a refused drag names a hostile Event and Calendar as text', async () => {
 test('the delete question names a hostile Event as text', async () => {
   const user = userEvent.setup();
   const hostileTitle = event({ calendarId: home.id, title: hostile.title, when: monday });
-  const core = showing([home], [hostileTitle]);
+  const core = firstLaunch({ calendars: [home], events: [hostileTitle] });
   await showApp(core);
   const details = await openOccurrence(
     user,
@@ -658,7 +650,7 @@ function occurrencesTitled(grid: HTMLElement, title: string) {
 
 /** Opens the details of Yoga's Occurrence `index`. */
 async function openYoga(user: ReturnType<typeof userEvent.setup>, index: number) {
-  const core = showing([home], yogaOccurrences);
+  const core = firstLaunch({ calendars: [home], events: yogaOccurrences });
   core.answer('event', yoga);
   const grid = await showApp(core);
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(3));
@@ -692,7 +684,7 @@ test('deleting an Occurrence asks, and “This event” deletes only that one', 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(core.callsOf('deleteOccurrence')).toEqual([[yoga.id, '2026-10-12T09:00:00']]);
   expect(core.callsOf('deleteEvent')).toEqual([]);
-  occurrencesChanged(core, [yogaOccurrences[0], yogaOccurrences[2]]);
+  occurrencesChanged(core, [home], [yogaOccurrences[0], yogaOccurrences[2]]);
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2));
 });
 
@@ -714,7 +706,7 @@ test('“All events” deletes the whole Recurring Event, and Cancel keeps it', 
 
 test('a new Event can repeat', async () => {
   const user = userEvent.setup();
-  const core = showing([home]);
+  const core = firstLaunch({ calendars: [home] });
   await showApp(core);
 
   await selectSlot(monday);
@@ -765,14 +757,14 @@ test('editing an Occurrence starts from its date and asks which events to change
       expect.objectContaining({ title: 'Pilates', when: yogaOccurrences[2].when }),
     ],
   ]);
-  occurrencesChanged(core, [...yogaOccurrences.slice(0, 2), pilates]);
+  occurrencesChanged(core, [home], [...yogaOccurrences.slice(0, 2), pilates]);
   expect(await screen.findByRole('dialog', { name: 'Pilates' })).toHaveTextContent(
     'Monday, October 19, 2026',
   );
 });
 
 test('dropping an Occurrence asks which events to move, and moves them through the core', async () => {
-  const core = showing([home], yogaOccurrences);
+  const core = firstLaunch({ calendars: [home], events: yogaOccurrences });
   await showApp(core);
   const moved: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
 
@@ -798,7 +790,7 @@ test('an Exception edits without a repeat, and Delete still asks', async () => {
     when: monday,
     recurrenceId: '2026-10-05T08:00:00',
   });
-  const core = showing([home], [exception]);
+  const core = firstLaunch({ calendars: [home], events: [exception] });
   await showApp(core);
   const details = await openOccurrence(user, core, exception);
 

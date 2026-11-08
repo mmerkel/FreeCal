@@ -14,13 +14,6 @@ import { failure, type FakeCore } from './test/fakeCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
-/** A first launch with `calendars`. */
-function withCalendars(...calendars: Calendar[]) {
-  const core = firstLaunch();
-  core.answer('listCalendars', calendars);
-  return core;
-}
-
 /** The preview of a file with `newEvents` Events, none of them in `into` yet. */
 function preview(into: Calendar, fields: Partial<ImportSummary> = {}): ImportSummary {
   return { calendarId: into.id, newEvents: 2, existingEvents: 0, pinned: [], ...fields };
@@ -57,7 +50,7 @@ function grid() {
 }
 
 test('Import… asks for a file in the system’s file dialog, with translated words', async () => {
-  const core = withCalendars(calendar({ name: 'Home' }));
+  const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
   const user = await showApp(core);
 
   await chooseImport(user);
@@ -72,11 +65,13 @@ test('Import… asks for a file in the system’s file dialog, with translated w
 
 test('the import dialog offers only writable Calendars and previews the first shown one', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(
-    calendar({ name: 'Hidden', shown: false }),
-    calendar({ name: 'Holidays', readOnly: true }),
-    home,
-  );
+  const core = firstLaunch({
+    calendars: [
+      calendar({ name: 'Hidden', shown: false }),
+      calendar({ name: 'Holidays', readOnly: true }),
+      home,
+    ],
+  });
   const user = await showApp(core);
 
   const dialog = await openImport(user, core, preview(home));
@@ -97,7 +92,7 @@ test('the import dialog offers only writable Calendars and previews the first sh
 test('with Events already in the Calendar, the dialog asks once what to do with them', async () => {
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
-  const core = withCalendars(home, work);
+  const core = firstLaunch({ calendars: [home, work] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   expect(within(dialog).getByText('2 new events')).toBeInTheDocument();
@@ -124,7 +119,7 @@ test('with Events already in the Calendar, the dialog asks once what to do with 
 
 test('the preview names the zones floating times were pinned to', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
 
   const dialog = await openImport(
@@ -150,7 +145,7 @@ test('the preview names the zones floating times were pinned to', async () => {
 
 test('a file without Events says so and can’t be imported', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   core.answer('pickImportFile', 'empty.ics');
   core.answer('previewImport', preview(home, { newEvents: 0 }));
   const user = await showApp(core);
@@ -164,7 +159,7 @@ test('a file without Events says so and can’t be imported', async () => {
 
 test('the import runs under the modal “Working…” dialog, and the grid follows “Occurrences changed”', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const ran = core.pending('runImport');
@@ -195,7 +190,7 @@ test('the import runs under the modal “Working…” dialog, and the grid foll
 
 test('after an import, Undo undoes its Journal Transaction under “Working…”', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home, { newEvents: 1, existingEvents: 1 }));
   core.answer('runImport', {
@@ -229,7 +224,7 @@ test('after an import, Undo undoes its Journal Transaction under “Working…�
 
 test('an import that changed nothing offers no Undo', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   const dialog = await openImport(
     user,
@@ -249,7 +244,7 @@ test('an import that changed nothing offers no Undo', async () => {
 
 test('a failed import stays in the dialog and says why', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   core.answer('runImport', failure({ code: 'calendarReadOnly' }));
@@ -265,7 +260,7 @@ test('a failed import stays in the dialog and says why', async () => {
 
 test('Cancel lets go of the picked file', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
 
@@ -277,7 +272,7 @@ test('Cancel lets go of the picked file', async () => {
 });
 
 test('a file that can’t be read gives a message naming it', async () => {
-  const core = withCalendars(calendar({ name: 'Home' }));
+  const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
   core.answer('pickImportFile', failure({ code: 'importTooLarge', file: 'takeout.zip' }));
   const user = await showApp(core);
 
@@ -290,7 +285,7 @@ test('a file that can’t be read gives a message naming it', async () => {
 });
 
 test('a preview that fails says why and can’t be imported', async () => {
-  const core = withCalendars(calendar({ name: 'Home' }));
+  const core = firstLaunch({ calendars: [calendar({ name: 'Home' })] });
   core.answer('pickImportFile', 'work.ics');
   core.answer('previewImport', failure({ code: 'importNotCalendar', file: 'work.ics' }));
   const user = await showApp(core);
@@ -305,7 +300,7 @@ test('a preview that fails says why and can’t be imported', async () => {
 });
 
 test('without a writable Calendar, Import… says where to create one first', async () => {
-  const core = withCalendars(calendar({ name: 'Holidays', readOnly: true }));
+  const core = firstLaunch({ calendars: [calendar({ name: 'Holidays', readOnly: true })] });
   const user = await showApp(core);
 
   await chooseImport(user);
@@ -318,7 +313,7 @@ test('without a writable Calendar, Import… says where to create one first', as
 test('a preview for a Calendar chosen earlier never overwrites the latest one', async () => {
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
-  const core = withCalendars(home, work);
+  const core = firstLaunch({ calendars: [home, work] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const slow = core.pending('previewImport');
@@ -336,7 +331,7 @@ test('a preview for a Calendar chosen earlier never overwrites the latest one', 
 
 test('the hostile file name and zone are shown only as text', async () => {
   const home = calendar({ name: 'Home' });
-  const core = withCalendars(home);
+  const core = firstLaunch({ calendars: [home] });
   const user = await showApp(core);
   core.answer('runImport', {
     journalTransaction: journalTransactionId(7),
@@ -362,7 +357,7 @@ test('the hostile file name and zone are shown only as text', async () => {
 test('a Calendar that becomes Read-only while the dialog is open is no longer chosen', async () => {
   const home = calendar({ name: 'Home' });
   const work = calendar({ name: 'Work' });
-  const core = withCalendars(home, work);
+  const core = firstLaunch({ calendars: [home, work] });
   const user = await showApp(core);
   const dialog = await openImport(user, core, preview(home));
   const choice = within(dialog).getByRole('combobox', { name: 'Into calendar' });

@@ -34,16 +34,18 @@ type Outcome<M extends Method> =
  * window's reactive state, and anything else, such as a `Temporal` date or a
  * function, as it is.
  */
-const snapshot = <T>(value: T): T => {
-  if (Array.isArray(value)) return value.map(snapshot) as T;
+const copyAsSent = <T>(value: T): T => {
+  if (Array.isArray(value)) return value.map(copyAsSent) as T;
   if (value === null || typeof value !== 'object') return value;
   const prototype: unknown = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item)])) as T;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, copyAsSent(item)]),
+  ) as T;
 };
 
 /** A copy of a sample of the core interface's types, with its IDs branded as the core sends them. */
-const branded = <T>(sample: Unbranded<NoInfer<T>>): T => snapshot(sample) as unknown as T;
+const branded = <T>(sample: Unbranded<NoInfer<T>>): T => copyAsSent(sample) as unknown as T;
 /** The first sample of a type. */
 const first = <T>(samplesOfType: readonly Unbranded<NoInfer<T>>[]): T =>
   branded<T>(samplesOfType[0]);
@@ -182,12 +184,12 @@ export class FakeCore {
   }
 
   private async call<M extends Method>(method: M, args: Args<M>): Promise<Answer<M>> {
-    this.calls.push({ method, args: snapshot(args) } as Call);
+    this.calls.push({ method, args: copyAsSent(args) } as Call);
     const outcome = (await (this.pendingAnswers.get(method)?.shift() ??
       this.scripted.get(method) ?? { kind: 'default' })) as Outcome<M>;
     switch (outcome.kind) {
       case 'value':
-        return snapshot(outcome.value);
+        return copyAsSent(outcome.value);
       case 'failure':
         throw outcome.error;
       case 'default':
