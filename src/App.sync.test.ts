@@ -88,19 +88,22 @@ test('the indicator shows the overall status and how long ago the last sync fini
   expect(statusText()).toBe('Synced 3 minutes ago');
 });
 
-test('under a minute the time ago counts up every second, then goes on in minutes', async () => {
+test('under a minute the indicator shows no time, then the time ago in minutes', async () => {
   vi.useFakeTimers();
   vi.setSystemTime('2026-10-03T10:00:05Z');
   const { core } = withServer();
   render(App, { core });
   await vi.waitFor(() => screen.getByRole('list', { name: 'Grid' }));
 
-  expect(statusText()).toBe('Synced 5 seconds ago');
+  expect(statusText()).toBe('Synced');
+
+  await vi.advanceTimersByTimeAsync(54_000);
+  expect(statusText()).toBe('Synced');
 
   await vi.advanceTimersByTimeAsync(1000);
-  expect(statusText()).toBe('Synced 6 seconds ago');
+  expect(statusText()).toBe('Synced 1 minute ago');
 
-  await vi.advanceTimersByTimeAsync(83_000);
+  await vi.advanceTimersByTimeAsync(29_000);
   expect(statusText()).toBe('Synced 1 minute ago');
 
   await vi.advanceTimersByTimeAsync(1000);

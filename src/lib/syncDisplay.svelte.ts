@@ -97,12 +97,15 @@ const overallStateLabels: Record<OverallState['kind'], MessageKey> = {
 
 /**
  * What the status indicator says: the overall state, with how long ago
- * the last sync finished, seen at `now`.
+ * the last sync finished, seen at `now`. Under a minute it says the state
+ * alone, so that no time counts up every second.
  */
 export function overallSyncText(overall: OverallStatus, now: Temporal.Instant): string {
   const state = t(overallStateLabels[overall.state.kind]);
   if (!overall.lastSync) return state;
-  const ago = timeAgo(Temporal.Instant.from(overall.lastSync), now);
+  const lastSync = Temporal.Instant.from(overall.lastSync);
+  if (now.epochMilliseconds - lastSync.epochMilliseconds < 60_000) return state;
+  const ago = timeAgo(lastSync, now);
   return overall.state.kind === 'synced'
     ? t('sync.syncedAgo', { ago })
     : t('sync.lastSync', { state, ago });

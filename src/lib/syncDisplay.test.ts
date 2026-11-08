@@ -134,6 +134,17 @@ test('the status text says Synced with the time ago, other states the last sync'
   );
 });
 
+test('under a minute the status text says the state alone', () => {
+  const now = Temporal.Instant.from('2026-10-03T10:00:59.999Z');
+  const lastSync = '2026-10-03T10:00:00Z';
+
+  expect(overallSyncText({ state: { kind: 'synced' }, lastSync }, now)).toBe('Synced');
+  expect(overallSyncText({ state: { kind: 'offline' }, lastSync }, now)).toBe('Offline');
+  expect(
+    overallSyncText({ state: { kind: 'synced' }, lastSync }, now.add({ milliseconds: 1 })),
+  ).toBe('Synced 1 minute ago');
+});
+
 test('without a last sync the status text is the state alone', () => {
   const now = Temporal.Instant.from('2026-10-03T10:03:00Z');
 

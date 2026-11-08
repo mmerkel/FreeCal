@@ -1,6 +1,6 @@
 <!--
-  The toolbar over the grid: Today, previous and next,
-  the shown period, the view switch, the status indicator's icon and the main menu (Sync now, Import…, Settings…,
+  The toolbar over the grid: the status indicator's icon, Today, previous and next,
+  the shown period, the view switch and the main menu (Sync now, Import…, Settings…,
   About FreeCal and Quit). The Today button is a
   toggle whose pressed state is tracking today. In day and week view the month names in the shown
   period open their month.
@@ -100,6 +100,20 @@
 </script>
 
 <div class="toolbar" role="toolbar" aria-label={t('nav.toolbar')}>
+  {#if syncState}
+    <!-- Not a live region: it would announce every routine sync. The icon
+         carries the text, which the sidebar shows only while it is shown. -->
+    <div
+      class="sync-status marker"
+      role="group"
+      aria-label={t('sync.indicator')}
+      title={overallText}
+    >
+      <span class="sync-icon" role="img" aria-label={overallText}>
+        <SyncIcon size={16} aria-hidden="true" />
+      </span>
+    </div>
+  {/if}
   <button
     type="button"
     class="button outline today"
@@ -156,20 +170,6 @@
       </button>
     {/each}
   </div>
-  {#if syncState}
-    <!-- Not a live region: it would announce every routine sync. The icon
-         carries the text, which the sidebar shows only while it is shown. -->
-    <div
-      class="sync-status marker"
-      role="group"
-      aria-label={t('sync.indicator')}
-      title={overallText}
-    >
-      <span class="sync-icon" role="img" aria-label={overallText}>
-        <SyncIcon size={16} aria-hidden="true" />
-      </span>
-    </div>
-  {/if}
   <div class="main-menu">
     <button
       type="button"
@@ -267,7 +267,7 @@
   }
 
   .sync-status {
-    margin-left: var(--space-4);
+    margin-right: var(--space-2);
   }
 
   .sync-icon {
