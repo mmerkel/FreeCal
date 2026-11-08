@@ -14,8 +14,8 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
     AccountId, AccountSyncStatus, CalDavLogin, Calendar, CalendarId, CalendarSyncStatus, Clock,
-    Colour, Core, CoreError, EventDraft, EventId, Frequency, Keyring, KeyringError, Occurrence,
-    Repeat, RepeatEnd, Signal, SignalSink, When,
+    Colour, Core, CoreError, Event, EventDraft, EventId, Frequency, Keyring, KeyringError,
+    Occurrence, Repeat, RepeatEnd, ServerObject, Signal, SignalSink, When,
 };
 use tempfile::TempDir;
 
@@ -367,6 +367,145 @@ pub fn add_account(core: &Core, radicale: &Radicale, user: &User) -> AccountId {
         .unwrap()
         .account
         .id
+}
+
+/// A Radicale user with a Calendar "Work", and a new Core with the user's
+/// CalDAV Account added and that Calendar's First Sync done. The Signals
+/// of setting it up are forgotten.
+pub struct OnServer {
+    pub radicale: &'static Radicale,
+    pub user: User,
+    /// The Calendar's URL on the server.
+    pub url: String,
+    pub harness: Harness,
+    pub core: Core,
+    pub account: AccountId,
+    pub work: CalendarId,
+}
+
+/// Puts `events` (name, iCalendar object) on the server, for
+/// [`OnServer::arranged`].
+pub fn put_events(events: &[(&str, Vec<u8>)]) -> impl FnOnce(&Radicale, &User, &str) {
+    move |radicale, user, url| {
+        for (name, ics) in events {
+            radicale.put_event(user, url, name, ics.clone());
+        }
+    }
+}
+
+/// Writes `files` (name, iCalendar object) straight into the server's
+/// storage (see [`Radicale::write_event_file`]), for [`OnServer::arranged`].
+pub fn write_files(files: &[(&str, Vec<u8>)]) -> impl FnOnce(&Radicale, &User, &str) {
+    move |radicale, _, url| {
+        for (name, ics) in files {
+            radicale.write_event_file(url, name, ics.clone());
+        }
+    }
+}
+
+impl OnServer {
+    /// A new user's Calendar with `events` (name, iCalendar object) on the
+    /// server first. FreeCal adds it Read-only.
+    pub fn with(events: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_calendar,
+            None,
+            put_events(events),
+        )
+    }
+
+    /// Like [`OnServer::with`], with `files` written straight into the
+    /// server's storage, as Radicale refuses a second resource holding
+    /// one UID.
+    pub fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_calendar,
+            None,
+            write_files(files),
+        )
+    }
+
+    /// `user`'s Calendar `calendar`, named "Work" and made by `create`,
+    /// once `arrange` put what it holds on the server, which FreeCal
+    /// reaches through the proxy at `through` if given. FreeCal adds it
+    /// Read-only, by the address the server gives, which may differ from
+    /// `url` in escapes, as in a username with `@`.
+    pub fn arranged(
+        user: User,
+        calendar: NewCalendar,
+        create: fn(&Radicale, &User, NewCalendar) -> String,
+        through: Option<&str>,
+        arrange: impl FnOnce(&Radicale, &User, &str),
+    ) -> Self {
+        let radicale = Radicale::shared();
+        let url = create(
+            radicale,
+            &user,
+            NewCalendar {
+                name: Some("Work"),
+                ..calendar
+            },
+        );
+        arrange(radicale, &user, &url);
+        let harness = Harness::new();
+        let core = harness.open_without_starting_calendars();
+        let server = through.map_or_else(|| radicale.url(), str::to_owned);
+        let account = core
+            .add_caldav_account(&CalDavLogin {
+                url: server,
+                ..user_login(radicale, &user)
+            })
+            .unwrap()
+            .account
+            .id;
+        let offered = core.available_calendars(account).unwrap()[0].url.clone();
+        let work = core.add_calendars(account, &[offered]).unwrap()[0].id;
+        harness.signals.clear();
+        Self {
+            radicale,
+            user,
+            url,
+            harness,
+            core,
+            account,
+            work,
+        }
+    }
+
+    /// It with the Calendar marked writable.
+    pub fn writable(self) -> Self {
+        self.core.set_calendar_read_only(self.work, false).unwrap();
+        self.harness.signals.clear();
+        self
+    }
+
+    /// The Event titled `title`, in October 2026.
+    pub fn event(&self, title: &str) -> Event {
+        let occurrence = self
+            .core
+            .occurrences(date("2026-10-01"), date("2026-11-01"))
+            .unwrap()
+            .into_iter()
+            .find(|occurrence| occurrence.title == title)
+            .unwrap_or_else(|| panic!("an Event titled {title:?}"));
+        self.core.event(occurrence.event_id).unwrap()
+    }
+
+    /// The Server Object the Event titled `title` is in, as FreeCal holds it.
+    pub fn held(&self, title: &str) -> Option<ServerObject> {
+        self.core
+            .original_server_data(self.event(title).id)
+            .unwrap()
+    }
+
+    /// The titles of the Calendar's Occurrences in October 2026, in order.
+    pub fn titles(&self) -> Vec<String> {
+        titles(&self.core, self.work)
+    }
 }
 
 /// The Sync Status of the server Account `id`.

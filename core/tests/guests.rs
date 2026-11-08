@@ -5,12 +5,9 @@
 
 mod support;
 
-use freecal_core::{
-    AccountId, CalendarId, Colour, Core, CoreError, EventId, ExistingEvents, ImportFile, Scope,
-    StartedBy,
-};
-use support::radicale::{Radicale, User};
-use support::{Harness, add_account, date, draft, ics, on, timed};
+use freecal_core::{Colour, CoreError, ExistingEvents, ImportFile, Scope, StartedBy};
+use support::radicale::{NewCalendar, Radicale, User};
+use support::{OnServer, date, draft, ics, on, put_events, timed};
 
 /// An attendee who isn't the user.
 const GUEST: &str = "ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED:mailto:bob@example.com\n";
@@ -36,46 +33,21 @@ fn weekly_with_exception(uid: &str, exception: &str) -> Vec<u8> {
     ))
 }
 
-/// A Core with the CalDAV Account of a Radicale user and their writable
-/// Calendar "Work", synced once the server held what `arrange` put there.
-struct Server {
-    radicale: &'static Radicale,
-    user: User,
-    url: String,
-    _harness: Harness,
-    core: Core,
-    account: AccountId,
-    work: CalendarId,
-}
-
-impl Server {
-    /// For `user`, with `events` (name, iCalendar object) on the server.
+impl OnServer {
+    /// `user`'s writable Calendar with `events` (name, iCalendar object)
+    /// on the server first.
     fn of(user: User, events: &[(&str, Vec<u8>)]) -> Self {
-        let radicale = Radicale::shared();
-        let url = radicale.create_calendar(&user, Default::default());
-        for (name, ics) in events {
-            radicale.put_event(&user, &url, name, ics.clone());
-        }
-        let harness = Harness::new();
-        let core = harness.open_without_starting_calendars();
-        let account = add_account(&core, radicale, &user);
-        // As the server names it, which may differ in escapes, as in a
-        // username with `@`.
-        let offered = core.available_calendars(account).unwrap()[0].url.clone();
-        let work = core.add_calendars(account, &[offered]).unwrap()[0].id;
-        core.set_calendar_read_only(work, false).unwrap();
-        Self {
-            radicale,
+        Self::arranged(
             user,
-            url,
-            _harness: harness,
-            core,
-            account,
-            work,
-        }
+            NewCalendar::default(),
+            Radicale::create_calendar,
+            None,
+            put_events(events),
+        )
+        .writable()
     }
 
-    fn with(events: &[(&str, Vec<u8>)]) -> Self {
+    fn writable_with(events: &[(&str, Vec<u8>)]) -> Self {
         Self::of(Radicale::shared().user(), events)
     }
 
@@ -85,20 +57,8 @@ impl Server {
             .unwrap();
     }
 
-    /// The Event with the title `title`.
-    fn event_titled(&self, title: &str) -> EventId {
-        self.core
-            .occurrences(date("2026-10-01"), date("2026-11-01"))
-            .unwrap()
-            .into_iter()
-            .find(|occurrence| occurrence.title == title)
-            .unwrap_or_else(|| panic!("an Occurrence titled {title:?}"))
-            .event_id
-    }
-
     fn has_guests(&self, title: &str) -> bool {
-        let id = self.event_titled(title);
-        self.core.event(id).unwrap().has_guests
+        self.event(title).has_guests
     }
 }
 
@@ -111,7 +71,7 @@ fn refused_for_guests<T: std::fmt::Debug>(result: Result<T, CoreError>) {
 
 #[test]
 fn an_event_with_an_attendee_other_than_the_user_has_guests() {
-    let server = Server::with(&[
+    let server = OnServer::writable_with(&[
         ("meeting", meeting("meeting", GUEST)),
         ("alone", meeting("alone", "")),
     ]);
@@ -131,9 +91,9 @@ fn an_event_with_an_attendee_other_than_the_user_has_guests() {
 
 #[test]
 fn the_core_refuses_edits_moves_and_deletes_of_an_event_with_guests() {
-    let server = Server::with(&[("meeting", meeting("meeting", GUEST))]);
+    let server = OnServer::writable_with(&[("meeting", meeting("meeting", GUEST))]);
     let core = &server.core;
-    let id = server.event_titled("meeting");
+    let id = server.event("meeting").id;
     let when = timed("2026-10-13T09:00:00", "2026-10-13T10:00:00");
     refused_for_guests(core.edit_event(id, draft(server.work, "renamed", when)));
     refused_for_guests(core.reschedule_event(id, when));
@@ -151,7 +111,7 @@ fn the_core_refuses_edits_moves_and_deletes_of_an_event_with_guests() {
 
 #[test]
 fn an_import_doesn_t_update_an_event_with_guests() {
-    let server = Server::with(&[("meeting", meeting("meeting", GUEST))]);
+    let server = OnServer::writable_with(&[("meeting", meeting("meeting", GUEST))]);
     let imported = ics("BEGIN:VEVENT\nUID:meeting\nSUMMARY:imported\n\
          DTSTART:20261012T090000Z\nDTEND:20261012T100000Z\nEND:VEVENT\n");
     let file = ImportFile::new("meeting.ics", imported);
@@ -162,7 +122,7 @@ fn an_import_doesn_t_update_an_event_with_guests() {
 
 #[test]
 fn guests_of_one_exception_make_its_whole_recurring_event_read_only() {
-    let server = Server::with(&[("weekly", weekly_with_exception("weekly", GUEST))]);
+    let server = OnServer::writable_with(&[("weekly", weekly_with_exception("weekly", GUEST))]);
     let core = &server.core;
     assert!(server.has_guests("weekly"));
     assert!(server.has_guests("weekly moved"));
@@ -186,9 +146,9 @@ fn guests_of_one_exception_make_its_whole_recurring_event_read_only() {
 }
 
 /// Asserts that the Event "mine" has no guests and can be changed.
-fn mine_is_writable(server: &Server) {
+fn mine_is_writable(server: &OnServer) {
     assert!(!server.has_guests("mine"));
-    let id = server.event_titled("mine");
+    let id = server.event("mine").id;
     let when = timed("2026-10-12T09:00:00", "2026-10-12T10:00:00");
     server
         .core
@@ -205,7 +165,7 @@ fn an_attendee_with_the_username_as_address_is_no_guest() {
         name = user.name,
         upper = user.name.to_uppercase(),
     );
-    mine_is_writable(&Server::of(
+    mine_is_writable(&OnServer::of(
         user,
         &[("mine", meeting("mine", &user_attendees))],
     ));
@@ -216,7 +176,7 @@ fn an_attendee_with_an_address_the_server_gives_for_the_user_is_no_guest() {
     let user = Radicale::shared().user();
     // Radicale gives the user's principal as their address.
     let user_attendees = format!("ATTENDEE:/{}/\n", user.name);
-    mine_is_writable(&Server::of(
+    mine_is_writable(&OnServer::of(
         user,
         &[("mine", meeting("mine", &user_attendees))],
     ));
@@ -224,7 +184,7 @@ fn an_attendee_with_an_address_the_server_gives_for_the_user_is_no_guest() {
 
 #[test]
 fn an_incoming_sync_still_changes_an_event_with_guests() {
-    let server = Server::with(&[("meeting", meeting("meeting", GUEST))]);
+    let server = OnServer::writable_with(&[("meeting", meeting("meeting", GUEST))]);
     let renamed = String::from_utf8(meeting("meeting", GUEST))
         .unwrap()
         .replace("SUMMARY:meeting", "SUMMARY:renamed")
@@ -240,7 +200,7 @@ fn an_incoming_sync_still_changes_an_event_with_guests() {
         .put_event(&server.user, &server.url, "meeting", meeting("meeting", ""));
     server.sync();
     assert!(!server.has_guests("meeting"));
-    let id = server.event_titled("meeting");
+    let id = server.event("meeting").id;
     server.core.delete_event(id).unwrap();
 }
 
@@ -266,7 +226,7 @@ fn the_hostile_event_s_title_names_no_guest() {
         .done()
         .to_string()
         .into_bytes();
-    let server = Server::with(&[("hostile", hostile)]);
+    let server = OnServer::writable_with(&[("hostile", hostile)]);
     let occurrence = on(&server.core, "2026-10-12");
     assert!(!occurrence.has_guests);
     assert!(!server.core.event(occurrence.event_id).unwrap().has_guests);

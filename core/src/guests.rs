@@ -22,7 +22,7 @@
 //! Addresses compare in one form ([`compared`]): without `mailto:` and in
 //! lower case, as servers and clients write the same address in either.
 
-use icalendar::parser::{read_components, unfold};
+use crate::import::read_vcalendars;
 
 /// An address in the form addresses compare in: trimmed, without
 /// surrounding quotes and a `mailto:`, in lower case.
@@ -35,32 +35,35 @@ fn compared(address: &str) -> String {
     address.to_lowercase()
 }
 
+/// Adds `address` to `addresses` in the form addresses compare in, unless
+/// it is empty then or already there.
+fn add_compared(addresses: &mut Vec<String>, address: &str) {
+    let address = compared(address);
+    if !address.is_empty() && !addresses.contains(&address) {
+        addresses.push(address);
+    }
+}
+
 /// The `ATTENDEE`s of every Event of the iCalendar text `text`, each once,
 /// in the form addresses compare in; none for text FreeCal can't read. The
 /// attendees of an alarm get its emails and aren't the Event's.
 pub(crate) fn attendees(text: &str) -> Vec<String> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let unfolded = unfold(text);
-    let Ok(roots) = read_components(&unfolded) else {
-        return Vec::new();
-    };
-    let mut attendees = Vec::new();
-    for event in roots
-        .iter()
-        .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
-        .flat_map(|root| &root.components)
-        .filter(|component| component.name.as_str().eq_ignore_ascii_case("VEVENT"))
-    {
-        for property in &event.properties {
-            if property.name.as_str().eq_ignore_ascii_case("ATTENDEE") {
-                let address = compared(property.val.as_str());
-                if !address.is_empty() && !attendees.contains(&address) {
-                    attendees.push(address);
+    read_vcalendars(text, |roots| {
+        let mut attendees = Vec::new();
+        for event in roots
+            .iter()
+            .flat_map(|root| &root.components)
+            .filter(|component| component.name.as_str().eq_ignore_ascii_case("VEVENT"))
+        {
+            for property in &event.properties {
+                if property.name.as_str().eq_ignore_ascii_case("ATTENDEE") {
+                    add_compared(&mut attendees, property.val.as_str());
                 }
             }
         }
-    }
-    attendees
+        attendees
+    })
+    .unwrap_or_default()
 }
 
 /// A CalDAV Account's Own Addresses: the addresses its server gives for the
@@ -70,10 +73,7 @@ pub(crate) fn caldav_own_addresses(given: &[String], username: &str) -> Vec<Stri
     let mut own: Vec<String> = Vec::new();
     let username = username.contains('@').then_some(username);
     for address in given.iter().map(String::as_str).chain(username) {
-        let address = compared(address);
-        if !address.is_empty() && !own.contains(&address) {
-            own.push(address);
-        }
+        add_compared(&mut own, address);
     }
     own
 }
@@ -95,6 +95,9 @@ pub(crate) fn has_guests(attendees: Option<&str>, own_addresses: Option<&str>) -
     let Ok(attendees) = serde_json::from_str::<Vec<String>>(attendees) else {
         return true;
     };
+    if attendees.is_empty() {
+        return false;
+    }
     let own: Vec<String> = own_addresses
         .and_then(|own| serde_json::from_str(own).ok())
         .unwrap_or_default();

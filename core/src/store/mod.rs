@@ -65,6 +65,7 @@ pub struct CombinedEventKey {
 }
 
 /// An Event with its Calendar and UID.
+#[derive(Clone)]
 pub struct UidEvent {
     pub id: EventId,
     pub calendar_id: CalendarId,

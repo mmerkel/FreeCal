@@ -1,36 +1,35 @@
 mod support;
 
-use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Changed, Core, Event, ServerObject, Signal, StartedBy,
-    SyncStatus,
-};
-use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
-use support::{Harness, date, event, ics, user_login};
+use freecal_core::{CalendarId, Changed, Signal, StartedBy, SyncStatus};
+use support::radicale::{NewCalendar, Radicale, RewritingProxy};
+use support::{Harness, OnServer, date, event, ics, put_events, write_files};
 
-/// A user on Radicale with a Calendar "Work", and a new Core with the
-/// user's Account added and that Calendar's first sync done.
-struct Synced {
-    radicale: &'static Radicale,
-    user: User,
-    /// The Calendar's URL on the server.
-    url: String,
-    harness: Harness,
-    core: Core,
-    account: AccountId,
-    work: CalendarId,
-}
+impl OnServer {
+    /// Like [`OnServer::with`], with the Calendar marked writable, so that
+    /// its changes can be undone.
+    fn writable_with(events: &[(&str, Vec<u8>)]) -> Self {
+        Self::with(events).writable()
+    }
 
-impl Synced {
-    /// Like [`Synced::with_files`], through `proxy`.
+    /// Like [`OnServer::with`], through `proxy`.
+    fn through(proxy: &RewritingProxy, events: &[(&str, Vec<u8>)]) -> Self {
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_calendar,
+            Some(&proxy.url),
+            put_events(events),
+        )
+    }
+
+    /// Like [`OnServer::with_files`], through `proxy`.
     fn files_through(proxy: &RewritingProxy, files: &[(&str, Vec<u8>)]) -> Self {
         Self::arranged(
+            Radicale::shared().user(),
             NewCalendar::default(),
+            Radicale::create_calendar,
             Some(&proxy.url),
-            |radicale, _, url| {
-                for (name, ics) in files {
-                    radicale.write_event_file(url, name, ics.clone());
-                }
-            },
+            write_files(files),
         )
     }
 
@@ -58,86 +57,6 @@ impl Synced {
         )
     }
 
-    /// Puts `events` (name, iCalendar object) on the server, then adds the
-    /// Calendar.
-    fn with(events: &[(&str, Vec<u8>)]) -> Self {
-        Self::with_calendar(NewCalendar::default(), events)
-    }
-
-    /// Like [`Synced::with`], with the Calendar unmarked read-only, so that
-    /// its changes can be undone.
-    fn writable(events: &[(&str, Vec<u8>)]) -> Self {
-        let synced = Self::with(events);
-        synced
-            .core
-            .set_calendar_read_only(synced.work, false)
-            .unwrap();
-        synced
-    }
-
-    fn with_calendar(calendar: NewCalendar, events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(calendar, None, |radicale, user, url| {
-            for (name, ics) in events {
-                radicale.put_event(user, url, name, ics.clone());
-            }
-        })
-    }
-
-    /// Like [`Synced::with`], with `files` written straight into the
-    /// server's storage (see [`Radicale::write_event_file`]).
-    fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(NewCalendar::default(), None, |radicale, _, url| {
-            for (name, ics) in files {
-                radicale.write_event_file(url, name, ics.clone());
-            }
-        })
-    }
-
-    /// A new Core with the Calendar `calendar` added once `arrange` put
-    /// what it holds on the server, which FreeCal reaches through the proxy
-    /// at `through` if given.
-    fn arranged(
-        calendar: NewCalendar,
-        through: Option<&str>,
-        arrange: impl FnOnce(&Radicale, &User, &str),
-    ) -> Self {
-        let radicale = Radicale::shared();
-        let user = radicale.user();
-        let url = radicale.create_calendar(
-            &user,
-            NewCalendar {
-                name: Some("Work"),
-                ..calendar
-            },
-        );
-        arrange(radicale, &user, &url);
-        let harness = Harness::new();
-        let core = harness.open_without_starting_calendars();
-        let server = through.map_or_else(|| radicale.url(), str::to_owned);
-        let account = core
-            .add_caldav_account(&CalDavLogin {
-                url: server.clone(),
-                ..user_login(radicale, &user)
-            })
-            .unwrap()
-            .account
-            .id;
-        let work = core
-            .add_calendars(account, &[url.replace(&radicale.url(), &server)])
-            .unwrap()[0]
-            .id;
-        harness.signals.clear();
-        Self {
-            radicale,
-            user,
-            url,
-            harness,
-            core,
-            account,
-            work,
-        }
-    }
-
     fn put(&self, name: &str, ics: Vec<u8>) {
         self.radicale.put_event(&self.user, &self.url, name, ics);
     }
@@ -158,14 +77,6 @@ impl Synced {
             "UPDATE calendar SET sync_token = NULL WHERE id = {}",
             self.work.0
         ));
-    }
-
-    /// The object the Calendar's Event titled `title` is in, as FreeCal
-    /// holds it.
-    fn held(&self, title: &str) -> Option<ServerObject> {
-        self.core
-            .original_server_data(self.event(title).id)
-            .unwrap()
     }
 
     /// The address of the object the Event titled `title` is in.
@@ -190,18 +101,6 @@ impl Synced {
         synced[0].journal_transaction
     }
 
-    /// The Calendar's Event titled `title`, in October 2026.
-    fn event(&self, title: &str) -> Event {
-        let occurrence = self
-            .core
-            .occurrences(date("2026-10-01"), date("2026-11-01"))
-            .unwrap()
-            .into_iter()
-            .find(|occurrence| occurrence.calendar_id == self.work && occurrence.title == title)
-            .unwrap_or_else(|| panic!("an Event titled {title:?}"));
-        self.core.event(occurrence.event_id).unwrap()
-    }
-
     /// The ETag the server serves the object `name` with.
     fn etag(&self, name: &str) -> String {
         self.radicale.get_event(&self.user, &self.url, name).0
@@ -215,17 +114,6 @@ impl Synced {
         vec![Signal::OccurrencesChanged {
             calendar_ids: vec![self.work],
         }]
-    }
-
-    /// The titles of the Calendar's Occurrences in October 2026, in order.
-    fn titles(&self) -> Vec<String> {
-        self.core
-            .occurrences(date("2026-10-01"), date("2026-11-01"))
-            .unwrap()
-            .into_iter()
-            .filter(|occurrence| occurrence.calendar_id == self.work)
-            .map(|occurrence| occurrence.title)
-            .collect()
     }
 }
 
@@ -306,7 +194,7 @@ fn standup(title: &str) -> Vec<u8> {
 
 #[test]
 fn a_sync_pulls_an_event_created_on_the_server() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     synced.put(
         "review",
         ics(&event(
@@ -332,7 +220,7 @@ fn a_sync_pulls_an_event_created_on_the_server() {
 
 #[test]
 fn a_sync_pulls_an_event_changed_on_the_server_with_its_new_server_data() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     synced.put("standup", standup("Standup moved"));
 
     let journal_transaction = synced.sync();
@@ -351,7 +239,7 @@ fn a_sync_pulls_an_event_changed_on_the_server_with_its_new_server_data() {
 
 #[test]
 fn a_sync_deletes_an_event_deleted_on_the_server_with_its_exceptions() {
-    let synced = Synced::with(&[
+    let synced = OnServer::with(&[
         ("standup", standup("Standup")),
         (
             "weekly",
@@ -381,7 +269,7 @@ fn a_sync_replaces_a_changed_occurrence_whose_recurrence_id_is_written_different
              DTSTART:20261012T090000Z\nDTEND:20261012T100000Z\nEND:VEVENT\n"
         ))
     };
-    let synced = Synced::with(&[("weekly", weekly("Moved"))]);
+    let synced = OnServer::with(&[("weekly", weekly("Moved"))]);
     let id = synced.event("Moved").id;
     // Another form of the same time, as a stored field may have it.
     synced.harness.arrange_local_store(&format!(
@@ -398,7 +286,7 @@ fn a_sync_replaces_a_changed_occurrence_whose_recurrence_id_is_written_different
 
 #[test]
 fn a_sync_that_changes_nothing_records_no_journal_transaction_and_sends_nothing() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
 
     let journal_transaction = synced.sync();
 
@@ -408,7 +296,7 @@ fn a_sync_that_changes_nothing_records_no_journal_transaction_and_sends_nothing(
 
 #[test]
 fn many_changes_send_one_occurrences_changed() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     synced.put("standup", standup("Standup moved"));
     for (uid, day) in [("a", "20261006"), ("b", "20261007"), ("c", "20261008")] {
         synced.put(uid, titled(uid, uid, day));
@@ -425,7 +313,7 @@ fn many_changes_send_one_occurrences_changed() {
 
 #[test]
 fn each_calendar_syncs_as_a_journal_transaction_of_its_own_with_its_own_signal() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     let home_url = synced.radicale.create_calendar(
         &synced.user,
         NewCalendar {
@@ -480,7 +368,7 @@ fn each_calendar_syncs_as_a_journal_transaction_of_its_own_with_its_own_signal()
 
 #[test]
 fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     // As every newly added server Calendar is, until 1.0.
     assert!(synced.core.list_calendars().unwrap()[0].read_only);
     synced.put("standup", standup("Standup moved"));
@@ -497,25 +385,20 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
 /// proxy says they may change it until it stops rewriting.
 #[test]
 fn each_sync_reads_whether_the_server_lets_the_user_change_the_calendar() {
-    let radicale = Radicale::shared();
-    let user = radicale.user();
-    let url = radicale.create_read_only_calendar(&user, NewCalendar::default());
-    let proxy = RewritingProxy::new(radicale, "<read />", "<all />");
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let account = core
-        .add_caldav_account(&CalDavLogin {
-            url: proxy.url.clone(),
-            ..user_login(radicale, &user)
-        })
-        .unwrap()
-        .account
-        .id;
-    let holidays = core
-        .add_calendars(account, &[url.replace(&radicale.url(), &proxy.url)])
-        .unwrap()[0]
-        .id;
-    core.set_calendar_read_only(holidays, false).unwrap();
+    let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+    let OnServer {
+        harness,
+        core,
+        account,
+        ..
+    } = OnServer::arranged(
+        Radicale::shared().user(),
+        NewCalendar::default(),
+        Radicale::create_read_only_calendar,
+        Some(&proxy.url),
+        |_, _, _| {},
+    )
+    .writable();
     let flags = || {
         let calendar = core.list_calendars().unwrap().pop().unwrap();
         (calendar.read_only, calendar.server_read_only)
@@ -545,7 +428,7 @@ mod undo {
     /// ADR 0015: the next write is conditional on what the server has now.
     #[test]
     fn restores_the_previous_event_version_and_leaves_the_object_as_the_server_has_it() {
-        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         synced.put("standup", standup("Standup moved"));
         let journal_transaction = synced.sync().unwrap();
         let served = synced
@@ -565,7 +448,7 @@ mod undo {
 
     #[test]
     fn of_a_journal_transaction_is_not_blocked_by_a_later_sync_that_changed_only_the_object() {
-        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         synced.put("standup", standup("Standup moved"));
         let journal_transaction = synced.sync().unwrap();
         // A property FreeCal doesn't read: a new ETag and data, the same Event.
@@ -594,7 +477,7 @@ mod undo {
     /// the server.
     #[test]
     fn of_a_delete_brings_back_an_event_without_the_object_the_server_removed_since() {
-        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         let deleted = synced
             .core
             .delete_event(synced.event("Standup").id)
@@ -613,7 +496,7 @@ mod undo {
 
     #[test]
     fn brings_back_what_the_server_deleted_and_removes_what_it_added() {
-        let synced = Synced::writable(&[("standup", standup("Standup"))]);
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         synced.delete("standup");
         synced.put(
             "review",
@@ -648,7 +531,7 @@ mod floating_times {
     /// ADR 0007, rule 2.
     #[test]
     fn a_new_version_floating_at_both_ends_keeps_the_zone_pinned_before() {
-        let synced = Synced::with(&[("standup", floating_standup("Standup"))]);
+        let synced = OnServer::with(&[("standup", floating_standup("Standup"))]);
         assert_eq!(
             synced.event("Standup").pinned_zone.as_deref(),
             Some("Europe/Berlin")
@@ -670,7 +553,7 @@ mod floating_times {
     /// ADR 0007, rule 3.
     #[test]
     fn one_floating_end_of_a_new_version_gets_the_zone_of_the_other() {
-        let synced = Synced::with(&[("standup", floating_standup("Standup"))]);
+        let synced = OnServer::with(&[("standup", floating_standup("Standup"))]);
         synced.put(
             "standup",
             ics("BEGIN:VEVENT\nUID:standup\nSUMMARY:Standup\n\
@@ -691,7 +574,7 @@ mod floating_times {
 
 #[test]
 fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
-    let synced = Synced::with(&[
+    let synced = OnServer::with(&[
         ("standup", standup("Standup")),
         (
             "review",
@@ -748,7 +631,7 @@ fn a_calendar_whose_first_sync_didnt_finish_gets_the_rest_of_it_unrecorded() {
 
 #[test]
 fn a_sync_token_the_server_refuses_lists_the_whole_calendar_instead() {
-    let synced = Synced::with(&[
+    let synced = OnServer::with(&[
         ("standup", standup("Standup")),
         (
             "review",
@@ -786,7 +669,7 @@ fn the_local_account_has_nothing_to_sync() {
 
 #[test]
 fn an_event_whose_object_moved_to_another_address_stays_the_same_event() {
-    let synced = Synced::with(&[("standup", standup("Standup"))]);
+    let synced = OnServer::with(&[("standup", standup("Standup"))]);
     let id = synced.event("Standup").id;
     synced.delete("standup");
     synced.put("standup-moved", standup("Standup moved"));
@@ -830,8 +713,8 @@ mod server_objects {
 
     /// As Google keeps a Recurring Event: each Exception is a Server Object
     /// of its own.
-    fn google_like() -> Synced {
-        Synced::with_files(&[
+    fn google_like() -> OnServer {
+        OnServer::with_files(&[
             ("weekly", weekly("Weekly")),
             ("weekly-moved", ics(&moved("Moved"))),
         ])
@@ -843,7 +726,7 @@ mod server_objects {
     #[test]
     fn of_two_objects_with_one_uid_a_first_sync_keeps_the_lower_href() {
         for tokens in [true, false] {
-            let synced = Synced::with_files(&[
+            let synced = OnServer::with_files(&[
                 ("b-standup", standup("Standup B")),
                 ("a-standup", standup("Standup A")),
             ]);
@@ -869,7 +752,7 @@ mod server_objects {
     #[test]
     fn the_object_holding_the_recurring_event_keeps_the_uid_unless_it_came_later() {
         let together = google_like();
-        let recurring_first = Synced::with_files(&[("weekly", weekly("Weekly"))]);
+        let recurring_first = OnServer::with_files(&[("weekly", weekly("Weekly"))]);
         recurring_first.write("weekly-moved", ics(&moved("Moved")));
         assert_eq!(recurring_first.sync(), None);
         for synced in [together, recurring_first] {
@@ -877,7 +760,7 @@ mod server_objects {
             assert!(synced.href("Weekly").ends_with("/weekly.ics"));
         }
 
-        let exception_first = Synced::with_files(&[("weekly-moved", ics(&moved("Moved")))]);
+        let exception_first = OnServer::with_files(&[("weekly-moved", ics(&moved("Moved")))]);
         exception_first.write("weekly", weekly("Weekly"));
         assert_eq!(exception_first.sync(), None);
         assert_eq!(exception_first.titles(), ["Moved"]);
@@ -900,7 +783,7 @@ mod server_objects {
     #[test]
     fn an_ignored_object_takes_over_when_the_kept_one_goes() {
         for tokens in [true, false] {
-            let synced = Synced::writable(&[]);
+            let synced = OnServer::writable_with(&[]);
             synced.write("weekly", weekly("Weekly"));
             synced.write("weekly-moved", ics(&moved("Moved")));
             synced.sync();
@@ -927,7 +810,7 @@ mod server_objects {
     #[test]
     fn an_ignored_object_takes_over_when_the_kept_ones_uid_changes() {
         for tokens in [true, false] {
-            let synced = Synced::with_files(&two_standups());
+            let synced = OnServer::with_files(&two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -991,7 +874,7 @@ mod server_objects {
             ),
         ];
         for (earlier, later, kept, ignored, uid, titles) in cases {
-            let synced = Synced::with_files(&[earlier]);
+            let synced = OnServer::with_files(&[earlier]);
             synced.first_sync_unfinished();
             synced.write(later.0, later.1);
             captured_log::start();
@@ -1012,7 +895,7 @@ mod server_objects {
     /// one Incoming Sync: the kept one keeps the UID.
     #[test]
     fn the_kept_resource_changed_beside_an_ignored_resource_keeps_the_uid() {
-        let synced = Synced::with_files(&two_standups());
+        let synced = OnServer::with_files(&two_standups());
         let id = synced.event("Standup A").id;
         synced.write("a-standup", standup("Standup A changed"));
         synced.write("b-standup", standup("Standup B changed"));
@@ -1040,7 +923,7 @@ mod server_objects {
             .into_iter()
             .flat_map(|tokens| cases.map(|case| (tokens, case)))
         {
-            let synced = Synced::with_files(&two_standups());
+            let synced = OnServer::with_files(&two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -1074,7 +957,7 @@ mod server_objects {
         for tokens in [true, false] {
             for (holds, titles) in &cases {
                 let proxy = RewritingProxy::passthrough(Radicale::shared());
-                let synced = Synced::files_through(&proxy, &two_standups());
+                let synced = OnServer::files_through(&proxy, &two_standups());
                 if !tokens {
                     synced.without_sync_tokens();
                 }
@@ -1098,7 +981,7 @@ mod server_objects {
     /// The one holding the Recurring Event first, else the lowest href.
     #[test]
     fn of_several_ignored_resources_taking_over_the_fixed_order_decides() {
-        let synced = Synced::with_files(&[
+        let synced = OnServer::with_files(&[
             ("a-standup", standup("Standup A")),
             ("c-standup", standup("Standup C")),
         ]);
@@ -1110,7 +993,7 @@ mod server_objects {
 
         assert_eq!(synced.titles(), ["Standup B"]);
 
-        let synced = Synced::with_files(&[("m-weekly-moved", ics(&moved("Moved")))]);
+        let synced = OnServer::with_files(&[("m-weekly-moved", ics(&moved("Moved")))]);
         synced.write("z-weekly", weekly("Weekly"));
         synced.write("a-weekly-moved", ics(&moved("Moved again")));
         assert_eq!(synced.sync(), None);
@@ -1136,7 +1019,7 @@ mod server_objects {
     /// Event Rows go; once one reads, it keeps the UID.
     #[test]
     fn with_no_ignored_resource_readable_on_takeover_the_event_goes() {
-        let synced = Synced::with_files(&two_standups());
+        let synced = OnServer::with_files(&two_standups());
         synced.write("b-standup", unreadable_standup("Standup B"));
         synced.sync();
         synced.delete("a-standup");
@@ -1154,7 +1037,7 @@ mod server_objects {
     /// Incoming Sync.
     #[test]
     fn a_kept_resource_that_becomes_unreadable_keeps_the_uid_beside_an_ignored_resource() {
-        let synced = Synced::with_files(&two_standups());
+        let synced = OnServer::with_files(&two_standups());
         let id = synced.event("Standup A").id;
         synced.write("a-standup", unreadable_standup("Standup A moved"));
         synced.write("b-standup", standup("Standup B changed"));
@@ -1182,7 +1065,7 @@ mod server_objects {
         let with_sequence = |sequence: u32, title: &str| {
             moved(title).replace("END:VEVENT", &format!("SEQUENCE:{sequence}\nEND:VEVENT"))
         };
-        let synced = Synced::with_files(&[(
+        let synced = OnServer::with_files(&[(
             "weekly",
             ics(&format!(
                 "{}{}{}",
@@ -1200,7 +1083,7 @@ mod server_objects {
     /// (ticket 88).
     #[test]
     fn of_two_objects_with_an_exception_for_one_occurrence_the_recurring_events_shows() {
-        let synced = Synced::with_files(&[
+        let synced = OnServer::with_files(&[
             (
                 "weekly",
                 ics(&format!("{}{}", recurring("Weekly"), moved("Moved"))),
@@ -1219,7 +1102,7 @@ mod server_objects {
     /// Server Object holding its UID.
     #[test]
     fn a_new_exception_not_yet_sent_belongs_to_the_object_of_its_recurring_event() {
-        let synced = Synced::writable(&[("weekly", weekly("Weekly"))]);
+        let synced = OnServer::writable_with(&[("weekly", weekly("Weekly"))]);
         let second = support::on(&synced.core, "2026-10-12");
 
         let moved = synced
@@ -1242,7 +1125,7 @@ mod server_objects {
 
     #[test]
     fn an_object_freecal_can_no_longer_read_keeps_its_last_readable_version() {
-        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        let synced = OnServer::with(&[("standup", standup("Standup"))]);
         let held = synced.held("Standup");
         // Radicale takes a UTC time with a zone; FreeCal can't read it.
         synced.put(
@@ -1282,7 +1165,7 @@ mod server_objects {
 
         /// The Calendar's Occurrences in October 2026, each with its title
         /// and whether it is one of a Recurring Event.
-        fn shown(synced: &Synced) -> Vec<(String, bool)> {
+        fn shown(synced: &OnServer) -> Vec<(String, bool)> {
             synced
                 .core
                 .occurrences(date("2026-10-01"), date("2026-11-01"))
@@ -1305,7 +1188,8 @@ mod server_objects {
 
         #[test]
         fn shows_at_its_own_time_in_its_object() {
-            let synced = Synced::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
+            let synced =
+                OnServer::with_files(&[("weekly-moved", ics(&moved_in_new_york("Moved")))]);
 
             assert_eq!(shown(&synced), alone("Moved"));
             let moved = synced.event("Moved");
@@ -1326,7 +1210,7 @@ mod server_objects {
         /// other takes over, its recurrence IDs as obtained.
         #[test]
         fn is_ignored_beside_its_recurring_event_in_another_object_until_that_goes() {
-            let synced = Synced::with_files(&[
+            let synced = OnServer::with_files(&[
                 ("weekly-moved", ics(&moved_in_new_york("Moved"))),
                 ("weekly", weekly("Weekly")),
             ]);
@@ -1353,7 +1237,7 @@ mod server_objects {
         #[test]
         fn joins_its_recurring_event_when_its_object_comes_to_hold_it() {
             for again in [moved_in_new_york("Moved again"), moved("Moved again")] {
-                let synced = Synced::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let synced = OnServer::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
                 let id = synced.event("Moved").id;
                 synced.write("weekly", ics(&format!("{}{again}", recurring("Weekly"))));
 
@@ -1370,7 +1254,7 @@ mod server_objects {
         /// it an Event of its own again.
         #[test]
         fn undoing_the_sync_that_brought_its_recurring_event_leaves_it_alone() {
-            let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+            let synced = OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
             let id = synced.event("Moved").id;
             synced.write(
                 "weekly",
@@ -1393,7 +1277,7 @@ mod server_objects {
 
         /// Imports the `.ics` file holding `body` into the Calendar,
         /// updating the Events it has.
-        fn import(synced: &Synced, body: &str) {
+        fn import(synced: &OnServer, body: &str) {
             let file = freecal_core::ImportFile::new("weekly.ics", ics(body));
             let preview = synced.core.preview_import(&file, synced.work).unwrap();
             synced
@@ -1410,7 +1294,8 @@ mod server_objects {
                 recurring("Weekly"),
                 format!("{}{}", recurring("Weekly"), moved("Moved")),
             ] {
-                let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let synced =
+                    OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
                 let id = synced.event("Moved").id;
 
                 import(&synced, &body);
@@ -1425,7 +1310,8 @@ mod server_objects {
         #[test]
         fn changing_its_recurring_event_keeps_it_on_its_occurrence() {
             for (hours, recurrence_id) in [(0, "2026-10-12T08:00:00"), (1, "2026-10-12T09:00:00")] {
-                let synced = Synced::writable(&[("weekly", ics(&moved_in_new_york("Moved")))]);
+                let synced =
+                    OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
                 let id = synced.event("Moved").id;
                 import(&synced, &recurring("Weekly"));
                 let first = support::on(&synced.core, "2026-10-05");
@@ -1467,7 +1353,7 @@ mod server_objects {
 
         #[test]
         fn a_known_object_that_comes_to_hold_only_it_keeps_it() {
-            let synced = Synced::with_files(&[(
+            let synced = OnServer::with_files(&[(
                 "weekly",
                 ics(&format!("{}{}", recurring("Weekly"), moved("Moved"))),
             )]);
@@ -1483,7 +1369,7 @@ mod server_objects {
         #[test]
         fn one_that_matches_no_occurrence_stays_after_its_recurring_event_arrives() {
             let odd = moved("Odd").replace("20261012T080000Z", "20261013T080000Z");
-            let synced = Synced::with_files(&[("weekly", ics(&odd))]);
+            let synced = OnServer::with_files(&[("weekly", ics(&odd))]);
             synced.write("weekly", ics(&format!("{}{odd}", recurring("Weekly"))));
 
             synced.sync();
@@ -1497,7 +1383,7 @@ mod server_objects {
     /// With a sync token, which lists only what changed since.
     #[test]
     fn an_object_freecal_couldnt_read_is_fetched_again_on_each_sync_until_it_reads() {
-        let synced = Synced::with(&[("standup", standup("Standup"))]);
+        let synced = OnServer::with(&[("standup", standup("Standup"))]);
         // As if FreeCal couldn't read the version the server has, and held
         // an earlier one.
         synced.harness.arrange_local_store(&format!(
@@ -1541,15 +1427,9 @@ mod ignored_resources {
 
     /// A Calendar holding the Event "Standup", synced through a proxy that
     /// shows [`two_uids`] as holding two UIDs.
-    fn through_proxy() -> (Synced, RewritingProxy) {
+    fn through_proxy() -> (OnServer, RewritingProxy) {
         let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
-        let synced = Synced::arranged(
-            NewCalendar::default(),
-            Some(&proxy.url),
-            |radicale, user, url| {
-                radicale.put_event(user, url, "standup", standup("Standup"));
-            },
-        );
+        let synced = OnServer::through(&proxy, &[("standup", standup("Standup"))]);
         (synced, proxy)
     }
 
@@ -1557,7 +1437,7 @@ mod ignored_resources {
     /// times it fetched the resource `name` and how many Log lines
     /// [`captured_log`] counts it wrote.
     fn sync_and_count(
-        synced: &Synced,
+        synced: &OnServer,
         proxy: &RewritingProxy,
         name: &str,
         tokens: bool,
@@ -1608,7 +1488,7 @@ mod ignored_resources {
     fn an_ignored_resource_takes_over_once_the_kept_one_holds_several_uids() {
         for tokens in [false, true] {
             let proxy = RewritingProxy::new(Radicale::shared(), MARKER, SECOND_UID);
-            let synced = Synced::files_through(&proxy, &two_standups());
+            let synced = OnServer::files_through(&proxy, &two_standups());
             if !tokens {
                 synced.without_sync_tokens();
             }
@@ -1639,7 +1519,7 @@ mod ignored_resources {
             let files = [file(first), file(second)];
             captured_log::start();
 
-            let synced = Synced::files_through(&proxy, &files);
+            let synced = OnServer::files_through(&proxy, &files);
 
             assert_eq!(synced.titles(), ["A alone"]);
             assert!(synced.href("A alone").ends_with("/a-alone.ics"));
@@ -1654,7 +1534,7 @@ mod ignored_resources {
     fn fetched_again_unchanged_it_writes_no_log_line() {
         for tokens in [false, true] {
             let proxy = RewritingProxy::passthrough(Radicale::shared());
-            let synced = Synced::files_through(&proxy, &two_standups());
+            let synced = OnServer::files_through(&proxy, &two_standups());
             synced.write("a-standup", standup("Standup A changed"));
 
             assert_eq!(
@@ -1711,15 +1591,9 @@ mod ignored_resources {
 
         /// A Calendar holding the Event "Standup", synced through a proxy
         /// that shows [`late`] unreadable.
-        fn through_proxy() -> (Synced, RewritingProxy) {
+        fn through_proxy() -> (OnServer, RewritingProxy) {
             let proxy = RewritingProxy::new(Radicale::shared(), READABLE_START, UNREADABLE_START);
-            let synced = Synced::arranged(
-                NewCalendar::default(),
-                Some(&proxy.url),
-                |radicale, user, url| {
-                    radicale.put_event(user, url, "standup", standup("Standup"));
-                },
-            );
+            let synced = OnServer::through(&proxy, &[("standup", standup("Standup"))]);
             (synced, proxy)
         }
 

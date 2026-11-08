@@ -12,7 +12,7 @@
 //! expand, never copied from a stored field.
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Offset, TimeDelta, TimeZone, Utc};
-use chrono_tz::{OffsetComponents, OffsetName, Tz};
+use chrono_tz::{OffsetComponents, OffsetName, Tz, TzOffset};
 use icalendar::Property;
 use icalendar::parser::unfold;
 
@@ -47,6 +47,11 @@ impl Written {
     /// Adds `other`'s lines after these, and its zones.
     pub fn append(&mut self, other: &Written) {
         self.text.push_str(&other.text);
+        self.append_zones(other);
+    }
+
+    /// Adds `other`'s zones, but not its lines.
+    fn append_zones(&mut self, other: &Written) {
         for &(zone, wall) in &other.zones {
             self.zone(zone, wall);
         }
@@ -124,9 +129,11 @@ impl Written {
                 Time::Wall(wall, _) => wall.format(format).to_string(),
             })
             .collect();
-        if let Time::Wall(_, Some(zone)) = first {
+        if let Time::Wall(_, Some(zone)) = first
+            && *zone != Tz::UTC
+        {
             for time in times {
-                if let (Time::Wall(wall, _), false) = (time, *zone == Tz::UTC) {
+                if let Time::Wall(wall, _) = time {
                     self.zone(*zone, *wall);
                 }
             }
@@ -145,6 +152,16 @@ impl Written {
             None => self.zones.push((zone, wall)),
         }
     }
+}
+
+/// The zones the times of `written` are given in, each with the earliest
+/// wall time given in it.
+pub fn zones_of<'w>(written: impl IntoIterator<Item = &'w Written>) -> Vec<(Tz, NaiveDateTime)> {
+    let mut zones = Written::new();
+    for written in written {
+        zones.append_zones(written);
+    }
+    zones.zones
 }
 
 /// `text` as an iCalendar TEXT value can hold it: line breaks as `\n`,
@@ -386,9 +403,18 @@ pub(super) fn vtimezone(zone: Tz, from: NaiveDateTime, out: &mut Written) {
     }];
     let mut day = start;
     let mut current = first;
+    // Compared without building a `ZoneOffset`, which is made of it, on
+    // every day: those are tens of thousands.
+    let mut current_raw = zone.offset_from_utc_datetime(&start.naive_utc());
     while day < until {
         let next_day = day + TimeDelta::days(1);
-        let next = ZoneOffset::of(zone, next_day);
+        let next_raw = zone.offset_from_utc_datetime(&next_day.naive_utc());
+        if next_raw == current_raw {
+            day = next_day;
+            continue;
+        }
+        current_raw = next_raw;
+        let next = ZoneOffset::from(next_raw);
         if next != current {
             // The first second of the new offset, as no zone changes its
             // offset twice within a day.
@@ -468,7 +494,10 @@ struct ZoneOffset {
 
 impl ZoneOffset {
     fn of(zone: Tz, at: DateTime<Utc>) -> Self {
-        let offset = zone.offset_from_utc_datetime(&at.naive_utc());
+        Self::from(zone.offset_from_utc_datetime(&at.naive_utc()))
+    }
+
+    fn from(offset: TzOffset) -> Self {
         Self {
             utc_offset: offset.fix().local_minus_utc(),
             dst: !offset.dst_offset().is_zero(),

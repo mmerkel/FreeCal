@@ -352,16 +352,7 @@ struct Rows(Vec<UidEvent>);
 
 impl Source for Rows {
     fn events_with_uid(&self, _: Uid) -> crate::Result<Vec<UidEvent>> {
-        Ok(self
-            .0
-            .iter()
-            .map(|row| UidEvent {
-                id: row.id,
-                calendar_id: row.calendar_id,
-                uid: row.uid.clone(),
-                fields: row.fields.clone(),
-            })
-            .collect())
+        Ok(self.0.clone())
     }
 }
 
@@ -553,7 +544,7 @@ fn edited_times_replace_dtstart_dtend_and_add_the_vtimezone_they_need() {
     event(&mut rows).fields.when.start = "2026-10-15T16:00:00".to_owned();
     event(&mut rows).fields.when.end = "2026-10-15T17:00:00".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(EXCHANGE));
+    let sent = send(rows.clone(), Some(EXCHANGE));
 
     let lines = content_lines(&sent);
     let vtimezones: Vec<usize> = (0..lines.len())
@@ -580,7 +571,7 @@ fn a_utc_time_is_written_in_utc_without_a_vtimezone() {
     event(&mut rows).fields.when.start = "2026-10-13T15:00:00".to_owned();
     event(&mut rows).fields.when.end = "2026-10-13T16:00:00".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(GOOGLE));
+    let sent = send(rows.clone(), Some(GOOGLE));
 
     let mut changes = revision_of(GOOGLE);
     changes.push(("DTSTART:20261013T130000Z", "DTSTART:20261013T150000Z"));
@@ -601,7 +592,7 @@ fn a_duration_gives_way_to_an_end_and_new_groups_come_before_alarms() {
     event(&mut rows).fields.when.end = "2026-10-14T12:30:00".to_owned();
     event(&mut rows).fields.title = "Lunch".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(&server));
+    let sent = send(rows.clone(), Some(&server));
 
     let lines = content_lines(&sent);
     assert!(!sent.contains("DURATION"));
@@ -630,7 +621,7 @@ fn an_edited_exception_changes_only_its_vevent_matched_by_occurrence() {
     exception.fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-19T09:00:00"));
     exception.fields.title = "Standup (later)".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+    let sent = send(rows.clone(), Some(NEXTCLOUD));
 
     let changes = [
         ("SUMMARY:Standup (moved)\r\n", "SUMMARY:Standup (later)\r\n"),
@@ -660,7 +651,7 @@ fn an_exception_whose_recurring_event_moved_keeps_its_vevent() {
         .unwrap();
     exception.fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-19T10:00:00"));
 
-    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+    let sent = send(rows.clone(), Some(NEXTCLOUD));
 
     assert_eq!(sent.matches("BEGIN:VEVENT").count(), 2);
     assert!(
@@ -678,7 +669,7 @@ fn an_exception_whose_recurring_event_moved_keeps_its_vevent() {
 #[test]
 fn an_exception_the_event_rows_add_gets_a_vevent_after_the_last() {
     let mut rows = rows_of(NEXTCLOUD);
-    let recurring = copy(event(&mut rows));
+    let recurring = event(&mut rows).clone();
     let mut fields = recurring.fields.clone();
     fields.rule = None;
     fields.exdates = String::new();
@@ -695,7 +686,7 @@ fn an_exception_the_event_rows_add_gets_a_vevent_after_the_last() {
         ..recurring
     });
 
-    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+    let sent = send(rows.clone(), Some(NEXTCLOUD));
 
     let added = "BEGIN:VEVENT\r\n\
         UID:5f1c2a9e-5d1b-4bd6-a1b2-nextcloud\r\n\
@@ -718,7 +709,7 @@ fn an_exception_the_event_rows_no_longer_hold_loses_its_vevent() {
     let mut rows = rows_of(NEXTCLOUD);
     rows.retain(|row| row.fields.recurrence_id.is_none());
 
-    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+    let sent = send(rows.clone(), Some(NEXTCLOUD));
 
     let second = NEXTCLOUD.rfind("BEGIN:VEVENT").unwrap();
     let end = NEXTCLOUD.rfind("END:VCALENDAR").unwrap();
@@ -736,7 +727,7 @@ fn an_edited_description_goes_without_its_html() {
     let mut rows = rows_of(&server);
     event(&mut rows).fields.description = "Pie".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(&server));
+    let sent = send(rows.clone(), Some(&server));
 
     let mut changes = revision_of(EVOLUTION);
     changes.push((
@@ -751,7 +742,7 @@ fn a_cancelled_occurrence_rewrites_the_excluded_dates() {
     let mut rows = rows_of(NEXTCLOUD);
     event(&mut rows).fields.exdates = "2026-10-14T09:00:00,2026-10-26T09:00:00".to_owned();
 
-    let sent = send(rows.iter().map(copy).collect(), Some(NEXTCLOUD));
+    let sent = send(rows.clone(), Some(NEXTCLOUD));
 
     let mut changes = revision_of(NEXTCLOUD);
     changes.push((
@@ -767,7 +758,7 @@ fn a_create_writes_a_vcalendar_with_the_vtimezones_it_needs() {
     for server in SERVER_TEXTS {
         let rows = rows_of(server);
 
-        let sent = send(rows.iter().map(copy).collect(), None);
+        let sent = send(rows.clone(), None);
 
         assert_well_formed(&sent);
         let lines = content_lines(&sent);
@@ -805,7 +796,7 @@ fn a_flight_gets_the_vtimezone_of_each_end() {
         end_zone: Some("America/New_York".to_owned()),
     };
 
-    let sent = send(rows.iter().map(copy).collect(), None);
+    let sent = send(rows.clone(), None);
 
     assert!(sent.contains("DTSTART;TZID=Europe/Berlin:20261015T100000\r\n"));
     assert!(sent.contains("DTEND;TZID=America/New_York:20261015T130000\r\n"));
@@ -862,7 +853,7 @@ fn long_lines_are_folded_between_characters() {
     event(&mut rows).fields.description = "Grüße aus Köln, ".repeat(20);
     event(&mut rows).fields.title = format!("{}🎂", "x".repeat(73));
 
-    let sent = send(rows.iter().map(copy).collect(), Some(EVOLUTION));
+    let sent = send(rows.clone(), Some(EVOLUTION));
 
     assert_well_formed(&sent);
     let folded = format!("SUMMARY:{}\r\n {}🎂\r\n", "x".repeat(67), "x".repeat(6));
@@ -917,7 +908,7 @@ fn hostile_event_rows_send_valid_icalendar() {
             Some("FREQ=DAILY\r\nATTENDEE:mailto:rule@example.com".to_owned());
         event(&mut rows).fields.exdates = "<b>,2026-10-21\r\nATTENDEE:x".to_owned();
 
-        let sent = send(rows.iter().map(copy).collect(), server);
+        let sent = send(rows.clone(), server);
 
         assert_well_formed(&sent);
         assert_eq!(guests::attendees(&sent), Vec::<String>::new(), "{sent}");
@@ -933,15 +924,5 @@ fn hostile_event_rows_send_valid_icalendar() {
             assert_eq!(event.location, text("location"));
             assert_eq!(event.description, text("description").replace("\r\n", "\n"));
         }
-    }
-}
-
-/// An Event Row as a new value.
-fn copy(row: &UidEvent) -> UidEvent {
-    UidEvent {
-        id: row.id,
-        calendar_id: row.calendar_id,
-        uid: row.uid.clone(),
-        fields: row.fields.clone(),
     }
 }

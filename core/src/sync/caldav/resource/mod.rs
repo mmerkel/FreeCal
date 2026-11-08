@@ -21,13 +21,15 @@
 
 mod write;
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
 use crate::event::{EventFields, Loaded, ServerPairing, as_propagated};
 use crate::import::{ImportedEvent, ImportedWhen, read_events};
 use crate::{CoreError, Result};
-use write::{Group, Revision, Written, new_vevent, vtimezone};
+use write::{Group, Revision, Written, new_vevent, vtimezone, zones_of};
 
 /// The iCalendar text of the CalDAV resource to send for `loaded`, the
 /// Event Rows of one Calendar and UID, built on `server`, the text of its
@@ -104,29 +106,33 @@ fn update(loaded: &Loaded, server: &str, now: DateTime<Utc>) -> Result<String> {
     let Some(&(first_calendar, _)) = calendars.first() else {
         return Err(CoreError::UnreadableServerObject);
     };
-    let mut places: Vec<Place> = Vec::new();
+    let mut vevents: Vec<(Place, &Block)> = Vec::new();
     let mut events: Vec<ImportedEvent> = Vec::new();
     for &(root, calendar) in &calendars {
         for (index, item) in calendar.items.iter().enumerate() {
-            if item.is_vevent() {
-                places.push((root, index));
+            if let Item::Block(block) = item
+                && block.kind == "VEVENT"
+            {
+                vevents.push(((root, index), block));
                 events.push(read_vevent(calendar, index)?);
             }
         }
     }
     let pairing = loaded.pair_with_server(&events);
-    let mut rewritten: Vec<(Place, Written)> = Vec::new();
-    for ((place, event), row) in places.iter().zip(&events).zip(&pairing.paired) {
-        if let (Some(row), Item::Block(block)) = (row, &roots[place.0].items()[place.1]) {
+    let mut rewritten: BTreeMap<Place, Written> = BTreeMap::new();
+    for ((&(place, block), event), row) in vevents.iter().zip(&events).zip(&pairing.paired) {
+        if let Some(row) = row {
             let recurring = pairing.recurring.as_ref();
-            rewritten.push((*place, rewrite(block, event, row, recurring, now)?));
+            rewritten.insert(place, rewrite(block, event, row, recurring, now)?);
         }
     }
     let added = new_vevents(loaded, &pairing, now)?;
     // New VEVENTs follow the last VEVENT, or end the first VCALENDAR.
-    let added_at = places
+    let added_at = vevents
         .last()
-        .map_or((first_calendar, None), |&(root, index)| (root, Some(index)));
+        .map_or((first_calendar, None), |&((root, index), _)| {
+            (root, Some(index))
+        });
     let mut out = Written::new();
     for (root, item) in roots.iter().enumerate() {
         let Item::Block(calendar) = item else {
@@ -137,17 +143,13 @@ fn update(loaded: &Loaded, server: &str, now: DateTime<Utc>) -> Result<String> {
             item.keep(&mut out);
             continue;
         }
-        let mut needed = Written::new();
-        for (place, written) in &rewritten {
-            if place.0 == root {
-                needed.append(written);
-            }
-        }
-        if added_at.0 == root {
-            needed.append(&added);
-        }
+        let needed = rewritten
+            .iter()
+            .filter(|((at, _), _)| *at == root)
+            .map(|(_, written)| written)
+            .chain((added_at.0 == root).then_some(&added));
         let mut zones = Written::new();
-        for &(zone, from) in needed.zones() {
+        for (zone, from) in zones_of(needed) {
             if !calendar.has_vtimezone(zone) {
                 vtimezone(zone, from, &mut zones);
             }
@@ -159,7 +161,7 @@ fn update(loaded: &Loaded, server: &str, now: DateTime<Utc>) -> Result<String> {
                 out.append(&zones);
             }
             if item.is_vevent() {
-                if let Some((_, written)) = rewritten.iter().find(|(at, _)| *at == (root, index)) {
+                if let Some(written) = rewritten.get(&(root, index)) {
                     out.append(written);
                 }
             } else {
@@ -347,14 +349,6 @@ enum Item<'t> {
 impl<'t> Item<'t> {
     fn is_vevent(&self) -> bool {
         matches!(self, Item::Block(block) if block.kind == "VEVENT")
-    }
-
-    /// The items of a component, none for a line.
-    fn items(&self) -> &[Item<'t>] {
-        match self {
-            Item::Block(block) => &block.items,
-            Item::Line(_) => &[],
-        }
     }
 
     /// Writes it as received.

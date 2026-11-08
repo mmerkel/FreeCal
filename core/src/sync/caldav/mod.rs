@@ -161,8 +161,16 @@ fn delete_if_unkept(
 /// The most UIDs a Log line of [`ignore`] lists.
 const LOGGED_UIDS: usize = 5;
 
-/// The most characters of each UID a Log line of [`ignore`] holds.
+/// The most characters of a UID a Log line holds ([`logged_uid`]).
 const LOGGED_UID_LENGTH: usize = 200;
+
+/// The untrusted UID `uid` as a Log line shows it: cut to
+/// [`LOGGED_UID_LENGTH`] characters and escaped in quotes, which keeps a
+/// newline in it from starting another line.
+fn logged_uid(uid: &str) -> String {
+    let cut: String = uid.chars().take(LOGGED_UID_LENGTH).collect();
+    format!("{cut:?}")
+}
 
 /// Why the Sync Engine ignored a CalDAV resource (ADR 0015).
 #[derive(Debug, Clone, Copy)]
@@ -179,16 +187,12 @@ enum Ignored<'a> {
 /// line, and the line is kept short: the first [`LOGGED_UIDS`] UIDs, each
 /// cut to [`LOGGED_UID_LENGTH`] characters, and a count of the others.
 fn ignored_line(calendar_id: CalendarId, href: &str, why: Ignored) -> String {
-    let quoted = |uid: &str| {
-        let cut: String = uid.chars().take(LOGGED_UID_LENGTH).collect();
-        format!("{cut:?}")
-    };
     let reason = match why {
         Ignored::SeveralUids(uids) => {
             let listed: Vec<String> = uids
                 .iter()
                 .take(LOGGED_UIDS)
-                .map(|uid| quoted(uid))
+                .map(|uid| logged_uid(uid))
                 .collect();
             let others = match uids.len().saturating_sub(LOGGED_UIDS) {
                 0 => String::new(),
@@ -202,7 +206,7 @@ fn ignored_line(calendar_id: CalendarId, href: &str, why: Ignored) -> String {
         Ignored::UidKept { uid, kept_by } => format!(
             "it holds the UID {} that the CalDAV resource {kept_by:?} holds, \
              which RFC 4791 §4.1 forbids",
-            quoted(uid)
+            logged_uid(uid)
         ),
     };
     format!(

@@ -468,21 +468,38 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
     Ok(read)
 }
 
-/// The `VCALENDAR`s of iCalendar text, none if it has none or can't be read.
-fn calendars(text: &str) -> Option<Vec<icalendar::Calendar>> {
+/// Gives `read` the `VCALENDAR` components at the top of iCalendar text,
+/// and returns what it makes of them; nothing if the text can't be read.
+/// Every reader of iCalendar text starts here, so that they agree on what
+/// FreeCal can read.
+pub(crate) fn read_vcalendars<R>(
+    text: &str,
+    read: impl FnOnce(Vec<icalendar::parser::Component<'_>>) -> R,
+) -> Option<R> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let unfolded = icalendar::parser::unfold(text);
-    let calendars: Vec<_> = icalendar::parser::read_components(&unfolded)
-        .ok()?
-        .into_iter()
-        .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
-        .map(|root| {
-            icalendar::Calendar::from(icalendar::parser::Calendar {
-                properties: root.properties,
-                components: root.components,
+    let roots = icalendar::parser::read_components(&unfolded).ok()?;
+    Some(read(
+        roots
+            .into_iter()
+            .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
+            .collect(),
+    ))
+}
+
+/// The `VCALENDAR`s of iCalendar text, none if it has none or can't be read.
+fn calendars(text: &str) -> Option<Vec<icalendar::Calendar>> {
+    let calendars: Vec<_> = read_vcalendars(text, |roots| {
+        roots
+            .into_iter()
+            .map(|root| {
+                icalendar::Calendar::from(icalendar::parser::Calendar {
+                    properties: root.properties,
+                    components: root.components,
+                })
             })
-        })
-        .collect();
+            .collect()
+    })?;
     (!calendars.is_empty()).then_some(calendars)
 }
 

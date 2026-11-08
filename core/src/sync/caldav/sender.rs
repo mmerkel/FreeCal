@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
 use super::resource::resource_to_send;
-use super::{LOGGED_UID_LENGTH, deleted_by_sender, mirror};
+use super::{deleted_by_sender, logged_uid, mirror};
 use crate::event::{Loaded, ServerObject};
 use crate::journal::{self, SentEventRows};
 use crate::remote::{Precondition, Remote, WriteOutcome};
@@ -69,10 +69,8 @@ pub(crate) fn send(
             url,
             uid: &uid,
         };
-        match to_send.send(remote, store, now) {
-            Ok(()) => {}
-            Err(error) if beyond_uid(&error) => return Err(error),
-            Err(error) => _ = failed.get_or_insert(error),
+        if let Some(error) = to_send.send(remote, store, now)? {
+            failed.get_or_insert(error);
         }
     }
     failed.map_or(Ok(()), Err)
@@ -108,11 +106,16 @@ impl ToSend<'_> {
     /// Sends the UID's Event Rows as [`ToSend::try_send`] does. When they
     /// aren't sent, keeps why with the UID's Unsent Changes, its Send
     /// Failure, but for a failure about the whole Account or Calendar
-    /// ([`beyond_uid`]), which is that one's Sync Status. A failed request
-    /// is returned.
-    fn send(&self, remote: &dyn Remote, store: &Mutex<Store>, now: DateTime<Utc>) -> Result<()> {
+    /// ([`beyond_uid`]), which is that one's Sync Status and is returned as
+    /// an error. A failed request of the UID alone is returned as `Some`.
+    fn send(
+        &self,
+        remote: &dyn Remote,
+        store: &Mutex<Store>,
+        now: DateTime<Utc>,
+    ) -> Result<Option<CoreError>> {
         let (send_failure, failed) = match self.try_send(remote, store, now) {
-            Ok(None) => return Ok(()),
+            Ok(None) => return Ok(None),
             Ok(Some(send_failure)) => (send_failure, None),
             Err(error) if beyond_uid(&error) => return Err(error),
             Err(error) => (
@@ -130,7 +133,7 @@ impl ToSend<'_> {
                 &send_failure,
             )
         })?;
-        failed.map_or(Ok(()), Err)
+        Ok(failed)
     }
 
     /// Sends the UID's Event Rows as one CalDAV resource, built on its
@@ -150,15 +153,14 @@ impl ToSend<'_> {
         store: &Mutex<Store>,
         now: DateTime<Utc>,
     ) -> Result<Option<SendFailure>> {
-        let (built, held, sending) = {
+        let (loaded, held, sending) = {
             let store = store.lock().unwrap();
             let loaded = Loaded::of_uid(&*store, self.calendar_id, self.uid)?;
             let held = store.server_object(self.calendar_id, self.uid)?;
-            let built =
-                resource_to_send(&loaded, held.as_ref().map(|held| held.data.as_str()), now);
             let sending = journal::sending(&store, self.calendar_id, self.uid)?;
-            (built, held, sending)
+            (loaded, held, sending)
         };
+        let built = resource_to_send(&loaded, held.as_ref().map(|held| held.data.as_str()), now);
         let built = match built {
             Ok(built) => built,
             Err(error) => {
@@ -176,7 +178,13 @@ impl ToSend<'_> {
                 let name = new_resource_name(self.uid);
                 remote
                     .put(self.url, &name, &text, Precondition::Absent)?
-                    .map(|put| Mirrored::Written(sent_object(put.href, put.etag, text)))
+                    .map(|put| {
+                        Mirrored::Written(ServerObject {
+                            href: put.href,
+                            etag: put.etag,
+                            data: text,
+                        })
+                    })
             }
             (built, Some(held)) => {
                 let Some(etag) = &held.etag else {
@@ -185,7 +193,13 @@ impl ToSend<'_> {
                 match built {
                     Some(text) => remote
                         .put(self.url, &held.href, &text, Precondition::Matches(etag))?
-                        .map(|put| Mirrored::Written(sent_object(held.href, put.etag, text))),
+                        .map(|put| {
+                            Mirrored::Written(ServerObject {
+                                href: held.href,
+                                etag: put.etag,
+                                data: text,
+                            })
+                        }),
                     None => remote
                         .delete(self.url, &held.href, etag)?
                         .map(|()| Mirrored::Deleted),
@@ -227,23 +241,15 @@ impl ToSend<'_> {
     }
 
     /// The Log line for a UID whose resource couldn't be built, because of
-    /// `why`. The UID is untrusted, so it is escaped, which keeps a newline
-    /// in it from starting another line, and cut to [`LOGGED_UID_LENGTH`]
-    /// characters.
+    /// `why`, with the untrusted UID escaped and cut ([`logged_uid`]).
     fn unbuilt_line(&self, why: &str) -> String {
-        let uid: String = self.uid.chars().take(LOGGED_UID_LENGTH).collect();
         format!(
-            "Couldn't send the Events of UID {uid:?} in Calendar {}: {why:?}; their Unsent \
+            "Couldn't send the Events of UID {} in Calendar {}: {why:?}; their Unsent \
              Changes wait",
+            logged_uid(self.uid),
             self.calendar_id.0
         )
     }
-}
-
-/// The Server Object the server holds once it took `data` at `href`,
-/// with the ETag `etag` it gave, if any.
-fn sent_object(href: String, etag: Option<String>, data: String) -> ServerObject {
-    ServerObject { href, etag, data }
 }
 
 /// The most characters of a UID that [`new_resource_name`] takes as it is.
@@ -284,6 +290,7 @@ mod tests {
     use crate::journal::{TransactionOrigin, record};
     use crate::remote::{Changes, FetchToo, KnownVersions, Put, SyncPoint};
     use crate::store::StoredEvent;
+    use crate::sync::caldav::LOGGED_UID_LENGTH;
     use crate::{AvailableCalendar, ErrorCode, Provider};
 
     #[test]
@@ -329,14 +336,55 @@ mod tests {
         assert!(!line.contains('\n'));
     }
 
-    /// A server that takes every create and runs `meanwhile` while it
-    /// does, as another thread may change the Local Store while a request
-    /// runs.
-    struct Server<'a> {
+    fn dentist(calendar_id: CalendarId, title: &str) -> StoredEvent {
+        StoredEvent {
+            calendar_id,
+            fields: EventFields {
+                title: title.to_owned(),
+                when: StoredWhen {
+                    all_day: false,
+                    start: "2026-10-05T09:00:00".to_owned(),
+                    end: "2026-10-05T10:00:00".to_owned(),
+                    start_zone: Some("Europe/Berlin".to_owned()),
+                    end_zone: Some("Europe/Berlin".to_owned()),
+                },
+                location: String::new(),
+                description: String::new(),
+                description_html: false,
+                zone_pinned: false,
+                rule: None,
+                exdates: String::new(),
+                recurrence_id: None,
+            },
+        }
+    }
+
+    /// A server that gives every write the answer `answer` makes, and runs
+    /// `meanwhile` during the first, as another thread may change the Local
+    /// Store while a request runs. A create's name is taken relative to
+    /// the Calendar, as a CalDAV server does.
+    struct Answering<'a> {
+        answer: fn() -> Result<WriteOutcome<()>>,
         meanwhile: RefCell<Option<Box<dyn FnOnce() + 'a>>>,
     }
 
-    impl Remote for Server<'_> {
+    impl Answering<'_> {
+        fn new(answer: fn() -> Result<WriteOutcome<()>>) -> Self {
+            Self {
+                answer,
+                meanwhile: RefCell::new(None),
+            }
+        }
+
+        fn answer(&self) -> Result<WriteOutcome<()>> {
+            if let Some(meanwhile) = self.meanwhile.borrow_mut().take() {
+                meanwhile();
+            }
+            (self.answer)()
+        }
+    }
+
+    impl Remote for Answering<'_> {
         fn provider(&self) -> Provider {
             Provider::CalDav
         }
@@ -376,89 +424,18 @@ mod tests {
             _: &str,
             precondition: Precondition,
         ) -> Result<WriteOutcome<Put>> {
-            assert_eq!(precondition, Precondition::Absent);
-            if let Some(meanwhile) = self.meanwhile.borrow_mut().take() {
-                meanwhile();
-            }
-            Ok(WriteOutcome::Done(Put {
-                href: format!("{calendar}{href}"),
-                etag: Some("\"1\"".to_owned()),
-            }))
-        }
-
-        fn delete(&self, _: &str, _: &str, _: &str) -> Result<WriteOutcome<()>> {
-            unreachable!()
-        }
-    }
-
-    fn dentist(calendar_id: CalendarId, title: &str) -> StoredEvent {
-        StoredEvent {
-            calendar_id,
-            fields: EventFields {
-                title: title.to_owned(),
-                when: StoredWhen {
-                    all_day: false,
-                    start: "2026-10-05T09:00:00".to_owned(),
-                    end: "2026-10-05T10:00:00".to_owned(),
-                    start_zone: Some("Europe/Berlin".to_owned()),
-                    end_zone: Some("Europe/Berlin".to_owned()),
-                },
-                location: String::new(),
-                description: String::new(),
-                description_html: false,
-                zone_pinned: false,
-                rule: None,
-                exdates: String::new(),
-                recurrence_id: None,
-            },
-        }
-    }
-
-    /// A server that gives every write the answer `answer` makes.
-    struct Answering(fn() -> Result<WriteOutcome<()>>);
-
-    impl Remote for Answering {
-        fn provider(&self) -> Provider {
-            Provider::CalDav
-        }
-
-        fn discover(&self) -> Result<Vec<AvailableCalendar>> {
-            unreachable!()
-        }
-
-        fn server_read_only(&self, _: &str) -> Result<bool> {
-            unreachable!()
-        }
-
-        fn all_events(
-            &self,
-            _: &str,
-            _: Tz,
-            _: &mut dyn FnMut(Vec<ServerObject>, Tz) -> Result<()>,
-        ) -> Result<SyncPoint> {
-            unreachable!()
-        }
-
-        fn changes(
-            &self,
-            _: &str,
-            _: Option<&str>,
-            _: &KnownVersions,
-            _: Tz,
-            _: FetchToo,
-        ) -> Result<Changes> {
-            unreachable!()
-        }
-
-        fn put(&self, _: &str, href: &str, _: &str, _: Precondition) -> Result<WriteOutcome<Put>> {
-            Ok((self.0)()?.map(|()| Put {
-                href: href.to_owned(),
+            let href = match precondition {
+                Precondition::Absent => format!("{calendar}{href}"),
+                Precondition::Matches(_) => href.to_owned(),
+            };
+            Ok(self.answer()?.map(|()| Put {
+                href,
                 etag: Some("\"2\"".to_owned()),
             }))
         }
 
         fn delete(&self, _: &str, _: &str, _: &str) -> Result<WriteOutcome<()>> {
-            (self.0)()
+            self.answer()
         }
     }
 
@@ -502,7 +479,7 @@ mod tests {
     /// through `server`, and returns how the send ended, with the Send
     /// Failure of each Unsent Change left.
     fn send_failures(
-        server: &Answering,
+        server: &Answering<'_>,
         store: &Mutex<Store>,
         calendar_id: CalendarId,
     ) -> (Result<()>, Vec<Option<SendFailure>>) {
@@ -535,7 +512,7 @@ mod tests {
     fn a_create_meeting_something_at_its_address_keeps_why() {
         let (_directory, store, calendar_id) = with_dentist(None);
 
-        let (sent, failures) = send_failures(&Answering(server_changed), &store, calendar_id);
+        let (sent, failures) = send_failures(&Answering::new(server_changed), &store, calendar_id);
 
         sent.unwrap();
         assert_eq!(failures, [Some(SendFailure::AddressTaken)]);
@@ -545,7 +522,7 @@ mod tests {
     fn an_update_meeting_a_newer_server_version_keeps_why() {
         let (_directory, store, calendar_id) = with_dentist(Some(Some("\"1\"")));
 
-        let (sent, failures) = send_failures(&Answering(server_changed), &store, calendar_id);
+        let (sent, failures) = send_failures(&Answering::new(server_changed), &store, calendar_id);
 
         sent.unwrap();
         assert_eq!(failures, [Some(SendFailure::ServerChanged)]);
@@ -555,7 +532,8 @@ mod tests {
     fn an_update_without_a_stored_etag_keeps_why_it_waits() {
         let (_directory, store, calendar_id) = with_dentist(Some(None));
 
-        let (sent, failures) = send_failures(&Answering(|| unreachable!()), &store, calendar_id);
+        let (sent, failures) =
+            send_failures(&Answering::new(|| unreachable!()), &store, calendar_id);
 
         sent.unwrap();
         assert_eq!(failures, [Some(SendFailure::WaitingForServerVersion)]);
@@ -571,7 +549,7 @@ mod tests {
             })
         };
 
-        let (sent, failures) = send_failures(&Answering(refused), &store, calendar_id);
+        let (sent, failures) = send_failures(&Answering::new(refused), &store, calendar_id);
 
         assert!(matches!(
             sent,
@@ -595,7 +573,7 @@ mod tests {
         let (_directory, store, calendar_id) = with_dentist(None);
 
         let (sent, failures) = send_failures(
-            &Answering(|| Err(CoreError::WritesRefused)),
+            &Answering::new(|| Err(CoreError::WritesRefused)),
             &store,
             calendar_id,
         );
@@ -610,7 +588,7 @@ mod tests {
         let (_directory, store, calendar_id) = with_dentist(None);
         let unreachable = || Err(CoreError::ServerUnreachable("gone".to_owned()));
 
-        let (sent, failures) = send_failures(&Answering(unreachable), &store, calendar_id);
+        let (sent, failures) = send_failures(&Answering::new(unreachable), &store, calendar_id);
 
         assert!(matches!(sent, Err(CoreError::ServerUnreachable(_))));
         assert_eq!(failures, [None]);
@@ -619,11 +597,11 @@ mod tests {
     #[test]
     fn a_send_that_succeeds_takes_the_send_failure_with_its_unsent_changes() {
         let (_directory, store, calendar_id) = with_dentist(None);
-        send_failures(&Answering(server_changed), &store, calendar_id)
+        send_failures(&Answering::new(server_changed), &store, calendar_id)
             .0
             .unwrap();
 
-        let (sent, failures) = send_failures(&Answering(done), &store, calendar_id);
+        let (sent, failures) = send_failures(&Answering::new(done), &store, calendar_id);
 
         sent.unwrap();
         assert_eq!(failures, []);
@@ -681,7 +659,8 @@ mod tests {
         )
         .unwrap();
         let id = id.unwrap();
-        let server = Server {
+        let server = Answering {
+            answer: done,
             meanwhile: RefCell::new(Some(Box::new(|| {
                 change(&|journal_transaction| {
                     journal_transaction.replace(id, &dentist(calendar_id, "Dentist, moved"))

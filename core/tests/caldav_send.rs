@@ -7,117 +7,54 @@
 mod support;
 
 use freecal_core::{
-    AccountId, CalDavLogin, CalendarId, Changed, Core, ErrorCode, Event, EventDraft, EventId,
-    JournalTransactionId, Occurrence, RepeatEnd, Scope, ServerObject, Signal, StartedBy,
-    SyncStatus, When,
+    CalendarId, Changed, Core, ErrorCode, EventDraft, EventId, JournalTransactionId, Occurrence,
+    RepeatEnd, Scope, Signal, StartedBy, SyncStatus, When,
 };
-use support::radicale::{NewCalendar, Radicale, RewritingProxy, User};
-use support::{Harness, calendar_sync_status, date, draft, ics, on, timed, user_login, yoga};
-
-/// A user on Radicale with a writable Calendar "Work", FreeCal's Account
-/// for it and the Calendar's First Sync done.
-struct OnServer {
-    radicale: &'static Radicale,
-    user: User,
-    /// The Calendar's URL on the server.
-    url: String,
-    harness: Harness,
-    core: Core,
-    account: AccountId,
-    work: CalendarId,
-}
-
-/// Puts `events` (name, iCalendar object) on the server, for
-/// [`OnServer::arranged`].
-fn put(events: &[(&str, Vec<u8>)]) -> impl FnOnce(&Radicale, &User, &str) {
-    move |radicale, user, url| {
-        for (name, ics) in events {
-            radicale.put_event(user, url, name, ics.clone());
-        }
-    }
-}
+use support::radicale::{NewCalendar, Radicale, RewritingProxy};
+use support::{
+    Harness, OnServer, add_account, calendar_sync_status, date, draft, ics, on, put_events, timed,
+    yoga,
+};
 
 impl OnServer {
-    /// With `events` (name, iCalendar object) on the server first.
-    fn with(events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(None, put(events))
+    /// A writable Calendar with `events` (name, iCalendar object) on the
+    /// server first.
+    fn writable_with(events: &[(&str, Vec<u8>)]) -> Self {
+        Self::with(events).writable()
     }
 
-    /// Like [`OnServer::with`], writing `files` straight into the server's
-    /// storage, as Radicale refuses a second resource holding one UID.
-    fn with_files(files: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(None, |radicale, _, url| {
-            for (name, ics) in files {
-                radicale.write_event_file(url, name, ics.clone());
-            }
-        })
+    /// Like [`OnServer::writable_with`], with `files` written straight into
+    /// the server's storage, as Radicale refuses a second resource holding
+    /// one UID.
+    fn writable_with_files(files: &[(&str, Vec<u8>)]) -> Self {
+        Self::with_files(files).writable()
     }
 
-    /// Like [`OnServer::with`], reaching the server through `proxy`.
+    /// Like [`OnServer::writable_with`], reaching the server through
+    /// `proxy`.
     fn through(proxy: &RewritingProxy, events: &[(&str, Vec<u8>)]) -> Self {
-        Self::arranged(Some(&proxy.url), put(events))
-    }
-
-    /// The Account and its Calendar once `arrange` put what the Calendar
-    /// holds on the server, which FreeCal reaches through the proxy at
-    /// `through` if given.
-    fn arranged(through: Option<&str>, arrange: impl FnOnce(&Radicale, &User, &str)) -> Self {
-        Self::set_up(through, Radicale::create_calendar, arrange)
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_calendar,
+            Some(&proxy.url),
+            put_events(events),
+        )
+        .writable()
     }
 
     /// Like [`OnServer::through`] with no Events, but the server lets the
     /// user only read the Calendar; FreeCal takes it as writable while
     /// `proxy` says so.
     fn read_only_through(proxy: &RewritingProxy) -> Self {
-        Self::set_up(
-            Some(&proxy.url),
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
             Radicale::create_read_only_calendar,
+            Some(&proxy.url),
             |_, _, _| {},
         )
-    }
-
-    /// Like [`OnServer::arranged`], with the Calendar made by `create`.
-    fn set_up(
-        through: Option<&str>,
-        create: fn(&Radicale, &User, NewCalendar) -> String,
-        arrange: impl FnOnce(&Radicale, &User, &str),
-    ) -> Self {
-        let radicale = Radicale::shared();
-        let user = radicale.user();
-        let url = create(
-            radicale,
-            &user,
-            NewCalendar {
-                name: Some("Work"),
-                ..NewCalendar::default()
-            },
-        );
-        arrange(radicale, &user, &url);
-        let harness = Harness::new();
-        let core = harness.open_without_starting_calendars();
-        let server = through.map_or_else(|| radicale.url(), str::to_owned);
-        let account = core
-            .add_caldav_account(&CalDavLogin {
-                url: server.clone(),
-                ..user_login(radicale, &user)
-            })
-            .unwrap()
-            .account
-            .id;
-        let work = core
-            .add_calendars(account, &[url.replace(&radicale.url(), &server)])
-            .unwrap()[0]
-            .id;
-        core.set_calendar_read_only(work, false).unwrap();
-        Self {
-            radicale,
-            user,
-            url,
-            harness,
-            core,
-            account,
-            work,
-        }
+        .writable()
     }
 
     /// A second writable Calendar "Home" of the same Account, synced.
@@ -149,18 +86,6 @@ impl OnServer {
             .collect()
     }
 
-    /// The Calendar's Event titled `title`, in October 2026.
-    fn event(&self, title: &str) -> Event {
-        let occurrence = self
-            .core
-            .occurrences(date("2026-10-01"), date("2026-11-01"))
-            .unwrap()
-            .into_iter()
-            .find(|occurrence| occurrence.title == title)
-            .unwrap_or_else(|| panic!("an Event titled {title:?}"));
-        self.core.event(occurrence.event_id).unwrap()
-    }
-
     /// Renames the Event titled `title` to `new_title`, moving it to the
     /// Calendar `calendar_id`.
     fn edit(&self, title: &str, new_title: &str, calendar_id: CalendarId) {
@@ -174,13 +99,6 @@ impl OnServer {
                 },
             )
             .unwrap();
-    }
-
-    /// The Server Object the Event titled `title` is in, as FreeCal holds it.
-    fn held(&self, title: &str) -> Option<ServerObject> {
-        self.core
-            .original_server_data(self.event(title).id)
-            .unwrap()
     }
 
     /// The ETag and text the server serves the resource at `href` with, a
@@ -233,6 +151,84 @@ impl OnServer {
             })
             .collect()
     }
+
+    /// What the Calendar shows, as [`shows`].
+    fn shows(&self, calendar_id: CalendarId) -> Vec<(String, When)> {
+        shows(&self.core, calendar_id)
+    }
+
+    /// What a second client shows of the Calendar at `url` after its First
+    /// Sync, a whole listing of what the server holds.
+    fn another_client_shows(&self, url: &str) -> Vec<(String, When)> {
+        let harness = Harness::new();
+        let core = harness.open_without_starting_calendars();
+        let account = add_account(&core, self.radicale, &self.user);
+        let calendar = core.add_calendars(account, &[url.to_owned()]).unwrap()[0].id;
+        shows(&core, calendar)
+    }
+
+    /// Asserts that a second client reads back from the server what the
+    /// Calendar `calendar_id` at `url` shows, and that nothing waits.
+    fn assert_read_back(&self, calendar_id: CalendarId, url: &str) {
+        assert_eq!(self.unsent(calendar_id), 0);
+        assert_eq!(self.status(calendar_id), SyncStatus::Synced);
+        assert_eq!(self.another_client_shows(url), self.shows(calendar_id));
+    }
+
+    /// The names of the resources the Calendar at `url` holds on the server.
+    fn names(&self, url: &str) -> Vec<String> {
+        self.radicale.event_names(url)
+    }
+
+    /// The one Occurrence the Calendar shows on `date`.
+    fn on(&self, date: &str) -> Occurrence {
+        on(&self.core, date)
+    }
+
+    /// Yoga as [`yoga`] with `count` Occurrences, created in "Work" and sent.
+    fn with_yoga(count: u32) -> (Self, EventId) {
+        let on_server = Self::writable_with(&[]);
+        let id = yoga(&on_server.core, on_server.work, RepeatEnd::Count { count });
+        on_server.sync();
+        assert_eq!(on_server.names(&on_server.url).len(), 1);
+        (on_server, id)
+    }
+
+    /// Renames the Occurrence on `date` to `title`, in `scope`.
+    fn rename(&self, date: &str, scope: Scope, title: &str) -> Changed<Occurrence> {
+        let occurrence = self.on(date);
+        let event = self.core.event(occurrence.event_id).unwrap();
+        self.core
+            .edit_occurrence(
+                occurrence.event_id,
+                rid(&occurrence),
+                scope,
+                false,
+                EventDraft {
+                    title: title.to_owned(),
+                    repeat: event.repeat,
+                    ..draft(event.calendar_id, "", occurrence.when)
+                },
+            )
+            .unwrap()
+    }
+
+    /// Moves the Occurrence on `date` to `when`, in `scope`.
+    fn reschedule(&self, date: &str, scope: Scope, when: When) -> Changed<Occurrence> {
+        let occurrence = self.on(date);
+        self.core
+            .reschedule_occurrence(occurrence.event_id, rid(&occurrence), scope, false, when)
+            .unwrap()
+    }
+
+    /// Undoes the Journal Transaction `id`, and returns the undo's.
+    fn undo(&self, id: JournalTransactionId) -> JournalTransactionId {
+        self.core
+            .undo_journal_transaction(id)
+            .unwrap()
+            .journal_transaction
+            .expect("an undo is a Journal Transaction")
+    }
 }
 
 /// "Dentist" on 5 October 2026, 9:00 to 10:00 in Berlin.
@@ -254,7 +250,7 @@ fn standup(title: &str) -> Vec<u8> {
 
 #[test]
 fn a_created_event_is_created_on_the_server_and_its_unsent_change_goes() {
-    let on_server = OnServer::with(&[]);
+    let on_server = OnServer::writable_with(&[]);
     on_server
         .core
         .create_event(dentist(on_server.work))
@@ -272,7 +268,7 @@ fn a_created_event_is_created_on_the_server_and_its_unsent_change_goes() {
 
 #[test]
 fn an_edit_is_written_over_the_servers_version_keeping_what_freecal_doesnt_show() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server.edit("Standup", "Standup moved", on_server.work);
 
     on_server.sync();
@@ -291,7 +287,7 @@ fn an_edit_is_written_over_the_servers_version_keeping_what_freecal_doesnt_show(
 
 #[test]
 fn a_deleted_event_is_deleted_on_the_server() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
         .delete_event(on_server.event("Standup").id)
@@ -308,7 +304,7 @@ fn a_deleted_event_is_deleted_on_the_server() {
 
 #[test]
 fn an_event_moved_to_another_calendar_moves_on_the_server() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     let (home, home_url) = on_server.add_home();
     on_server.edit("Standup", "Standup", home);
 
@@ -333,7 +329,7 @@ fn an_event_moved_to_another_calendar_moves_on_the_server() {
 /// (tickets 20 and 21), so the Sender writes nothing over it.
 #[test]
 fn an_edit_is_not_written_over_a_newer_server_version() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server.radicale.put_event(
         &on_server.user,
         &on_server.url,
@@ -355,7 +351,7 @@ fn an_edit_is_not_written_over_a_newer_server_version() {
 /// conditional, so it waits.
 #[test]
 fn an_update_without_a_stored_etag_waits() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server.edit("Standup", "Standup moved", on_server.work);
     on_server
         .harness
@@ -372,7 +368,7 @@ fn an_update_without_a_stored_etag_waits() {
 
 #[test]
 fn a_delete_without_a_stored_etag_waits() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
         .delete_event(on_server.event("Standup").id)
@@ -412,7 +408,7 @@ fn a_write_answered_without_an_etag_leaves_the_incoming_sync_to_fetch_the_server
 /// matches neither Event Rows nor a Server Object, so it is dropped.
 #[test]
 fn an_unsent_change_matching_nothing_is_dropped() {
-    let on_server = OnServer::with(&[]);
+    let on_server = OnServer::writable_with(&[]);
     let created = on_server
         .core
         .create_event(dentist(on_server.work))
@@ -427,7 +423,7 @@ fn an_unsent_change_matching_nothing_is_dropped() {
 
 #[test]
 fn unsent_changes_of_a_read_only_calendar_wait() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
         .delete_event(on_server.event("Standup").id)
@@ -447,7 +443,7 @@ fn unsent_changes_of_a_read_only_calendar_wait() {
 /// it is sent; sending it records nothing more.
 #[test]
 fn a_sent_change_is_in_the_change_journal_and_sending_records_nothing() {
-    let on_server = OnServer::with(&[]);
+    let on_server = OnServer::writable_with(&[]);
     let created = on_server
         .core
         .create_event(dentist(on_server.work))
@@ -480,7 +476,7 @@ fn a_sent_change_is_in_the_change_journal_and_sending_records_nothing() {
 /// and the undo is sent like any change.
 #[test]
 fn a_sent_edit_and_delete_are_in_the_change_journal() {
-    let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+    let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     let edited = on_server
         .core
         .edit_event(
@@ -524,17 +520,6 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
     assert_eq!(on_server.unsent(on_server.work), 0);
 }
 
-/// The titles of the Occurrences in October 2026, in order.
-fn titles(on_server: &OnServer) -> Vec<String> {
-    on_server
-        .core
-        .occurrences(date("2026-10-01"), date("2026-11-01"))
-        .unwrap()
-        .into_iter()
-        .map(|occurrence| occurrence.title)
-        .collect()
-}
-
 /// Ticket 128 (ADR 0015): a sent DELETE frees its UID for the Ignored
 /// Resources holding it, and the first by the fixed order takes over in
 /// the same sync, as after an Incoming Sync, so the Event comes back. The
@@ -542,12 +527,12 @@ fn titles(on_server: &OnServer) -> Vec<String> {
 /// deletes none of the Ignored Resources.
 #[test]
 fn a_delete_hands_its_uid_on_to_the_first_ignored_resource_holding_it() {
-    let on_server = OnServer::with_files(&[
+    let on_server = OnServer::writable_with_files(&[
         ("a-standup", standup("Standup A")),
         ("c-standup", standup("Standup C")),
         ("b-standup", standup("Standup B")),
     ]);
-    assert_eq!(titles(&on_server), ["Standup A"]);
+    assert_eq!(on_server.titles(), ["Standup A"]);
     on_server
         .core
         .delete_event(on_server.event("Standup A").id)
@@ -559,7 +544,7 @@ fn a_delete_hands_its_uid_on_to_the_first_ignored_resource_holding_it() {
         .radicale
         .status_of(&on_server.user, &format!("{}a-standup.ics", on_server.url));
     assert_eq!(status, 404);
-    assert_eq!(titles(&on_server), ["Standup B"]);
+    assert_eq!(on_server.titles(), ["Standup B"]);
     assert!(
         on_server
             .held("Standup B")
@@ -579,7 +564,7 @@ fn a_delete_hands_its_uid_on_to_the_first_ignored_resource_holding_it() {
     );
     assert_eq!(on_server.unsent(on_server.work), 0);
     assert_eq!(on_server.sync(), []);
-    assert_eq!(titles(&on_server), ["Standup B"]);
+    assert_eq!(on_server.titles(), ["Standup B"]);
 }
 
 /// [`standup`] with a start FreeCal can't read: a UTC time with a zone,
@@ -596,11 +581,11 @@ fn unreadable_standup(title: &str) -> Vec<u8> {
 /// without Event Rows; once one reads, it takes over.
 #[test]
 fn a_delete_with_no_readable_ignored_resource_holding_its_uid_leaves_no_event_rows() {
-    let on_server = OnServer::with_files(&[
+    let on_server = OnServer::writable_with_files(&[
         ("a-standup", standup("Standup A")),
         ("b-standup", unreadable_standup("Standup B")),
     ]);
-    assert_eq!(titles(&on_server), ["Standup A"]);
+    assert_eq!(on_server.titles(), ["Standup A"]);
     on_server
         .core
         .delete_event(on_server.event("Standup A").id)
@@ -608,13 +593,13 @@ fn a_delete_with_no_readable_ignored_resource_holding_its_uid_leaves_no_event_ro
 
     on_server.sync();
 
-    assert_eq!(titles(&on_server), Vec::<String>::new());
+    assert_eq!(on_server.titles(), Vec::<String>::new());
     assert_eq!(on_server.unsent(on_server.work), 0);
     on_server
         .radicale
         .write_event_file(&on_server.url, "b-standup", standup("Standup B"));
     on_server.sync();
-    assert_eq!(titles(&on_server), ["Standup B"]);
+    assert_eq!(on_server.titles(), ["Standup B"]);
     assert_eq!(on_server.unsent(on_server.work), 0);
 }
 
@@ -625,7 +610,7 @@ mod sent_as_made {
 
     #[test]
     fn a_change_is_sent_right_after_it_is_made() {
-        let on_server = OnServer::with(&[]);
+        let on_server = OnServer::writable_with(&[]);
         on_server.launched();
         on_server
             .core
@@ -646,7 +631,7 @@ mod sent_as_made {
 
     #[test]
     fn a_change_syncs_only_the_calendars_it_changed() {
-        let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+        let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
         let (home, home_url) = on_server.add_home();
         // A third Calendar the change leaves alone.
         let url = on_server.radicale.create_calendar(
@@ -712,7 +697,7 @@ mod sent_as_made {
     /// (ticket 128).
     #[test]
     fn a_deleted_uid_is_handed_on_right_after_the_delete_is_sent() {
-        let on_server = OnServer::with_files(&[
+        let on_server = OnServer::writable_with_files(&[
             ("a-standup", standup("Standup A")),
             ("b-standup", standup("Standup B")),
         ]);
@@ -724,7 +709,7 @@ mod sent_as_made {
 
         on_server.run_scheduled_syncs();
 
-        assert_eq!(titles(&on_server), ["Standup B"]);
+        assert_eq!(on_server.titles(), ["Standup B"]);
     }
 }
 
@@ -797,7 +782,7 @@ mod writes_refused {
     /// The user's own Read-only mark is their choice, not a refusal.
     #[test]
     fn unsent_changes_of_a_calendar_the_user_made_read_only_are_no_sync_error() {
-        let on_server = OnServer::with(&[]);
+        let on_server = OnServer::writable_with(&[]);
         on_server
             .core
             .create_event(dentist(on_server.work))
@@ -823,90 +808,6 @@ fn shows(core: &Core, calendar_id: CalendarId) -> Vec<(String, When)> {
         .filter(|occurrence| occurrence.calendar_id == calendar_id)
         .map(|occurrence| (occurrence.title, occurrence.when))
         .collect()
-}
-
-impl OnServer {
-    /// What the Calendar shows, as [`shows`].
-    fn shows(&self, calendar_id: CalendarId) -> Vec<(String, When)> {
-        shows(&self.core, calendar_id)
-    }
-
-    /// What a second client shows of the Calendar at `url` after its First
-    /// Sync, a whole listing of what the server holds.
-    fn another_client_shows(&self, url: &str) -> Vec<(String, When)> {
-        let harness = Harness::new();
-        let core = harness.open_without_starting_calendars();
-        let account = core
-            .add_caldav_account(&user_login(self.radicale, &self.user))
-            .unwrap()
-            .account
-            .id;
-        let calendar = core.add_calendars(account, &[url.to_owned()]).unwrap()[0].id;
-        shows(&core, calendar)
-    }
-
-    /// Asserts that a second client reads back from the server what the
-    /// Calendar `calendar_id` at `url` shows, and that nothing waits.
-    fn assert_read_back(&self, calendar_id: CalendarId, url: &str) {
-        assert_eq!(self.unsent(calendar_id), 0);
-        assert_eq!(self.status(calendar_id), SyncStatus::Synced);
-        assert_eq!(self.another_client_shows(url), self.shows(calendar_id));
-    }
-
-    /// The names of the resources the Calendar at `url` holds on the server.
-    fn names(&self, url: &str) -> Vec<String> {
-        self.radicale.event_names(url)
-    }
-
-    /// The one Occurrence the Calendar shows on `date`.
-    fn on(&self, date: &str) -> Occurrence {
-        on(&self.core, date)
-    }
-
-    /// Yoga as [`yoga`] with `count` Occurrences, created in "Work" and sent.
-    fn with_yoga(count: u32) -> (Self, EventId) {
-        let on_server = Self::with(&[]);
-        let id = yoga(&on_server.core, on_server.work, RepeatEnd::Count { count });
-        on_server.sync();
-        assert_eq!(on_server.names(&on_server.url).len(), 1);
-        (on_server, id)
-    }
-
-    /// Renames the Occurrence on `date` to `title`, in `scope`.
-    fn rename(&self, date: &str, scope: Scope, title: &str) -> Changed<Occurrence> {
-        let occurrence = self.on(date);
-        let event = self.core.event(occurrence.event_id).unwrap();
-        self.core
-            .edit_occurrence(
-                occurrence.event_id,
-                rid(&occurrence),
-                scope,
-                false,
-                EventDraft {
-                    title: title.to_owned(),
-                    repeat: event.repeat,
-                    ..draft(event.calendar_id, "", occurrence.when)
-                },
-            )
-            .unwrap()
-    }
-
-    /// Moves the Occurrence on `date` to `when`, in `scope`.
-    fn reschedule(&self, date: &str, scope: Scope, when: When) -> Changed<Occurrence> {
-        let occurrence = self.on(date);
-        self.core
-            .reschedule_occurrence(occurrence.event_id, rid(&occurrence), scope, false, when)
-            .unwrap()
-    }
-
-    /// Undoes the Journal Transaction `id`, and returns the undo's.
-    fn undo(&self, id: JournalTransactionId) -> JournalTransactionId {
-        self.core
-            .undo_journal_transaction(id)
-            .unwrap()
-            .journal_transaction
-            .expect("an undo is a Journal Transaction")
-    }
 }
 
 fn rid(occurrence: &Occurrence) -> &str {
@@ -1074,7 +975,7 @@ mod recurrence {
     /// Ticket 122 tests the text; this, that it survives the round trip.
     #[test]
     fn unknown_fields_survive_scope_edits_on_the_server() {
-        let on_server = OnServer::with(&[("yoga", server_yoga())]);
+        let on_server = OnServer::writable_with(&[("yoga", server_yoga())]);
 
         on_server.rename("2026-10-12", Scope::This, "Yoga in the park");
         on_server.rename("2026-10-19", Scope::This, "Yoga late");
@@ -1148,7 +1049,7 @@ mod recurrence {
              BEGIN:VEVENT\nUID:yoga\nRECURRENCE-ID:20261019T160000Z\nSUMMARY:Yoga late\n\
              DTSTART:20261019T160000Z\nDTEND:20261019T170000Z\nX-CUSTOM:third\nEND:VEVENT\n",
         );
-        let on_server = OnServer::with(&[("yoga", yoga)]);
+        let on_server = OnServer::writable_with(&[("yoga", yoga)]);
 
         on_server.reschedule(
             "2026-10-05",
@@ -1239,7 +1140,7 @@ mod undo {
     /// ticket 129.
     #[test]
     fn undoing_a_sent_delete_puts_the_event_back_under_its_uid() {
-        let on_server = OnServer::with(&[("from-elsewhere", standup("Standup"))]);
+        let on_server = OnServer::writable_with(&[("from-elsewhere", standup("Standup"))]);
         let deleted = on_server
             .core
             .delete_event(on_server.event("Standup").id)
@@ -1263,7 +1164,7 @@ mod undo {
     /// keeps the server's version from coming back.
     #[test]
     fn an_undone_sync_is_sent_and_stays_undone() {
-        let on_server = OnServer::with(&[("standup", standup("Standup"))]);
+        let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
         on_server.radicale.put_event(
             &on_server.user,
             &on_server.url,
@@ -1271,18 +1172,18 @@ mod undo {
             standup("Standup on the server"),
         );
         let synced = on_server.sync();
-        assert_eq!(titles(&on_server), ["Standup on the server"]);
+        assert_eq!(on_server.titles(), ["Standup on the server"]);
 
         on_server.undo(synced[0]);
         on_server.sync();
 
-        assert_eq!(titles(&on_server), ["Standup"]);
+        assert_eq!(on_server.titles(), ["Standup"]);
         let text = on_server.on_server("standup");
         assert!(text.contains("SUMMARY:Standup\r\n"), "{text}");
         assert!(text.contains("X-CUSTOM;X-PARAM=1:kept as it is"), "{text}");
         on_server.assert_read_back(on_server.work, &on_server.url);
         on_server.sync();
-        assert_eq!(titles(&on_server), ["Standup"]);
+        assert_eq!(on_server.titles(), ["Standup"]);
     }
 
     /// ADR 0015's takeover: another client deletes the resource keeping
@@ -1292,7 +1193,7 @@ mod undo {
     /// them.
     #[test]
     fn an_undone_sync_with_a_takeover_writes_the_events_back_into_the_resource_that_took_over() {
-        let on_server = OnServer::with_files(&[
+        let on_server = OnServer::writable_with_files(&[
             ("a-standup", standup("Standup A")),
             ("b-standup", standup("Standup B")),
         ]);
@@ -1300,12 +1201,12 @@ mod undo {
             .radicale
             .delete_event(&on_server.user, &on_server.url, "a-standup");
         let synced = on_server.sync();
-        assert_eq!(titles(&on_server), ["Standup B"]);
+        assert_eq!(on_server.titles(), ["Standup B"]);
 
         on_server.undo(synced[0]);
         on_server.sync();
 
-        assert_eq!(titles(&on_server), ["Standup A"]);
+        assert_eq!(on_server.titles(), ["Standup A"]);
         assert_eq!(on_server.names(&on_server.url), ["b-standup"]);
         assert!(
             on_server
@@ -1314,6 +1215,6 @@ mod undo {
         );
         on_server.assert_read_back(on_server.work, &on_server.url);
         on_server.sync();
-        assert_eq!(titles(&on_server), ["Standup A"]);
+        assert_eq!(on_server.titles(), ["Standup A"]);
     }
 }
