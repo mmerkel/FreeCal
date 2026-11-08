@@ -1,18 +1,32 @@
-// Hiding the sidebar and changing its width, run against the fake core with a
-// stand-in grid. jsdom has no layout: widths come from the state FreeCal
+// Hiding the sidebar and changing its width, run against the recording fake
+// core with a stand-in grid. jsdom has no layout: widths come from the state FreeCal
 // keeps, never from the page, and dragging is also checked in the real app.
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import { FakeCore } from './test/fakeCore';
+import type { SidebarState } from './core/types';
+import { firstLaunch } from './test/answers';
+import { failure, type RecordingCore } from './test/recordingCore';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
-async function showApp(core = new FakeCore()) {
+async function showApp(core = firstLaunch()) {
   render(App, { core });
   await screen.findByRole('list', { name: 'Grid' });
   return { core, user: userEvent.setup() };
+}
+
+/** A first launch whose sidebar was left as `stored`. */
+function leftAs(stored: SidebarState) {
+  const core = firstLaunch();
+  core.answer('sidebar', stored);
+  return core;
+}
+
+/** The sidebar states written, in order. */
+function saves(core: RecordingCore) {
+  return core.callsOf('setSidebar').map(([saved]) => saved);
 }
 
 function sidebar() {
@@ -67,8 +81,7 @@ test('on first launch the sidebar shows at the default width, with the tab on it
 });
 
 test('opens hidden when it was left hidden, and the tab shows it again at its last width', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: false, width: 15 };
+  const core = leftAs({ shown: false, width: 15 });
   const { user } = await showApp(core);
 
   expect(sidebar()).not.toBeInTheDocument();
@@ -80,7 +93,7 @@ test('opens hidden when it was left hidden, and the tab shows it again at its la
   expect(sidebar()).toBeInTheDocument();
   expect(width()).toBe('15');
   expect(handle()).toHaveAttribute('title', 'Hide sidebar (F9)');
-  expect(core.sidebarSaves).toEqual([{ shown: true, width: 15 }]);
+  expect(saves(core)).toEqual([{ shown: true, width: 15 }]);
 });
 
 test('a click on the tab hides the sidebar and remembers that', async () => {
@@ -89,7 +102,7 @@ test('a click on the tab hides the sidebar and remembers that', async () => {
   await user.click(tab());
 
   expect(sidebar()).not.toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([{ shown: false, width: null }]);
+  expect(saves(core)).toEqual([{ shown: false, width: null }]);
 });
 
 test('Enter on the separator hides and shows the sidebar', async () => {
@@ -101,15 +114,14 @@ test('Enter on the separator hides and shows the sidebar', async () => {
 
   await user.keyboard('{Enter}');
   expect(sidebar()).toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([
+  expect(saves(core)).toEqual([
     { shown: false, width: null },
     { shown: true, width: null },
   ]);
 });
 
 test('F9 hides and shows the sidebar, but not while typing', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: true, width: 18 };
+  const core = leftAs({ shown: true, width: 18 });
   const { user } = await showApp(core);
 
   await user.keyboard('{F9}');
@@ -118,7 +130,7 @@ test('F9 hides and shows the sidebar, but not while typing', async () => {
   await user.keyboard('{F9}');
   expect(sidebar()).toBeInTheDocument();
   expect(width()).toBe('18');
-  expect(core.sidebarSaves).toEqual([
+  expect(saves(core)).toEqual([
     { shown: false, width: 18 },
     { shown: true, width: 18 },
   ]);
@@ -134,30 +146,28 @@ test('the arrow keys change the width within its limits and save each press', as
 
   await user.keyboard('{ArrowRight}');
   expect(width()).toBe('13');
-  expect(core.sidebarSaves).toEqual([{ shown: true, width: 13 }]);
+  expect(saves(core)).toEqual([{ shown: true, width: 13 }]);
 
   for (let press = 0; press < 10; press++) await user.keyboard('{ArrowLeft}');
   expect(width()).toBe('8');
   expect(sidebar()).toBeInTheDocument();
-  expect(core.sidebarSaves.at(-1)).toEqual({ shown: true, width: 8 });
+  expect(saves(core).at(-1)).toEqual({ shown: true, width: 8 });
 
   for (let press = 0; press < 20; press++) await user.keyboard('{ArrowRight}');
   expect(width()).toBe('20');
-  expect(core.sidebarSaves.at(-1)).toEqual({ shown: true, width: 20 });
+  expect(saves(core).at(-1)).toEqual({ shown: true, width: 20 });
 });
 
 test('a stored width beyond the limits shows within them, and stays stored', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: true, width: 40 };
+  const core = leftAs({ shown: true, width: 40 });
   await showApp(core);
 
   expect(width()).toBe('20');
-  expect(core.sidebarSaves).toEqual([]);
+  expect(saves(core)).toEqual([]);
 });
 
 test('a stored width below the minimum shows at the minimum', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: true, width: 2 };
+  const core = leftAs({ shown: true, width: 2 });
   await showApp(core);
 
   expect(width()).toBe('8');
@@ -169,7 +179,7 @@ test('dragging changes the width and saves once when it ends', async () => {
   await drag(192, 224, 256);
 
   expect(width()).toBe('16');
-  expect(core.sidebarSaves).toEqual([{ shown: true, width: 16 }]);
+  expect(saves(core)).toEqual([{ shown: true, width: 16 }]);
 });
 
 test('the sidebar follows the edge from where it was pressed', async () => {
@@ -180,7 +190,7 @@ test('the sidebar follows the edge from where it was pressed', async () => {
   await release(240);
 
   expect(width()).toBe('14.5');
-  expect(core.sidebarSaves).toEqual([{ shown: true, width: 14.5 }]);
+  expect(saves(core)).toEqual([{ shown: true, width: 14.5 }]);
 });
 
 test('a drag stops at the limits and doesn’t hide the sidebar above 4rem', async () => {
@@ -192,26 +202,24 @@ test('a drag stops at the limits and doesn’t hide the sidebar above 4rem', asy
   await drag(320, 70);
   expect(width()).toBe('8');
   expect(sidebar()).toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([
+  expect(saves(core)).toEqual([
     { shown: true, width: 20 },
     { shown: true, width: 8 },
   ]);
 });
 
 test('a drag that leaves the width as shown keeps a stored width beyond the limits', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: true, width: 40 };
+  const core = leftAs({ shown: true, width: 40 });
   await showApp(core);
 
   await drag(320, 330);
 
   expect(width()).toBe('20');
-  expect(core.sidebarSaves).toEqual([]);
+  expect(saves(core)).toEqual([]);
 });
 
 test('dragging below 4rem hides the sidebar at once; letting go there keeps the width from before', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: true, width: 16 };
+  const core = leftAs({ shown: true, width: 16 });
   const { user } = await showApp(core);
 
   await press(handle(), 256);
@@ -225,15 +233,14 @@ test('dragging below 4rem hides the sidebar at once; letting go there keeps the 
   await release(50);
 
   expect(sidebar()).not.toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([{ shown: false, width: 16 }]);
+  expect(saves(core)).toEqual([{ shown: false, width: 16 }]);
 
   await user.click(tab());
   expect(width()).toBe('16');
 });
 
 test('pulling the tab out of a hidden sidebar shows it past 4rem, at the minimum or wider', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: false, width: 16 };
+  const core = leftAs({ shown: false, width: 16 });
   await showApp(core);
 
   await press(tab(), 0);
@@ -246,12 +253,11 @@ test('pulling the tab out of a hidden sidebar shows it past 4rem, at the minimum
   await release(240);
 
   expect(width()).toBe('15');
-  expect(core.sidebarSaves).toEqual([{ shown: true, width: 15 }]);
+  expect(saves(core)).toEqual([{ shown: true, width: 15 }]);
 });
 
 test('a pull from a hidden sidebar that ends below 4rem saves nothing', async () => {
-  const core = new FakeCore();
-  core.storedSidebar = { shown: false, width: 16 };
+  const core = leftAs({ shown: false, width: 16 });
   await showApp(core);
 
   await press(tab(), 0);
@@ -259,7 +265,7 @@ test('a pull from a hidden sidebar that ends below 4rem saves nothing', async ()
   await release(40);
 
   expect(sidebar()).not.toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([]);
+  expect(saves(core)).toEqual([]);
 });
 
 test('a press on the tab that moves less than 4px is a click; 4px or more is a drag', async () => {
@@ -269,7 +275,7 @@ test('a press on the tab that moves less than 4px is a click; 4px or more is a d
   await move(203);
   await release(203);
   expect(sidebar()).not.toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([{ shown: false, width: null }]);
+  expect(saves(core)).toEqual([{ shown: false, width: null }]);
 
   await press(tab(), 5);
   await move(2);
@@ -281,7 +287,7 @@ test('a press on the tab that moves less than 4px is a click; 4px or more is a d
   await release(204);
   expect(sidebar()).toBeInTheDocument();
   expect(width()).toBe('12.3');
-  expect(core.sidebarSaves.at(-1)).toEqual({ shown: true, width: 12.25 });
+  expect(saves(core).at(-1)).toEqual({ shown: true, width: 12.25 });
 });
 
 test('a press on the edge beside the tab doesn’t hide the sidebar', async () => {
@@ -290,19 +296,17 @@ test('a press on the edge beside the tab doesn’t hide the sidebar', async () =
   await drag(192, 192);
 
   expect(sidebar()).toBeInTheDocument();
-  expect(core.sidebarSaves).toEqual([]);
+  expect(saves(core)).toEqual([]);
 });
 
 test('says so when the sidebar can’t be remembered', async () => {
-  const core = new FakeCore();
-  core.setSidebar = async () => {
-    throw new Error('disk full');
-  };
+  const core = firstLaunch();
+  core.answer('setSidebar', failure({ code: 'localStoreFailed' }));
   const { user } = await showApp(core);
 
   await user.keyboard('{F9}');
 
-  expect(screen.getByRole('alert')).toHaveTextContent(
-    'FreeCal could not remember the sidebar: Error: disk full',
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'FreeCal could not remember the sidebar: FreeCal’s database couldn’t be read or written',
   );
 });
