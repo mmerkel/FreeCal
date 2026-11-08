@@ -220,7 +220,7 @@ test('a Sync Error shows on the Calendar where it happened, with its message', a
 });
 
 test('the sidebar shows a Calendar’s unsent changes when there are any', async () => {
-  const { core, team: id, setOverall, reportCalendar } = withServer();
+  const { core, team: id, reportCalendar } = withServer();
   await showApp(core);
 
   reportCalendar(id, report({ kind: 'synced' }, 3));
@@ -263,7 +263,7 @@ test('a sync the user started shows as Syncing at once', async () => {
 });
 
 test('a Calendar whose First Sync is unfinished says so, whatever its Sync Status', async () => {
-  const { core, team: id, setOverall, reportCalendar } = withServer();
+  const { core, team: id, reportCalendar } = withServer();
   await showApp(core);
   const unfinished = (status: SyncStatus, lastSync: SyncStatusReport['lastSync']) =>
     reportCalendar(id, { status, lastSync, unsentChanges: 0 }, true);
@@ -292,7 +292,7 @@ test('a Calendar whose First Sync is unfinished says so, whatever its Sync Statu
 });
 
 test('the overall status doesn’t show a Calendar whose First Sync is unfinished', async () => {
-  const { core, team: id, setOverall, reportCalendar } = withServer();
+  const { core, team: id, reportCalendar } = withServer();
   await showApp(core);
 
   reportCalendar(id, report({ kind: 'synced' }), true);
