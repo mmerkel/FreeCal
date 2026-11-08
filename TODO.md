@@ -3,7 +3,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] ticket 17 -> first split
 - [ ] test by hand
-- [ ] simplify
+- [ ] simplify -> from ticket 120 on
 - [ ] code base architecture
 - [ ] ticket 25 -> first split
 - [ ] simplify
