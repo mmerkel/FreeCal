@@ -2,7 +2,7 @@
 
 **What to build:** When a local change and a newer server change to the same Event can't both be kept, FreeCal holds a Conflict instead of guessing. The Event carries a Conflict badge, the user can list all open Conflicts, see both versions and choose.
 
-**Blocked by:** 17, 91, 92, 100
+**Blocked by:** 91, 92, 100, 123
 
 **Status:** ready-for-agent
 

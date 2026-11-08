@@ -2,7 +2,7 @@
 
 **What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: US-131 and "Quitting" under Frontend.
 
-**Blocked by:** 13, 16, 17, 33, 91, 92
+**Blocked by:** 13, 16, 33, 91, 92, 123, 124
 
 **Status:** ready-for-agent
 

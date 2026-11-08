@@ -2,7 +2,7 @@
 
 **What to build:** The user can see every change in the Change Journal as one timeline, undo any one of them, or undo everything in a Calendar since a given time, and can see and undo an Event's History from its details. Undo follows ADR 0009 and the rules of tickets 69 and 72.
 
-**Blocked by:** 17, 70, 72
+**Blocked by:** 70, 72, 125
 
 **Status:** ready-for-agent
 

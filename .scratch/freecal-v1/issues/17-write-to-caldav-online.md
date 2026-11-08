@@ -4,9 +4,9 @@
 
 **Blocked by:** 08, 15, 56, 69, 91, 92, 97, 100
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
-**Effort:** L
+**Split into:** 120, 121, 122, 123, 124, 125
 
 - [ ] The user can set any Calendar read-only or writable in FreeCal (server-reported read-only still wins)
 - [ ] Changes are applied to the Local Store immediately, queued, and pushed with conditional requests (ETags)
@@ -30,3 +30,4 @@
 - 2026-11-04 (grilling, altitude findings of 90–92): when a send's DELETE removes a UID's Corresponding Server Object and another Server Object of the Calendar still holds that UID, that one becomes the Corresponding Server Object and its Events take the Event Rows' place, as after a sync (ADR 0011): the Event comes back, as it does in other clients. The Sender does not delete the other Server Object. So a send hands UIDs on to their next Corresponding Server Object like a sync does.
 - 2026-11-06 (grilling, ADRs 0012–0014): blocked by 100. The Sender is CalDAV's, in `core/src/sync/caldav/sender.rs`. It finds an Unsent Change's CalDAV Server Object by Calendar and UID in `caldav_server_object`; `combined_event_key` is gone, so the comment of 2026-10-25 reads "the CalDAV Server Object holding its Calendar and UID" there. Unsent Changes keep their recurrence IDs as obtained and are merged per UID, since CalDAV sends one resource per UID. A server change met while sending is found and held as ADR 0014 says (tickets 20 and 21), not by the Sender.
 - 2026-11-07 (grilling, ticket 109, ADR 0015's amendment): the Sender writes an update or a delete only with `If-Match` on the Mirror's ETag. If the Corresponding Server Object has no stored ETag, because FreeCal couldn't read the server's version or the server gives none, the Unsent Change waits until it reads, and the Event shows as not yet synced. A create uses `If-None-Match: *` and needs no ETag. After a successful write whose response gives no ETag (RFC 4791 allows this when the server changed the text), the Mirror holds the text sent without an ETag, and the next Incoming Sync fetches what the server stored.
+- 2026-11-08: Split into 120 (the user marks Calendars read-only or writable), 121 (Events with guests are read-only), 122 (the CalDAV resource to send, built from a UID's Event Rows), 123 (the CalDAV Sender, run by every sync), 124 (changes sent as they're made; a refused write is a Sync Error; the reason for "Not yet synced") and 125 (recurrence scopes, Exceptions and undos reach the server), so that each part's `/implement` fits one context window. The parts restate the comments above that still hold. Work from those; this file stays for its history.
