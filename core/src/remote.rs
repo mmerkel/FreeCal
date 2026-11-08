@@ -53,6 +53,10 @@ pub(crate) type FetchToo<'a> = &'a dyn Fn(&[String]) -> Vec<String>;
 
 /// A server Account's server, logged in.
 pub(crate) trait Remote {
+    /// The Account's Provider, which [`connect`] logged in to; never the
+    /// Local Provider, which has no server.
+    fn provider(&self) -> Provider;
+
     /// The Calendars the Account has on its server that take Events.
     fn discover(&self) -> Result<Vec<AvailableCalendar>>;
 
@@ -90,6 +94,10 @@ pub(crate) trait Remote {
 }
 
 impl Remote for caldav::Client {
+    fn provider(&self) -> Provider {
+        Provider::CalDav
+    }
+
     fn discover(&self) -> Result<Vec<AvailableCalendar>> {
         caldav::Client::discover(self)
     }

@@ -26,8 +26,7 @@ Spec: "Sync engine"; "Provider interface".
 
 Done (2026-11-08).
 
-- The entry is `sync::incoming` (`core/src/sync/mod.rs`): an exhaustive `match` on the Provider, `Provider::Local => Ok(None)` as the Local Account has no server. The CalDAV side, `sync::caldav::incoming::sync`, reads the Known Server Resources and decides between the First Sync page by page, its rest and an incremental Incoming Sync; `Core::first_sync` moved there. `changes`, `incoming_sync` and `mirror_and_propagate` are now private to the CalDAV Sync Engine.
-- The Provider reaches the entry with the Remote: `Core::remote` returns the Account's Provider with it.
+- The entry is `sync::incoming` (`core/src/sync/mod.rs`): an exhaustive `match` on the Provider, which the Remote names (`Remote::provider`), as `remote::connect` made it for the Account's Provider; the Local arm is `unreachable!`, as the Local Provider has no Remote. The CalDAV side, `sync::caldav::incoming::sync`, reads the Known Server Resources and decides between the First Sync page by page, its rest and an incremental Incoming Sync; `Core::first_sync` moved there. `changes`, `incoming_sync` and `mirror_and_propagate` are now private to the CalDAV Sync Engine.
 - The Sync Engine takes the Store's `Mutex`, not a `&Store`, and locks it only for its reads and the `set_synced` write: holding the Store lock across the network requests and the recorder, which locks it again, would deadlock.
 - `CODING_STANDARDS.md` "Local Store" now says that `sync/mod.rs` holds the entry and the recorder, and that a Provider's own Mirror reads sit in `mirror/` beside its writes, as this ticket moved them.
 - The `Holds` unit test moved with `read_caldav_resource`; no other test changed. The core suite, clippy and fmt pass.

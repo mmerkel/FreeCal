@@ -32,11 +32,10 @@ use crate::{CalendarId, ImportedEvent, Result};
 pub(crate) fn sync(
     remote: &dyn Remote,
     store: &Mutex<Store>,
-    (calendar_id, url, state): &CalendarToSync,
+    &(calendar_id, ref url, ref state): &CalendarToSync,
     display: Tz,
     record: Recorder,
 ) -> Result<Option<JournalTransactionId>> {
-    let calendar_id = *calendar_id;
     let known = store.lock().unwrap().known_server_resources(calendar_id)?;
     let origin = match state {
         None if known.is_empty() => {

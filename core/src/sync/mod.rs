@@ -31,8 +31,8 @@ pub(crate) type Recorder<'a> = &'a dyn Fn(
     &mut dyn FnMut(&mut JournalTransaction) -> Result<()>,
 ) -> Result<Option<JournalTransactionId>>;
 
-/// Runs the Incoming Sync of `calendar`, a Calendar of an Account of
-/// `provider`, through its server `remote`, by that Provider's Sync Engine,
+/// Runs the Incoming Sync of `calendar` through its Account's server
+/// `remote`, by the Sync Engine of the Account's Provider,
 /// with Journal Transactions opened through `record`. The Sync Engine reads
 /// its Known Server Resources from `store` and decides between a First Sync,
 /// page by page while the Calendar holds nothing from its server yet, its
@@ -41,16 +41,14 @@ pub(crate) type Recorder<'a> = &'a dyn Fn(
 /// Journal Transaction, none for a First Sync, which the Change Journal
 /// doesn't record (ADR 0009), or for one that changed nothing.
 pub(crate) fn incoming(
-    provider: Provider,
     remote: &dyn Remote,
     store: &Mutex<Store>,
     calendar: &CalendarToSync,
     display: Tz,
     record: Recorder,
 ) -> Result<Option<JournalTransactionId>> {
-    match provider {
-        // The Local Account has no server, so nothing comes in.
-        Provider::Local => Ok(None),
+    match remote.provider() {
+        Provider::Local => unreachable!("the Local Provider has no server"),
         Provider::CalDav => caldav::incoming::sync(remote, store, calendar, display, record),
     }
 }

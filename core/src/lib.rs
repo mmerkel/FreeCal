@@ -233,7 +233,7 @@ impl Core {
     /// Syncs.
     pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
         let remote = self.remote(account_id)?;
-        let offered = offered_by(remote.as_ref())?;
+        let offered = offered_by(remote.as_deref())?;
         let add = |store: &Store| {
             // Added already, or earlier in `urls`.
             let mut taken = store.calendar_urls(account_id)?;
@@ -251,7 +251,7 @@ impl Core {
                     .collect::<Result<Vec<_>>>()
             })
         };
-        let Some((provider, remote)) = remote else {
+        let Some(remote) = remote else {
             let added = add(&self.store())?;
             self.signals.send(Signal::CalendarsChanged);
             return Ok(added);
@@ -267,7 +267,7 @@ impl Core {
         self.sync_calendars(
             added.account_sync,
             StartedBy::User,
-            (provider, remote.as_ref()),
+            remote.as_ref(),
             calendars,
         )?;
         Ok(added.calendars)
@@ -309,10 +309,10 @@ impl Core {
             Ok(remote.map(|remote| (remote, calendars)))
         });
         match to_sync {
-            Ok(Some(((provider, remote), calendars))) => self.sync_calendars(
+            Ok(Some((remote, calendars))) => self.sync_calendars(
                 account_sync,
                 started_by,
-                (provider, remote.as_ref()),
+                remote.as_ref(),
                 calendars
                     .into_iter()
                     .map(|calendar| (calendar, None))
@@ -324,8 +324,8 @@ impl Core {
         }
     }
 
-    /// Syncs the Calendars `calendars` of a server Account of `provider`, in
-    /// order, through its server `remote`, in the Account's Running Sync
+    /// Syncs the Calendars `calendars` of a server Account, in order,
+    /// through its server `remote`, in the Account's Running Sync
     /// `account_sync`, started by `started_by`, and ends that. The Calendars
     /// paired with a Running Sync are syncing already, as
     /// [`Core::add_calendars`] starts them; any other syncing now is left
@@ -337,7 +337,7 @@ impl Core {
         &self,
         account_sync: RunningSync,
         started_by: StartedBy,
-        (provider, remote): (Provider, &dyn Remote),
+        remote: &dyn Remote,
         calendars: Vec<(CalendarToSync, Option<RunningSync>)>,
     ) -> Result<Vec<Changed<CalendarId>>> {
         let mut synced = Vec::new();
@@ -345,8 +345,7 @@ impl Core {
         let mut about_account = None;
         // The Calendars it doesn't reach end as before the sync, as the
         // loop drops their Running Syncs.
-        for (calendar, started) in calendars {
-            let (calendar_id, ..) = calendar;
+        for (calendar @ (calendar_id, ..), started) in calendars {
             let calendar_sync = match started {
                 Some(calendar_sync) => calendar_sync,
                 None => match self.sync_status().start_calendar(calendar_id, started_by) {
@@ -354,7 +353,7 @@ impl Core {
                     None => continue,
                 },
             };
-            match calendar_sync.end(self.sync_calendar(provider, remote, &calendar)) {
+            match calendar_sync.end(self.sync_calendar(remote, &calendar)) {
                 Ok(changed) => synced.extend(changed),
                 Err(error) if sync_status::about_account(&error) => {
                     about_account = Some(error);
@@ -481,23 +480,21 @@ impl Core {
         }
     }
 
-    /// Runs the Incoming Sync of `calendar`, a Calendar of an Account of
-    /// `provider`, through its server `remote`, as the Sync Engine decides
+    /// Runs the Incoming Sync of `calendar` through its Account's server
+    /// `remote`, as the Sync Engine decides
     /// (see [`sync::incoming`]). Returns the Calendar with its Journal
     /// Transaction.
     fn sync_calendar(
         &self,
-        provider: Provider,
         remote: &dyn Remote,
         calendar: &CalendarToSync,
     ) -> Result<Changed<CalendarId>> {
         let record: sync::Recorder = &|origin, change| {
-            self.record(origin, |journal_transaction| change(journal_transaction))
+            self.record(origin, change)
                 .map(|changed| changed.journal_transaction)
         };
         let (calendar_id, ..) = *calendar;
         let journal_transaction = sync::incoming(
-            provider,
             remote,
             &self.store,
             calendar,
@@ -513,13 +510,12 @@ impl Core {
     /// Every Calendar a server Account's server offers now, added or not;
     /// none for the Local Account.
     fn offered_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
-        offered_by(self.remote(id)?.as_ref())
+        offered_by(self.remote(id)?.as_deref())
     }
 
     /// The Provider interface to a server Account's server, logged in with
-    /// the password from the keyring, with the Account's Provider; none for
-    /// the Local Account.
-    fn remote(&self, id: AccountId) -> Result<Option<(Provider, Box<dyn Remote>)>> {
+    /// the password from the keyring; none for the Local Account.
+    fn remote(&self, id: AccountId) -> Result<Option<Box<dyn Remote>>> {
         let (account, key) = {
             let store = self.store();
             (store.find_account(id)?, store.account_keyring_key(id)?)
@@ -533,8 +529,7 @@ impl Core {
             .secret(&key)
             .map_err(CoreError::KeyringUnavailable)?
             .ok_or(CoreError::PasswordNotInKeyring)?;
-        let remote = remote::connect(account.provider, server, password)?;
-        Ok(remote.map(|remote| (account.provider, remote)))
+        remote::connect(account.provider, server, password)
     }
 
     /// Removes a server Account with its Calendars, as
@@ -953,6 +948,6 @@ fn server_accounts_of(store: &Store) -> Result<Vec<AccountId>> {
 }
 
 /// Every Calendar a server offers, added or not; none without a server.
-fn offered_by(remote: Option<&(Provider, Box<dyn Remote>)>) -> Result<Vec<AvailableCalendar>> {
-    remote.map_or_else(|| Ok(Vec::new()), |(_, remote)| remote.discover())
+fn offered_by(remote: Option<&dyn Remote>) -> Result<Vec<AvailableCalendar>> {
+    remote.map_or_else(|| Ok(Vec::new()), Remote::discover)
 }
