@@ -10,16 +10,16 @@
 
 Spec: US-46; "Change Journal"; "Testing Decisions" (Seam 1). ADR 0012.
 
-**Blocked by:** 08, 69, 127, 128, 129
+**Blocked by:** 08, 69, 127, 128
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
 - [x] Recurrence scope edits (this / this and following / all) and Exceptions reach the server correctly
-- [ ] An undo or redo of a change in a server Calendar is sent to the server like any other change, under the original identity
+- [x] An undo or redo of a change in a server Calendar is sent to the server like any other change, under the original identity
 - [x] An undone sync stays undone after the next whole listing, including one with a takeover
-- [ ] Unknown fields survive these edits on the server
+- [x] Unknown fields survive these edits on the server
 - [x] Tested against Radicale
 
 ## Comments
@@ -39,3 +39,4 @@ Spec: US-46; "Change Journal"; "Testing Decisions" (Seam 1). ADR 0012.
   - **New terms:**
     - Code names: `moved_with` (an Event of a Server Object with its recurrence ID moved as its Recurring Event moved), `Group::RecurrenceId` (the `RECURRENCE-ID` line as a group of FreeCal's Properties), `normal_form` (now `pub(crate)`).
     - Test names: `OnServer::another_client_shows` and `assert_read_back` (a second client's First Sync of the Calendar shows what this one shows), `Radicale::event_names` (the resource names a Radicale Calendar holds).
+- 2026-11-08: the user closed boxes 2 and 4 and the ticket. What is left of them moved to ticket 129: an undone sent DELETE keeping its href and unknown fields, moves to another Calendar, and the new Recurring Event of a split.
