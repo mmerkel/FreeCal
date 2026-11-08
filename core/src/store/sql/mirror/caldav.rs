@@ -15,6 +15,7 @@ use rusqlite::{OptionalExtension, params};
 
 use super::super::readable;
 use crate::event::ServerObject;
+use crate::guests;
 use crate::store::{DatabaseTransaction, Store};
 use crate::sync::SyncEngineWritePermission;
 use crate::sync::caldav::KnownServerResource;
@@ -64,10 +65,12 @@ impl Store {
 
 impl DatabaseTransaction<'_> {
     /// Writes `object` as the CalDAV Server Object of a Calendar and the
-    /// UID `uid`, address included, over the one there is (ADR 0015). It
-    /// fails if another Server Object of the Calendar is at its address. An
-    /// Ignored Resource at its address leaves `caldav_ignored_resource`, as
-    /// an href is never both mirrored and ignored.
+    /// UID `uid`, address included, over the one there is (ADR 0015), with
+    /// the attendees of its text (see [`guests`]), so that they always
+    /// match it. It fails if another Server Object of the Calendar is at
+    /// its address. An Ignored Resource at its address leaves
+    /// `caldav_ignored_resource`, as an href is never both mirrored and
+    /// ignored.
     pub(crate) fn write_object(
         &self,
         permission: &SyncEngineWritePermission,
@@ -77,11 +80,19 @@ impl DatabaseTransaction<'_> {
     ) -> Result<()> {
         self.forget_ignored_resource(permission, calendar_id, &object.href)?;
         self.tx.execute(
-            "INSERT INTO caldav_server_object (calendar_id, uid, href, etag, data) \
-             VALUES (?1, ?2, ?3, ?4, ?5) \
+            "INSERT INTO caldav_server_object (calendar_id, uid, href, etag, data, attendees) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
              ON CONFLICT (calendar_id, uid) DO UPDATE \
-             SET href = excluded.href, etag = excluded.etag, data = excluded.data",
-            params![calendar_id.0, uid, object.href, object.etag, object.data],
+             SET href = excluded.href, etag = excluded.etag, data = excluded.data, \
+             attendees = excluded.attendees",
+            params![
+                calendar_id.0,
+                uid,
+                object.href,
+                object.etag,
+                object.data,
+                guests::stored(&guests::attendees(&object.data))
+            ],
         )?;
         Ok(())
     }

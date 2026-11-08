@@ -1,7 +1,8 @@
 <!--
   An Event's details: its title, time, repeat, location, description and
-  Calendar, with Edit and Delete icons for Events of writable Calendars; the
-  others say they are read-only and why. Delete asks first, and for an
+  Calendar, with Edit and Delete icons for Events of writable Calendars
+  without guests; the others say they are read-only and why: a Read-only
+  Calendar, or guests, with where to edit it instead. Delete asks first, and for an
   Occurrence of a Recurring Event whether to delete it alone or all. A click
   on the backdrop closes the details.
 -->
@@ -14,6 +15,7 @@
   import Repeat from '@lucide/svelte/icons/repeat';
   import Text from '@lucide/svelte/icons/text';
   import Trash from '@lucide/svelte/icons/trash-2';
+  import Users from '@lucide/svelte/icons/users';
   import type { Calendar as CalendarType, Event, When } from '../core/types';
   import { t } from '../i18n';
   import Dialog from './Dialog.svelte';
@@ -50,7 +52,7 @@
     onopenlink,
   }: Props = $props();
 
-  const writable = $derived(calendar !== undefined && !calendar.readOnly);
+  const writable = $derived(calendar !== undefined && !calendar.readOnly && !event.hasGuests);
   const title = $derived(event.title || t('event.untitled'));
   const repeat = $derived(describeRepeat(event.repeat, event.customRepeat));
   /** Whether Delete asks which Occurrences to delete: for an Event that repeats or is an Exception. */
@@ -133,6 +135,12 @@
           <dd>{t('event.readOnlyCalendar')}</dd>
         </div>
       {/if}
+    {/if}
+    {#if event.hasGuests}
+      <div class="row">
+        <dt><Users size={14} aria-label={t('event.readOnly')} /></dt>
+        <dd>{t('event.hasGuests')}</dd>
+      </div>
     {/if}
   </dl>
   {#if failure}

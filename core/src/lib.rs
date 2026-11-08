@@ -9,6 +9,7 @@ mod calendar;
 mod clock;
 mod error;
 mod event;
+mod guests;
 mod import;
 mod journal;
 mod keyring;
@@ -183,7 +184,9 @@ impl Core {
     /// keyring fails.
     pub fn add_caldav_account(&self, login: &CalDavLogin) -> Result<AddedAccount> {
         let client = caldav::Client::new(login)?;
-        let available = client.discover()?;
+        let discovered = client.discover()?;
+        let own_addresses =
+            guests::caldav_own_addresses(&discovered.user_addresses, &login.username);
         let server = ServerLogin {
             url: client.url().to_string(),
             username: login.username.clone(),
@@ -198,7 +201,12 @@ impl Core {
             .store(&key, &label, &login.password)
             .map_err(CoreError::KeyringUnavailable)?;
         let added = self.store().write(|database_transaction| {
-            database_transaction.insert_server_account(Provider::CalDav, &server, &key)
+            database_transaction.insert_server_account(
+                Provider::CalDav,
+                &server,
+                &key,
+                &own_addresses,
+            )
         });
         if added.is_err() {
             // Best effort: the Account failed already.
@@ -206,7 +214,10 @@ impl Core {
         }
         let account = added?;
         self.signals.send(Signal::CalendarsChanged);
-        Ok(AddedAccount { account, available })
+        Ok(AddedAccount {
+            account,
+            available: discovered.calendars,
+        })
     }
 
     /// The Available Calendars of a server Account, fetched from its server
@@ -683,7 +694,8 @@ impl Core {
 
     /// An Event with everything its details and editor show.
     pub fn event(&self, id: EventId) -> Result<Event> {
-        Opened::load(&*self.store(), id)?.to_event(self.clock.time_zone())
+        let store = self.store();
+        Opened::load(&*store, id)?.to_event(&store, self.clock.time_zone())
     }
 
     /// The Server Object an Event belongs to (ADR 0015), as the server last
@@ -811,6 +823,8 @@ impl Core {
                 title: occurrence.title,
                 when: occurrence.when.to_when(zone)?,
                 recurrence_id: occurrence.recurrence_id,
+                // The Change Journal changes no Event with guests.
+                has_guests: false,
             },
         })
     }

@@ -184,10 +184,12 @@ fn samples_file() -> (String, Vec<String>) {
         repeat: Some(repeat),
         custom_repeat: true,
         recurrence_id: None,
+        has_guests: false,
     };
     let exception = Event {
         id: EventId(4),
         recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
+        has_guests: true,
         ..event.clone()
     };
     let server = ServerLogin {
@@ -254,6 +256,7 @@ fn samples_file() -> (String, Vec<String>) {
                 title: "Holiday".to_owned(),
                 when: all_day,
                 recurrence_id: None,
+                has_guests: false,
             },
             Occurrence {
                 event_id: EventId(3),
@@ -261,6 +264,7 @@ fn samples_file() -> (String, Vec<String>) {
                 title: "Dentist".to_owned(),
                 when: timed,
                 recurrence_id: Some("2026-10-05T09:30:00".to_owned()),
+                has_guests: true,
             },
         ]),
         samples(&[repeat]),

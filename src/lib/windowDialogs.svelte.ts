@@ -299,19 +299,23 @@ export class WindowDialogs {
     }
   }
 
-  /** A drag the grid refused, because the Occurrence's Calendar is read-only. */
+  /**
+   * A drag the grid refused, because the Occurrence's Calendar is read-only
+   * or its Event has guests; the Calendar is named first, as the user can
+   * change that in FreeCal.
+   */
   refuseDrag(id: EventId, recurrenceId: string | null) {
     const dragged = this.#occurrence(id, recurrenceId);
     const calendar = this.#model.directory?.calendars.find(
       (found) => found.id === dragged?.calendarId,
     );
     if (!dragged || !calendar) return;
-    this.#toast = {
-      message: t('event.readOnlyDrag', {
-        title: dragged.title || t('event.untitled'),
-        calendar: calendar.name,
-      }),
-    };
+    const title = dragged.title || t('event.untitled');
+    if (calendar.readOnly) {
+      this.#toast = { message: t('event.readOnlyDrag', { title, calendar: calendar.name }) };
+    } else if (dragged.hasGuests) {
+      this.#toast = { message: t('event.hasGuestsDrag', { title }) };
+    }
   }
 
   /** Deletes the Event whose details are open, all its Occurrences. */

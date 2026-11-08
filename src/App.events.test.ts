@@ -212,6 +212,27 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
   expect(within(details).getByText('Can’t be changed: its calendar is read-only.')).toBeVisible();
 });
 
+test('an Event with guests can’t be edited or deleted, and says where to edit it', async () => {
+  const user = userEvent.setup();
+  const meeting = event({ calendarId: home.id, title: 'Meeting', when: monday, hasGuests: true });
+  const core = firstLaunch({ calendars: [home], events: [meeting] });
+  await showApp(core);
+
+  const details = await openOccurrence(user, core, meeting);
+
+  expect(
+    within(details)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label')),
+  ).toEqual(['Close']);
+  expect(
+    within(details).getByText(
+      'Has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
+    ),
+  ).toBeVisible();
+  expect(within(details).queryByText(/calendar is read-only/)).toBeNull();
+});
+
 test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
   const user = userEvent.setup();
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
@@ -597,6 +618,30 @@ test('trying to drag an Event of a Read-only Calendar says why it can’t move',
     '“⁨Fixed⁩” can’t be changed: its calendar “⁨Holidays⁩” is read-only.',
   );
   expect(core.callsOf('rescheduleEvent')).toEqual([]);
+});
+
+test('trying to drag an Event with guests says why it can’t move', async () => {
+  const meeting = event({ calendarId: home.id, title: 'Meeting', when: monday, hasGuests: true });
+  const core = firstLaunch({ calendars: [home], events: [meeting] });
+  await showApp(core);
+
+  stubGrid.props!.onrefusedrag!(meeting.id, null);
+
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '“⁨Meeting⁩” has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
+  );
+  expect(core.callsOf('rescheduleEvent')).toEqual([]);
+});
+
+test('a refused drag of an Event with guests names a hostile Event as text', async () => {
+  const fixed = event({ calendarId: home.id, title: hostile.title, when: monday, hasGuests: true });
+  await showApp(firstLaunch({ calendars: [home], events: [fixed] }));
+
+  stubGrid.props!.onrefusedrag!(fixed.id, null);
+
+  const toast = await screen.findByRole('status');
+  expect(toast.querySelector('p')!.textContent).toBe(hostile.expected.hasGuestsDrag);
+  expect(document.querySelector('img, script')).toBeNull();
 });
 
 test('a refused drag names a hostile Event and Calendar as text', async () => {

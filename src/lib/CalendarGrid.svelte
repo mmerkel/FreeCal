@@ -282,9 +282,11 @@
       const selected =
         occurrence.eventId === selectedEventId &&
         (selectedRecurrenceId === undefined || occurrence.recurrenceId === selectedRecurrenceId);
-      const editable = movable && calendar !== undefined && !calendar.readOnly;
+      // An Event with guests is read-only too (spec: "Attendees").
+      const readOnly = calendar?.readOnly === true || occurrence.hasGuests;
+      const editable = movable && calendar !== undefined && !readOnly;
       // Dragging it says why it can't move (spec: "Event details").
-      const fixed = movable && calendar?.readOnly === true;
+      const fixed = movable && readOnly;
       return {
         id: gridId(occurrence),
         // Titles are untrusted; FullCalendar draws them as text, never as HTML.

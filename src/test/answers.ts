@@ -95,6 +95,7 @@ export function event(
     repeat: null,
     customRepeat: false,
     recurrenceId: null,
+    hasGuests: false,
     ...rest,
     location: typeof location === 'string' ? plainText(location) : location,
     description: typeof description === 'string' ? plainText(description) : description,
@@ -123,6 +124,7 @@ export function occurrence(of: Event, fields: Partial<Occurrence> = {}): Occurre
     title: of.title,
     when: of.when,
     recurrenceId: of.recurrenceId,
+    hasGuests: of.hasGuests,
     ...fields,
   };
 }

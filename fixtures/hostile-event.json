@@ -136,6 +136,7 @@
     "readOnlyDrag": "“\u2068<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com\u2069” can’t be changed: its calendar “\u2068<img src=x onerror=alert(11)> ../../.bashrc {name} _Work_ %s\u202e\u2069” is read-only.",
     "deleteQuestion": "“⁨<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com⁩” will be deleted.",
     "removeCalendarTitle": "Remove “\u2068<img src=x onerror=alert(11)> ../../.bashrc {name} _Work_ %s\u202e\u2069” from FreeCal?",
-    "accountName": "⁨<img src=x onerror=alert(10)> {username} _alice_ %s‮⁩ (CalDAV)"
+    "accountName": "⁨<img src=x onerror=alert(10)> {username} _alice_ %s‮⁩ (CalDAV)",
+    "hasGuestsDrag": "“\u2068<img src=x onerror=alert(1)><script>alert(2)</script> _Standup_ <b>bold</b>\r\nATTENDEE:mailto:evil@example.com\u2069” has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now."
   }
 }

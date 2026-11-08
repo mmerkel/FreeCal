@@ -168,7 +168,8 @@ export const samples = {
         }
       },
       "customRepeat": true,
-      "recurrenceId": null
+      "recurrenceId": null,
+      "hasGuests": false
     },
     {
       "id": 4,
@@ -216,7 +217,8 @@ export const samples = {
         }
       },
       "customRepeat": true,
-      "recurrenceId": "2026-10-19T09:30:00"
+      "recurrenceId": "2026-10-19T09:30:00",
+      "hasGuests": true
     }
   ],
   Occurrence: [
@@ -229,7 +231,8 @@ export const samples = {
         "start": "2026-10-05",
         "end": "2026-10-06"
       },
-      "recurrenceId": null
+      "recurrenceId": null,
+      "hasGuests": false
     },
     {
       "eventId": 3,
@@ -240,7 +243,8 @@ export const samples = {
         "start": "2026-10-05T09:30:00",
         "end": "2026-10-05T10:00:00"
       },
-      "recurrenceId": "2026-10-05T09:30:00"
+      "recurrenceId": "2026-10-05T09:30:00",
+      "hasGuests": true
     }
   ],
   Repeat: [
@@ -634,7 +638,8 @@ export const samples = {
           }
         },
         "customRepeat": true,
-        "recurrenceId": null
+        "recurrenceId": null,
+        "hasGuests": false
       }
     },
     {
@@ -685,7 +690,8 @@ export const samples = {
           }
         },
         "customRepeat": true,
-        "recurrenceId": null
+        "recurrenceId": null,
+        "hasGuests": false
       }
     }
   ],
@@ -707,6 +713,9 @@ export const samples = {
     },
     {
       "code": "calendarReadOnly"
+    },
+    {
+      "code": "eventHasGuests"
     },
     {
       "code": "eventNotFound"

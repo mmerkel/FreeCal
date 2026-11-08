@@ -75,6 +75,10 @@ pub struct Event {
     /// Event that it changed, in the Normal Form, or as stored when it isn't
     /// one; none for every other Event.
     pub recurrence_id: Option<String>,
+    /// Whether it has guests, attendees other than the user, which makes
+    /// it read-only (spec: "Attendees"). For an Exception, whether its
+    /// Recurring Event has, as they are one Event on the server.
+    pub has_guests: bool,
 }
 
 /// One dated appearance of an Event in the grid. A single Event has exactly
@@ -96,6 +100,9 @@ pub struct Occurrence {
     /// Exception that is an Event of its own: without its Recurring Event,
     /// or changing none of its Occurrences.
     pub recurrence_id: Option<String>,
+    /// Whether its Event has guests, which makes it read-only (spec:
+    /// "Attendees"), as [`Event::has_guests`] says.
+    pub has_guests: bool,
 }
 
 impl Occurrence {
@@ -524,10 +531,11 @@ impl Opened {
             .expect("the opened Event loaded as the Event")
     }
 
-    /// The Event as the window shows it, in the Display Time Zone `zone`.
-    /// An Exception repeats with its Recurring Event, which the editor can
-    /// change from it, unless it is an Event of its own.
-    pub fn to_event(&self, zone: Tz) -> Result<Event> {
+    /// The Event as the window shows it, in the Display Time Zone `zone`,
+    /// with whether `store` finds guests for its UID. An Exception repeats
+    /// with its Recurring Event, which the editor can change from it, unless
+    /// it is an Event of its own.
+    pub fn to_event(&self, store: &Store, zone: Tz) -> Result<Event> {
         let fields = self.fields();
         let repeats = match &self.loaded.event {
             Some((_, recurring)) if self.is_exception() && !self.is_of_its_own() => recurring,
@@ -557,6 +565,7 @@ impl Opened {
                         obtained.map(|obtained| obtained.as_obtained().to_owned())
                     })
             }),
+            has_guests: store.has_guests(self.loaded.calendar_id, &self.loaded.uid)?,
         })
     }
 
@@ -676,6 +685,7 @@ pub(crate) fn occurrences(
                 title: event.fields.title.clone(),
                 when: when.to_when(zone)?,
                 recurrence_id,
+                has_guests: event.has_guests,
             })
         };
         match expanded {

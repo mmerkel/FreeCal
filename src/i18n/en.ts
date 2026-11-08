@@ -157,6 +157,10 @@ export const en = {
   'event.description': 'Description',
   'event.readOnly': 'Read-only',
   'event.readOnlyCalendar': 'Can’t be changed: its calendar is read-only.',
+  'event.hasGuests':
+    'Has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
+  'event.hasGuestsDrag':
+    '“\u2068{title}\u2069” has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
   'event.readOnlyDrag':
     '“\u2068{title}\u2069” can’t be changed: its calendar “\u2068{calendar}\u2069” is read-only.',
   'event.pinnedZone': 'The original has no time zone, so FreeCal uses {zone}.',
@@ -276,6 +280,7 @@ export const en = {
   'error.accountNotFound': 'the account no longer exists',
   'error.calendarNotFound': 'the calendar no longer exists',
   'error.calendarReadOnly': 'the calendar is read-only',
+  'error.eventHasGuests': 'the event has guests',
   'error.eventNotFound': 'the event no longer exists',
   'error.endBeforeStart': 'an event can’t end before it starts',
   'error.invalidRepeat':

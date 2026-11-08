@@ -16,6 +16,8 @@ pub enum CoreError {
     CalendarNotFound(CalendarId),
     #[error("Calendar {0:?} is read-only")]
     CalendarReadOnly(CalendarId),
+    #[error("the Event has guests, so FreeCal doesn't change it")]
+    EventHasGuests,
     #[error("there is no Event {0:?}")]
     EventNotFound(EventId),
     #[error("an Event can't end before it starts")]
@@ -98,6 +100,7 @@ impl CoreError {
             CoreError::AccountNotFound(_) => ErrorCode::AccountNotFound,
             CoreError::CalendarNotFound(_) => ErrorCode::CalendarNotFound,
             CoreError::CalendarReadOnly(_) => ErrorCode::CalendarReadOnly,
+            CoreError::EventHasGuests => ErrorCode::EventHasGuests,
             CoreError::EventNotFound(_) => ErrorCode::EventNotFound,
             CoreError::EndBeforeStart => ErrorCode::EndBeforeStart,
             CoreError::InvalidRepeat => ErrorCode::InvalidRepeat,
@@ -160,6 +163,8 @@ pub enum ErrorCode {
     AccountNotFound,
     CalendarNotFound,
     CalendarReadOnly,
+    /// An Event with guests is read-only (spec: "Attendees").
+    EventHasGuests,
     EventNotFound,
     EndBeforeStart,
     InvalidRepeat,
@@ -280,6 +285,7 @@ impl ErrorCode {
             ErrorCode::AccountNotFound,
             ErrorCode::CalendarNotFound,
             ErrorCode::CalendarReadOnly,
+            ErrorCode::EventHasGuests,
             ErrorCode::EventNotFound,
             ErrorCode::EndBeforeStart,
             ErrorCode::InvalidRepeat,

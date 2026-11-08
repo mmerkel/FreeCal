@@ -63,6 +63,12 @@ const CALENDAR_HOME_SET: Property = Property {
     name: "calendar-home-set",
 };
 
+/// The addresses that name the user as an attendee (RFC 6638 §2.4.1).
+const CALENDAR_USER_ADDRESS_SET: Property = Property {
+    namespace: CALDAV,
+    name: "calendar-user-address-set",
+};
+
 const RESOURCETYPE: Property = Property {
     namespace: DAV,
     name: "resourcetype",
@@ -113,6 +119,14 @@ const CALENDAR_DATA: Property = Property {
     namespace: CALDAV,
     name: "calendar-data",
 };
+
+/// What [`Client::discover`] finds on the server.
+pub(crate) struct Discovered {
+    /// The Calendars that take Events, by name.
+    pub calendars: Vec<AvailableCalendar>,
+    /// The principal's `calendar-user-address-set`, as the server gave it.
+    pub user_addresses: Vec<String>,
+}
 
 /// A connection to one CalDAV server, logged in as one user.
 pub(crate) struct Client {
@@ -170,11 +184,26 @@ impl Client {
         &self.url
     }
 
-    /// The Calendars the user has on the server that take Events, by name.
-    /// Finding them checks the username and password first.
-    pub fn discover(&self) -> Result<Vec<AvailableCalendar>> {
+    /// The Calendars the user has on the server that take Events, by name,
+    /// with the addresses the server gives for the user. Finding them
+    /// checks the username and password first.
+    pub fn discover(&self) -> Result<Discovered> {
         let principal = self.current_user_principal()?;
-        let (answer, principal) = self.propfind(&principal, Depth::Zero, &[CALENDAR_HOME_SET])?;
+        let (answer, principal) = self.propfind(
+            &principal,
+            Depth::Zero,
+            &[CALENDAR_HOME_SET, CALENDAR_USER_ADDRESS_SET],
+        )?;
+        // As given: they are compared with attendees, which name the user
+        // as a client wrote them, not resolved against the server.
+        let user_addresses = answer
+            .property(CALENDAR_USER_ADDRESS_SET)
+            .map(|set| {
+                set.children(DAV, "href")
+                    .map(|href| href.text.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
         let homes: Vec<Url> = answer
             .property(CALENDAR_HOME_SET)
             .map(|set| {
@@ -209,7 +238,10 @@ impl Client {
             .sort_by(|a, b| (a.name.to_lowercase(), &a.url).cmp(&(b.name.to_lowercase(), &b.url)));
         // Home sets may overlap.
         calendars.dedup_by(|a, b| a.url == b.url);
-        Ok(calendars)
+        Ok(Discovered {
+            calendars,
+            user_addresses,
+        })
     }
 
     /// Whether the server doesn't let the user change the Events of the

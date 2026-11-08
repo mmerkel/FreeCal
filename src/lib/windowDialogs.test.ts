@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import { samples } from '../core/samples.generated';
-import type { Changed, Event, EventDraft, Occurrence, Repeat, Signal } from '../core/types';
+import type {
+  Calendar,
+  Changed,
+  Event,
+  EventDraft,
+  Occurrence,
+  Repeat,
+  Signal,
+} from '../core/types';
 import { dateChanged } from '../test/answers';
 import { calendarId, eventId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
@@ -320,13 +328,25 @@ describe('writes', () => {
   });
 
   test('a refused drag says the Calendar is read-only in the toast', async () => {
-    const { dialogs } = await started();
+    const core = new FakeCore();
+    const calendar = first<Calendar>(samples.Calendar);
+    core.answer('listCalendars', [{ ...calendar, readOnly: true }]);
+    const { dialogs } = await started(core);
 
-    dialogs.refuseDrag(eventId(3), recurrenceId);
+    dialogs.refuseDrag(recurring.eventId, recurrenceId);
 
-    expect(dialogs.toast?.message).toContain('Home');
+    expect(dialogs.toast?.message).toContain(`its calendar “⁨${calendar.name}⁩” is read-only`);
     dialogs.dismissToast();
     expect(dialogs.toast).toBeUndefined();
+  });
+
+  test('a refused drag of an Event with guests in a writable Calendar says so', async () => {
+    const { dialogs } = await started();
+    expect(recurring.hasGuests).toBe(true);
+
+    dialogs.refuseDrag(recurring.eventId, recurrenceId);
+
+    expect(dialogs.toast?.message).toContain('has guests');
   });
 });
 

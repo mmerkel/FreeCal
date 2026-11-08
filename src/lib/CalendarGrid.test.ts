@@ -33,6 +33,7 @@ function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Oc
     calendarId: home.id,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     recurrenceId: null,
+    hasGuests: false,
     ...fields,
   };
 }
@@ -431,12 +432,13 @@ function resizer(found: HTMLElement, edge: 'start' | 'end'): Element | undefined
   return handle && handle.childElementCount === 0 && handle.textContent === '' ? handle : undefined;
 }
 
-test('offers a resize on both edges for Events of writable Calendars only', async () => {
+test('offers a resize on both edges for Events of writable Calendars without guests only', async () => {
   const shared: Calendar = { ...home, id: calendarId(2), name: 'Shared', readOnly: true };
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
       occurrence({ eventId: eventId(1), title: 'Mine' }),
+      occurrence({ eventId: eventId(5), title: 'Meeting', hasGuests: true }),
       occurrence({ eventId: eventId(2), title: 'Theirs', calendarId: shared.id }),
       occurrence({
         eventId: eventId(3),
@@ -460,7 +462,26 @@ test('offers a resize on both edges for Events of writable Calendars only', asyn
     expect(resizer(chip('Holiday'), edge)).toBeDefined();
     expect(resizer(chip('Theirs'), edge)).toBeUndefined();
     expect(resizer(chip('Their holiday'), edge)).toBeUndefined();
+    expect(resizer(chip('Meeting'), edge)).toBeUndefined();
   }
+});
+
+test('reports a drag of an Occurrence with guests in a writable Calendar', async () => {
+  const onrefusedrag = vi.fn();
+  render(CalendarGrid, {
+    ...thatWeek,
+    occurrences: [occurrence({ ...recurring[0], title: 'Meeting', hasGuests: true })],
+    calendars: [home],
+    onreschedule: vi.fn(async () => {}),
+    onrefusedrag,
+  });
+  await waitFor(() => expect(screen.getByText('Meeting')).toBeInTheDocument());
+
+  fireEvent.mouseDown(chip('Meeting'), { clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(window, { clientX: 100, clientY: 140 });
+  fireEvent.mouseUp(window);
+
+  expect(onrefusedrag.mock.calls).toEqual([[eventId(7), recurring[0].recurrenceId]]);
 });
 
 test('reports a drag of an Occurrence it doesn’t offer to move, once, without opening it', async () => {

@@ -32,6 +32,7 @@ use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
+use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId};
 use crate::remote::SyncPoint;
 use crate::sync_status::SyncRecord;
@@ -81,6 +82,31 @@ fn readable<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>
 /// Journal's Journal Event Modifications share with the `event` table.
 const EVENT_FIELDS: &str = "title, all_day, start_at, end_at, start_zone, end_zone, location, \
      description, description_html, zone_pinned, rrule, exdates, recurrence_id";
+
+/// What tells whether a UID's Events have guests ([`guests::has_guests`]):
+/// the attendees of its Corresponding Server Object and the Own Addresses
+/// of its Account, in a query joining both.
+const GUESTS_COLUMNS: &str = "caldav_server_object.attendees, account.own_addresses";
+
+/// Whether the UID's Events have guests, from [`GUESTS_COLUMNS`] at
+/// `first` in `row`: none for a UID without a Server Object, whose
+/// attendees are NULL as the join found none. Untrusted, so a value of
+/// another type than text is taken as one FreeCal can't read.
+fn has_guests(row: &Row, first: usize) -> rusqlite::Result<bool> {
+    let attendees = match row.get(first)? {
+        Value::Null => None,
+        Value::Text(text) => Some(text),
+        _ => Some(String::new()),
+    };
+    let own_addresses = match row.get(first + 1)? {
+        Value::Text(text) => Some(text),
+        _ => None,
+    };
+    Ok(guests::has_guests(
+        attendees.as_deref(),
+        own_addresses.as_deref(),
+    ))
+}
 
 /// Reads [`EVENT_FIELDS`] starting at column `first`.
 fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
@@ -291,6 +317,27 @@ impl Store {
             .optional()?)
     }
 
+    /// Whether the Events of the UID `uid` in a Calendar have guests: their
+    /// Corresponding Server Object names an attendee other than the user
+    /// (see [`guests`]).
+    pub fn has_guests(&self, calendar_id: CalendarId, uid: &str) -> Result<bool> {
+        let has: Option<bool> = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {GUESTS_COLUMNS} FROM caldav_server_object \
+                     JOIN calendar ON calendar.id = caldav_server_object.calendar_id \
+                     JOIN account ON account.id = calendar.account_id \
+                     WHERE caldav_server_object.calendar_id = ?1 \
+                     AND caldav_server_object.uid = ?2"
+                ),
+                params![calendar_id.0, uid],
+                |row| has_guests(row, 0),
+            )
+            .optional()?;
+        Ok(has.unwrap_or(false))
+    }
+
     /// The Server Object the Event `id` belongs to, as the server last gave
     /// it: the Corresponding Server Object of its UID in its Calendar. None
     /// for an Event no Server Object holds, such as one not on a server yet.
@@ -357,13 +404,18 @@ impl Store {
 
     /// The Events of shown Calendars that overlap `range`, found by their
     /// derived UTC instants alone, which for a Recurring Event span all its
-    /// Occurrences. An Event of no length counts when it starts inside the
-    /// range (see [`StoredRange::overlaps`]).
+    /// Occurrences, with whether they have guests. An Event of no length
+    /// counts when it starts inside the range (see
+    /// [`StoredRange::overlaps`]).
     pub fn shown_events_in(&self, range: &StoredRange) -> Result<Vec<RangeEvent>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT event.id, event.calendar_id, event.uid, event.start_utc, \
-             {} \
+             {GUESTS_COLUMNS}, {} \
              FROM event JOIN calendar ON calendar.id = event.calendar_id \
+             JOIN account ON account.id = calendar.account_id \
+             LEFT JOIN caldav_server_object \
+               ON caldav_server_object.calendar_id = event.calendar_id \
+               AND caldav_server_object.uid = event.uid \
              WHERE calendar.shown AND CASE event.all_day \
                WHEN 1 THEN event.start_utc < ?2 AND event.end_utc > ?1 \
                ELSE event.start_utc < ?4 AND (event.end_utc > ?3 \
@@ -389,7 +441,8 @@ impl Store {
                         calendar_id: CalendarId(row.get(1)?),
                         uid: row.get(2)?,
                         start_utc: row.get(3)?,
-                        fields: event_fields(row, 4)?,
+                        has_guests: has_guests(row, 4)?,
+                        fields: event_fields(row, 6)?,
                     })
                 },
             )?

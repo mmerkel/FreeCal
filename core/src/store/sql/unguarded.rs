@@ -5,6 +5,7 @@
 use chrono::{DateTime, FixedOffset};
 use rusqlite::params;
 
+use crate::guests;
 use crate::store::DatabaseTransaction;
 use crate::sync_status::SyncOutcome;
 use crate::{
@@ -19,16 +20,24 @@ const NEW_SERVER_CALENDARS_READ_ONLY: bool = true;
 
 impl DatabaseTransaction<'_> {
     /// Adds a server Account whose secret is in the keyring under
-    /// `keyring_key`.
+    /// `keyring_key`, with its Own Addresses (see [`guests`]).
     pub fn insert_server_account(
         &self,
         provider: Provider,
         server: &ServerLogin,
         keyring_key: &str,
+        own_addresses: &[String],
     ) -> Result<Account> {
         self.tx.execute(
-            "INSERT INTO account (provider, url, username, keyring_key) VALUES (?1, ?2, ?3, ?4)",
-            params![provider.as_str(), server.url, server.username, keyring_key],
+            "INSERT INTO account (provider, url, username, keyring_key, own_addresses) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                provider.as_str(),
+                server.url,
+                server.username,
+                keyring_key,
+                guests::stored(own_addresses)
+            ],
         )?;
         Ok(Account {
             id: AccountId(self.tx.last_insert_rowid()),

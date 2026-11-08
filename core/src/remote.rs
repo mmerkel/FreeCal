@@ -103,7 +103,7 @@ impl Remote for caldav::Client {
     }
 
     fn discover(&self) -> Result<Vec<AvailableCalendar>> {
-        caldav::Client::discover(self)
+        caldav::Client::discover(self).map(|discovered| discovered.calendars)
     }
 
     fn server_read_only(&self, url: &str) -> Result<bool> {

@@ -32,6 +32,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   accountNotFound: 'error.accountNotFound',
   calendarNotFound: 'error.calendarNotFound',
   calendarReadOnly: 'error.calendarReadOnly',
+  eventHasGuests: 'error.eventHasGuests',
   eventNotFound: 'error.eventNotFound',
   endBeforeStart: 'error.endBeforeStart',
   invalidRepeat: 'error.invalidRepeat',

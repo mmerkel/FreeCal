@@ -254,7 +254,7 @@ impl JournalTransaction<'_> {
 
     /// Adds an Event with the UID `uid`.
     pub fn create(&mut self, uid: &str, event: &StoredEvent) -> Result<EventId> {
-        self.writable(event.calendar_id)?;
+        self.event_writable(event.calendar_id, uid)?;
         let id = self.database_transaction.write_event(
             WRITE_PERMISSION,
             None,
@@ -270,8 +270,8 @@ impl JournalTransaction<'_> {
     /// change that changes nothing isn't recorded.
     pub fn replace(&mut self, id: EventId, event: &StoredEvent) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
-        self.writable(previous.calendar_id)?;
-        self.writable(event.calendar_id)?;
+        self.event_writable(previous.calendar_id, &uid)?;
+        self.event_writable(event.calendar_id, &uid)?;
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
@@ -287,7 +287,7 @@ impl JournalTransaction<'_> {
 
     pub fn delete(&mut self, id: EventId) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
-        self.writable(previous.calendar_id)?;
+        self.event_writable(previous.calendar_id, &uid)?;
         self.database_transaction
             .delete_event(WRITE_PERMISSION, id)?;
         self.record_journal_event_modification(id, &uid, Some(&previous), None)
@@ -319,7 +319,7 @@ impl JournalTransaction<'_> {
         if self.database_transaction.current_event(id, uid)?.is_some() {
             return self.replace(id, event);
         }
-        self.writable(event.calendar_id)?;
+        self.event_writable(event.calendar_id, uid)?;
         // An Event Version FreeCal can't read the time of was stored like
         // that; it reads as unreadable again rather than stopping the undo.
         let instants = rule::span(&event.fields).unwrap_or_default();
@@ -336,19 +336,28 @@ impl JournalTransaction<'_> {
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
     /// every Transaction Origin but an Incoming Sync, which loads what the
-    /// server has. Every write checks this itself; a change that targets a
+    /// server has. Every write checks this itself, through
+    /// [`JournalTransaction::event_writable`]; a change that targets a
     /// Calendar, such as an import, checks it first, so that it is refused
     /// even when it would write nothing.
     pub fn writable(&self, id: CalendarId) -> Result<()> {
         let read_only = self.database_transaction.find_calendar(id)?.read_only;
-        match self.origin {
-            TransactionOrigin::UserAction | TransactionOrigin::Import | TransactionOrigin::Undo
-                if read_only =>
-            {
-                Err(CoreError::CalendarReadOnly(id))
-            }
-            _ => Ok(()),
+        if read_only && !self.origin.is_incoming_sync() {
+            return Err(CoreError::CalendarReadOnly(id));
         }
+        Ok(())
+    }
+
+    /// Refuses writes to the Events of the UID `uid` in the Calendar `id`
+    /// as [`JournalTransaction::writable`] does, and while they have guests
+    /// (see [`crate::guests`]), which only an Incoming Sync changes. Every
+    /// write of an Event Row checks this.
+    fn event_writable(&self, id: CalendarId, uid: &str) -> Result<()> {
+        self.writable(id)?;
+        if !self.origin.is_incoming_sync() && self.database_transaction.has_guests(id, uid)? {
+            return Err(CoreError::EventHasGuests);
+        }
+        Ok(())
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for an

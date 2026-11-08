@@ -98,7 +98,7 @@ export type Colour = string;
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "journalTransactionNotFound" } | { "code": "changedSinceJournalTransaction" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventHasGuests" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "journalTransactionNotFound" } | { "code": "changedSinceJournalTransaction" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" };
 
 /**
  * An Event with everything its details and editor show.
@@ -125,7 +125,13 @@ customRepeat: boolean,
  * Event that it changed, in the Normal Form, or as stored when it isn't
  * one; none for every other Event.
  */
-recurrenceId: string | null, };
+recurrenceId: string | null,
+/**
+ * Whether it has guests, attendees other than the user, which makes
+ * it read-only (spec: "Attendees"). For an Exception, whether its
+ * Recurring Event has, as they are one Event on the server.
+ */
+hasGuests: boolean, };
 
 /**
  * What the user gives an Event when creating or editing it.
@@ -215,7 +221,12 @@ eventId: EventId, calendarId: CalendarId, title: string, when: When,
  * Exception that is an Event of its own: without its Recurring Event,
  * or changing none of its Occurrences.
  */
-recurrenceId: string | null, };
+recurrenceId: string | null,
+/**
+ * Whether its Event has guests, which makes it read-only (spec:
+ * "Attendees"), as [`Event::has_guests`] says.
+ */
+hasGuests: boolean, };
 
 /**
  * The most important state of all server Accounts and Calendars, as the

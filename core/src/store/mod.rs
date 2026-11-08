@@ -41,6 +41,8 @@ pub struct RangeEvent {
     pub uid: String,
     pub fields: EventFields,
     pub start_utc: i64,
+    /// Whether the Events of its UID have guests (see [`crate::guests`]).
+    pub has_guests: bool,
 }
 
 /// Which Events [`Store::events_with_uid`] gives.
@@ -107,8 +109,12 @@ impl Store {
             read_only: false,
         };
         self.write(|database_transaction| {
-            let account =
-                database_transaction.insert_server_account(Provider::CalDav, &login, "key")?;
+            let account = database_transaction.insert_server_account(
+                Provider::CalDav,
+                &login,
+                "key",
+                &["anna@dav.example".to_owned()],
+            )?;
             let calendar = database_transaction.insert_server_calendar(account.id, &available)?;
             // A new server Calendar starts marked read-only.
             database_transaction.set_calendar_read_only(calendar.id, false)?;

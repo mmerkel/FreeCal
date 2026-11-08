@@ -116,10 +116,20 @@ impl Radicale {
 
     /// A new user, who can log in straight away.
     pub fn user(&self) -> User {
+        self.user_named(|number| format!("user{number}"))
+    }
+
+    /// A new user whose name is an email address, `user<n>@example.com`.
+    pub fn user_with_address(&self) -> User {
+        self.user_named(|number| format!("user{number}@example.com"))
+    }
+
+    /// A new user named by `name` from a number no other user has.
+    fn user_named(&self, name: impl Fn(usize) -> String) -> User {
         let mut users = self.users.lock().unwrap();
         *users += 1;
         let user = User {
-            name: format!("user{users}"),
+            name: name(*users),
             password: format!("secret-of-user{users}"),
         };
         OpenOptions::new()

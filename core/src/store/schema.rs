@@ -205,6 +205,15 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE calendar ADD COLUMN last_sync_outcome TEXT;
     ALTER TABLE calendar ADD COLUMN last_synced_at INTEGER;
     ",
+    // Ticket 121: who counts as a Guest (see `guests.rs`). A server
+    // Account's Own Addresses, as a JSON array of addresses in the form
+    // they are compared in; none for the Local Account. A CalDAV Server
+    // Object's attendees, derived from its text and written with it, in the
+    // same form. Both untrusted when read.
+    "
+    ALTER TABLE account ADD COLUMN own_addresses TEXT;
+    ALTER TABLE caldav_server_object ADD COLUMN attendees TEXT NOT NULL DEFAULT '[]';
+    ",
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether
