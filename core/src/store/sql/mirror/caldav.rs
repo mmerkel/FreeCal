@@ -4,14 +4,63 @@
 //! holds; and of the Ignored Resources,
 //! `caldav_ignored_resource`, which aren't part of the Mirror. Each takes a
 //! [`SyncEngineWritePermission`], which only [`crate::sync`] can make, and is
-//! a method of a [`DatabaseTransaction`].
+//! a method of a [`DatabaseTransaction`]. The CalDAV Sync Engine's reads of
+//! those tables sit here too, methods of [`Store`]. The Corresponding Server
+//! Object, which the Provider-neutral Sender and Conflicts read (ADR 0014),
+//! stays with the shared readers.
+
+use std::collections::HashMap;
 
 use rusqlite::{OptionalExtension, params};
 
+use super::super::readable;
 use crate::event::ServerObject;
-use crate::store::DatabaseTransaction;
+use crate::store::{DatabaseTransaction, Store};
 use crate::sync::SyncEngineWritePermission;
+use crate::sync::caldav::KnownServerResource;
 use crate::{CalendarId, Result};
+
+impl Store {
+    /// The Known Server Resources of a CalDAV Calendar, by their address as
+    /// the server gave it: its Server Objects, each with the UID it keeps,
+    /// and its Ignored Resources, each with the UID it holds that a Server
+    /// Object keeps, none for one holding several or not read.
+    pub fn known_server_resources(
+        &self,
+        calendar_id: CalendarId,
+    ) -> Result<HashMap<String, KnownServerResource>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT href, etag, uid, FALSE FROM caldav_server_object \
+             WHERE calendar_id = ?1 \
+             UNION ALL SELECT href, etag, uid, TRUE FROM caldav_ignored_resource \
+             WHERE calendar_id = ?1",
+        )?;
+        let known = readable(stmt.query_map([calendar_id.0], |row| {
+            Ok((
+                row.get(0)?,
+                KnownServerResource {
+                    etag: row.get(1)?,
+                    uid: row.get(2)?,
+                    ignored: row.get(3)?,
+                },
+            ))
+        })?)?;
+        Ok(known.into_iter().collect())
+    }
+
+    /// The UID that the CalDAV Server Object at `href` in a Calendar keeps,
+    /// if one is there.
+    pub fn uid_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT uid FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
+                params![calendar_id.0, href],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+}
 
 impl DatabaseTransaction<'_> {
     /// Writes `object` as the CalDAV Server Object of a Calendar and the

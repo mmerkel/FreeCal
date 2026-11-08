@@ -6,25 +6,83 @@
 //! Calendar and UID: an Ambiguous UID is kept by one at a time (ADR 0015).
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use chrono_tz::Tz;
 
 use super::{
-    Ignored, KnownServerResource, delete_if_unkept, fixed_order, forget_ignored, ignore,
-    ignored_to_fetch, mirror, remove_object, unreadable,
+    Holds, Ignored, KnownServerResource, delete_if_unkept, fixed_order, forget_ignored, ignore,
+    ignored_to_fetch, mirror, read_caldav_resource, remove_object, unreadable,
 };
 use crate::event::{self, ServerObject};
-use crate::import::{Holds, read_caldav_resource};
-use crate::journal::{JournalTransaction, TransactionOrigin};
+use crate::journal::{JournalTransaction, JournalTransactionId, TransactionOrigin};
 use crate::remote::{Changes, KnownVersions, Remote};
+use crate::store::{CalendarToSync, Store};
+use crate::sync::Recorder;
 use crate::{CalendarId, ImportedEvent, Result};
+
+/// Runs the CalDAV Incoming Sync of `calendar`, as [`crate::sync::incoming`]
+/// says, deciding from its Known Server Resources: a Calendar whose First
+/// Sync is unfinished, without a sync point, gets the rest of it,
+/// unrecorded like the rest: page by page ([`first_sync`]) while it holds
+/// nothing from its server yet, otherwise as one Journal Transaction with
+/// the Transaction Origin First Sync. Any other Calendar gets what changed
+/// since its sync point as one Journal Transaction with the Transaction
+/// Origin Incoming Sync.
+pub(crate) fn sync(
+    remote: &dyn Remote,
+    store: &Mutex<Store>,
+    (calendar_id, url, state): &CalendarToSync,
+    display: Tz,
+    record: Recorder,
+) -> Result<Option<JournalTransactionId>> {
+    let calendar_id = *calendar_id;
+    let known = store.lock().unwrap().known_server_resources(calendar_id)?;
+    let origin = match state {
+        None if known.is_empty() => {
+            first_sync(remote, store, calendar_id, url, display, record)?;
+            return Ok(None);
+        }
+        None => TransactionOrigin::FirstSync,
+        Some(_) => TransactionOrigin::IncomingSync,
+    };
+    let token = state.as_ref().and_then(|state| state.token.as_deref());
+    let changes = changes(remote, &known, url, token, display)?;
+    record(origin, &mut |journal_transaction| {
+        incoming_sync(journal_transaction, calendar_id, &changes)
+    })
+}
+
+/// Pulls every Event of the Calendar `calendar_id` at `url` on the server,
+/// page by page, as a First Sync, each page one Journal Transaction, which
+/// the Change Journal doesn't record (ADR 0009), with "Occurrences changed"
+/// for each page. A Calendar removed meanwhile ends it with
+/// [`CoreError::CalendarNotFound`](crate::CoreError::CalendarNotFound).
+fn first_sync(
+    remote: &dyn Remote,
+    store: &Mutex<Store>,
+    calendar_id: CalendarId,
+    url: &str,
+    display: Tz,
+    record: Recorder,
+) -> Result<()> {
+    let state = remote.all_events(url, display, &mut |fetched, zone| {
+        record(TransactionOrigin::FirstSync, &mut |journal_transaction| {
+            mirror_and_propagate(journal_transaction, calendar_id, &fetched, &[], zone)
+        })
+        .map(drop)
+    })?;
+    store.lock().unwrap().write(|database_transaction| {
+        database_transaction.set_synced(calendar_id, state.token.as_deref())
+    })
+}
 
 /// Asks `remote` what changed in the Calendar at `url` since `token`, given
 /// `known`, its Known Server Resources by address. The Ignored Resources
 /// that a takeover may need ([`ignored_to_fetch`](super::ignored_to_fetch))
 /// are fetched in the same request as the rest. Runs before the Journal
 /// Transaction, as no network request runs inside a Database Transaction.
-pub(crate) fn changes(
+fn changes(
     remote: &dyn Remote,
     known: &HashMap<String, KnownServerResource>,
     url: &str,
@@ -43,7 +101,7 @@ pub(crate) fn changes(
 /// Brings `changes` into the Calendar `calendar_id` in `journal_transaction`,
 /// as [`mirror_and_propagate`] does it, and records its new sync state with
 /// them.
-pub(crate) fn incoming_sync(
+fn incoming_sync(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     changes: &Changes,
@@ -90,7 +148,7 @@ impl Candidate<'_> {
 /// its UID, and a new one becomes an Ignored Resource. A Recurring Event
 /// that arrives joins the Calendar's Exceptions that had none without
 /// writing them, as they keep their recurrence IDs as obtained (ADR 0012).
-pub(crate) fn mirror_and_propagate(
+fn mirror_and_propagate(
     journal_transaction: &mut JournalTransaction,
     calendar_id: CalendarId,
     fetched: &[ServerObject],

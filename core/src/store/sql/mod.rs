@@ -1,6 +1,7 @@
 //! Every query and write of the Local Store, but its schema: the SQL lives
 //! here and nowhere else. This file holds the readers, methods of
-//! [`Store`]. Every write is a method of a
+//! [`Store`], but those of a Provider's own Mirror tables, which sit in
+//! [`mirror`] beside its writes. Every write is a method of a
 //! [`DatabaseTransaction`](super::DatabaseTransaction), and sits in the file
 //! of the Guard whose Write Permission it takes (ADR 0015): [`journal`] for
 //! the Change Journal's, [`mirror`] for the Sync Engine's, and [`unguarded`]
@@ -17,13 +18,14 @@
 //! [`SyncEngineWritePermission`]: crate::sync::SyncEngineWritePermission
 
 mod journal;
-/// The Sync Engine's writes of the Mirror, one file per Provider (ADR 0015).
+/// The Sync Engine's writes of the Mirror, one file per Provider (ADR 0015),
+/// with the reads of the Provider's own Mirror tables.
 mod mirror {
     mod caldav;
 }
 mod unguarded;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
@@ -32,7 +34,6 @@ use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::journal::{JournalEventModification, JournalTransactionId};
 use crate::remote::SyncPoint;
-use crate::sync::caldav::KnownServerResource;
 use crate::sync_status::SyncRecord;
 use crate::{
     Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
@@ -262,46 +263,6 @@ impl Store {
              WHERE provider != 'local' ORDER BY id",
         )?;
         readable(stmt.query_map([], |row| Ok((AccountId(row.get(0)?), sync_record(row)?)))?)
-    }
-
-    /// The Known Server Resources of a CalDAV Calendar, by their address as
-    /// the server gave it: its Server Objects, each with the UID it keeps,
-    /// and its Ignored Resources, each with the UID it holds that a Server
-    /// Object keeps, none for one holding several or not read.
-    pub fn known_server_resources(
-        &self,
-        calendar_id: CalendarId,
-    ) -> Result<HashMap<String, KnownServerResource>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT href, etag, uid, FALSE FROM caldav_server_object \
-             WHERE calendar_id = ?1 \
-             UNION ALL SELECT href, etag, uid, TRUE FROM caldav_ignored_resource \
-             WHERE calendar_id = ?1",
-        )?;
-        let known = readable(stmt.query_map([calendar_id.0], |row| {
-            Ok((
-                row.get(0)?,
-                KnownServerResource {
-                    etag: row.get(1)?,
-                    uid: row.get(2)?,
-                    ignored: row.get(3)?,
-                },
-            ))
-        })?)?;
-        Ok(known.into_iter().collect())
-    }
-
-    /// The UID that the CalDAV Server Object at `href` in a Calendar keeps,
-    /// if one is there.
-    pub fn uid_at(&self, calendar_id: CalendarId, href: &str) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT uid FROM caldav_server_object WHERE calendar_id = ?1 AND href = ?2",
-                params![calendar_id.0, href],
-                |row| row.get(0),
-            )
-            .optional()?)
     }
 
     /// The Corresponding Server Object of the UID `uid` in a Calendar, the

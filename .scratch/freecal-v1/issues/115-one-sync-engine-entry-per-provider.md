@@ -13,11 +13,25 @@ Spec: "Sync engine"; "Provider interface".
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] `core/src/lib.rs` names no Provider's Sync Engine; an exhaustive `match` on the Provider in `core/src/sync/mod.rs` picks it
-- [ ] The decision between a First Sync, its rest and an incremental Incoming Sync is the Sync Engine's, not the core interface's
-- [ ] `Holds` and `read_caldav_resource` are in `core/src/sync/caldav/`; the CalDAV Mirror's reads are in `store/sql/mirror/caldav.rs`
-- [ ] The existing CalDAV and Sync Status tests pass unchanged
+- [x] `core/src/lib.rs` names no Provider's Sync Engine; an exhaustive `match` on the Provider in `core/src/sync/mod.rs` picks it
+- [x] The decision between a First Sync, its rest and an incremental Incoming Sync is the Sync Engine's, not the core interface's
+- [x] `Holds` and `read_caldav_resource` are in `core/src/sync/caldav/`; the CalDAV Mirror's reads are in `store/sql/mirror/caldav.rs`
+- [x] The existing CalDAV and Sync Status tests pass unchanged
+
+## Comments
+
+Done (2026-11-08).
+
+- The entry is `sync::incoming` (`core/src/sync/mod.rs`): an exhaustive `match` on the Provider, `Provider::Local => Ok(None)` as the Local Account has no server. The CalDAV side, `sync::caldav::incoming::sync`, reads the Known Server Resources and decides between the First Sync page by page, its rest and an incremental Incoming Sync; `Core::first_sync` moved there. `changes`, `incoming_sync` and `mirror_and_propagate` are now private to the CalDAV Sync Engine.
+- The Provider reaches the entry with the Remote: `Core::remote` returns the Account's Provider with it.
+- The Sync Engine takes the Store's `Mutex`, not a `&Store`, and locks it only for its reads and the `set_synced` write: holding the Store lock across the network requests and the recorder, which locks it again, would deadlock.
+- `CODING_STANDARDS.md` "Local Store" now says that `sync/mod.rs` holds the entry and the recorder, and that a Provider's own Mirror reads sit in `mirror/` beside its writes, as this ticket moved them.
+- The `Holds` unit test moved with `read_caldav_resource`; no other test changed. The core suite, clippy and fmt pass.
+
+New terms:
+- **Recorder** (new term): the callback the core passes the Sync Engine, which runs a change as one Journal Transaction of a Transaction Origin and then sends its Signals as `Core::record` does (`sync::Recorder`).
+- **sync point** (new term, prose for the existing `SyncPoint`): how far a Calendar whose First Sync finished is synced, such as its CalDAV sync token.

@@ -1,7 +1,8 @@
 //! The CalDAV part of the Sync Engine (ADR 0015): CalDAV's Incoming Sync
 //! ([`incoming`]), its writes of the Mirror, by Calendar and UID, its rules
 //! for which resource keeps a UID: the fixed order among resources holding
-//! one UID ([`fixed_order`]) and the Ignored Resources fetched again for a
+//! one UID ([`fixed_order`]), whether a Server Object still keeps its UID
+//! ([`Holds::keeps`]) and the Ignored Resources fetched again for a
 //! takeover ([`ignored_to_fetch`]), the CalDAV resources it doesn't mirror,
 //! the Ignored Resources: remembering them and their Log lines
 //! ([`ignore`]), and the resources it can't read ([`unreadable`]).
@@ -10,8 +11,12 @@ pub(crate) mod incoming;
 
 use std::collections::{HashMap, HashSet};
 
+use chrono_tz::Tz;
+
 use super::WRITE_PERMISSION;
+
 use crate::event::{Loaded, ServerObject};
+use crate::import::read_events;
 use crate::journal::JournalTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
 
@@ -71,6 +76,61 @@ fn ignored_to_fetch(known: &HashMap<String, KnownServerResource>, asked: &[Strin
 fn fixed_order<'a>(href: &'a str, events: &[ImportedEvent]) -> (bool, &'a str) {
     let only_exceptions = events.iter().all(|event| event.recurrence_id.is_some());
     (only_exceptions, href)
+}
+
+/// What a CalDAV resource holds of what FreeCal keeps, as the CalDAV
+/// Incoming Sync reads it (ADR 0015). RFC 4791 §4.1 allows one UID per
+/// resource, so the Sync Engine never sees several, unlike the file import.
+#[derive(Debug, Clone)]
+enum Holds {
+    /// FreeCal can't read it.
+    Unreadable,
+    /// No Events: nothing FreeCal keeps.
+    NoEvents,
+    /// Events of several UIDs, in the order of its Events, which RFC 4791
+    /// §4.1 forbids: an Ignored Resource.
+    SeveralUids(Vec<String>),
+    /// The Events of one UID, never none, Exceptions as Events of their
+    /// own, not yet paired with their Recurring Events.
+    OneUid {
+        uid: String,
+        events: Vec<ImportedEvent>,
+    },
+}
+
+impl Holds {
+    /// Whether a Server Object keeping `uid`, an Ambiguous UID or not, still
+    /// keeps it, holding this (ADR 0015): one FreeCal can't read keeps its
+    /// UID, and one holding no Events, several UIDs or another stops keeping
+    /// it.
+    fn keeps(&self, uid: &str) -> bool {
+        match self {
+            Holds::Unreadable => true,
+            Holds::NoEvents | Holds::SeveralUids(_) => false,
+            Holds::OneUid { uid: holds, .. } => holds == uid,
+        }
+    }
+}
+
+/// What the CalDAV resource `object` holds, its Events read as the file
+/// import reads files ([`read_events`]), those that aren't Exceptions
+/// first, with floating times pinned to `zone`.
+fn read_caldav_resource(object: &ServerObject, zone: Tz) -> Holds {
+    let Ok(read) = read_events(&object.href, object.data.as_bytes(), zone) else {
+        return Holds::Unreadable;
+    };
+    let events: Vec<ImportedEvent> = read.events.into_iter().chain(read.exceptions).collect();
+    let mut uids: Vec<String> = Vec::new();
+    for event in &events {
+        if !uids.contains(&event.uid) {
+            uids.push(event.uid.clone());
+        }
+    }
+    match <[String; 1]>::try_from(uids) {
+        Ok([uid]) => Holds::OneUid { uid, events },
+        Err(uids) if uids.is_empty() => Holds::NoEvents,
+        Err(uids) => Holds::SeveralUids(uids),
+    }
 }
 
 /// Deletes the Event Rows of `uid` in the Calendar `calendar_id` if no
@@ -284,6 +344,50 @@ mod tests {
     use super::*;
     use crate::journal::{self, TransactionOrigin, record};
     use crate::store::Store;
+
+    /// RFC 4791 §4.1: a CalDAV resource holds the components of one UID, so
+    /// one holding several holds nothing FreeCal keeps, unlike a file to
+    /// import.
+    #[test]
+    fn a_caldav_resource_holds_one_uid_or_nothing() {
+        let holds = |body: &str| {
+            let object = ServerObject {
+                href: "/one.ics".to_owned(),
+                etag: None,
+                data: format!("BEGIN:VCALENDAR\r\n{body}END:VCALENDAR\r\n"),
+            };
+            read_caldav_resource(&object, Tz::UTC)
+        };
+        let event = |uid: &str, extra: &str| {
+            format!(
+                "BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTART:20261005T070000Z\r\n{extra}END:VEVENT\r\n"
+            )
+        };
+        let weekly = event("weekly", "RRULE:FREQ=WEEKLY\r\n");
+        let moved = event("weekly", "RECURRENCE-ID:20261012T070000Z\r\n");
+
+        let Holds::OneUid { uid, events } = holds(&format!("{moved}{weekly}")) else {
+            panic!("one UID");
+        };
+        assert_eq!(uid, "weekly");
+        assert_eq!(events.len(), 2);
+        assert!(
+            events[0].recurrence_id.is_none(),
+            "the Recurring Event first"
+        );
+        assert!(matches!(
+            holds(&format!("{moved}{}{weekly}", event("other", ""))),
+            Holds::SeveralUids(uids) if uids == ["other", "weekly"]
+        ));
+        assert!(matches!(
+            holds("BEGIN:VTODO\r\nUID:task\r\nEND:VTODO\r\n"),
+            Holds::NoEvents
+        ));
+        assert!(matches!(
+            holds("BEGIN:VEVENT\r\nUID:no-start\r\nEND:VEVENT\r\n"),
+            Holds::Unreadable
+        ));
+    }
 
     /// Not visible through the core interface, so not a seam test.
     #[test]

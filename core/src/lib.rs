@@ -61,7 +61,7 @@ pub use view::View;
 use calendar::calendar_name;
 use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
-use remote::{Remote, SyncPoint};
+use remote::Remote;
 use store::{CalendarToSync, Store};
 use sync_scheduler::SyncScheduler;
 use sync_status::{RunningSync, RunningSyncs, SyncStatusKeeper};
@@ -233,7 +233,7 @@ impl Core {
     /// Syncs.
     pub fn add_calendars(&self, account_id: AccountId, urls: &[String]) -> Result<Vec<Calendar>> {
         let remote = self.remote(account_id)?;
-        let offered = offered_by(remote.as_deref())?;
+        let offered = offered_by(remote.as_ref())?;
         let add = |store: &Store| {
             // Added already, or earlier in `urls`.
             let mut taken = store.calendar_urls(account_id)?;
@@ -251,7 +251,7 @@ impl Core {
                     .collect::<Result<Vec<_>>>()
             })
         };
-        let Some(remote) = remote else {
+        let Some((provider, remote)) = remote else {
             let added = add(&self.store())?;
             self.signals.send(Signal::CalendarsChanged);
             return Ok(added);
@@ -267,35 +267,10 @@ impl Core {
         self.sync_calendars(
             added.account_sync,
             StartedBy::User,
-            remote.as_ref(),
+            (provider, remote.as_ref()),
             calendars,
         )?;
         Ok(added.calendars)
-    }
-
-    /// Pulls every Event of the Calendar `id` at `url` on the server, page by
-    /// page, as a First Sync, which the Change Journal doesn't record (ADR
-    /// 0009), with "Occurrences changed" for each page. A Calendar removed
-    /// meanwhile ends it with [`CoreError::CalendarNotFound`].
-    fn first_sync(&self, remote: &dyn Remote, id: CalendarId, url: &str) -> Result<()> {
-        remote
-            .all_events(url, self.clock.time_zone(), &mut |fetched, zone| {
-                self.record(TransactionOrigin::FirstSync, |journal_transaction| {
-                    sync::caldav::incoming::mirror_and_propagate(
-                        journal_transaction,
-                        id,
-                        &fetched,
-                        &[],
-                        zone,
-                    )
-                })
-                .map(drop)
-            })
-            .and_then(|state| {
-                self.store().write(|database_transaction| {
-                    database_transaction.set_synced(id, state.token.as_deref())
-                })
-            })
     }
 
     /// Syncs a server Account on demand: each of its Calendars gets what
@@ -334,10 +309,10 @@ impl Core {
             Ok(remote.map(|remote| (remote, calendars)))
         });
         match to_sync {
-            Ok(Some((remote, calendars))) => self.sync_calendars(
+            Ok(Some(((provider, remote), calendars))) => self.sync_calendars(
                 account_sync,
                 started_by,
-                remote.as_ref(),
+                (provider, remote.as_ref()),
                 calendars
                     .into_iter()
                     .map(|calendar| (calendar, None))
@@ -349,8 +324,8 @@ impl Core {
         }
     }
 
-    /// Syncs the Calendars `calendars` of a server Account, in order,
-    /// through its server `remote`, in the Account's Running Sync
+    /// Syncs the Calendars `calendars` of a server Account of `provider`, in
+    /// order, through its server `remote`, in the Account's Running Sync
     /// `account_sync`, started by `started_by`, and ends that. The Calendars
     /// paired with a Running Sync are syncing already, as
     /// [`Core::add_calendars`] starts them; any other syncing now is left
@@ -362,7 +337,7 @@ impl Core {
         &self,
         account_sync: RunningSync,
         started_by: StartedBy,
-        remote: &dyn Remote,
+        (provider, remote): (Provider, &dyn Remote),
         calendars: Vec<(CalendarToSync, Option<RunningSync>)>,
     ) -> Result<Vec<Changed<CalendarId>>> {
         let mut synced = Vec::new();
@@ -370,7 +345,8 @@ impl Core {
         let mut about_account = None;
         // The Calendars it doesn't reach end as before the sync, as the
         // loop drops their Running Syncs.
-        for ((calendar_id, url, state), started) in calendars {
+        for (calendar, started) in calendars {
+            let (calendar_id, ..) = calendar;
             let calendar_sync = match started {
                 Some(calendar_sync) => calendar_sync,
                 None => match self.sync_status().start_calendar(calendar_id, started_by) {
@@ -378,7 +354,7 @@ impl Core {
                     None => continue,
                 },
             };
-            match calendar_sync.end(self.sync_calendar(remote, calendar_id, &url, state)) {
+            match calendar_sync.end(self.sync_calendar(provider, remote, &calendar)) {
                 Ok(changed) => synced.extend(changed),
                 Err(error) if sync_status::about_account(&error) => {
                     about_account = Some(error);
@@ -505,58 +481,45 @@ impl Core {
         }
     }
 
-    /// Runs the Incoming Sync of the Calendar `id` at `url` on the server from
-    /// `state`, a First Sync's rest without one. Returns the Calendar with
-    /// its Journal Transaction.
+    /// Runs the Incoming Sync of `calendar`, a Calendar of an Account of
+    /// `provider`, through its server `remote`, as the Sync Engine decides
+    /// (see [`sync::incoming`]). Returns the Calendar with its Journal
+    /// Transaction.
     fn sync_calendar(
         &self,
+        provider: Provider,
         remote: &dyn Remote,
-        id: CalendarId,
-        url: &str,
-        state: Option<SyncPoint>,
+        calendar: &CalendarToSync,
     ) -> Result<Changed<CalendarId>> {
-        let first = state.is_none();
-        let synced = (|| {
-            let known_server_resources = self.store().known_server_resources(id)?;
-            if first && known_server_resources.is_empty() {
-                self.first_sync(remote, id, url)?;
-                return Ok(Changed {
-                    journal_transaction: None,
-                    value: (),
-                });
-            }
-            let token = state.and_then(|state| state.token);
-            let changes = sync::caldav::incoming::changes(
-                remote,
-                &known_server_resources,
-                url,
-                token.as_deref(),
-                self.clock.time_zone(),
-            )?;
-            let origin = if first {
-                TransactionOrigin::FirstSync
-            } else {
-                TransactionOrigin::IncomingSync
-            };
-            self.record(origin, |journal_transaction| {
-                sync::caldav::incoming::incoming_sync(journal_transaction, id, &changes)
-            })
-        })()?;
+        let record: sync::Recorder = &|origin, change| {
+            self.record(origin, |journal_transaction| change(journal_transaction))
+                .map(|changed| changed.journal_transaction)
+        };
+        let (calendar_id, ..) = *calendar;
+        let journal_transaction = sync::incoming(
+            provider,
+            remote,
+            &self.store,
+            calendar,
+            self.clock.time_zone(),
+            record,
+        )?;
         Ok(Changed {
-            journal_transaction: synced.journal_transaction,
-            value: id,
+            journal_transaction,
+            value: calendar_id,
         })
     }
 
     /// Every Calendar a server Account's server offers now, added or not;
     /// none for the Local Account.
     fn offered_calendars(&self, id: AccountId) -> Result<Vec<AvailableCalendar>> {
-        offered_by(self.remote(id)?.as_deref())
+        offered_by(self.remote(id)?.as_ref())
     }
 
     /// The Provider interface to a server Account's server, logged in with
-    /// the password from the keyring; none for the Local Account.
-    fn remote(&self, id: AccountId) -> Result<Option<Box<dyn Remote>>> {
+    /// the password from the keyring, with the Account's Provider; none for
+    /// the Local Account.
+    fn remote(&self, id: AccountId) -> Result<Option<(Provider, Box<dyn Remote>)>> {
         let (account, key) = {
             let store = self.store();
             (store.find_account(id)?, store.account_keyring_key(id)?)
@@ -570,7 +533,8 @@ impl Core {
             .secret(&key)
             .map_err(CoreError::KeyringUnavailable)?
             .ok_or(CoreError::PasswordNotInKeyring)?;
-        remote::connect(account.provider, server, password)
+        let remote = remote::connect(account.provider, server, password)?;
+        Ok(remote.map(|remote| (account.provider, remote)))
     }
 
     /// Removes a server Account with its Calendars, as
@@ -989,6 +953,6 @@ fn server_accounts_of(store: &Store) -> Result<Vec<AccountId>> {
 }
 
 /// Every Calendar a server offers, added or not; none without a server.
-fn offered_by(remote: Option<&dyn Remote>) -> Result<Vec<AvailableCalendar>> {
-    remote.map_or_else(|| Ok(Vec::new()), Remote::discover)
+fn offered_by(remote: Option<&(Provider, Box<dyn Remote>)>) -> Result<Vec<AvailableCalendar>> {
+    remote.map_or_else(|| Ok(Vec::new()), |(_, remote)| remote.discover())
 }
