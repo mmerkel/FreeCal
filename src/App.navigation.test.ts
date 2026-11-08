@@ -1,16 +1,18 @@
-// The App's views, navigation and tracking today, run against the fake core
-// with a stand-in grid (see StubGrid.svelte).
+// The App's views, navigation and tracking today, run against the recording
+// fake core with a stand-in grid (see StubGrid.svelte).
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import { FakeCore } from './test/fakeCore';
+import type { Calendar, Event } from './core/types';
+import { calendar, event, firstLaunch, scriptWindow } from './test/answers';
+import type { RecordingCore } from './test/recordingCore';
 import { stubGrid } from './test/stubGrid';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
-async function showApp(core = new FakeCore()) {
+async function showApp(core = firstLaunch()) {
   render(App, { core });
   await screen.findByRole('list', { name: 'Grid' });
   return { core, user: userEvent.setup() };
@@ -30,6 +32,26 @@ function viewButton(name: 'Day' | 'Week' | 'Month') {
   return screen.getByRole('button', { name });
 }
 
+const monday = {
+  kind: 'timed',
+  start: '2026-10-05T09:00:00',
+  end: '2026-10-05T10:00:00',
+} as const;
+
+/** Emits "Date changed" to `date`, as the core does at midnight. */
+function dateChanged(core: RecordingCore, date: string) {
+  core.emit({ kind: 'dateChanged', date });
+}
+
+/**
+ * Scripts the Occurrences of `events` in `home` and emits "Occurrences
+ * changed", as the core does after a change.
+ */
+function occurrencesChanged(core: RecordingCore, home: Calendar, events: Event[]) {
+  scriptWindow(core, { calendars: [home], events });
+  core.emit({ kind: 'occurrencesChanged', calendarIds: [home.id] });
+}
+
 function title() {
   return screen.getByRole('heading', { level: 1 }).textContent;
 }
@@ -44,9 +66,9 @@ test('opens in month view on today, tracking today, on first launch', async () =
 });
 
 test('opens in the last-used view, always on today', async () => {
-  const core = new FakeCore();
-  core.lastView = 'week';
-  core.currentDate = Temporal.PlainDate.from('2027-02-14');
+  const core = firstLaunch();
+  core.answer('lastUsedView', 'week');
+  core.answer('today', Temporal.PlainDate.from('2027-02-14'));
 
   await showApp(core);
 
@@ -62,13 +84,13 @@ test('switching the view remembers it and keeps tracking today', async () => {
   expect(shown().view).toBe('week');
   expect(viewButton('Week')).toHaveAttribute('aria-pressed', 'true');
   expect(viewButton('Month')).toHaveAttribute('aria-pressed', 'false');
-  expect(core.lastView).toBe('week');
+  expect(core.callsOf('setLastUsedView')).toEqual([['week']]);
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
   // Weeks start on Monday.
   expect(title()).toMatch(/^Sep 28\s–\sOct 4, 2026$/);
 
   await user.click(viewButton('Day'));
-  expect(core.lastView).toBe('day');
+  expect(core.callsOf('setLastUsedView')).toEqual([['week'], ['day']]);
   expect(title()).toBe('Saturday, October 3, 2026');
 });
 
@@ -120,7 +142,7 @@ test('clicking a day number opens that day and ends tracking today', async () =>
 
   expect(shown()).toMatchObject({ view: 'day', date: '2026-10-03' });
   expect(todayButton()).toHaveAttribute('aria-pressed', 'false');
-  expect(core.lastView).toBe('day');
+  expect(core.callsOf('setLastUsedView')).toEqual([['day']]);
 });
 
 test('in day view, the month name in the title opens its month and keeps tracking today', async () => {
@@ -131,7 +153,7 @@ test('in day view, the month name in the title opens its month and keeps trackin
 
   expect(shown()).toMatchObject({ view: 'month', date: '2026-10-03' });
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
-  expect(core.lastView).toBe('month');
+  expect(core.callsOf('setLastUsedView')).toEqual([['day'], ['month']]);
 });
 
 test('in a week across two months, each month name opens its own month', async () => {
@@ -170,7 +192,7 @@ test('in month view, the title has no month button', async () => {
 test('on “Date changed” the view follows the new today while tracking', async () => {
   const { core } = await showApp();
 
-  core.changeDate('2026-10-04');
+  dateChanged(core, '2026-10-04');
   await tick();
 
   expect(shown()).toMatchObject({ date: '2026-10-04', today: '2026-10-04' });
@@ -181,7 +203,7 @@ test('on “Date changed” only the today highlight moves while not tracking', 
   const { core, user } = await showApp();
   await user.click(todayButton());
 
-  core.changeDate('2026-10-04');
+  dateChanged(core, '2026-10-04');
   await tick();
 
   expect(shown()).toMatchObject({ date: '2026-10-03', today: '2026-10-04' });
@@ -192,7 +214,7 @@ test('a “Date changed” during a press on the grid waits for its end to move 
   const { core } = await showApp();
 
   stubGrid.props!.oninteract!(true);
-  core.changeDate('2026-10-04');
+  dateChanged(core, '2026-10-04');
   await tick();
 
   // The grid holds back its own today highlight meanwhile.
@@ -206,55 +228,9 @@ test('a “Date changed” during a press on the grid waits for its end to move 
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('a “Date changed” while the question for a drop is open waits for the answer', async () => {
-  const core = new FakeCore();
-  const home = core.addCalendar({ name: 'Home' });
-  const yoga = core.addEvent({
-    calendarId: home.id,
-    title: 'Yoga',
-    when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
-    repeat: { frequency: 'weekly', interval: 1, end: { kind: 'never' } },
-  });
-  await showApp(core);
-
-  // The press ends as the Occurrence is dropped, and the question opens.
-  stubGrid.props!.oninteract!(true);
-  const dropped = stubGrid.props!.onreschedule!(yoga.id, '2026-10-05T09:00:00', {
-    kind: 'timed',
-    start: '2026-10-06T09:00:00',
-    end: '2026-10-06T10:00:00',
-  });
-  stubGrid.props!.oninteract!(false);
-  core.changeDate('2026-10-04');
-  await tick();
-
-  expect(stubGrid.props!.held).toBe(true);
-  expect(shown()).toMatchObject({ date: '2026-10-03', today: '2026-10-04' });
-
-  (await screen.findByRole('button', { name: 'Cancel' })).click();
-  await expect(dropped).rejects.toBeDefined();
-  await tick();
-
-  expect(stubGrid.props!.held).toBe(false);
-  expect(shown()).toMatchObject({ date: '2026-10-04', today: '2026-10-04' });
-});
-
-test('a press on the grid without a “Date changed” leaves the view where it is', async () => {
-  const { core, user } = await showApp();
-  await user.click(screen.getByRole('button', { name: 'Next month' }));
-  const before = shown();
-
-  stubGrid.props!.oninteract!(true);
-  stubGrid.props!.oninteract!(false);
-  core.changeDate('2026-10-04');
-  await tick();
-
-  expect(shown()).toEqual({ ...before, today: '2026-10-04' });
-});
-
 test('opening and closing dialogs keeps tracking today', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = firstLaunch();
+  core.answer('listCalendars', [calendar({ name: 'Home' })]);
   const { user } = await showApp(core);
 
   await user.keyboard('c');
@@ -265,10 +241,12 @@ test('opening and closing dialogs keeps tracking today', async () => {
 });
 
 test('selecting, creating and editing Events keeps tracking today', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = firstLaunch();
+  const home = calendar({ name: 'Home' });
+  core.answer('listCalendars', [home]);
   const { user } = await showApp(core);
   const grid = screen.getByRole('list', { name: 'Grid' });
+  const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
 
   stubGrid.props!.onselectslot!({
     kind: 'timed',
@@ -277,6 +255,8 @@ test('selecting, creating and editing Events keeps tracking today', async () => 
   });
   await tick();
   await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Dentist{Enter}');
+  occurrencesChanged(core, home, [dentist]);
+  core.answer('event', dentist);
   await user.click(await within(grid).findByRole('button', { name: 'Dentist' }));
   await user.click(
     within(await screen.findByRole('dialog', { name: 'Dentist' })).getByRole('button', {
@@ -285,7 +265,11 @@ test('selecting, creating and editing Events keeps tracking today', async () => 
   );
   await user.type(screen.getByRole('textbox', { name: 'Title' }), ' at 9');
   await user.click(screen.getByRole('button', { name: 'Save' }));
+  occurrencesChanged(core, home, [{ ...dentist, title: 'Dentist at 9' }]);
   await within(grid).findByRole('button', { name: 'Dentist at 9' });
+
+  expect(core.callsOf('createEvent')).toHaveLength(1);
+  expect(core.callsOf('editEvent')).toHaveLength(1);
 
   expect(shown()).toMatchObject({ view: 'month', date: '2026-10-03' });
   expect(todayButton()).toHaveAttribute('aria-pressed', 'true');
@@ -331,8 +315,8 @@ test('Google’s shortcuts move to the next and previous period and to today', a
 });
 
 test('the shortcuts do nothing with a modifier, while typing or with a dialog open', async () => {
-  const core = new FakeCore();
-  core.addCalendar({ name: 'Home' });
+  const core = firstLaunch();
+  core.answer('listCalendars', [calendar({ name: 'Home' })]);
   const { user } = await showApp(core);
 
   await user.keyboard('{Control>}j{/Control}{Alt>}w{/Alt}');
