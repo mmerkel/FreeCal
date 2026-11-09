@@ -6,6 +6,9 @@ import type { Signal } from './types';
 /** The Tauri event on which the shell forwards the core's Signals. */
 const SIGNAL_EVENT = 'freecal://signal';
 
+/** The Tauri event on which the shell asks the window to quit, as closing it does while Unsent Changes wait. */
+const QUIT_ASKED_EVENT = 'freecal://quit-asked';
+
 /** The core application interface, reached through the Tauri shell's commands. */
 export const tauriCore: CoreApi = {
   startupFailure: () => invoke('startup_failure'),
@@ -27,6 +30,8 @@ export const tauriCore: CoreApi = {
   listCalendars: () => invoke('list_calendars'),
   syncStatuses: () => invoke('sync_statuses'),
   syncNow: (accountId) => invoke('sync_now', { accountId }),
+  sendBeforeQuit: () => invoke('send_before_quit'),
+  onQuitAsked: (onAsked) => listen(QUIT_ASKED_EVENT, () => onAsked()),
   createCalendar: (accountId, name, colour) =>
     invoke('create_calendar', { accountId, name, colour }),
   renameCalendar: (id, name) => invoke('rename_calendar', { id, name }),

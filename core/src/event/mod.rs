@@ -18,12 +18,13 @@ mod when;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::JournalTransaction;
-use crate::store::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::store::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::sync::SendFailure;
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
 pub(crate) use recurrence_id::{NormalForm, RecurrenceId, in_normal_form};
@@ -79,6 +80,52 @@ pub struct Event {
     /// it read-only (spec: "Attendees"). For an Exception, whether its
     /// Recurring Event has, as they are one Event on the server.
     pub has_guests: bool,
+    /// Its Unsent Change, for "Not yet synced: <reason>" (spec: "Event
+    /// details"); none when it has none.
+    pub unsent_change: Option<UnsentChange>,
+}
+
+/// The Unsent Change of an Event as the window gets it: since when it
+/// waits, and why the Sender's last try to send it failed. A change made
+/// after that try, or a Send Failure that can't be read, has none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct UnsentChange {
+    /// An instant, in RFC 3339 UTC.
+    #[cfg_attr(test, ts(type = "string"))]
+    pub since: DateTime<Utc>,
+    pub send_failure: Option<SendFailure>,
+}
+
+impl UnsentChange {
+    /// The Unsent Change of the Event Row whose Occurrence is `key`: none
+    /// for an Event Row that isn't an Exception, otherwise its recurrence
+    /// ID in the Normal Form. It is found among `kept`, the Unsent Changes
+    /// of its Calendar and UID, comparing by Occurrence against the
+    /// Recurring Event at `recurring` (ADR 0012). A `since` that can't be
+    /// read counts as the Unix epoch, so that the change still shows, as
+    /// one that waited long.
+    fn of_event_row(
+        kept: &[KeptUnsentChange],
+        key: Option<&NormalForm>,
+        recurring: Option<&ImportedWhen>,
+    ) -> Option<Self> {
+        let found = kept.iter().find(|kept| {
+            occurrence_key(kept.recurrence_id.as_ref(), recurring)
+                .is_some_and(|kept_key| kept_key.as_ref() == key)
+        })?;
+        Some(Self {
+            since: found
+                .since
+                .and_then(|since| DateTime::from_timestamp(since, 0))
+                .unwrap_or(DateTime::UNIX_EPOCH),
+            send_failure: found
+                .send_failure
+                .as_deref()
+                .and_then(SendFailure::from_stored),
+        })
+    }
 }
 
 /// One dated appearance of an Event in the grid. A single Event has exactly
@@ -103,6 +150,13 @@ pub struct Occurrence {
     /// Whether its Event has guests, which makes it read-only (spec:
     /// "Attendees"), as [`Event::has_guests`] says.
     pub has_guests: bool,
+    /// Since when its Event has an Unsent Change, an instant in RFC 3339
+    /// UTC, for the dashed outline (spec: "Event chips stay sparse"); none
+    /// when it has none. It is its Event's [`Event::unsent_change`]: an
+    /// Occurrence that an Exception changed has the Exception's, any other
+    /// Occurrence of a Recurring Event the Recurring Event's.
+    #[cfg_attr(test, ts(type = "string | null"))]
+    pub unsent_since: Option<DateTime<Utc>>,
 }
 
 impl Occurrence {
@@ -659,7 +713,25 @@ impl Opened {
                     })
             }),
             has_guests: store.has_guests(self.loaded.calendar_id, &self.loaded.uid)?,
+            unsent_change: self.unsent_change(store)?,
         })
+    }
+
+    /// The opened Event's Unsent Change, as `store` keeps it; none for an
+    /// Exception whose recurrence ID can't be read, which pairs with
+    /// nothing.
+    pub fn unsent_change(&self, store: &Store) -> Result<Option<UnsentChange>> {
+        let key = match self.exception() {
+            None => None,
+            Some(Exception { rid: Some(rid), .. }) => Some(rid),
+            Some(Exception { rid: None, .. }) => return Ok(None),
+        };
+        let kept = store.unsent_changes_of(self.loaded.calendar_id, &self.loaded.uid)?;
+        Ok(UnsentChange::of_event_row(
+            &kept,
+            key,
+            self.loaded.recurring_when().as_ref(),
+        ))
     }
 
     /// Deletes the Event, and with a Recurring Event or one of its
@@ -731,7 +803,8 @@ pub(crate) fn create_event(
 /// of several for one Occurrence, as another program may have written, the
 /// first by ID, paired by Occurrence. An Occurrence's recurrence ID is in the
 /// Normal Form; an Exception that is an Event of its own
-/// ([`Loaded::of_its_own`]) has none.
+/// ([`Loaded::of_its_own`]) has none. Each says since when its Event has an
+/// Unsent Change, if it has one.
 pub(crate) fn occurrences(
     store: &Store,
     from: NaiveDate,
@@ -740,16 +813,24 @@ pub(crate) fn occurrences(
 ) -> Result<Vec<Occurrence>> {
     let range = StoredRange::new(from, to, zone);
     let mut occurrences = Vec::new();
-    // The Events with each UID, loaded once.
+    // The Events with each UID, and their Unsent Changes, loaded once.
     let mut loaded = HashMap::new();
+    let mut unsent = HashMap::new();
     for event in store.shown_events_in(&range)? {
         let mut recurrence_id = None;
+        // The Occurrence of the Event Row, against the Recurring Event at
+        // `recurring`, for its Unsent Change; none for an Exception whose
+        // recurrence ID can't be read, which pairs with nothing.
+        let mut key = Some(None);
+        let mut recurring = None;
         if event.fields.recurrence_id.is_some() {
             let with_uid = with_uid_of(&mut loaded, store, &event)?;
+            recurring = with_uid.recurring_when();
             let own = with_uid
                 .exceptions
                 .iter()
                 .find(|exception| exception.id == event.id);
+            key = own.and_then(|own| own.rid.clone()).map(Some);
             if let Some(own) = own {
                 let first = own.rid.as_ref().and_then(|rid| with_uid.exception_at(rid));
                 if first.is_some_and(|first| first.id != own.id) {
@@ -771,6 +852,19 @@ pub(crate) fn occurrences(
                 rule::occurrences_in(&event.fields, &changed, &range)?
             }
         };
+        let unsent_since = match key {
+            Some(key) => {
+                let kept = match unsent.entry((event.calendar_id, event.uid.clone())) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        entry.insert(store.unsent_changes_of(event.calendar_id, &event.uid)?)
+                    }
+                };
+                UnsentChange::of_event_row(kept, key.as_ref(), recurring.as_ref())
+                    .map(|unsent| unsent.since)
+            }
+            None => None,
+        };
         let occurrence = |when: &StoredWhen, recurrence_id| -> Result<Occurrence> {
             Ok(Occurrence {
                 event_id: event.id,
@@ -779,6 +873,7 @@ pub(crate) fn occurrences(
                 when: when.to_when(zone)?,
                 recurrence_id,
                 has_guests: event.has_guests,
+                unsent_since,
             })
         };
         match expanded {

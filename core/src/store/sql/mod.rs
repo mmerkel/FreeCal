@@ -30,7 +30,7 @@ use std::collections::HashSet;
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
-use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use super::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId};
@@ -530,9 +530,41 @@ impl Store {
         Ok(uids)
     }
 
+    /// The Unsent Changes of the UID `uid` in a Calendar, whatever their
+    /// recurrence IDs, as the Local Store keeps them, untrusted. A
+    /// recurrence ID or Send Failure that isn't text counts as none.
+    pub(crate) fn unsent_changes_of(
+        &self,
+        calendar_id: CalendarId,
+        uid: &str,
+    ) -> Result<Vec<KeptUnsentChange>> {
+        let text = |value| match value {
+            Value::Text(text) => Some(text),
+            _ => None,
+        };
+        let kept = self
+            .conn
+            .prepare(
+                "SELECT recurrence_id, since, send_failure FROM unsent_change \
+                 WHERE calendar_id = ?1 AND uid = ?2 ORDER BY rowid",
+            )?
+            .query_map(params![calendar_id.0, uid], |row| {
+                Ok(KeptUnsentChange {
+                    recurrence_id: text(row.get(0)?).map(RecurrenceId::obtained),
+                    since: match row.get(1)? {
+                        Value::Integer(since) => Some(since),
+                        _ => None,
+                    },
+                    send_failure: text(row.get(2)?),
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(kept)
+    }
+
     /// The Send Failure of each Unsent Change of a Calendar, as the Local
     /// Store keeps it, untrusted, with its UID, in the order they were
-    /// added. Ticket 18 shows them.
+    /// added.
     #[cfg(test)]
     pub fn send_failures(&self, calendar_id: CalendarId) -> Result<Vec<(String, Option<String>)>> {
         let failures = self
@@ -548,13 +580,13 @@ impl Store {
 
     /// Every Unsent Change, in the order they were added.
     #[cfg(test)]
-    pub fn unsent_changes(&self) -> Result<Vec<UnsentChange>> {
+    pub fn unsent_changes(&self) -> Result<Vec<UnsentChangeRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT calendar_id, uid, recurrence_id, since FROM unsent_change ORDER BY rowid",
         )?;
         let unsent = stmt
             .query_map([], |row| {
-                Ok(UnsentChange {
+                Ok(UnsentChangeRow {
                     calendar_id: CalendarId(row.get(0)?),
                     uid: row.get(1)?,
                     recurrence_id: row.get(2)?,
@@ -645,7 +677,7 @@ pub struct ServerCalendarState {
 /// to compare.
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct UnsentChange {
+pub struct UnsentChangeRow {
     pub calendar_id: CalendarId,
     pub uid: String,
     pub recurrence_id: Option<String>,

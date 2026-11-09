@@ -2,13 +2,15 @@
   An Event's details: its title, time, repeat, location, description and
   Calendar, with Edit and Delete icons for Events of writable Calendars
   without guests; the others say they are read-only and why: a Read-only
-  Calendar, or guests, with where to edit it instead. Delete asks first, and for an
+  Calendar, or guests, with where to edit it instead. An Event with an
+  Unsent Change says "Not yet synced", and why. Delete asks first, and for an
   Occurrence of a Recurring Event whether to delete it alone or all. A click
   on the backdrop closes the details.
 -->
 <script lang="ts">
   import Calendar from '@lucide/svelte/icons/calendar';
   import Clock from '@lucide/svelte/icons/clock';
+  import CloudUpload from '@lucide/svelte/icons/cloud-upload';
   import Lock from '@lucide/svelte/icons/lock';
   import MapPin from '@lucide/svelte/icons/map-pin';
   import Pencil from '@lucide/svelte/icons/pencil';
@@ -16,11 +18,12 @@
   import Text from '@lucide/svelte/icons/text';
   import Trash from '@lucide/svelte/icons/trash-2';
   import Users from '@lucide/svelte/icons/users';
-  import type { Calendar as CalendarType, Event, When } from '../core/types';
+  import type { Calendar as CalendarType, Event, SyncStatuses, When } from '../core/types';
   import { t } from '../i18n';
   import Dialog from './Dialog.svelte';
   import { describeRepeat } from './repeat';
   import StructuredTextView from './StructuredTextView.svelte';
+  import { notYetSyncedText } from './unsent';
   import { describeWhen } from './when';
   import { canEdit } from './windowModel.svelte';
 
@@ -28,6 +31,8 @@
     event: Event;
     /** The Event's Calendar, if it is still there. */
     calendar: CalendarType | undefined;
+    /** For why an Unsent Change of the Event waits, once read. */
+    syncStatuses?: SyncStatuses;
     /** When the Occurrence that was opened takes place, if it isn't the Event's first. */
     when?: When;
     /** A failure to report, such as a delete the core refused. */
@@ -44,6 +49,7 @@
   let {
     event,
     calendar,
+    syncStatuses,
     when = event.when,
     failure,
     onedit,
@@ -141,6 +147,12 @@
       <div class="row">
         <dt><Users size={14} aria-label={t('event.readOnly')} /></dt>
         <dd>{t('event.hasGuests')}</dd>
+      </div>
+    {/if}
+    {#if event.unsentChange}
+      <div class="row">
+        <dt><CloudUpload size={14} aria-label={t('unsent.notYetSynced')} /></dt>
+        <dd>{notYetSyncedText(event.unsentChange, syncStatuses, calendar)}</dd>
       </div>
     {/if}
   </dl>

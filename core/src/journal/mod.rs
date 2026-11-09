@@ -551,7 +551,7 @@ fn hash(uid: &str, event: &StoredEvent) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::event::{EventFields, RecurrenceId, ServerObject, StoredWhen};
-    use crate::store::UnsentChange;
+    use crate::store::UnsentChangeRow;
     use crate::sync;
 
     fn dentist() -> StoredEvent {
@@ -950,7 +950,7 @@ mod tests {
                 .value
         }
 
-        fn unsent(&self) -> Vec<UnsentChange> {
+        fn unsent(&self) -> Vec<UnsentChangeRow> {
             self.store.unsent_changes().unwrap()
         }
 
@@ -960,8 +960,8 @@ mod tests {
             uid: &str,
             recurrence_id: Option<&str>,
             since: i64,
-        ) -> UnsentChange {
-            UnsentChange {
+        ) -> UnsentChangeRow {
+            UnsentChangeRow {
                 calendar_id: self.server,
                 uid: uid.to_owned(),
                 recurrence_id: recurrence_id.map(str::to_owned),

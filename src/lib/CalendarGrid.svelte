@@ -15,10 +15,11 @@
   import 'fullcalendar/themes/classic/theme.css';
   import 'fullcalendar/themes/classic/palette.css';
   import { onDestroy, untrack } from 'svelte';
-  import type { Calendar, EventId, Occurrence, View, When } from '../core/types';
+  import type { AccountId, Calendar, EventId, Occurrence, View, When } from '../core/types';
   import { t } from '../i18n';
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
+  import { outlineDue } from './unsent';
   import { firstWeekdayNumber } from './week.svelte';
   import { canEdit, whyReadOnly } from './windowModel.svelte';
   import {
@@ -79,6 +80,12 @@
      * Occurrence waits for the user to choose its recurrence scope.
      */
     held?: boolean;
+    /**
+     * The server Accounts that are Offline: their Occurrences with Unsent
+     * Changes get the dashed outline at once, the others only once the
+     * change waited a few seconds.
+     */
+    offlineAccounts?: ReadonlySet<AccountId>;
   }
 
   /** FullCalendar's names for FreeCal's views. */
@@ -100,6 +107,7 @@
     onrefusedrag,
     oninteract,
     held = false,
+    offlineAccounts = new Set(),
   }: Props = $props();
 
   let element: HTMLDivElement;
@@ -267,14 +275,43 @@
     untrack(() => shown?.setOption('firstDay', firstDay));
   });
 
+  /** When each Occurrence's dashed outline is due, if it has an Unsent Change (spec: "Event chips stay sparse"). */
+  const outlinesDue = $derived.by(() => {
+    const accountOf = new Map(calendars.map((calendar) => [calendar.id, calendar.accountId]));
+    return occurrences.map((occurrence) => {
+      const account = accountOf.get(occurrence.calendarId);
+      return outlineDue(occurrence, account !== undefined && offlineAccounts.has(account));
+    });
+  });
+  /** Counts the outlines that fell due, so that the Occurrences are drawn again then. */
+  let outlinesFallen = $state(0);
+
+  // A timer for the next outline due, so that it appears once the change
+  // waited, if it is still unsent then.
   $effect(() => {
-    // Draws the Occurrences again after a refused drag.
+    void outlinesFallen;
+    const now = Date.now();
+    const next = Math.min(
+      ...outlinesDue.filter((due): due is number => due !== undefined && due > now),
+    );
+    if (next === Infinity) return;
+    const timer = setTimeout(() => outlinesFallen++, next - now);
+    return () => clearTimeout(timer);
+  });
+
+  $effect(() => {
+    // Draws the Occurrences again after a refused drag, and once an outline
+    // fell due.
     redraws;
+    void outlinesFallen;
+    const now = Date.now();
     // Without a handler there is nothing to tell about a drag.
     const movable = onreschedule !== undefined;
     const calendarsById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
     const timeGrid = view !== 'month';
-    const events: EventInput[] = occurrences.map((occurrence) => {
+    const events: EventInput[] = occurrences.map((occurrence, index) => {
+      const due = outlinesDue[index];
+      const unsent = due !== undefined && due <= now;
       const calendar = calendarsById.get(occurrence.calendarId);
       const colour = calendar?.colour;
       // A timed Occurrence of a day or more goes to the all-day area, so that
@@ -297,7 +334,9 @@
         extendedProps: { when: occurrence.when, recurrenceId: occurrence.recurrenceId },
         color: colour,
         contrastColor: colour && textColourOn(colour),
-        className: [selected && 'selected-event', fixed && 'fixed-event'].filter(Boolean).join(' '),
+        className: [selected && 'selected-event', fixed && 'fixed-event', unsent && 'unsent-event']
+          .filter(Boolean)
+          .join(' '),
       };
     });
     const shown = grid;
@@ -343,6 +382,14 @@
     .calendar-grid :global(.event-block:hover) {
       background-image: linear-gradient(rgb(0 0 0 / 15%), rgb(0 0 0 / 15%));
     }
+  }
+
+  /* An Occurrence with Unsent Changes: a dashed outline, not a paler colour,
+     which would look past or tentative (spec: "Event chips stay sparse").
+     The selected Occurrence's solid outline, below, wins. */
+  .calendar-grid :global(.unsent-event) {
+    outline: 1px dashed var(--foreground);
+    outline-offset: 1px;
   }
 
   .calendar-grid :global(.selected-event) {

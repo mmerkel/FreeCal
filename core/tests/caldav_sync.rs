@@ -466,7 +466,15 @@ mod privileges {
             try_sync(&on_server, StartedBy::FreeCal),
             (
                 Some(ErrorCode::WritesRefused),
-                vec![Signal::CalendarsChanged]
+                // A sync with Unsent Changes to send says the Occurrences
+                // changed, as what the window shows of them may have
+                // (ticket 18).
+                vec![
+                    Signal::CalendarsChanged,
+                    Signal::OccurrencesChanged {
+                        calendar_ids: vec![on_server.work]
+                    }
+                ]
             )
         );
 

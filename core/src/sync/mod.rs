@@ -208,16 +208,17 @@ fn read_server_read_only(
 
 /// Why the Sender's last try to send the Unsent Changes of a UID didn't
 /// send them (new term: Send Failure), kept with them until a send
-/// succeeds, for "Not yet synced: <reason>" (spec: "Event details", shown by
-/// ticket 18). It covers only what is about the UID itself. What is about
+/// succeeds, for "Not yet synced: <reason>" (spec: "Event details"). It
+/// covers only what is about the UID itself. What is about
 /// its Account or Calendar is that one's Sync Status instead, and stores
 /// none: the Account Offline, the Calendar's Sync Error (the server
 /// refusing writes, a paused Calendar) or its First Sync unfinished. An
 /// Unsent Change never tried has none either. The Local Store keeps it as
 /// its JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub(crate) enum SendFailure {
+pub enum SendFailure {
     /// An update or a delete failed its precondition: the server holds a
     /// version FreeCal hasn't read yet, which the Incoming Sync brings in
     /// (a Conflict once tickets 20 and 21 raise them).
@@ -245,7 +246,6 @@ impl SendFailure {
     /// Reads a stored Send Failure, untrusted: none when it can't be read,
     /// and an error code checked as a Sync Record's is
     /// ([`ErrorCode::checked`]).
-    #[cfg(test)]
     pub(crate) fn from_stored(json: &str) -> Option<Self> {
         match serde_json::from_str(json).ok()? {
             SendFailure::Failed { error } => Some(SendFailure::Failed {

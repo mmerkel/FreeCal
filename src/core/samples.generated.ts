@@ -169,7 +169,8 @@ export const samples = {
       },
       "customRepeat": true,
       "recurrenceId": null,
-      "hasGuests": false
+      "hasGuests": false,
+      "unsentChange": null
     },
     {
       "id": 4,
@@ -218,7 +219,13 @@ export const samples = {
       },
       "customRepeat": true,
       "recurrenceId": "2026-10-19T09:30:00",
-      "hasGuests": true
+      "hasGuests": true,
+      "unsentChange": {
+        "since": "2026-10-05T07:45:00Z",
+        "sendFailure": {
+          "kind": "serverChanged"
+        }
+      }
     }
   ],
   Occurrence: [
@@ -232,7 +239,8 @@ export const samples = {
         "end": "2026-10-06"
       },
       "recurrenceId": null,
-      "hasGuests": false
+      "hasGuests": false,
+      "unsentSince": null
     },
     {
       "eventId": 3,
@@ -244,7 +252,36 @@ export const samples = {
         "end": "2026-10-05T10:00:00"
       },
       "recurrenceId": "2026-10-05T09:30:00",
-      "hasGuests": true
+      "hasGuests": true,
+      "unsentSince": "2026-10-05T07:45:00Z"
+    }
+  ],
+  UnsentChange: [
+    {
+      "since": "2026-10-05T07:45:00Z",
+      "sendFailure": {
+        "kind": "serverChanged"
+      }
+    }
+  ],
+  SendFailure: [
+    {
+      "kind": "serverChanged"
+    },
+    {
+      "kind": "addressTaken"
+    },
+    {
+      "kind": "waitingForServerVersion"
+    },
+    {
+      "kind": "unbuildable"
+    },
+    {
+      "kind": "failed",
+      "error": {
+        "code": "serverUnreachable"
+      }
     }
   ],
   Repeat: [
@@ -639,7 +676,8 @@ export const samples = {
         },
         "customRepeat": true,
         "recurrenceId": null,
-        "hasGuests": false
+        "hasGuests": false,
+        "unsentChange": null
       }
     },
     {
@@ -691,7 +729,8 @@ export const samples = {
         },
         "customRepeat": true,
         "recurrenceId": null,
-        "hasGuests": false
+        "hasGuests": false,
+        "unsentChange": null
       }
     }
   ],
@@ -850,6 +889,8 @@ type Samples = {
   EventDraft: Unbranded<T.EventDraft>[];
   Event: Unbranded<T.Event>[];
   Occurrence: Unbranded<T.Occurrence>[];
+  UnsentChange: Unbranded<T.UnsentChange>[];
+  SendFailure: Unbranded<T.SendFailure>[];
   Repeat: Unbranded<T.Repeat>[];
   Frequency: Unbranded<T.Frequency>[];
   RepeatEnd: Unbranded<T.RepeatEnd>[];

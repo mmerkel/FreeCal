@@ -8,6 +8,7 @@ mod handoff;
 mod keyring;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -25,6 +26,10 @@ use tauri_plugin_opener::OpenerExt;
 
 /// The Tauri event on which Signals reach the frontend.
 const SIGNAL_EVENT: &str = "freecal://signal";
+
+/// The Tauri event that asks the frontend to quit as Quit in the main menu
+/// does, when closing the window would quit with Unsent Changes waiting.
+const QUIT_ASKED_EVENT: &str = "freecal://quit-asked";
 
 /// How often the core checks whether the local date changed. A sleep of the
 /// thread doesn't count the time the computer was suspended, so a short
@@ -52,6 +57,13 @@ impl SignalSink for ForwardToFrontend {
         let _ = self.0.emit(SIGNAL_EVENT, signal);
     }
 }
+
+/// Whether the desktop session ends, by logout or shutdown, as the Desktop
+/// Watch reports it. Then closing the window quits at once, without trying
+/// to send the Unsent Changes, which stay in the Local Store (spec:
+/// "Quitting").
+#[derive(Default)]
+struct SessionEnding(AtomicBool);
 
 /// Why the core couldn't open its Local Store. Managed only then, in place
 /// of the [`Core`], and the window shows it on the startup error screen.
@@ -168,6 +180,13 @@ fn list_calendars(core: State<Core>) -> CommandResult<Vec<Calendar>> {
 #[tauri::command]
 fn sync_statuses(core: State<Core>) -> CommandResult<SyncStatuses> {
     core.sync_statuses().map_err(ErrorCode::from)
+}
+
+/// Tries to send every Unsent Change before quitting, for a few seconds,
+/// and returns the Sync Statuses then (see [`Core::send_before_quit`]).
+#[tauri::command]
+async fn send_before_quit(core: State<'_, Core>) -> CommandResult<SyncStatuses> {
+    core.send_before_quit().map_err(ErrorCode::from)
 }
 
 /// Sync now, of the Account `account_id`, or of every server Account.
@@ -451,6 +470,24 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Whether closing `window` should first try to send the Unsent Changes:
+/// some wait, and the session isn't ending. When they can't be counted,
+/// closing quits.
+fn unsent_changes_wait(window: &tauri::Window) -> bool {
+    let Some(core) = window.try_state::<Core>() else {
+        return false;
+    };
+    if window.state::<SessionEnding>().0.load(Ordering::SeqCst) {
+        return false;
+    }
+    core.sync_statuses().is_ok_and(|statuses| {
+        statuses
+            .accounts
+            .iter()
+            .any(|account| account.report.unsent_changes > 0)
+    })
+}
+
 fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     match app.get_webview_window(MAIN_WINDOW) {
         Some(window) if !window.is_visible()? => {
@@ -550,6 +587,13 @@ fn run_scheduled_syncs(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     {
         let handle = app.clone();
+        desktop_watch::watch_session_end(move |ending| {
+            handle
+                .state::<SessionEnding>()
+                .0
+                .store(ending, Ordering::SeqCst)
+        });
+        let handle = app.clone();
         desktop_watch::watch_network(move |available| {
             handle.state::<Core>().set_network_available(available)
         });
@@ -583,6 +627,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(log_plugin())
         .manage(PickedImport::default())
+        .manage(SessionEnding::default())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
@@ -623,6 +668,14 @@ fn main() {
             {
                 window.app_handle().exit(0);
             }
+            // Closing the window quits FreeCal (background running is ticket
+            // 13's); with Unsent Changes waiting, the frontend quits as Quit
+            // in the main menu does, trying to send them first. Logout and
+            // shutdown never wait for that.
+            WindowEvent::CloseRequested { api, .. } if unsent_changes_wait(window) => {
+                api.prevent_close();
+                let _ = window.emit(QUIT_ASKED_EVENT, ());
+            }
             WindowEvent::Focused(true) => {
                 if let Some(core) = window.try_state::<Core>() {
                     core.trigger_sync(SyncTrigger::WindowFocused);
@@ -645,6 +698,7 @@ fn main() {
             remove_account,
             list_calendars,
             sync_statuses,
+            send_before_quit,
             sync_now,
             create_calendar,
             rename_calendar,

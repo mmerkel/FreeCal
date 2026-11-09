@@ -17,8 +17,8 @@ use crate::{
     Account, AccountId, AddedAccount, Appearance, AvailableCalendar, Calendar, CalendarId, Changed,
     Colour, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
     ImportOutcome, ImportSummary, JournalTransactionId, Occurrence, Piece, PinnedZone, Provider,
-    Repeat, RepeatEnd, Scope, ServerLogin, Settings, SettingsUpdate, SidebarState, Signal,
-    StructuredText, View, When,
+    Repeat, RepeatEnd, Scope, SendFailure, ServerLogin, Settings, SettingsUpdate, SidebarState,
+    Signal, StructuredText, UnsentChange, View, When,
 };
 use crate::{
     AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, SyncOutcome,
@@ -185,11 +185,18 @@ fn samples_file() -> (String, Vec<String>) {
         custom_repeat: true,
         recurrence_id: None,
         has_guests: false,
+        unsent_change: None,
+    };
+    let unsent_since = date(5).and_hms_opt(7, 45, 0).unwrap().and_utc();
+    let unsent_change = UnsentChange {
+        since: unsent_since,
+        send_failure: Some(SendFailure::ServerChanged),
     };
     let exception = Event {
         id: EventId(4),
         recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
         has_guests: true,
+        unsent_change: Some(unsent_change.clone()),
         ..event.clone()
     };
     let server = ServerLogin {
@@ -257,6 +264,7 @@ fn samples_file() -> (String, Vec<String>) {
                 when: all_day,
                 recurrence_id: None,
                 has_guests: false,
+                unsent_since: None,
             },
             Occurrence {
                 event_id: EventId(3),
@@ -265,6 +273,17 @@ fn samples_file() -> (String, Vec<String>) {
                 when: timed,
                 recurrence_id: Some("2026-10-05T09:30:00".to_owned()),
                 has_guests: true,
+                unsent_since: Some(unsent_since),
+            },
+        ]),
+        samples(&[unsent_change]),
+        samples(&[
+            SendFailure::ServerChanged,
+            SendFailure::AddressTaken,
+            SendFailure::WaitingForServerVersion,
+            SendFailure::Unbuildable,
+            SendFailure::Failed {
+                error: ErrorCode::ServerUnreachable,
             },
         ]),
         samples(&[repeat]),
