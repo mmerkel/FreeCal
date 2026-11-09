@@ -2,7 +2,7 @@
 
 **What to build:** When a local change to a whole Recurring Event collides with a remote change to one of its Occurrences, FreeCal raises one Conflict on the whole Recurring Event, showing both versions, so the user resolves it as one decision.
 
-**Blocked by:** 20, 91, 92
+**Blocked by:** 91, 92, 133, 134, 135, 138
 
 **Status:** ready-for-agent
 
@@ -21,3 +21,5 @@
 - 2026-10-25 (grilling, ADR 0011): blocked by 91, as ticket 20 is. A Recurring Event's Event Rows are one Server Object on CalDAV, but several on Google; a Conflict there is on the Server Objects whose Combined Event Keys are unsent.
 - 2026-11-02: Ticket 91 was split; `unsent_change` is now ticket 92, so this ticket is blocked by both.
 - 2026-11-06 (grilling, ADR 0014): detection per Occurrence, with changes to different Occurrences merged without asking (in line with the spec: both can be kept). This replaces the comment of 2026-10-25 on Google Server Objects whose Combined Event Keys are unsent: Conflicts are found in the Provider-neutral core for every Provider. Effort re-sized from M to L for the comparison of Server Versions and the merge.
+- 2026-11-09: Ticket 20 was split into 133 to 137. This ticket now waits on the core parts: 133 (finding and holding), 134 (listing and resolving) and 135 (what each side changed). It extends each of them to Recurring Events. The window parts (136, 137) show a Conflict per Event, so they need no change for Recurring Events.
+- 2026-11-09 (grilling of 133 to 137, ADR 0014's amendment of 2026-11-09): the Last Agreed Version is kept per UID in `conflict_event`, the Recurring Event with its Exceptions, beside the Server Version; extend 133's rule to compare per Occurrence against it. The rule also runs on local changes (138), so this ticket waits on 138 too. Ticket 20's "common version from the Change Journal" here means the Last Agreed Version.
