@@ -77,6 +77,7 @@ export class FakeCore {
    */
   readonly calls: Call[] = [];
   private readonly subscribers = new Set<(signal: Signal) => void>();
+  private readonly quitAsked = new Set<() => void>();
   private readonly scripted = new Map<Method, Outcome<Method>>();
   private readonly pendingAnswers = new Map<Method, Promise<Outcome<Method>>[]>();
 
@@ -110,6 +111,11 @@ export class FakeCore {
     listCalendars: () => every(samples.Calendar),
     syncStatuses: () => first(samples.SyncStatuses),
     syncNow: () => undefined,
+    sendBeforeQuit: () => first(samples.SyncStatuses),
+    onQuitAsked: (onAsked) => {
+      this.quitAsked.add(onAsked);
+      return () => void this.quitAsked.delete(onAsked);
+    },
     createCalendar: () => first(samples.Calendar),
     renameCalendar: () => undefined,
     recolourCalendar: () => undefined,
@@ -185,6 +191,11 @@ export class FakeCore {
   /** Sends `signal` to every subscriber, as the core would. */
   emit(signal: Signal) {
     for (const onSignal of [...this.subscribers]) onSignal(signal);
+  }
+
+  /** Asks the window to quit, as the shell does when it is closed while Unsent Changes wait. */
+  askToQuit() {
+    for (const onAsked of [...this.quitAsked]) onAsked();
   }
 
   private async call<M extends Method>(method: M, args: Args<M>): Promise<Answer<M>> {

@@ -9,9 +9,10 @@ import type {
   JournalTransactionId,
   When,
 } from '../core/types';
-import { errorText, t } from '../i18n';
+import { errorText, t, tCount } from '../i18n';
 import { sameRepeat } from './repeat';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
+import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
 import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
 
 /**
@@ -81,6 +82,13 @@ export class WindowDialogs {
   #importFailure = $state<string>();
   /** What the modal "Working…" dialog says while a long command runs. */
   #working = $state<string>();
+  /**
+   * The Calendars whose Unsent Changes still wait after quitting tried to
+   * send them, while the quit dialog asks whether to quit anyway.
+   */
+  #quitting = $state<UnsentAtQuit[]>();
+  /** Why quitting failed, if it did. */
+  #quitFailure = $state<string>();
 
   /** The Calendars new, edited and imported Events can go into: those that aren't Read-only. */
   readonly #writableCalendars: Calendar[];
@@ -97,9 +105,11 @@ export class WindowDialogs {
   get open() {
     return this.#open;
   }
-  /** Whether anything is open over the grid, the Scope Prompt too. */
+  /** Whether anything is open over the grid, the Scope Prompt and the quit dialog too. */
   get isOpen() {
-    return this.#open !== undefined || this.#scopePrompt !== undefined;
+    return (
+      this.#open !== undefined || this.#scopePrompt !== undefined || this.#quitting !== undefined
+    );
   }
   get scopePrompt() {
     return this.#scopePrompt;
@@ -129,6 +139,14 @@ export class WindowDialogs {
   /** What the modal "Working…" dialog says while a long command runs. */
   get working() {
     return this.#working;
+  }
+  /** The Calendars the quit dialog lists, while it is open. */
+  get quitting() {
+    return this.#quitting;
+  }
+  /** Why quitting failed, if it did. */
+  get quitFailure() {
+    return this.#quitFailure;
   }
   /** The Calendars new, edited and imported Events can go into: those that aren't Read-only. */
   get writableCalendars() {
@@ -431,6 +449,48 @@ export class WindowDialogs {
 
   dismissToast() {
     this.#toast = undefined;
+  }
+
+  /**
+   * Quit, from the main menu or the window's close (spec: "Quitting").
+   * With Unsent Changes waiting, it first tries to send them for a few
+   * seconds under "Working…", and quits if that sent them all; otherwise
+   * the quit dialog asks, listing the Calendars whose changes still wait
+   * and why. What is open over the grid stays open beneath. A Quit while
+   * one runs or asks does nothing.
+   */
+  async quit() {
+    if (this.#working !== undefined || this.#quitting !== undefined) return;
+    // Read now, as the window's may lag behind a change just made.
+    const before = await this.#core.syncStatuses().catch(() => this.#model.syncStatuses);
+    const waiting = before ? unsentCount(before) : 0;
+    if (waiting === 0) return this.quitAnyway();
+    this.#working = tCount('working.sending', waiting);
+    let after = before;
+    try {
+      after = await this.#core.sendBeforeQuit();
+    } catch {
+      // What waited before still waits, as far as the window knows.
+    } finally {
+      this.#working = undefined;
+    }
+    const unsent = after ? unsentAtQuit(after, this.#model.directory?.calendars ?? []) : [];
+    if (unsent.length === 0) return this.quitAnyway();
+    this.#quitting = unsent;
+  }
+
+  /** Closes the quit dialog without quitting. */
+  cancelQuit() {
+    this.#quitting = undefined;
+  }
+
+  /** Quits at once, leaving any Unsent Changes for the next start. */
+  quitAnyway() {
+    this.#quitting = undefined;
+    this.#quitFailure = undefined;
+    this.#core
+      .quit()
+      .catch((error) => (this.#quitFailure = t('app.quitFailed', { error: errorText(error) })));
   }
 
   /** Closes what is open over the grid. */

@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 use std::fs::{File, TryLockError};
 use std::path::Path;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, TimeDelta};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -41,7 +41,7 @@ pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{
     Event, EventDraft, EventId, ExceptionCounts, Frequency, Occurrence, Repeat, RepeatEnd, Scope,
-    ServerObject, When,
+    ServerObject, UnsentChange, When,
 };
 pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
@@ -54,6 +54,7 @@ pub use settings::{Appearance, Settings, SettingsUpdate};
 pub use sidebar::SidebarState;
 pub use signal::{Signal, SignalSink};
 pub use structured_text::{Piece, StructuredText, link_allowed};
+pub use sync::SendFailure;
 pub use sync_scheduler::SyncTrigger;
 pub use sync_status::{
     AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, StartedBy,
@@ -65,11 +66,19 @@ use calendar::calendar_name;
 use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::Remote;
-use store::{CalendarToSync, Store};
+use store::{CalendarToSync, ServerCalendarState, Store};
 use sync_scheduler::SyncScheduler;
 use sync_status::{RunningSync, RunningSyncs, SyncStatusKeeper};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+/// How long quitting tries to send the Unsent Changes, at most (spec:
+/// "Quitting": "for a few seconds").
+const SENDING_BEFORE_QUIT: TimeDelta = TimeDelta::seconds(5);
+
+/// How often [`Core::send_before_quit`] looks at the clock while it waits,
+/// in real time, so that a test's clock can end the wait.
+const QUIT_CLOCK_CHECK: Duration = Duration::from_millis(50);
 
 /// The core application interface.
 pub struct Core {
@@ -90,6 +99,8 @@ pub struct Core {
     scheduler: Mutex<SyncScheduler>,
     /// Wakes [`Core::wait_for_sync_request`] when a sync is asked for.
     sync_requested: Condvar,
+    /// Wakes [`Core::send_before_quit`] when the syncs due finished running.
+    syncs_ran: Condvar,
 }
 
 impl Core {
@@ -116,6 +127,7 @@ impl Core {
             running_syncs: RunningSyncs::default(),
             scheduler: Mutex::new(SyncScheduler::default()),
             sync_requested: Condvar::new(),
+            syncs_ran: Condvar::new(),
         })
     }
 
@@ -418,6 +430,13 @@ impl Core {
     /// Sync Status; one that isn't Offline is also logged.
     pub fn run_scheduled_syncs(&self) {
         let due = self.scheduler().take_due(self.clock.now());
+        self.run_syncs(&due);
+        self.scheduler().finish_batch();
+        self.syncs_ran.notify_all();
+    }
+
+    /// Runs the syncs `due`, as [`Core::run_scheduled_syncs`] says.
+    fn run_syncs(&self, due: &sync_scheduler::SyncRequests) {
         if due.is_empty() {
             return;
         }
@@ -455,6 +474,42 @@ impl Core {
         let _ = self
             .sync_requested
             .wait_timeout_while(scheduler, timeout, |scheduler| !scheduler.has_requests());
+    }
+
+    /// Tries to send every Unsent Change before FreeCal quits (spec:
+    /// "Quitting"): asks for a sync of each Calendar that has some, as a
+    /// change does, and waits until those syncs ran or 5 seconds passed on
+    /// the core's clock, whichever comes first. With no network, or nothing
+    /// to send, it returns at once. Returns the Sync Statuses as they are
+    /// then, whose Unsent Changes are those still waiting, and whose Sync
+    /// Statuses say why. A sync still running when it gives up goes on;
+    /// what it doesn't send stays in the Local Store for the next launch.
+    pub fn send_before_quit(&self) -> Result<SyncStatuses> {
+        let deadline = self.clock.now() + SENDING_BEFORE_QUIT;
+        let unsent: Vec<ServerCalendarState> = self
+            .store()
+            .server_calendar_states()?
+            .into_iter()
+            .filter(|calendar| calendar.unsent_changes > 0)
+            .collect();
+        if !unsent.is_empty() {
+            let mut scheduler = self.scheduler();
+            if scheduler.network_available() {
+                for calendar in &unsent {
+                    scheduler.ask_calendar(calendar.account_id, calendar.calendar_id);
+                }
+                let batch = scheduler.next_batch();
+                self.sync_requested.notify_all();
+                while !scheduler.batch_run(batch) && self.clock.now() < deadline {
+                    scheduler = self
+                        .syncs_ran
+                        .wait_timeout(scheduler, QUIT_CLOCK_CHECK)
+                        .unwrap()
+                        .0;
+                }
+            }
+        }
+        self.sync_statuses()
     }
 
     /// Tells the Sync Scheduler whether the window is open, which polls
@@ -539,6 +594,10 @@ impl Core {
         started_by: StartedBy,
         at_launch: bool,
     ) -> Result<Changed<CalendarId>> {
+        // Sending records no Journal Transaction, but it changes what the
+        // window shows of the Events it sends: their Unsent Changes go, or
+        // get a Send Failure.
+        let had_unsent = !self.store().unsent_uids(calendar.0)?.is_empty();
         let record: sync::Recorder = &|origin, change| {
             self.record(origin, change)
                 .map(|changed| changed.journal_transaction)
@@ -554,6 +613,11 @@ impl Core {
         );
         if synced.server_read_only_changed {
             self.signals.send(Signal::CalendarsChanged);
+        }
+        if had_unsent {
+            self.signals.send(Signal::OccurrencesChanged {
+                calendar_ids: vec![calendar.0],
+            });
         }
         synced.outcome.map(|journal_transaction| Changed {
             journal_transaction,
@@ -850,6 +914,10 @@ impl Core {
             )
         })?;
         let occurrence = edited.value;
+        let unsent_change = {
+            let store = self.store();
+            Opened::load(&*store, occurrence.id)?.unsent_change(&store)?
+        };
         Ok(Changed {
             journal_transaction: edited.journal_transaction,
             value: Occurrence {
@@ -860,6 +928,7 @@ impl Core {
                 recurrence_id: occurrence.recurrence_id,
                 // The Change Journal changes no Event with guests.
                 has_guests: false,
+                unsent_since: unsent_change.map(|unsent| unsent.since),
             },
         })
     }

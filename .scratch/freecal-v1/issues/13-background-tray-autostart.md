@@ -21,3 +21,4 @@
 
 - 2026-10-17 (from ticket 29): closing the window on a startup error screen must still quit FreeCal. `on_window_event` in `src-tauri/src/main.rs` quits when `StartupFailure` is managed; a start that fails after the core opened shows the same screen without that state, so the frontend or shell needs to cover it too.
 - 2026-11-07 (from 16): hiding the window for background running must call `Core::set_window_open(false)`, and showing it again `true`, so that the Sync Scheduler polls every 15 minutes in the background. The tray menu's Sync now (ticket 16) calls `Core::sync_now(None)`.
+- 2026-11-09 (from 18): the tray menu's Quit must quit as Quit in the main menu does, trying to send the Unsent Changes first: emit `freecal://quit-asked` to the window (as closing it does in `on_window_event`, `src-tauri/src/main.rs`), and quit at once only when no window is there to ask. Hiding the window for background running must not go through the close that asks to quit.

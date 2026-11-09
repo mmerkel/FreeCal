@@ -86,6 +86,18 @@ export interface CoreApi {
    * changed" tells how it goes.
    */
   syncNow(accountId: AccountId | null): Promise<void>;
+  /**
+   * Tries to send every Unsent Change before quitting, for at most a few
+   * seconds, and resolves to the Sync Statuses then: their Unsent Changes
+   * are those still waiting, and their states say why.
+   */
+  sendBeforeQuit(): Promise<SyncStatuses>;
+  /**
+   * Calls `onAsked` each time closing the window would quit while Unsent
+   * Changes wait: the shell keeps the window open for the window to quit as
+   * Quit in the main menu does. Resolves to a function that stops it.
+   */
+  onQuitAsked(onAsked: () => void): Promise<() => void>;
   /** Creates a Calendar in the Local Account. `colour` is `#rrggbb`. */
   createCalendar(accountId: AccountId, name: string, colour: string): Promise<Calendar>;
   renameCalendar(id: CalendarId, name: string): Promise<void>;

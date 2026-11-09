@@ -13,7 +13,7 @@ mod schema;
 mod sql;
 
 #[cfg(test)]
-pub use sql::UnsentChange;
+pub use sql::UnsentChangeRow;
 pub(crate) use sql::{CalendarToSync, ServerCalendarState};
 
 use std::ops::Deref;
@@ -43,6 +43,16 @@ pub struct RangeEvent {
     pub start_utc: i64,
     /// Whether the Events of its UID have guests (see [`crate::guests`]).
     pub has_guests: bool,
+}
+
+/// An Unsent Change as the Local Store keeps it, read untrusted: its
+/// recurrence ID as obtained, since when it waits in Unix seconds (none
+/// when that can't be read), and its Send Failure as kept, JSON not read
+/// yet.
+pub struct KeptUnsentChange {
+    pub recurrence_id: Option<RecurrenceId>,
+    pub since: Option<i64>,
+    pub send_failure: Option<String>,
 }
 
 /// Which Events [`Store::events_with_uid`] gives.

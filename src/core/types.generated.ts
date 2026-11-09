@@ -132,7 +132,12 @@ recurrenceId: string | null,
  * it read-only (spec: "Attendees"). For an Exception, whether its
  * Recurring Event has, as they are one Event on the server.
  */
-hasGuests: boolean, };
+hasGuests: boolean,
+/**
+ * Its Unsent Change, for "Not yet synced: <reason>" (spec: "Event
+ * details"); none when it has none.
+ */
+unsentChange: UnsentChange | null, };
 
 /**
  * What the user gives an Event when creating or editing it.
@@ -227,7 +232,15 @@ recurrenceId: string | null,
  * Whether its Event has guests, which makes it read-only (spec:
  * "Attendees"), as [`Event::has_guests`] says.
  */
-hasGuests: boolean, };
+hasGuests: boolean,
+/**
+ * Since when its Event has an Unsent Change, an instant in RFC 3339
+ * UTC, for the dashed outline (spec: "Event chips stay sparse"); none
+ * when it has none. It is its Event's [`Event::unsent_change`]: an
+ * Occurrence that an Exception changed has the Exception's, any other
+ * Occurrence of a Recurring Event the Recurring Event's.
+ */
+unsentSince: string | null, };
 
 /**
  * The most important state of all server Accounts and Calendars, as the
@@ -278,6 +291,19 @@ export type RepeatEnd = { "kind": "never" } | { "kind": "until", date: string, }
  * Which Occurrences of a Recurring Event a change to one of them changes.
  */
 export type Scope = "this" | "thisAndFollowing" | "all";
+
+/**
+ * Why the Sender's last try to send the Unsent Changes of a UID didn't
+ * send them (new term: Send Failure), kept with them until a send
+ * succeeds, for "Not yet synced: <reason>" (spec: "Event details"). It
+ * covers only what is about the UID itself. What is about
+ * its Account or Calendar is that one's Sync Status instead, and stores
+ * none: the Account Offline, the Calendar's Sync Error (the server
+ * refusing writes, a paused Calendar) or its First Sync unfinished. An
+ * Unsent Change never tried has none either. The Local Store keeps it as
+ * its JSON.
+ */
+export type SendFailure = { "kind": "serverChanged" } | { "kind": "addressTaken" } | { "kind": "waitingForServerVersion" } | { "kind": "unbuildable" } | { "kind": "failed", error: ErrorCode, };
 
 /**
  * A server Account's server and the username it logs in with. Its
@@ -356,6 +382,17 @@ unsentChanges: number, };
  * status, as the window reads them on starting.
  */
 export type SyncStatuses = { overall: OverallStatus, accounts: Array<AccountSyncStatus>, calendars: Array<CalendarSyncStatus>, };
+
+/**
+ * The Unsent Change of an Event as the window gets it: since when it
+ * waits, and why the Sender's last try to send it failed. A change made
+ * after that try, or a Send Failure that can't be read, has none.
+ */
+export type UnsentChange = {
+/**
+ * An instant, in RFC 3339 UTC.
+ */
+since: string, sendFailure: SendFailure | null, };
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

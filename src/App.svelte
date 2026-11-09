@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CoreApi } from './core/CoreApi';
   import type { View } from './core/types';
-  import { errorText, t } from './i18n';
+  import { t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
   import { followAppearance } from './lib/colourScheme';
@@ -31,6 +31,8 @@
   import { WindowDialogs } from './lib/windowDialogs.svelte';
   import { WindowModel } from './lib/windowModel.svelte';
   import WorkingDialog from './lib/WorkingDialog.svelte';
+  import QuitDialog from './lib/QuitDialog.svelte';
+  import { offlineAccounts } from './lib/unsent';
 
   interface Props {
     core: CoreApi;
@@ -44,7 +46,6 @@
   // svelte-ignore state_referenced_locally
   const dialogs = new WindowDialogs(core, model);
 
-  let quitFailure = $state<string>();
   /**
    * Releases the hold on "Date changed" while the user presses on the grid,
    * as for a drag, so that the grid doesn't move under the pointer.
@@ -96,13 +97,19 @@
 
   $effect(() => model.start());
 
+  // Closing the window while Unsent Changes wait quits as Quit in the main
+  // menu does.
+  $effect(() => {
+    const stopping = core.onQuitAsked(() => void dialogs.quit());
+    return () => void stopping.then((stop) => stop());
+  });
+
+  /** The server Accounts that are Offline, whose Unsent Changes the grid outlines at once. */
+  const offline = $derived(offlineAccounts(model.syncStatuses));
+
   /** Sync now of every server Account; the Sync Status shows how it goes. */
   function syncNow() {
     void core.syncNow(null);
-  }
-
-  function quit() {
-    core.quit().catch((error) => (quitFailure = t('app.quitFailed', { error: errorText(error) })));
   }
 
   /** What each keyboard shortcut does (see `shortcuts.ts` for the keys). */
@@ -150,7 +157,7 @@
 <svelte:document onvisibilitychange={onwake} />
 
 {#if model.startupReason}
-  <StartupError reason={model.startupReason} onquit={quit} />
+  <StartupError reason={model.startupReason} onquit={() => dialogs.quitAnyway()} />
 {:else if model.today && model.navigation && model.directory && model.sidebar}
   {@const today = model.today}
   {@const shown = model.navigation}
@@ -180,7 +187,7 @@
         onimport={() => dialogs.startImport()}
         onsettings={() => dialogs.openSettings()}
         onabout={() => dialogs.openAbout()}
-        onquit={quit}
+        onquit={() => void dialogs.quit()}
       />
       {#if model.readFailure}
         <p role="alert">{t('app.readFailed', { error: model.readFailure })}</p>
@@ -191,8 +198,8 @@
       {#if model.sidebarSaveFailure}
         <p role="alert">{model.sidebarSaveFailure}</p>
       {/if}
-      {#if quitFailure}
-        <p role="alert">{quitFailure}</p>
+      {#if dialogs.quitFailure}
+        <p role="alert">{dialogs.quitFailure}</p>
       {/if}
       {#if dialogs.rescheduleFailure}
         <p role="alert">{dialogs.rescheduleFailure}</p>
@@ -213,6 +220,7 @@
         onrefusedrag={(id, recurrenceId) => dialogs.refuseDrag(id, recurrenceId)}
         {oninteract}
         held={dialogs.dropHeld}
+        offlineAccounts={offline}
       />
     </main>
   </div>
@@ -222,6 +230,7 @@
     <EventDetails
       {event}
       calendar={directory.calendars.find((calendar) => calendar.id === event.calendarId)}
+      syncStatuses={model.syncStatuses}
       when={dialogs.openedOccurrence?.when}
       failure={dialogs.failure}
       onedit={() => dialogs.startEditing()}
@@ -304,6 +313,13 @@
   {/if}
   {#if dialogs.working}
     <WorkingDialog message={dialogs.working} />
+  {/if}
+  {#if dialogs.quitting}
+    <QuitDialog
+      unsent={dialogs.quitting}
+      oncancel={() => dialogs.cancelQuit()}
+      onquit={() => dialogs.quitAnyway()}
+    />
   {/if}
 {:else}
   <p>{t('app.loading')}</p>

@@ -9,7 +9,14 @@ import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
 import type { Event, Repeat, StructuredText, When } from './core/types';
-import { calendar, event, firstLaunch, occurrence, occurrencesChanged } from './test/answers';
+import {
+  caldavAccount,
+  calendar,
+  event,
+  firstLaunch,
+  occurrence,
+  occurrencesChanged,
+} from './test/answers';
 import { journalTransactionId } from './test/ids';
 import { failure, type FakeCore } from './test/fakeCore';
 import { stubGrid } from './test/stubGrid';
@@ -194,6 +201,37 @@ test('the details of an Event that had no time zone say which zone FreeCal gave 
 
   const zonedDetails = await openOccurrence(user, core, zoned);
   expect(zonedDetails).not.toHaveTextContent('no time zone');
+});
+
+test('the details of an Event with an Unsent Change say it isn’t synced yet, and why', async () => {
+  const user = userEvent.setup();
+  const account = caldavAccount('ada');
+  const team = calendar({ accountId: account.id, name: 'Team' });
+  const waiting = event({
+    calendarId: team.id,
+    title: 'Waiting',
+    when: monday,
+    unsentChange: { since: '2026-10-03T10:00:00Z', sendFailure: { kind: 'serverChanged' } },
+  });
+  const sent = event({ calendarId: team.id, title: 'Sent', when: later });
+  const core = firstLaunch({ accounts: [account], calendars: [team], events: [waiting, sent] });
+  await showApp(core);
+
+  const details = await openOccurrence(user, core, waiting);
+  expect(details).toHaveTextContent('Not yet synced: the event was changed on the server');
+
+  // The Account's reason comes first, and the details follow it.
+  const offline = { status: { kind: 'offline' }, lastSync: null, unsentChanges: 1 } as const;
+  core.answer('syncStatuses', {
+    overall: { state: { kind: 'offline' }, lastSync: null },
+    accounts: [{ accountId: account.id, report: offline }],
+    calendars: [],
+  });
+  core.emit({ kind: 'accountSyncStatusChanged', accountId: account.id, report: offline });
+  await waitFor(() => expect(details).toHaveTextContent('Not yet synced: offline'));
+  await user.click(within(details).getByRole('button', { name: 'Close' }));
+
+  expect(await openOccurrence(user, core, sent)).not.toHaveTextContent('Not yet synced');
 });
 
 test('an Event of a Read-only Calendar can’t be edited or deleted', async () => {

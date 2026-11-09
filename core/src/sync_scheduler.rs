@@ -120,6 +120,11 @@ pub(crate) struct SyncScheduler {
     /// Whether the sync of every Account at launch hasn't run yet: with no
     /// network at launch, it is the one the network's return asks for.
     launch_sync_due: bool,
+    /// How many times the syncs due were taken, and how many of those
+    /// finished running, so that a caller can wait for the syncs it asked
+    /// for to have run ([`SyncScheduler::batch_run`]).
+    batches_taken: u64,
+    batches_run: u64,
 }
 
 impl Default for SyncScheduler {
@@ -132,6 +137,8 @@ impl Default for SyncScheduler {
             last_poll: None,
             requests: SyncRequests::default(),
             launch_sync_due: true,
+            batches_taken: 0,
+            batches_run: 0,
         }
     }
 }
@@ -202,6 +209,7 @@ impl SyncScheduler {
         if self.requests.every_account() {
             self.last_poll = Some(now);
         }
+        self.batches_taken += 1;
         let mut due = std::mem::take(&mut self.requests);
         if !self.network_available {
             return SyncRequests::default();
@@ -210,6 +218,23 @@ impl SyncScheduler {
             due.at_launch = std::mem::take(&mut self.launch_sync_due);
         }
         due
+    }
+
+    /// Notes that the syncs last taken by [`SyncScheduler::take_due`]
+    /// finished running, on the one thread that runs them.
+    pub fn finish_batch(&mut self) {
+        self.batches_run = self.batches_taken;
+    }
+
+    /// The batch that takes the syncs asked for so far: the next one taken.
+    pub fn next_batch(&self) -> u64 {
+        self.batches_taken + 1
+    }
+
+    /// Whether the batch `batch`, from [`SyncScheduler::next_batch`],
+    /// finished running.
+    pub fn batch_run(&self, batch: u64) -> bool {
+        self.batches_run >= batch
     }
 }
 

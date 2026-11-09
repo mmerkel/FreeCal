@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar, Occurrence } from '../core/types';
 import { accountId, calendarId, eventId } from '../test/ids';
 import CalendarGrid from './CalendarGrid.svelte';
 import { setClockHours } from './clock.svelte';
+import { OUTLINE_DELAY_MS } from './unsent';
 import { setFirstDayOfWeek } from './week.svelte';
 
 const today = Temporal.PlainDate.from('2026-10-03');
@@ -34,6 +35,7 @@ function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Oc
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     recurrenceId: null,
     hasGuests: false,
+    unsentSince: null,
     ...fields,
   };
 }
@@ -615,4 +617,52 @@ test('shows a new today straight away when nothing is pressed', async () => {
   await shown.rerender({ today: newToday });
 
   await waitFor(() => expect(highlighted()).toBe('2026-10-11'));
+});
+
+describe('an Occurrence with Unsent Changes', () => {
+  /** A server Account, and its Calendar. */
+  const account = accountId(5);
+  const served: Calendar = { ...home, id: calendarId(5), accountId: account };
+  const now = Temporal.Instant.from('2026-10-03T10:00:00Z');
+
+  /** An Occurrence of `served` whose change waits since `ago` milliseconds. */
+  const waiting = (title: string, ago: number) =>
+    occurrence({
+      title,
+      calendarId: served.id,
+      unsentSince: now.subtract({ milliseconds: ago }).toString(),
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(now.epochMilliseconds);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  test('gets a dashed outline once its change has waited a few seconds', async () => {
+    render(CalendarGrid, {
+      ...thisMonth,
+      occurrences: [waiting('Waited', OUTLINE_DELAY_MS), waiting('Just made', 1000)],
+      calendars: [served],
+    });
+
+    await waitFor(() => expect(chip('Waited')).toHaveClass('unsent-event'));
+    expect(chip('Just made')).not.toHaveClass('unsent-event');
+
+    vi.advanceTimersByTime(OUTLINE_DELAY_MS - 1000);
+
+    await waitFor(() => expect(chip('Just made')).toHaveClass('unsent-event'));
+  });
+
+  test('gets it at once while its Account is Offline', async () => {
+    render(CalendarGrid, {
+      ...thisMonth,
+      occurrences: [waiting('Just made', 0), occurrence({ title: 'Sent', calendarId: served.id })],
+      calendars: [served],
+      offlineAccounts: new Set([account]),
+    });
+
+    await waitFor(() => expect(chip('Just made')).toHaveClass('unsent-event'));
+    expect(chip('Sent')).not.toHaveClass('unsent-event');
+  });
 });
