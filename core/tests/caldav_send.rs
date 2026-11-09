@@ -12,8 +12,7 @@ use freecal_core::{
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy};
 use support::{
-    Harness, OnServer, add_account, calendar_sync_status, date, draft, ics, on, put_events, timed,
-    yoga,
+    Harness, OnServer, add_account, date, dentist, draft, ics, on, put_events, timed, yoga,
 };
 
 impl OnServer {
@@ -39,20 +38,6 @@ impl OnServer {
             Radicale::create_calendar,
             Some(&proxy.url),
             put_events(events),
-        )
-        .writable()
-    }
-
-    /// Like [`OnServer::through`] with no Events, but the server lets the
-    /// user only read the Calendar; FreeCal takes it as writable while
-    /// `proxy` says so.
-    fn read_only_through(proxy: &RewritingProxy) -> Self {
-        Self::arranged(
-            Radicale::shared().user(),
-            NewCalendar::default(),
-            Radicale::create_read_only_calendar,
-            Some(&proxy.url),
-            |_, _, _| {},
         )
         .writable()
     }
@@ -115,16 +100,6 @@ impl OnServer {
     /// The text of the resource `name` of the Calendar "Work" on the server.
     fn on_server(&self, name: &str) -> String {
         self.radicale.get_event(&self.user, &self.url, name).1
-    }
-
-    /// The Unsent Changes of the Calendar `id`.
-    fn unsent(&self, id: CalendarId) -> u32 {
-        calendar_sync_status(&self.core, id).report.unsent_changes
-    }
-
-    /// The Sync Status of the Calendar `id`.
-    fn status(&self, id: CalendarId) -> SyncStatus {
-        calendar_sync_status(&self.core, id).report.status
     }
 
     /// Runs the syncs FreeCal launches with, and forgets their Signals.
@@ -229,15 +204,6 @@ impl OnServer {
             .journal_transaction
             .expect("an undo is a Journal Transaction")
     }
-}
-
-/// "Dentist" on 5 October 2026, 9:00 to 10:00 in Berlin.
-fn dentist(calendar_id: CalendarId) -> EventDraft {
-    draft(
-        calendar_id,
-        "Dentist",
-        timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
-    )
 }
 
 /// A server Event with properties FreeCal doesn't show.

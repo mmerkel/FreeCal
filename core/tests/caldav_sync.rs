@@ -388,24 +388,15 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
 /// they may change it while it rewrites.
 mod privileges {
     use super::*;
-    use support::{draft, timed};
+    use support::dentist;
 
     const PRIVILEGES: &str = "current-user-privilege-set";
 
-    /// The Calendar, added while the proxy says what `rewriting` makes it
-    /// say, and marked writable by the user.
-    fn through(proxy: &RewritingProxy, rewriting: bool) -> OnServer {
-        if !rewriting {
-            proxy.stop_rewriting();
-        }
-        OnServer::arranged(
-            Radicale::shared().user(),
-            NewCalendar::default(),
-            Radicale::create_read_only_calendar,
-            Some(&proxy.url),
-            |_, _, _| {},
-        )
-        .writable()
+    /// [`OnServer::read_only_through`] `proxy`, once it stopped rewriting:
+    /// added Server read-only.
+    fn server_read_only_through(proxy: &RewritingProxy) -> OnServer {
+        proxy.stop_rewriting();
+        OnServer::read_only_through(proxy)
     }
 
     /// The user's Read-only mark and Server read-only, as the Calendar
@@ -436,7 +427,7 @@ mod privileges {
     #[test]
     fn a_poll_sends_no_privilege_request_nor_a_sync_the_user_starts_of_a_writable_calendar() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
-        let on_server = through(&proxy, true);
+        let on_server = OnServer::read_only_through(&proxy);
         let added = proxy.requests_holding(PRIVILEGES);
 
         sync(&on_server, StartedBy::FreeCal);
@@ -448,15 +439,11 @@ mod privileges {
     #[test]
     fn a_write_the_server_refuses_makes_the_calendar_server_read_only() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
-        let on_server = through(&proxy, true);
+        let on_server = OnServer::read_only_through(&proxy);
         assert_eq!(flags(&on_server), (false, false));
         on_server
             .core
-            .create_event(draft(
-                on_server.work,
-                "Dentist",
-                timed("2026-10-07T09:00:00", "2026-10-07T10:00:00"),
-            ))
+            .create_event(dentist(on_server.work))
             .unwrap();
         proxy.stop_rewriting();
 
@@ -471,9 +458,7 @@ mod privileges {
         assert_eq!(flags(&on_server), (true, true));
         // The refused write stays the Calendar's Sync Error (ticket 124).
         assert_eq!(
-            support::calendar_sync_status(&on_server.core, on_server.work)
-                .report
-                .status,
+            on_server.status(on_server.work),
             SyncStatus::SyncError {
                 error: ErrorCode::WritesRefused
             }
@@ -483,7 +468,7 @@ mod privileges {
     #[test]
     fn a_permission_granted_again_is_noticed_by_a_sync_the_user_starts_not_by_a_poll() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
-        let on_server = through(&proxy, false);
+        let on_server = server_read_only_through(&proxy);
         assert_eq!(flags(&on_server), (true, true));
         proxy.start_rewriting();
         let added = proxy.requests_holding(PRIVILEGES);
@@ -505,7 +490,7 @@ mod privileges {
     #[test]
     fn a_permission_granted_again_is_noticed_at_launch_and_by_sync_now() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
-        let on_server = through(&proxy, false);
+        let on_server = server_read_only_through(&proxy);
         let run_scheduled_syncs = || {
             on_server.harness.signals.clear();
             on_server.core.run_scheduled_syncs();

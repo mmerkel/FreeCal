@@ -63,11 +63,12 @@ pub(crate) fn outgoing(
     remote: &dyn Remote,
     store: &Mutex<Store>,
     calendar: &CalendarToSync,
+    server_read_only: bool,
     now: DateTime<Utc>,
 ) -> Result<()> {
     match remote.provider() {
         Provider::Local => unreachable!("the Local Provider has no server"),
-        Provider::CalDav => caldav::sender::send(remote, store, calendar, now),
+        Provider::CalDav => caldav::sender::send(remote, store, calendar, server_read_only, now),
     }
 }
 

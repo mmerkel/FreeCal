@@ -89,12 +89,10 @@ impl SyncRequests {
             .unwrap_or(StartedBy::FreeCal)
     }
 
-    /// Whether the sync of the Account `id` reads again the privileges of
-    /// its Server read-only Calendars, to notice a permission the server
-    /// granted again: a sync the user starts and the one at launch do
-    /// (ticket 130).
-    pub fn looks_for_grants(&self, id: AccountId) -> bool {
-        self.at_launch || self.started_by(id) == StartedBy::User
+    /// Whether they hold the launch sync, which looks for permissions
+    /// granted again (ticket 130).
+    pub fn at_launch(&self) -> bool {
+        self.at_launch
     }
 
     fn ask_every_account(&mut self, by: StartedBy) {
@@ -223,21 +221,18 @@ mod tests {
         DateTime::parse_from_rfc3339(&format!("2026-10-03T{time}+02:00")).unwrap()
     }
 
-    /// Ticket 130: the sync of every Account at launch looks for
-    /// permissions granted again, also when it waits for the network.
+    /// Ticket 130: the launch sync is the first sync of every Account that
+    /// runs, also when it waits for the network.
     #[test]
-    fn the_launch_sync_looks_for_grants_once_it_runs() {
-        let account = AccountId(2);
+    fn the_launch_sync_is_the_first_that_runs() {
         let mut scheduler = SyncScheduler::default();
         scheduler.set_network_available(false);
         assert!(scheduler.take_due(at("12:00:00")).is_empty());
 
         scheduler.set_network_available(true);
-        assert!(scheduler.take_due(at("12:00:10")).looks_for_grants(account));
+        assert!(scheduler.take_due(at("12:00:10")).at_launch());
 
         let poll = scheduler.take_due(at("12:05:10"));
-        assert!(poll.every_account() && !poll.looks_for_grants(account));
-        scheduler.ask_account(account, StartedBy::User);
-        assert!(scheduler.take_due(at("12:05:20")).looks_for_grants(account));
+        assert!(poll.every_account() && !poll.at_launch());
     }
 }

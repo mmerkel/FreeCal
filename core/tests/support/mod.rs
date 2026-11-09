@@ -15,11 +15,11 @@ use chrono_tz::Tz;
 use freecal_core::{
     AccountId, AccountSyncStatus, CalDavLogin, Calendar, CalendarId, CalendarSyncStatus, Clock,
     Colour, Core, CoreError, Event, EventDraft, EventId, Frequency, Keyring, KeyringError,
-    Occurrence, Repeat, RepeatEnd, ServerObject, Signal, SignalSink, When,
+    Occurrence, Repeat, RepeatEnd, ServerObject, Signal, SignalSink, SyncStatus, When,
 };
 use tempfile::TempDir;
 
-use radicale::{NewCalendar, Radicale, User};
+use radicale::{NewCalendar, Radicale, RewritingProxy, User};
 
 pub struct Harness {
     data_dir: TempDir,
@@ -283,6 +283,15 @@ pub fn draft(calendar_id: CalendarId, title: &str, when: When) -> EventDraft {
     }
 }
 
+/// "Dentist" on 5 October 2026, 9:00 to 10:00 in Berlin.
+pub fn dentist(calendar_id: CalendarId) -> EventDraft {
+    draft(
+        calendar_id,
+        "Dentist",
+        timed("2026-10-05T09:00:00", "2026-10-05T10:00:00"),
+    )
+}
+
 pub fn weekly(end: RepeatEnd) -> Repeat {
     Repeat {
         frequency: Frequency::Weekly,
@@ -476,6 +485,20 @@ impl OnServer {
         }
     }
 
+    /// A new user's Calendar with no Events that the server lets the user
+    /// only read, reached through `proxy`, and marked writable; FreeCal
+    /// takes it as writable while `proxy` says so.
+    pub fn read_only_through(proxy: &RewritingProxy) -> Self {
+        Self::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_read_only_calendar,
+            Some(&proxy.url),
+            |_, _, _| {},
+        )
+        .writable()
+    }
+
     /// It with the Calendar marked writable.
     pub fn writable(self) -> Self {
         self.core.set_calendar_read_only(self.work, false).unwrap();
@@ -505,6 +528,16 @@ impl OnServer {
     /// The titles of the Calendar's Occurrences in October 2026, in order.
     pub fn titles(&self) -> Vec<String> {
         titles(&self.core, self.work)
+    }
+
+    /// The Unsent Changes of the Calendar `id`.
+    pub fn unsent(&self, id: CalendarId) -> u32 {
+        calendar_sync_status(&self.core, id).report.unsent_changes
+    }
+
+    /// The Sync Status of the Calendar `id`.
+    pub fn status(&self, id: CalendarId) -> SyncStatus {
+        calendar_sync_status(&self.core, id).report.status
     }
 }
 

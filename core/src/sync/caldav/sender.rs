@@ -1,5 +1,5 @@
-//! The CalDAV Sender: the Outgoing Sync of a writable CalDAV Calendar,
-//! which sends its Unsent Changes (ADR 0015). CalDAV sends one resource per
+//! The CalDAV Sender: the Outgoing Sync of a CalDAV Calendar, which sends
+//! its Unsent Changes (ADR 0015). CalDAV sends one resource per
 //! UID (RFC 4791 §4.1), so Unsent Changes are merged per UID, whatever
 //! their recurrence IDs (ADR 0012). For each UID, the Sender compares its
 //! Event Rows with its CalDAV Server Object, found by Calendar and UID:
@@ -33,33 +33,28 @@ use crate::{CalendarId, CoreError, Result};
 /// changed, building new `VEVENT`s with `now` as their time of revision.
 /// Those of a Calendar whose First Sync is unfinished wait, as the Mirror
 /// doesn't yet hold every Server Object, so a create could meet a UID the
-/// server holds. Those of a Server read-only Calendar fail with
+/// server holds. Those of a Calendar that is `server_read_only` fail with
 /// [`CoreError::WritesRefused`] without a request, the Calendar's Sync
 /// Error, as the server would refuse them. The user's Read-only mark holds
 /// none back: it only stops new changes, so those made before it are sent
-/// (ticket 130). A failure
-/// about the whole Account stops it, and so does the server refusing
-/// writes to the Calendar. Any other failure of one UID leaves its Unsent
-/// Changes in place and the others are still sent, and the first is
-/// returned.
+/// (ticket 130). A failure about the whole Account stops it, and so does
+/// the server refusing writes to the Calendar. Any other failure of one UID
+/// leaves its Unsent Changes in place and the others are still sent, and
+/// the first is returned.
 pub(crate) fn send(
     remote: &dyn Remote,
     store: &Mutex<Store>,
     &(calendar_id, ref url, ref state): &CalendarToSync,
+    server_read_only: bool,
     now: DateTime<Utc>,
 ) -> Result<()> {
     if state.is_none() {
         return Ok(());
     }
-    let uids = {
-        let store = store.lock().unwrap();
-        let calendar = store.find_calendar(calendar_id)?;
-        let uids = store.unsent_uids(calendar_id)?;
-        if calendar.server_read_only && !uids.is_empty() {
-            return Err(CoreError::WritesRefused);
-        }
-        uids
-    };
+    let uids = store.lock().unwrap().unsent_uids(calendar_id)?;
+    if server_read_only && !uids.is_empty() {
+        return Err(CoreError::WritesRefused);
+    }
     let mut failed = None;
     for uid in uids {
         let to_send = ToSend {
@@ -486,7 +481,7 @@ mod tests {
             "/user/work/".to_owned(),
             Some(SyncPoint { token: None }),
         );
-        let sent = send(server, store, &calendar, Utc::now());
+        let sent = send(server, store, &calendar, false, Utc::now());
         let failures = store
             .lock()
             .unwrap()
@@ -671,7 +666,7 @@ mod tests {
             Some(SyncPoint { token: None }),
         );
 
-        send(&server, &store, &calendar, Utc::now()).unwrap();
+        send(&server, &store, &calendar, false, Utc::now()).unwrap();
 
         let store = store.lock().unwrap();
         let held = store

@@ -318,20 +318,22 @@ impl Core {
         id: AccountId,
         started_by: StartedBy,
     ) -> Result<Vec<Changed<CalendarId>>> {
-        self.sync_account_calendars(id, None, started_by, started_by == StartedBy::User)
+        self.sync_account_calendars(id, None, started_by, false)
     }
 
     /// [`Core::sync_account`] for only the Calendars `only` of the Account,
-    /// or all of them when none is given, looking for permissions granted
-    /// again when `look_for_grants`. The Account's Sync Status says
-    /// Syncing while they sync, and ends as for a sync of all of them.
+    /// or all of them when none is given, within the launch sync when
+    /// `at_launch`. A sync the user starts and the launch sync look for
+    /// permissions granted again (ticket 130). The Account's Sync Status
+    /// says Syncing while they sync, and ends as for a sync of all of them.
     fn sync_account_calendars(
         &self,
         id: AccountId,
         only: Option<&BTreeSet<CalendarId>>,
         started_by: StartedBy,
-        look_for_grants: bool,
+        at_launch: bool,
     ) -> Result<Vec<Changed<CalendarId>>> {
+        let look_for_grants = at_launch || started_by == StartedBy::User;
         let account = self.store().find_account(id)?;
         if account.ok_or(CoreError::AccountNotFound(id))?.provider == Provider::Local {
             return Ok(Vec::new());
@@ -437,7 +439,7 @@ impl Core {
                 id,
                 due.calendars_of(id),
                 due.started_by(id),
-                due.looks_for_grants(id),
+                due.at_launch(),
             );
             match synced {
                 Ok(_) | Err(CoreError::ServerUnreachable(_) | CoreError::AccountNotFound(_)) => {}
@@ -565,19 +567,20 @@ impl Core {
             server_read_only = self.read_server_read_only(remote, calendar)?;
         }
         let now = self.clock.now().with_timezone(&Utc);
-        let sent = match sync::outgoing(remote, &self.store, calendar, now) {
+        let sent = match sync::outgoing(remote, &self.store, calendar, server_read_only, now) {
             Err(error) if sync_status::about_account(&error) => return Err(error),
             // Refused by the server, not held back for Server read-only.
             // The refusal stays the Sync Error whatever the reading meets,
             // unless that is about the whole Account.
             Err(CoreError::WritesRefused) if !server_read_only => {
-                match self.read_server_read_only(remote, calendar) {
-                    Err(error) if sync_status::about_account(&error) => return Err(error),
-                    Err(error) => log::warn!(
+                if let Err(error) = self.read_server_read_only(remote, calendar) {
+                    if sync_status::about_account(&error) {
+                        return Err(error);
+                    }
+                    log::warn!(
                         "Reading the privileges of Calendar {} failed: {error}",
                         calendar_id.0
-                    ),
-                    Ok(_) => {}
+                    );
                 }
                 Err(CoreError::WritesRefused)
             }
