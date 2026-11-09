@@ -276,17 +276,19 @@ impl Core {
             .zip(added.calendar_syncs)
             .map(|((calendar, url), sync)| ((calendar.id, url.clone(), None), Some(sync)))
             .collect();
+        // Adding them read their privileges already.
         self.sync_calendars(
             added.account_sync,
             StartedBy::User,
+            false,
             remote.as_ref(),
             calendars,
         )?;
         Ok(added.calendars)
     }
 
-    /// Syncs a server Account on demand: each writable Calendar's Unsent
-    /// Changes are sent first (see [`Core::sync_calendar`]), then each
+    /// Syncs a server Account on demand: each Calendar's Unsent Changes are
+    /// sent first (see [`Core::sync_calendar`]), then each
     /// Calendar gets what changed on its server since its last sync,
     /// fetching only that where the server can tell (see
     /// [`Remote::changes`]). Each Calendar's
@@ -308,22 +310,27 @@ impl Core {
     /// sync it stopped, and the other Calendars still sync. The first error
     /// is returned. Returns each Calendar synced, with its Journal
     /// Transaction. None for the Local Account, which has no Sync Status.
+    ///
+    /// A sync the user starts looks for permissions the server granted
+    /// again, as [`Core::sync_calendar`] says.
     pub fn sync_account(
         &self,
         id: AccountId,
         started_by: StartedBy,
     ) -> Result<Vec<Changed<CalendarId>>> {
-        self.sync_account_calendars(id, None, started_by)
+        self.sync_account_calendars(id, None, started_by, started_by == StartedBy::User)
     }
 
     /// [`Core::sync_account`] for only the Calendars `only` of the Account,
-    /// or all of them when none is given. The Account's Sync Status says
+    /// or all of them when none is given, looking for permissions granted
+    /// again when `look_for_grants`. The Account's Sync Status says
     /// Syncing while they sync, and ends as for a sync of all of them.
     fn sync_account_calendars(
         &self,
         id: AccountId,
         only: Option<&BTreeSet<CalendarId>>,
         started_by: StartedBy,
+        look_for_grants: bool,
     ) -> Result<Vec<Changed<CalendarId>>> {
         let account = self.store().find_account(id)?;
         if account.ok_or(CoreError::AccountNotFound(id))?.provider == Provider::Local {
@@ -338,6 +345,7 @@ impl Core {
             Ok(Some((remote, calendars))) => self.sync_calendars(
                 account_sync,
                 started_by,
+                look_for_grants,
                 remote.as_ref(),
                 calendars
                     .into_iter()
@@ -353,7 +361,8 @@ impl Core {
 
     /// Syncs the Calendars `calendars` of a server Account, in order,
     /// through its server `remote`, in the Account's Running Sync
-    /// `account_sync`, started by `started_by`, and ends that. The Calendars
+    /// `account_sync`, started by `started_by`, looking for permissions
+    /// granted again when `look_for_grants`, and ends that. The Calendars
     /// paired with a Running Sync are syncing already, as
     /// [`Core::add_calendars`] starts them; any other syncing now is left
     /// out. A failure about the whole Account stops it: the Calendars it
@@ -364,6 +373,7 @@ impl Core {
         &self,
         account_sync: RunningSync,
         started_by: StartedBy,
+        look_for_grants: bool,
         remote: &dyn Remote,
         calendars: Vec<(CalendarToSync, Option<RunningSync>)>,
     ) -> Result<Vec<Changed<CalendarId>>> {
@@ -380,7 +390,7 @@ impl Core {
                     None => continue,
                 },
             };
-            match calendar_sync.end(self.sync_calendar(remote, &calendar)) {
+            match calendar_sync.end(self.sync_calendar(remote, &calendar, look_for_grants)) {
                 Ok(changed) => synced.extend(changed),
                 Err(error) if sync_status::about_account(&error) => {
                     about_account = Some(error);
@@ -423,7 +433,13 @@ impl Core {
             if !self.scheduler().network_available() {
                 break;
             }
-            match self.sync_account_calendars(id, due.calendars_of(id), due.started_by(id)) {
+            let synced = self.sync_account_calendars(
+                id,
+                due.calendars_of(id),
+                due.started_by(id),
+                due.looks_for_grants(id),
+            );
+            match synced {
                 Ok(_) | Err(CoreError::ServerUnreachable(_) | CoreError::AccountNotFound(_)) => {}
                 Err(error) => log::warn!("Syncing Account {} failed: {error}", id.0),
             }
@@ -524,27 +540,47 @@ impl Core {
     /// committed but not returned. Otherwise returns the Calendar with the
     /// Journal Transaction of its Incoming Sync, as the Outgoing Sync
     /// records none.
+    ///
+    /// Whether the server lets the user change the Calendar, Server
+    /// read-only, is read when it is added, and again only when FreeCal has
+    /// a reason to think it changed (ticket 130), so that a Poll costs no
+    /// request for it. A write the server refuses for want of privileges
+    /// reads it again, to notice a revoked permission. A Server read-only
+    /// Calendar sends no writes, so nothing tells of a permission granted
+    /// again: with `look_for_grants`, as for a sync the user starts and the
+    /// one at launch, it is read again first.
     fn sync_calendar(
         &self,
         remote: &dyn Remote,
         calendar: &CalendarToSync,
+        look_for_grants: bool,
     ) -> Result<Changed<CalendarId>> {
         let record: sync::Recorder = &|origin, change| {
             self.record(origin, change)
                 .map(|changed| changed.journal_transaction)
         };
-        let (calendar_id, ref url, _) = *calendar;
-        // A permission the server revokes or grants later is noticed here.
-        let server_read_only = remote.server_read_only(url)?;
-        let changed = self.store().write(|database_transaction| {
-            database_transaction.set_server_read_only(calendar_id, server_read_only)
-        })?;
-        if changed {
-            self.signals.send(Signal::CalendarsChanged);
+        let (calendar_id, ..) = *calendar;
+        let mut server_read_only = self.store().find_calendar(calendar_id)?.server_read_only;
+        if server_read_only && look_for_grants {
+            server_read_only = self.read_server_read_only(remote, calendar)?;
         }
         let now = self.clock.now().with_timezone(&Utc);
         let sent = match sync::outgoing(remote, &self.store, calendar, now) {
             Err(error) if sync_status::about_account(&error) => return Err(error),
+            // Refused by the server, not held back for Server read-only.
+            // The refusal stays the Sync Error whatever the reading meets,
+            // unless that is about the whole Account.
+            Err(CoreError::WritesRefused) if !server_read_only => {
+                match self.read_server_read_only(remote, calendar) {
+                    Err(error) if sync_status::about_account(&error) => return Err(error),
+                    Err(error) => log::warn!(
+                        "Reading the privileges of Calendar {} failed: {error}",
+                        calendar_id.0
+                    ),
+                    Ok(_) => {}
+                }
+                Err(CoreError::WritesRefused)
+            }
             sent => sent,
         };
         let journal_transaction = sync::incoming(
@@ -559,6 +595,25 @@ impl Core {
             journal_transaction,
             value: calendar_id,
         })
+    }
+
+    /// Reads from the server `remote` whether it lets the user change the
+    /// Calendar `calendar`, keeps it as its Server read-only, and sends
+    /// "Calendars changed" when that changed. Returns it.
+    fn read_server_read_only(
+        &self,
+        remote: &dyn Remote,
+        calendar: &CalendarToSync,
+    ) -> Result<bool> {
+        let (calendar_id, ref url, _) = *calendar;
+        let server_read_only = remote.server_read_only(url)?;
+        let changed = self.store().write(|database_transaction| {
+            database_transaction.set_server_read_only(calendar_id, server_read_only)
+        })?;
+        if changed {
+            self.signals.send(Signal::CalendarsChanged);
+        }
+        Ok(server_read_only)
     }
 
     /// Every Calendar a server Account's server offers now, added or not;

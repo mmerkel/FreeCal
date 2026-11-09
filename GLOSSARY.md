@@ -25,7 +25,7 @@ A Calendar that a server Account offers but that the user hasn't added to FreeCa
 _Avoid_: Subscribe/unsubscribe (for adding or removing), unsubscribed calendar, hidden calendar (a hidden Calendar is added and syncs, just not shown)
 
 **Read-only Calendar**:
-A Calendar whose Events FreeCal never changes, either because the server doesn't allow it or because the user marked it read-only in FreeCal. Every other Calendar is writable.
+A Calendar whose Events the user can't change in FreeCal, either because the server doesn't allow it or because the user marked it read-only in FreeCal. The user's mark only stops new changes: Unsent Changes made before it are still sent. While the server doesn't allow changes, FreeCal sends none. Every other Calendar is writable.
 _Avoid_: Locked, view-only, subscribed calendar
 
 **Event**:

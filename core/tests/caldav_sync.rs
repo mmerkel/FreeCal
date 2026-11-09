@@ -1,6 +1,6 @@
 mod support;
 
-use freecal_core::{CalendarId, Changed, Signal, StartedBy, SyncStatus};
+use freecal_core::{CalendarId, Changed, ErrorCode, Signal, StartedBy, SyncStatus};
 use support::radicale::{NewCalendar, Radicale, RewritingProxy};
 use support::{Harness, OnServer, date, event, ics, put_events, write_files};
 
@@ -379,47 +379,156 @@ fn a_sync_writes_into_a_read_only_calendar_and_records_it() {
     assert_eq!(synced.titles(), ["Standup moved"]);
 }
 
-/// A permission the server revokes or grants after the Calendar was added
-/// reaches it with the next sync, with "Calendars changed" (spec:
-/// "Calendars changed"). Radicale lets the user only read the Calendar; the
-/// proxy says they may change it until it stops rewriting.
-#[test]
-fn each_sync_reads_whether_the_server_lets_the_user_change_the_calendar() {
-    let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
-    let OnServer {
-        harness,
-        core,
-        account,
-        ..
-    } = OnServer::arranged(
-        Radicale::shared().user(),
-        NewCalendar::default(),
-        Radicale::create_read_only_calendar,
-        Some(&proxy.url),
-        |_, _, _| {},
-    )
-    .writable();
-    let flags = || {
-        let calendar = core.list_calendars().unwrap().pop().unwrap();
+/// Ticket 130: FreeCal reads whether the server lets the user change a
+/// Calendar when it is added, and again only when it has a reason to think
+/// that changed: a write the server refuses (a revocation), and a sync the
+/// user starts or the one at launch, for Server read-only Calendars only (a
+/// grant). Either change sends "Calendars changed" (spec: "Calendars
+/// changed"). Radicale lets the user only read the Calendar; the proxy says
+/// they may change it while it rewrites.
+mod privileges {
+    use super::*;
+    use support::{draft, timed};
+
+    const PRIVILEGES: &str = "current-user-privilege-set";
+
+    /// The Calendar, added while the proxy says what `rewriting` makes it
+    /// say, and marked writable by the user.
+    fn through(proxy: &RewritingProxy, rewriting: bool) -> OnServer {
+        if !rewriting {
+            proxy.stop_rewriting();
+        }
+        OnServer::arranged(
+            Radicale::shared().user(),
+            NewCalendar::default(),
+            Radicale::create_read_only_calendar,
+            Some(&proxy.url),
+            |_, _, _| {},
+        )
+        .writable()
+    }
+
+    /// The user's Read-only mark and Server read-only, as the Calendar
+    /// shows them: `read_only` holds either.
+    fn flags(on_server: &OnServer) -> (bool, bool) {
+        let calendar = on_server.core.list_calendars().unwrap().pop().unwrap();
         (calendar.read_only, calendar.server_read_only)
-    };
-    let sync = || {
-        harness.signals.clear();
-        core.sync_account(account, StartedBy::FreeCal).unwrap();
-        harness.signals.received_but_sync_status()
-    };
-    assert_eq!(flags(), (false, false));
+    }
 
-    assert_eq!(sync(), []);
+    /// Syncs the Account as started by `by`, and returns how that ended,
+    /// with the Signals but "Sync status changed".
+    fn try_sync(on_server: &OnServer, by: StartedBy) -> (Option<ErrorCode>, Vec<Signal>) {
+        on_server.harness.signals.clear();
+        let synced = on_server.core.sync_account(on_server.account, by);
+        (
+            synced.err().map(|error| error.code()),
+            on_server.harness.signals.received_but_sync_status(),
+        )
+    }
 
-    proxy.stop_rewriting();
-    assert_eq!(sync(), [Signal::CalendarsChanged]);
-    assert_eq!(flags(), (true, true));
+    /// [`try_sync`] of a sync that succeeds.
+    fn sync(on_server: &OnServer, by: StartedBy) -> Vec<Signal> {
+        let (failed, signals) = try_sync(on_server, by);
+        assert_eq!(failed, None);
+        signals
+    }
 
-    proxy.start_rewriting();
-    assert_eq!(sync(), [Signal::CalendarsChanged]);
-    // The user's mark stayed as they left it.
-    assert_eq!(flags(), (false, false));
+    #[test]
+    fn a_poll_sends_no_privilege_request_nor_a_sync_the_user_starts_of_a_writable_calendar() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = through(&proxy, true);
+        let added = proxy.requests_holding(PRIVILEGES);
+
+        sync(&on_server, StartedBy::FreeCal);
+        sync(&on_server, StartedBy::User);
+
+        assert_eq!(proxy.requests_holding(PRIVILEGES), added);
+    }
+
+    #[test]
+    fn a_write_the_server_refuses_makes_the_calendar_server_read_only() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = through(&proxy, true);
+        assert_eq!(flags(&on_server), (false, false));
+        on_server
+            .core
+            .create_event(draft(
+                on_server.work,
+                "Dentist",
+                timed("2026-10-07T09:00:00", "2026-10-07T10:00:00"),
+            ))
+            .unwrap();
+        proxy.stop_rewriting();
+
+        assert_eq!(
+            try_sync(&on_server, StartedBy::FreeCal),
+            (
+                Some(ErrorCode::WritesRefused),
+                vec![Signal::CalendarsChanged]
+            )
+        );
+
+        assert_eq!(flags(&on_server), (true, true));
+        // The refused write stays the Calendar's Sync Error (ticket 124).
+        assert_eq!(
+            support::calendar_sync_status(&on_server.core, on_server.work)
+                .report
+                .status,
+            SyncStatus::SyncError {
+                error: ErrorCode::WritesRefused
+            }
+        );
+    }
+
+    #[test]
+    fn a_permission_granted_again_is_noticed_by_a_sync_the_user_starts_not_by_a_poll() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = through(&proxy, false);
+        assert_eq!(flags(&on_server), (true, true));
+        proxy.start_rewriting();
+        let added = proxy.requests_holding(PRIVILEGES);
+
+        assert_eq!(sync(&on_server, StartedBy::FreeCal), []);
+        assert_eq!(flags(&on_server), (true, true));
+        assert_eq!(proxy.requests_holding(PRIVILEGES), added);
+
+        assert_eq!(
+            sync(&on_server, StartedBy::User),
+            [Signal::CalendarsChanged]
+        );
+        // The user's mark stayed as they left it.
+        assert_eq!(flags(&on_server), (false, false));
+    }
+
+    /// Through the Sync Scheduler: the first Poll, due at launch, and sync
+    /// now look; a later Poll doesn't.
+    #[test]
+    fn a_permission_granted_again_is_noticed_at_launch_and_by_sync_now() {
+        let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        let on_server = through(&proxy, false);
+        let run_scheduled_syncs = || {
+            on_server.harness.signals.clear();
+            on_server.core.run_scheduled_syncs();
+            on_server.harness.signals.received_but_sync_status()
+        };
+        proxy.start_rewriting();
+
+        assert_eq!(run_scheduled_syncs(), [Signal::CalendarsChanged]);
+        assert_eq!(flags(&on_server), (false, false));
+
+        // Revoked again meanwhile, as a refused write finds.
+        on_server.harness.arrange_local_store(&format!(
+            "UPDATE calendar SET server_read_only = 1 WHERE id = {}",
+            on_server.work.0
+        ));
+        on_server.harness.clock.set("2026-10-03T12:05:00+02:00");
+        assert_eq!(run_scheduled_syncs(), []);
+        assert_eq!(flags(&on_server), (true, true));
+
+        on_server.core.sync_now(Some(on_server.account));
+        assert_eq!(run_scheduled_syncs(), [Signal::CalendarsChanged]);
+        assert_eq!(flags(&on_server), (false, false));
+    }
 }
 
 mod undo {

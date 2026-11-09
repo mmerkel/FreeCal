@@ -46,6 +46,9 @@ pub(crate) struct SyncRequests {
     /// Calendars to sync without the rest of their Account, by Account, as
     /// after a local change; always asked for by FreeCal.
     calendars: BTreeMap<AccountId, BTreeSet<CalendarId>>,
+    /// Whether they hold the sync of every Account at launch, the first
+    /// that runs.
+    at_launch: bool,
 }
 
 impl SyncRequests {
@@ -86,6 +89,14 @@ impl SyncRequests {
             .unwrap_or(StartedBy::FreeCal)
     }
 
+    /// Whether the sync of the Account `id` reads again the privileges of
+    /// its Server read-only Calendars, to notice a permission the server
+    /// granted again: a sync the user starts and the one at launch do
+    /// (ticket 130).
+    pub fn looks_for_grants(&self, id: AccountId) -> bool {
+        self.at_launch || self.started_by(id) == StartedBy::User
+    }
+
     fn ask_every_account(&mut self, by: StartedBy) {
         self.every_account = self.every_account.max(Some(by));
     }
@@ -108,6 +119,9 @@ pub(crate) struct SyncScheduler {
     /// first, which is due at once on launch.
     last_poll: Option<DateTime<FixedOffset>>,
     requests: SyncRequests,
+    /// Whether the sync of every Account at launch hasn't run yet: with no
+    /// network at launch, it is the one the network's return asks for.
+    launch_sync_due: bool,
 }
 
 impl Default for SyncScheduler {
@@ -119,6 +133,7 @@ impl Default for SyncScheduler {
             network_available: true,
             last_poll: None,
             requests: SyncRequests::default(),
+            launch_sync_due: true,
         }
     }
 }
@@ -189,11 +204,40 @@ impl SyncScheduler {
         if self.requests.every_account() {
             self.last_poll = Some(now);
         }
-        let due = std::mem::take(&mut self.requests);
-        if self.network_available {
-            due
-        } else {
-            SyncRequests::default()
+        let mut due = std::mem::take(&mut self.requests);
+        if !self.network_available {
+            return SyncRequests::default();
         }
+        if due.every_account() {
+            due.at_launch = std::mem::take(&mut self.launch_sync_due);
+        }
+        due
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(time: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(&format!("2026-10-03T{time}+02:00")).unwrap()
+    }
+
+    /// Ticket 130: the sync of every Account at launch looks for
+    /// permissions granted again, also when it waits for the network.
+    #[test]
+    fn the_launch_sync_looks_for_grants_once_it_runs() {
+        let account = AccountId(2);
+        let mut scheduler = SyncScheduler::default();
+        scheduler.set_network_available(false);
+        assert!(scheduler.take_due(at("12:00:00")).is_empty());
+
+        scheduler.set_network_available(true);
+        assert!(scheduler.take_due(at("12:00:10")).looks_for_grants(account));
+
+        let poll = scheduler.take_due(at("12:05:10"));
+        assert!(poll.every_account() && !poll.looks_for_grants(account));
+        scheduler.ask_account(account, StartedBy::User);
+        assert!(scheduler.take_due(at("12:05:20")).looks_for_grants(account));
     }
 }

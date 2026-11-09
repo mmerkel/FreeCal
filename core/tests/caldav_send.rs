@@ -422,7 +422,7 @@ fn an_unsent_change_matching_nothing_is_dropped() {
 }
 
 #[test]
-fn unsent_changes_of_a_read_only_calendar_wait() {
+fn unsent_changes_made_before_the_user_marked_the_calendar_read_only_are_sent() {
     let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
@@ -435,8 +435,14 @@ fn unsent_changes_of_a_read_only_calendar_wait() {
 
     on_server.sync();
 
-    assert!(on_server.on_server("standup").contains("SUMMARY:Standup"));
-    assert_eq!(on_server.unsent(on_server.work), 1);
+    assert_eq!(on_server.status(on_server.work), SyncStatus::Synced);
+    assert_eq!(on_server.unsent(on_server.work), 0);
+    assert_eq!(
+        on_server
+            .radicale
+            .status_of(&on_server.user, &format!("{}standup.ics", on_server.url)),
+        404
+    );
 }
 
 /// Ticket 69: every change is in the Change Journal as it is made, before
@@ -752,10 +758,10 @@ mod writes_refused {
         assert_eq!(proxy.requests_holding("BEGIN:VCALENDAR"), 1);
     }
 
-    /// Privileges lost while Unsent Changes wait: the server says so
-    /// before any write.
+    /// Ticket 130: once a refusal made the Calendar Server read-only, its
+    /// Unsent Changes fail without a request.
     #[test]
-    fn unsent_changes_of_a_calendar_the_server_made_read_only_are_a_sync_error() {
+    fn unsent_changes_of_a_server_read_only_calendar_are_a_sync_error_without_a_request() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
         let on_server = OnServer::read_only_through(&proxy);
         on_server
@@ -763,6 +769,10 @@ mod writes_refused {
             .create_event(dentist(on_server.work))
             .unwrap();
         proxy.stop_rewriting();
+        let refused = on_server
+            .core
+            .sync_account(on_server.account, StartedBy::FreeCal);
+        assert_eq!(refused.unwrap_err().code(), ErrorCode::WritesRefused);
 
         let synced = on_server
             .core
@@ -776,26 +786,7 @@ mod writes_refused {
             }
         );
         assert_eq!(on_server.unsent(on_server.work), 1);
-        assert_eq!(proxy.requests_holding("BEGIN:VCALENDAR"), 0);
-    }
-
-    /// The user's own Read-only mark is their choice, not a refusal.
-    #[test]
-    fn unsent_changes_of_a_calendar_the_user_made_read_only_are_no_sync_error() {
-        let on_server = OnServer::writable_with(&[]);
-        on_server
-            .core
-            .create_event(dentist(on_server.work))
-            .unwrap();
-        on_server
-            .core
-            .set_calendar_read_only(on_server.work, true)
-            .unwrap();
-
-        on_server.sync();
-
-        assert_eq!(on_server.status(on_server.work), SyncStatus::Synced);
-        assert_eq!(on_server.unsent(on_server.work), 1);
+        assert_eq!(proxy.requests_holding("BEGIN:VCALENDAR"), 1);
     }
 }
 

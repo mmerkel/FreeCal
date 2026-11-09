@@ -51,10 +51,11 @@ pub struct Calendar {
     pub colour: Colour,
     /// Whether the user shows this Calendar's Events or has hidden them.
     pub shown: bool,
-    /// A Read-only Calendar: FreeCal never changes its Events. It is one
+    /// A Read-only Calendar: the user can't change its Events now. It is one
     /// when its server doesn't allow changing it or the user marked it
     /// read-only; until 1.0, every newly added server Calendar starts
-    /// marked.
+    /// marked. The user's mark only stops new changes: Unsent Changes made
+    /// before it are still sent.
     pub read_only: bool,
     /// Whether its server doesn't allow the user to change it, so that it
     /// stays read-only whatever the user marks.

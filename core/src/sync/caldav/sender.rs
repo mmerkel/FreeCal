@@ -30,13 +30,14 @@ use crate::{CalendarId, CoreError, Result};
 
 /// Sends the Unsent Changes of the CalDAV Calendar `calendar` through its
 /// Account's server `remote`, UID by UID, in the order they were first
-/// changed, building new `VEVENT`s with `now` as their time of revision. A
-/// Read-only Calendar's wait until it is writable, and so do those of a
-/// Calendar whose First Sync is unfinished, as the Mirror doesn't yet hold
-/// every Server Object, so a create could meet a UID the server holds.
-/// Those of a Calendar its server reports read-only also fail with
-/// [`CoreError::WritesRefused`], the Calendar's Sync Error, as the server
-/// refuses them; the user's own Read-only mark is no failure. A failure
+/// changed, building new `VEVENT`s with `now` as their time of revision.
+/// Those of a Calendar whose First Sync is unfinished wait, as the Mirror
+/// doesn't yet hold every Server Object, so a create could meet a UID the
+/// server holds. Those of a Server read-only Calendar fail with
+/// [`CoreError::WritesRefused`] without a request, the Calendar's Sync
+/// Error, as the server would refuse them. The user's Read-only mark holds
+/// none back: it only stops new changes, so those made before it are sent
+/// (ticket 130). A failure
 /// about the whole Account stops it, and so does the server refusing
 /// writes to the Calendar. Any other failure of one UID leaves its Unsent
 /// Changes in place and the others are still sent, and the first is
@@ -56,9 +57,6 @@ pub(crate) fn send(
         let uids = store.unsent_uids(calendar_id)?;
         if calendar.server_read_only && !uids.is_empty() {
             return Err(CoreError::WritesRefused);
-        }
-        if calendar.read_only {
-            return Ok(());
         }
         uids
     };

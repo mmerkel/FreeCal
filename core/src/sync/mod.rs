@@ -77,9 +77,9 @@ pub(crate) fn outgoing(
 /// ticket 18). It covers only what is about the UID itself. What is about
 /// its Account or Calendar is that one's Sync Status instead, and stores
 /// none: the Account Offline, the Calendar's Sync Error (the server
-/// refusing writes, a paused Calendar), its Read-only mark, or its First
-/// Sync unfinished. An Unsent Change never tried has none either. The
-/// Local Store keeps it as its JSON.
+/// refusing writes, a paused Calendar) or its First Sync unfinished. An
+/// Unsent Change never tried has none either. The Local Store keeps it as
+/// its JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum SendFailure {

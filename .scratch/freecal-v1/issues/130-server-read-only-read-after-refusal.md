@@ -13,17 +13,18 @@ Spec: US-17, US-19, US-30; "Writability"; "Calendars changed".
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** S
 
-- [ ] A Poll of a server Calendar sends no privilege request
-- [ ] A write refused for lack of privileges sets Server read-only and sends "Calendars changed"
-- [ ] A permission the server grants again is noticed by a sync the user starts and at launch, for Server read-only Calendars only
-- [ ] Unsent Changes made before the user marked a Calendar read-only are sent at its next sync; the Sender looks only at Server read-only (replacing `unsent_changes_of_a_read_only_calendar_wait` and `unsent_changes_of_a_calendar_the_user_made_read_only_are_no_sync_error`, `core/tests/caldav_send.rs`)
-- [ ] Sync tests against Radicale through `RewritingProxy` for a revocation met by a write and a grant met by a sync the user starts (replacing `each_sync_reads_whether_the_server_lets_the_user_change_the_calendar`, `core/tests/caldav_sync.rs`), and a test that a Poll sends no privilege request
+- [x] A Poll of a server Calendar sends no privilege request
+- [x] A write refused for lack of privileges sets Server read-only and sends "Calendars changed"
+- [x] A permission the server grants again is noticed by a sync the user starts and at launch, for Server read-only Calendars only
+- [x] Unsent Changes made before the user marked a Calendar read-only are sent at its next sync; the Sender looks only at Server read-only (replacing `unsent_changes_of_a_read_only_calendar_wait` and `unsent_changes_of_a_calendar_the_user_made_read_only_are_no_sync_error`, `core/tests/caldav_send.rs`)
+- [x] Sync tests against Radicale through `RewritingProxy` for a revocation met by a write and a grant met by a sync the user starts (replacing `each_sync_reads_whether_the_server_lets_the_user_change_the_calendar`, `core/tests/caldav_sync.rs`), and a test that a Poll sends no privilege request
 
 ## Comments
 - 2026-11-08 (/simplify since ticket 120): found by the efficiency review; the user chose to re-read only after a refused write.
 - 2026-11-08: the user chose the recommendation for a granted permission: re-read on a sync the user starts and at launch, for Server read-only Calendars only.
 - 2026-11-09: the user chose to fold in the rule that only Server read-only holds back Unsent Changes; the user's Read-only mark only stops new changes (from `TODO.md`).
+- 2026-11-09 (/implement): done. A sync re-reads privileges only after a write refused for lack of privileges, and, for Server read-only Calendars only, on a sync the user starts and on the sync of every Account at launch (`Core::sync_calendar`, `core/src/lib.rs`). With no network at launch, the sync the network's return asks for counts as the one at launch (`SyncScheduler::take_due`, `core/src/sync_scheduler.rs`). A failed re-read after a refusal leaves `WritesRefused` the Sync Error, unless it is about the whole Account. The Sender no longer looks at the user's mark. New terms: **look for grants** (new term), re-reading the privileges of Server read-only Calendars to notice a permission the server granted again (`look_for_grants`, `SyncRequests::looks_for_grants`); **launch sync** (new term), the sync of every Account at launch, the first that runs (`SyncRequests::at_launch`, `SyncScheduler::launch_sync_due`); **Server read-only** is used as a term in comments (the ticket's word, not in `GLOSSARY.md`). Left from /code-review, judgement calls: `look_for_grants` is a bare `bool` travelling next to `started_by`; `sync_calendar` repeats the Sender's "already Server read-only" check to tell a held-back refusal from a real one, instead of the Sender returning the difference; a failed grant check still fails the Calendar's sync.

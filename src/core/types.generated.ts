@@ -55,10 +55,11 @@ export type Calendar = { id: CalendarId, accountId: AccountId, name: string, col
  */
 shown: boolean,
 /**
- * A Read-only Calendar: FreeCal never changes its Events. It is one
+ * A Read-only Calendar: the user can't change its Events now. It is one
  * when its server doesn't allow changing it or the user marked it
  * read-only; until 1.0, every newly added server Calendar starts
- * marked.
+ * marked. The user's mark only stops new changes: Unsent Changes made
+ * before it are still sent.
  */
 readOnly: boolean,
 /**
