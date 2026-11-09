@@ -9,6 +9,9 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 - [ ] finish tickets 15 and 16
 - [ ] simplify
 - [ ] code base architecture
+- [ ] tickets 18, 19
+- [ ] simplify
+- [ ] code base architecture
 - [ ] ticket 25 -> first split
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
