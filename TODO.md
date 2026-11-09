@@ -1,17 +1,15 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] ticket 130
-- [ ] simplify
-- [ ] code base architecture
-- [ ] ticket 25 -> first split
-- [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 20
 - [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 13
 - [ ] finish tickets 15 and 16
+- [ ] simplify
+- [ ] code base architecture
+- [ ] ticket 25 -> first split
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
