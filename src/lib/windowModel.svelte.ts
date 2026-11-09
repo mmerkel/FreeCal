@@ -3,6 +3,7 @@ import type { CoreApi } from '../core/CoreApi';
 import type {
   Account,
   Calendar,
+  ErrorCode,
   Event,
   EventId,
   Occurrence,
@@ -18,6 +19,23 @@ import { NewestRead } from './newestRead';
 import { DEFAULT_SETTINGS } from './settings';
 import { SyncingDelay } from './syncDisplay.svelte';
 import type { VisibleRange } from './when';
+
+/**
+ * Why an Event, or an Occurrence of it, in `calendar` can't be edited, as
+ * the core would refuse it; undefined when it can, or when only a Calendar
+ * not read yet could say (spec: "Writability", "Attendees"). A Read-only Calendar is named first, as the user can change
+ * that in FreeCal. Only a hint for disabling or hiding actions: the core
+ * decides (`ReadOnly` in `core/src/read_only.rs`), and the window shows its
+ * refusal when this is wrong.
+ */
+export function whyReadOnly(
+  calendar: Calendar | undefined,
+  hasGuests: boolean,
+): Extract<ErrorCode['code'], 'calendarReadOnly' | 'eventHasGuests'> | undefined {
+  if (calendar?.readOnly === true) return 'calendarReadOnly';
+  if (hasGuests) return 'eventHasGuests';
+  return undefined;
+}
 
 /** The Accounts and Calendars, as last read together (Directory, new term). */
 interface Directory {

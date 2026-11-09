@@ -13,6 +13,7 @@ mod guests;
 mod import;
 mod journal;
 mod keyring;
+mod read_only;
 mod remote;
 mod settings;
 mod sidebar;

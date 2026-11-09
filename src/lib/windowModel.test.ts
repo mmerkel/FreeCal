@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/types';
-import { dateChanged } from '../test/answers';
+import { calendar, dateChanged } from '../test/answers';
 import { eventId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
-import { WindowModel } from './windowModel.svelte';
+import { whyReadOnly, WindowModel } from './windowModel.svelte';
 
 const date = (iso: string) => Temporal.PlainDate.from(iso);
 /** The sample Signal of `kind`. */
@@ -336,5 +336,27 @@ describe('the window’s own state', () => {
     model.forgetSettingsFailure();
 
     expect(model.settingsFailure).toBeUndefined();
+  });
+});
+
+describe('whyReadOnly', () => {
+  test('lets an Event without guests in a writable Calendar be edited', () => {
+    expect(whyReadOnly(calendar({ name: 'Work' }), false)).toBeUndefined();
+  });
+
+  test('refuses an Event in a Read-only Calendar, whatever made it read-only', () => {
+    expect(whyReadOnly(calendar({ name: 'Work', readOnly: true }), false)).toBe('calendarReadOnly');
+    expect(
+      whyReadOnly(calendar({ name: 'Work', readOnly: true, serverReadOnly: true }), false),
+    ).toBe('calendarReadOnly');
+  });
+
+  test('refuses an Event with guests, even before its Calendar is read', () => {
+    expect(whyReadOnly(calendar({ name: 'Work' }), true)).toBe('eventHasGuests');
+    expect(whyReadOnly(undefined, true)).toBe('eventHasGuests');
+  });
+
+  test('names a Read-only Calendar before guests, as the user can change that', () => {
+    expect(whyReadOnly(calendar({ name: 'Work', readOnly: true }), true)).toBe('calendarReadOnly');
   });
 });

@@ -22,6 +22,7 @@
   import { describeRepeat } from './repeat';
   import StructuredTextView from './StructuredTextView.svelte';
   import { describeWhen } from './when';
+  import { whyReadOnly } from './windowModel.svelte';
 
   interface Props {
     event: Event;
@@ -52,7 +53,9 @@
     onopenlink,
   }: Props = $props();
 
-  const writable = $derived(calendar !== undefined && !calendar.readOnly && !event.hasGuests);
+  const writable = $derived(
+    calendar !== undefined && whyReadOnly(calendar, event.hasGuests) === undefined,
+  );
   const title = $derived(event.title || t('event.untitled'));
   const repeat = $derived(describeRepeat(event.repeat, event.customRepeat));
   /** Whether Delete asks which Occurrences to delete: for an Event that repeats or is an Exception. */

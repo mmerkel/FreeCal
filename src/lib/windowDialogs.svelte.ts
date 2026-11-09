@@ -12,7 +12,7 @@ import type {
 import { errorText, t } from '../i18n';
 import { sameRepeat } from './repeat';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
-import type { WindowModel } from './windowModel.svelte';
+import { whyReadOnly, type WindowModel } from './windowModel.svelte';
 
 /**
  * What is open over the grid, if anything. The Event of `details` and
@@ -82,14 +82,15 @@ export class WindowDialogs {
   /** What the modal "Working…" dialog says while a long command runs. */
   #working = $state<string>();
 
-  /** The Calendars new and edited Events can go into. */
+  /** The Calendars new, edited and imported Events can go into: those that aren't Read-only. */
   readonly #writableCalendars: Calendar[];
 
   constructor(core: CoreApi, model: WindowModel) {
     this.#core = core;
     this.#model = model;
     this.#writableCalendars = $derived(
-      model.directory?.calendars.filter((calendar) => !calendar.readOnly) ?? [],
+      model.directory?.calendars.filter((calendar) => whyReadOnly(calendar, false) === undefined) ??
+        [],
     );
   }
 
@@ -130,7 +131,7 @@ export class WindowDialogs {
   get working() {
     return this.#working;
   }
-  /** The Calendars new and edited Events can go into. */
+  /** The Calendars new, edited and imported Events can go into: those that aren't Read-only. */
   get writableCalendars() {
     return this.#writableCalendars;
   }
@@ -301,8 +302,7 @@ export class WindowDialogs {
 
   /**
    * A drag the grid refused, because the Occurrence's Calendar is read-only
-   * or its Event has guests; the Calendar is named first, as the user can
-   * change that in FreeCal.
+   * or its Event has guests, as `whyReadOnly` says.
    */
   refuseDrag(id: EventId, recurrenceId: string | null) {
     const dragged = this.#occurrence(id, recurrenceId);
@@ -311,9 +311,10 @@ export class WindowDialogs {
     );
     if (!dragged || !calendar) return;
     const title = dragged.title || t('event.untitled');
-    if (calendar.readOnly) {
+    const why = whyReadOnly(calendar, dragged.hasGuests);
+    if (why === 'calendarReadOnly') {
       this.#toast = { message: t('event.readOnlyDrag', { title, calendar: calendar.name }) };
-    } else if (dragged.hasGuests) {
+    } else if (why === 'eventHasGuests') {
       this.#toast = { message: t('event.hasGuestsDrag', { title }) };
     }
   }

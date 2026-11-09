@@ -13,15 +13,18 @@ Spec: US-17, US-19, US-30; "Writability"; "Attendees"; "Event details".
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] `core/src/read_only.rs` decides whether an edit may be made, from the user's mark, Server read-only, guests and the Transaction Origin, with in-process tests for each case
-- [ ] The Change Journal's `writable` and `event_writable` ask it; the Local Store's Calendar reader asks it for `read_only` and no longer combines the columns itself
-- [ ] One Window Model helper says whether an Occurrence or Event can be edited and why not; `EventDetails.svelte`, `CalendarGrid.svelte` and `windowDialogs.svelte.ts` use it and combine no flags themselves; frontend tests cover the helper
-- [ ] The existing core and frontend tests pass unchanged, apart from tests moved to the helper
+- [x] `core/src/read_only.rs` decides whether an edit may be made, from the user's mark, Server read-only, guests and the Transaction Origin, with in-process tests for each case
+- [x] The Change Journal's `writable` and `event_writable` ask it; the Local Store's Calendar reader asks it for `read_only` and no longer combines the columns itself
+- [x] One Window Model helper says whether an Occurrence or Event can be edited and why not; `EventDetails.svelte`, `CalendarGrid.svelte` and `windowDialogs.svelte.ts` use it and combine no flags themselves; frontend tests cover the helper
+- [x] The existing core and frontend tests pass unchanged, apart from tests moved to the helper
 
 ## Comments
 - 2026-11-09 (/improve-codebase-architecture): the user chose: the module answers only "may this edit be made?" (user's mark, Server read-only, guests, Transaction Origin); a plain value the Change Journal asks; combining the mark with Server read-only moves into it; the window keeps the flags as hints through one Window Model helper; the module is named `read_only`, with no new term.
 - Google (ticket 26) reuses the module unchanged; only how Server read-only is read differs per Provider (ticket 132).
+- 2026-11-09 (/implement): done. `ReadOnly` (`core/src/read_only.rs`) is built from the user's mark and Server read-only (`ReadOnly::calendar`), and from guests (`with_guests`). It answers `may_edit(id, origin)` and, for the Local Store's Calendar reader, `calendar_read_only`. The Change Journal reads both columns through a new reader, `Store::read_only`, which also replaces the list-all-Calendars lookup per write. The window's helper is `whyReadOnly(calendar, hasGuests)` in `src/lib/windowModel.svelte.ts`. It returns the core's error code (`calendarReadOnly` or `eventHasGuests`) or nothing. It takes a Calendar not read yet as `undefined`, so the grid still fixes an Occurrence with guests whose Calendar isn't read yet, as before.
+  - Trade-off, named: `event_writable` now reads the guests even for an Incoming Sync, which costs one indexed query per Event Row write, so that only `ReadOnly` knows which Transaction Origins may always edit. A lazily read guests value was rejected as more machinery for the same rule.
+  - New terms (code names, for approval or renaming): **`ReadOnly`** (the value that decides whether an edit may be made; it covers guests too, wider than a Read-only Calendar) and **`whyReadOnly`** (the window's hint for why an Event can't be edited).

@@ -104,7 +104,7 @@ impl TransactionOrigin {
 
     /// Whether it is an Incoming Sync, whose changes come from the server
     /// and so aren't Unsent Changes.
-    fn is_incoming_sync(self) -> bool {
+    pub(crate) fn is_incoming_sync(self) -> bool {
         matches!(
             self,
             TransactionOrigin::FirstSync | TransactionOrigin::IncomingSync
@@ -399,28 +399,28 @@ impl JournalTransaction<'_> {
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
     /// every Transaction Origin but an Incoming Sync, which loads what the
-    /// server has. Every write checks this itself, through
-    /// [`JournalTransaction::event_writable`]; a change that targets a
+    /// server has, as [`crate::read_only::ReadOnly`] decides. Every write
+    /// checks this itself, through [`JournalTransaction::event_writable`]; a change that targets a
     /// Calendar, such as an import, checks it first, so that it is refused
     /// even when it would write nothing.
     pub fn writable(&self, id: CalendarId) -> Result<()> {
-        let read_only = self.database_transaction.find_calendar(id)?.read_only;
-        if read_only && !self.origin.is_incoming_sync() {
-            return Err(CoreError::CalendarReadOnly(id));
-        }
-        Ok(())
+        self.database_transaction
+            .read_only(id)?
+            .may_edit(id, self.origin)
     }
 
     /// Refuses writes to the Events of the UID `uid` in the Calendar `id`
     /// as [`JournalTransaction::writable`] does, and while they have guests
-    /// (see [`crate::guests`]), which only an Incoming Sync changes. Every
-    /// write of an Event Row checks this.
+    /// (see [`crate::guests`]), which only an Incoming Sync may change, as
+    /// [`crate::read_only::ReadOnly`] decides. Every write of an Event Row
+    /// checks this. It reads the guests even for an Incoming Sync, so that
+    /// only `ReadOnly` knows which Transaction Origins may always edit.
     fn event_writable(&self, id: CalendarId, uid: &str) -> Result<()> {
-        self.writable(id)?;
-        if !self.origin.is_incoming_sync() && self.database_transaction.has_guests(id, uid)? {
-            return Err(CoreError::EventHasGuests);
-        }
-        Ok(())
+        let has_guests = self.database_transaction.has_guests(id, uid)?;
+        self.database_transaction
+            .read_only(id)?
+            .with_guests(has_guests)
+            .may_edit(id, self.origin)
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for an

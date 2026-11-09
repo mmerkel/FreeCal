@@ -34,6 +34,7 @@ use super::{RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId};
+use crate::read_only::ReadOnly;
 use crate::remote::SyncPoint;
 use crate::sync_status::SyncRecord;
 use crate::{
@@ -219,7 +220,7 @@ impl Store {
                     // A stored colour is untrusted like every stored field.
                     colour: Colour::parse(&row.get::<_, String>(3)?).unwrap_or_default(),
                     shown: row.get(4)?,
-                    read_only: row.get::<_, bool>(5)? || row.get::<_, bool>(6)?,
+                    read_only: ReadOnly::calendar(row.get(5)?, row.get(6)?).calendar_read_only(),
                     server_read_only: row.get(6)?,
                 })
             })?
@@ -346,6 +347,19 @@ impl Store {
             Some((uid, event)) => self.server_object(event.calendar_id, &uid),
             None => Err(CoreError::EventNotFound(id)),
         }
+    }
+
+    /// What decides whether the Calendar `id`'s Events may be edited, from
+    /// its stored user mark and Server read-only.
+    pub fn read_only(&self, id: CalendarId) -> Result<ReadOnly> {
+        self.conn
+            .query_row(
+                "SELECT read_only, server_read_only FROM calendar WHERE id = ?1",
+                [id.0],
+                |row| Ok(ReadOnly::calendar(row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or(CoreError::CalendarNotFound(id))
     }
 
     pub fn find_calendar(&self, id: CalendarId) -> Result<Calendar> {
