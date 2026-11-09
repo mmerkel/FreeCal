@@ -20,7 +20,7 @@
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
   import { firstWeekdayNumber } from './week.svelte';
-  import { whyReadOnly } from './windowModel.svelte';
+  import { canEdit, whyReadOnly } from './windowModel.svelte';
   import {
     gridId,
     idOf,
@@ -283,10 +283,9 @@
       const selected =
         occurrence.eventId === selectedEventId &&
         (selectedRecurrenceId === undefined || occurrence.recurrenceId === selectedRecurrenceId);
-      const readOnly = whyReadOnly(calendar, occurrence.hasGuests) !== undefined;
-      const editable = movable && calendar !== undefined && !readOnly;
+      const editable = movable && canEdit(calendar, occurrence.hasGuests);
       // Dragging it says why it can't move (spec: "Event details").
-      const fixed = movable && readOnly;
+      const fixed = movable && whyReadOnly(calendar, occurrence.hasGuests) !== undefined;
       return {
         id: gridId(occurrence),
         // Titles are untrusted; FullCalendar draws them as text, never as HTML.

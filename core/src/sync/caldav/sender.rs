@@ -31,23 +31,18 @@ use crate::{CalendarId, CoreError, Result};
 /// Sends the Unsent Changes of the CalDAV Calendar `calendar` through its
 /// Account's server `remote`, UID by UID, in the order they were first
 /// changed, building new `VEVENT`s with `now` as their time of revision.
-/// Those of a Calendar whose First Sync is unfinished wait, as the Mirror
-/// doesn't yet hold every Server Object, so a create could meet a UID the
-/// server holds. A Server read-only Calendar never gets here:
-/// [`crate::sync::sync_calendar`] sends nothing of it. A failure about the
-/// whole Account stops it, and so does the server refusing writes to the
-/// Calendar. Any other failure of one UID
-/// leaves its Unsent Changes in place and the others are still sent, and
-/// the first is returned.
+/// Neither a Calendar whose First Sync is unfinished nor a Server read-only
+/// one gets here: [`crate::sync::sync_calendar`] sends nothing of them. A
+/// failure about the whole Account stops it, and so does the server
+/// refusing writes to the Calendar. Any other failure of one UID leaves its
+/// Unsent Changes in place and the others are still sent, and the first is
+/// returned.
 pub(crate) fn send(
     remote: &dyn Remote,
     store: &Mutex<Store>,
-    &(calendar_id, ref url, ref state): &CalendarToSync,
+    &(calendar_id, ref url, _): &CalendarToSync,
     now: DateTime<Utc>,
 ) -> Result<()> {
-    if state.is_none() {
-        return Ok(());
-    }
     let uids = store.lock().unwrap().unsent_uids(calendar_id)?;
     let mut failed = None;
     for uid in uids {

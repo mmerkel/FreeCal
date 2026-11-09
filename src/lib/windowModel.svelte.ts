@@ -23,10 +23,11 @@ import type { VisibleRange } from './when';
 /**
  * Why an Event, or an Occurrence of it, in `calendar` can't be edited, as
  * the core would refuse it; undefined when it can, or when only a Calendar
- * not read yet could say (spec: "Writability", "Attendees"). A Read-only Calendar is named first, as the user can change
- * that in FreeCal. Only a hint for disabling or hiding actions: the core
- * decides (`ReadOnly` in `core/src/read_only.rs`), and the window shows its
- * refusal when this is wrong.
+ * not read yet could say (spec: "Writability", "Attendees"). A Read-only
+ * Calendar is named first, as the user can change that in FreeCal. Only a
+ * hint for disabling or hiding actions: the core decides (`ReadOnly` in
+ * `core/src/read_only.rs`), and the window shows its refusal when this is
+ * wrong.
  */
 export function whyReadOnly(
   calendar: Calendar | undefined,
@@ -35,6 +36,14 @@ export function whyReadOnly(
   if (calendar?.readOnly === true) return 'calendarReadOnly';
   if (hasGuests) return 'eventHasGuests';
   return undefined;
+}
+
+/**
+ * Whether an Event, or an Occurrence of it, in `calendar` can be edited, as
+ * `whyReadOnly` says: not while its Calendar isn't read yet.
+ */
+export function canEdit(calendar: Calendar | undefined, hasGuests: boolean): boolean {
+  return calendar !== undefined && whyReadOnly(calendar, hasGuests) === undefined;
 }
 
 /** The Accounts and Calendars, as last read together (Directory, new term). */

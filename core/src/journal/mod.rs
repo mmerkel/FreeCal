@@ -334,7 +334,9 @@ impl JournalTransaction<'_> {
     pub fn replace(&mut self, id: EventId, event: &StoredEvent) -> Result<()> {
         let (uid, previous) = self.previous(id)?;
         self.event_writable(previous.calendar_id, &uid)?;
-        self.event_writable(event.calendar_id, &uid)?;
+        if event.calendar_id != previous.calendar_id {
+            self.event_writable(event.calendar_id, &uid)?;
+        }
         if hash(&uid, &previous) == hash(&uid, event) {
             return Ok(());
         }
@@ -400,9 +402,9 @@ impl JournalTransaction<'_> {
     /// Refuses writes into a missing Calendar, and into a Read-only one for
     /// every Transaction Origin but an Incoming Sync, which loads what the
     /// server has, as [`crate::read_only::ReadOnly`] decides. Every write
-    /// checks this itself, through [`JournalTransaction::event_writable`]; a change that targets a
-    /// Calendar, such as an import, checks it first, so that it is refused
-    /// even when it would write nothing.
+    /// checks this itself, through [`JournalTransaction::event_writable`]; a
+    /// change that targets a Calendar, such as an import, checks it first,
+    /// so that it is refused even when it would write nothing.
     pub fn writable(&self, id: CalendarId) -> Result<()> {
         self.database_transaction
             .read_only(id)?
@@ -412,15 +414,14 @@ impl JournalTransaction<'_> {
     /// Refuses writes to the Events of the UID `uid` in the Calendar `id`
     /// as [`JournalTransaction::writable`] does, and while they have guests
     /// (see [`crate::guests`]), which only an Incoming Sync may change, as
-    /// [`crate::read_only::ReadOnly`] decides. Every write of an Event Row
-    /// checks this. It reads the guests even for an Incoming Sync, so that
-    /// only `ReadOnly` knows which Transaction Origins may always edit.
+    /// [`crate::read_only::ReadOnly`] decides, which reads the guests only
+    /// when they decide. Every write of an Event Row checks this.
     fn event_writable(&self, id: CalendarId, uid: &str) -> Result<()> {
-        let has_guests = self.database_transaction.has_guests(id, uid)?;
         self.database_transaction
             .read_only(id)?
-            .with_guests(has_guests)
-            .may_edit(id, self.origin)
+            .may_edit_event(id, self.origin, || {
+                self.database_transaction.has_guests(id, uid)
+            })
     }
 
     /// Records that the Event `id` went from `previous` to `new`, none for an

@@ -4,7 +4,7 @@ import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/t
 import { calendar, dateChanged } from '../test/answers';
 import { eventId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
-import { whyReadOnly, WindowModel } from './windowModel.svelte';
+import { canEdit, whyReadOnly, WindowModel } from './windowModel.svelte';
 
 const date = (iso: string) => Temporal.PlainDate.from(iso);
 /** The sample Signal of `kind`. */
@@ -358,5 +358,17 @@ describe('whyReadOnly', () => {
 
   test('names a Read-only Calendar before guests, as the user can change that', () => {
     expect(whyReadOnly(calendar({ name: 'Work', readOnly: true }), true)).toBe('calendarReadOnly');
+  });
+});
+
+describe('canEdit', () => {
+  test('lets an Event be edited when whyReadOnly names no reason', () => {
+    expect(canEdit(calendar({ name: 'Work' }), false)).toBe(true);
+    expect(canEdit(calendar({ name: 'Work', readOnly: true }), false)).toBe(false);
+    expect(canEdit(calendar({ name: 'Work' }), true)).toBe(false);
+  });
+
+  test('refuses while the Calendar isn’t read yet', () => {
+    expect(canEdit(undefined, false)).toBe(false);
   });
 });

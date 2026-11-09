@@ -100,14 +100,6 @@ pub(crate) fn sync_calendar(
     record: Recorder,
 ) -> CalendarSyncResult {
     let mut server_read_only_changed = false;
-    let mut read_server_read_only = || {
-        let (calendar_id, ref url, _) = *calendar;
-        let server_read_only = remote.server_read_only(url)?;
-        server_read_only_changed |= store.lock().unwrap().write(|database_transaction| {
-            database_transaction.set_server_read_only(calendar_id, server_read_only)
-        })?;
-        Ok(server_read_only)
-    };
     let outcome = sync_both_ways(
         remote,
         store,
@@ -115,7 +107,7 @@ pub(crate) fn sync_calendar(
         at_launch || started_by == StartedBy::User,
         clock,
         record,
-        &mut read_server_read_only,
+        &mut server_read_only_changed,
     );
     CalendarSyncResult {
         outcome,
@@ -124,8 +116,8 @@ pub(crate) fn sync_calendar(
 }
 
 /// The body of [`sync_calendar`], which looks for grants when
-/// `look_for_grants`, and reads Server read-only from the server, and keeps
-/// it, with `read_server_read_only`.
+/// `look_for_grants` and sets `server_read_only_changed` when a reading
+/// changed Server read-only, even when the sync then fails.
 fn sync_both_ways(
     remote: &dyn Remote,
     store: &Mutex<Store>,
@@ -133,25 +125,28 @@ fn sync_both_ways(
     look_for_grants: bool,
     clock: &dyn Clock,
     record: Recorder,
-    read_server_read_only: &mut dyn FnMut() -> Result<bool>,
+    server_read_only_changed: &mut bool,
 ) -> Result<Option<JournalTransactionId>> {
     let (calendar_id, _, ref state) = *calendar;
     let mut server_read_only = store
         .lock()
         .unwrap()
-        .find_calendar(calendar_id)?
-        .server_read_only;
+        .read_only(calendar_id)?
+        .server_read_only();
     if server_read_only && look_for_grants {
-        server_read_only = read_server_read_only()?;
+        server_read_only =
+            read_server_read_only(remote, store, calendar, server_read_only_changed)?;
     }
-    let sent = if server_read_only {
-        // A Calendar whose First Sync is unfinished sends nothing anyway.
-        let has_unsent =
-            state.is_some() && !store.lock().unwrap().unsent_uids(calendar_id)?.is_empty();
-        if has_unsent {
-            Err(CoreError::WritesRefused)
-        } else {
+    let sent = if state.is_none() {
+        // Its First Sync is unfinished: its Unsent Changes wait, as the
+        // Mirror doesn't yet hold every Server Object, so a create could
+        // meet a UID the server holds.
+        Ok(())
+    } else if server_read_only {
+        if store.lock().unwrap().unsent_uids(calendar_id)?.is_empty() {
             Ok(())
+        } else {
+            Err(CoreError::WritesRefused)
         }
     } else {
         let now = clock.now().with_timezone(&Utc);
@@ -162,7 +157,9 @@ fn sync_both_ways(
         match sent {
             // Refused by the server: has a permission been revoked?
             Err(CoreError::WritesRefused) => {
-                if let Err(error) = read_server_read_only() {
+                if let Err(error) =
+                    read_server_read_only(remote, store, calendar, server_read_only_changed)
+                {
                     if about_account(&error) {
                         return Err(error);
                     }
@@ -188,6 +185,22 @@ fn sync_both_ways(
         }
     };
     sent.map(|()| journal_transaction)
+}
+
+/// Reads from the server `remote` whether it lets the user change
+/// `calendar`, keeps it as its Server read-only, sets `changed` when that
+/// changed, and returns it.
+fn read_server_read_only(
+    remote: &dyn Remote,
+    store: &Mutex<Store>,
+    &(calendar_id, ref url, _): &CalendarToSync,
+    changed: &mut bool,
+) -> Result<bool> {
+    let server_read_only = remote.server_read_only(url)?;
+    *changed |= store.lock().unwrap().write(|database_transaction| {
+        database_transaction.set_server_read_only(calendar_id, server_read_only)
+    })?;
+    Ok(server_read_only)
 }
 
 /// Why the Sender's last try to send the Unsent Changes of a UID didn't

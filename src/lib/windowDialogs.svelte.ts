@@ -12,7 +12,7 @@ import type {
 import { errorText, t } from '../i18n';
 import { sameRepeat } from './repeat';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
-import { whyReadOnly, type WindowModel } from './windowModel.svelte';
+import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
 
 /**
  * What is open over the grid, if anything. The Event of `details` and
@@ -89,8 +89,7 @@ export class WindowDialogs {
     this.#core = core;
     this.#model = model;
     this.#writableCalendars = $derived(
-      model.directory?.calendars.filter((calendar) => whyReadOnly(calendar, false) === undefined) ??
-        [],
+      model.directory?.calendars.filter((calendar) => canEdit(calendar, false)) ?? [],
     );
   }
 

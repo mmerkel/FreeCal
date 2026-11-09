@@ -24,9 +24,9 @@ use crate::{CalendarId, ImportedEvent, Result};
 /// Runs the CalDAV Incoming Sync of `calendar`, as
 /// [`crate::sync::sync_calendar`] says, deciding from its Known Server
 /// Resources: a Calendar whose First Sync is unfinished, without a sync
-/// point, gets the rest of it, unrecorded like the rest: page by page ([`first_sync`]) while it holds
-/// nothing from its server yet, otherwise as one Journal Transaction with
-/// the Transaction Origin First Sync. Any other Calendar gets what changed
+/// point, gets the rest of it, unrecorded like the rest: page by page
+/// ([`first_sync`]) while it holds nothing from its server yet, otherwise
+/// as one Journal Transaction with the Transaction Origin First Sync. Any other Calendar gets what changed
 /// since its sync point as one Journal Transaction with the Transaction
 /// Origin Incoming Sync.
 pub(crate) fn sync(
