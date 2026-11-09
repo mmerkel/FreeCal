@@ -6,13 +6,15 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 - [ ] BUG:
   - [ ] in the database in the default xdg folder: dragging "Test event 1", first occurrence (Nov 5 at 11am) to Nov 6 makes the second occurrence disappear!  Seems like a problem with final date that is not changed accordingly? Maybe rather work with durations if possible?
 - [ ] ticket 13
+- [ ] finish ticket 16
 - [ ] simplify
 - [ ] ticket 19
 - [ ] simplify
 - [ ] ticket 20 parts
 - [ ] simplify
 - [ ] code base architecture
-- [ ] finish tickets 15 and 16
+- [ ] finish ticket 15
+- [ ] finish ticket 18
 - [ ] simplify
 - [ ] code base architecture
 - [ ] simplify
