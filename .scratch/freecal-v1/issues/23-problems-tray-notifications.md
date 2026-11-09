@@ -2,7 +2,7 @@
 
 **What to build:** The tray icon shows the overall status (Conflict, then Sync Error, then Offline, then Syncing, then Online and synced). The tray menu lists current Conflicts and Sync Errors so the user can go straight to them. While FreeCal runs in the background, each new Conflict or Sync Error gets one desktop notification. New problems also appear in an open window immediately.
 
-**Blocked by:** 16, 20
+**Blocked by:** 16, 134
 
 **Status:** ready-for-agent
 
@@ -17,3 +17,4 @@
 
 ## Comments
 - 2026-10-25 (grilling, ADR 0011): an object that holds a UID another object of its Calendar owns is mirrored without rows and isn't shown. List it here as a problem of its Calendar, through ticket 91's ownership function.
+- 2026-11-09: Ticket 20 was split into 133 to 137. This ticket now waits on 134, where the core lists open Conflicts. "Problems changed" comes with 133, which 134 waits on. Ticket 133 sends it only for Conflicts; whether Sync Errors send it too is decided here.
