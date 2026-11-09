@@ -1,14 +1,15 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] ticket 20
+- [ ] tickets 18, 19
+- [ ] simplify
+- [ ] ticket 20 parts
 - [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 13
 - [ ] finish tickets 15 and 16
 - [ ] simplify
 - [ ] code base architecture
-- [ ] tickets 18, 19
 - [ ] simplify
 - [ ] code base architecture
 - [ ] ticket 25 -> first split
