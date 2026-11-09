@@ -43,3 +43,4 @@
     - **Session End** (new term): a logout or shutdown, during which closing quits without trying to send (`SessionEnding`, `watch_session_end`).
     - **Quit Asked** (new term): the shell asking the window to quit as Quit does, when closing it with Unsent Changes waiting (`QUIT_ASKED_EVENT`, `onQuitAsked`).
     - Code names: `KeptUnsentChange` (an Unsent Change as read from the Local Store, untrusted), `UnsentChangeRow` (renamed test-only row), `UnsentAtQuit`, `QuitDialog`, `heldBackBy`, `notYetSyncedText`, `outlineDue`, `offlineAccounts`, `unsent_since`/`unsentSince`.
+- 2026-11-09 (review with the user): Batch, Session End, Quit Asked and Send Failure approved as code names, not added to `GLOSSARY.md`.
