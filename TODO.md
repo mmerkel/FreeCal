@@ -1,7 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] code base architecture
 - [ ] ticket 20
 - [ ] simplify
 - [ ] code base architecture
