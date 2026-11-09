@@ -436,6 +436,21 @@ mod privileges {
         assert_eq!(proxy.requests_holding(PRIVILEGES), added);
     }
 
+    /// Adding a Calendar reads its privileges; the sync that follows, in
+    /// its First Sync, which sends nothing, doesn't read them again.
+    #[test]
+    fn adding_a_server_read_only_calendar_reads_its_privileges_once() {
+        let writable = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        OnServer::read_only_through(&writable);
+        let server_read_only = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");
+        server_read_only_through(&server_read_only);
+
+        assert_eq!(
+            server_read_only.requests_holding(PRIVILEGES),
+            writable.requests_holding(PRIVILEGES)
+        );
+    }
+
     #[test]
     fn a_write_the_server_refuses_makes_the_calendar_server_read_only() {
         let proxy = RewritingProxy::new(Radicale::shared(), "<read />", "<all />");

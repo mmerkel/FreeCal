@@ -85,7 +85,8 @@ pub(crate) struct CalendarSyncResult {
 /// the refusal stays the outcome unless that reading fails about the whole
 /// Account. A Server read-only Calendar sends no writes, so nothing tells of
 /// a permission granted again: a sync the user starts and the launch sync
-/// read it again before sending. Trade-off, named: this rule exists because
+/// read it again before sending, once its First Sync is finished, as only
+/// then could it send. Trade-off, named: this rule exists because
 /// reading a CalDAV Calendar's privileges costs one request per Calendar,
 /// so a CalDAV cost rule lives in Provider-neutral code; with one Provider,
 /// a rule per Provider would be a seam for a hypothetical (ticket 26 may
@@ -133,7 +134,9 @@ fn sync_both_ways(
         .unwrap()
         .read_only(calendar_id)?
         .server_read_only();
-    if server_read_only && look_for_grants {
+    // A Calendar in its First Sync sends nothing, so a grant changes
+    // nothing yet, and adding it read its privileges just now.
+    if server_read_only && look_for_grants && state.is_some() {
         server_read_only =
             read_server_read_only(remote, store, calendar, server_read_only_changed)?;
     }
