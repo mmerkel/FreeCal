@@ -80,6 +80,10 @@ _Avoid_: Remote version, their version, server copy
 The Events FreeCal holds for one Calendar and UID, with the changes not sent yet, whether from an edit, an import or an undo. In a Conflict it stands against the Server Version, shown as "Your version".
 _Avoid_: Local version (Local is for Local Accounts and Calendars), mine, client version
 
+**Last Agreed Version**:
+The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it. In a Conflict, what each side changed is shown against it.
+_Avoid_: Common version, common reference version, base version, ancestor, original
+
 **Unsent Change**:
 A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.
 _Avoid_: Pending change, queued change, outbox entry

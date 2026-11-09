@@ -220,7 +220,8 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Occurrences: get those in a date range, already converted to the Display Time Zone, each with whether it has unsent local changes and since when
   - Events: create, edit, move or delete, including the recurrence scope (this / this and following / all) and moves across Accounts
   - Sync: sync now (per Account, or for all); get the current sync status of every Account and Calendar
-  - Problems: list and resolve Conflicts, list Sync Errors, approve or reject a paused Calendar
+  - Conflicts: list them, and resolve one by keeping the User's Version or the Server Version
+  - Sync Errors: read through the Sync Status; approve or reject a paused Calendar
   - Change Journal: list Journal Event Modifications, undo one Journal Event Modification, undo everything since a given time, undo an import
   - Import/export: add files waiting to be imported, list them, dismiss one, preview an import, run it, export
   - Snapshots: take, list, restore
@@ -234,7 +235,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - **Sync status changed** (status): the new Sync Status of an Account or Calendar, with the time and outcome of the last finished sync and the number of local changes not yet sent, and for a Calendar whether its First Sync is unfinished.
   - **Occurrences changed** (change): the Events of one or more Calendars changed, for any reason (remote pull, local edit, import, undo, Snapshot restore, Conflict resolution). It carries the affected Calendar IDs.
   - **Calendars changed** (change): Accounts or Calendars were added, removed, renamed, recoloured, shown or hidden, or their writability changed (for example the user adding a server Calendar, or a server permission change).
-  - **Problems changed** (change): a Conflict or Sync Error was raised or resolved. The tray and the notifications query the core for details; they run in the shell next to the core.
+  - **Conflicts changed** (change): a Conflict was raised, replaced or resolved. Sync Errors come with "Sync status changed". The tray and the notifications follow both and query the core for details; they run in the shell next to the core.
   - **Display Time Zone changed** (status): the system time zone changed, for example after travelling, or the user changed the Display Time Zone override. It carries the new zone. The frontend redraws the visible range and the time zone label. An open editor keeps its draft, including the draft's own time zone.
   - **Waiting imports changed** (change): files waiting to be imported were added or one was dismissed or imported. The frontend re-reads the list and opens the preview for the first one when no modal dialog is showing.
   - **Date changed** (status): the local date changed, at midnight or on waking up on a new day. It carries the new date. The frontend moves the today highlight, and jumps to the new today if it is tracking today (see View state). The core sends it because it already detects waking from sleep and owns the clock that tests control.
@@ -306,7 +307,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - **Window size**: the window has a fixed minimum size (880×560, set in `tauri.conf.json`) at which the sidebar at its default width and the week view still fit. A tiling window manager can still make the window smaller (KWin on X11 does so on purpose for quick-tiled windows, KDE bug 434615). The content then keeps its minimum size and the page scrolls.
   - **Event details** show "Not yet synced: <reason>" for unsent changes, and say when the Event is read-only, giving the reason: a Read-only Calendar, or "has guests" with the hint to edit it in Google or on the server.
   - Trying to drag or resize a read-only Event shows a short message saying why it can't change.
-  - On an "Occurrences changed" Signal for a shown Calendar, the frontend fetches the visible range again and keeps the current selection. An open Event editor is never overwritten: the user's draft stays, and saving it goes through normal Conflict detection.
+  - On an "Occurrences changed" Signal for a shown Calendar, the frontend fetches the visible range again and keeps the current selection. An open Event editor is never overwritten: the user's draft stays, and saving it is an ordinary edit. If the Event is in Conflict by then, the edit changes the User's Version, and the Conflict stays open unless the edit ends it (ADR 0014).
 - **View state**: month view on first launch, then the last-used view, always opening on today. There is no setting for the first-launch view.
 - **Tracking today**: a mode, like "follow my position" in a map app. The Today button is a toggle, and its pressed state *is* the mode.
   - It is turned on when FreeCal opens and when the user presses Today, which also jumps to today.
