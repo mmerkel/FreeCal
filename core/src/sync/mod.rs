@@ -4,9 +4,9 @@
 //! Mirror take a [`SyncEngineWritePermission`], which only this module can
 //! make. Each Provider's part lives in a module of its own, CalDAV's in
 //! [`caldav`] (ADR 0015); this module holds what every Provider and both
-//! directions share: the entries that pick the Provider's Sync Engine
-//! ([`incoming`], [`outgoing`]), the [`Recorder`] it opens Journal
-//! Transactions through, and the Write Permission. A Calendar's
+//! directions share: the entry that syncs a Calendar both ways and picks the
+//! Provider's Sync Engine ([`sync_calendar`]), the [`Recorder`] it opens
+//! Journal Transactions through, and the Write Permission. A Calendar's
 //! Event Rows with one UID belong to the UID's Corresponding Server Object,
 //! and only that Server Object writes them (ADR 0015).
 
@@ -14,14 +14,14 @@ pub(crate) mod caldav;
 
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
-use chrono_tz::Tz;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{JournalTransaction, JournalTransactionId, TransactionOrigin};
 use crate::remote::Remote;
 use crate::store::{CalendarToSync, Store};
-use crate::{ErrorCode, Provider, Result};
+use crate::sync_status::{StartedBy, about_account};
+use crate::{Clock, CoreError, ErrorCode, Provider, Result};
 
 /// Runs a change as one Journal Transaction of a Transaction Origin and then
 /// sends its Signals, as `Core::record` does, so that what follows a commit
@@ -33,43 +33,161 @@ pub(crate) type Recorder<'a> = &'a dyn Fn(
     &mut dyn FnMut(&mut JournalTransaction) -> Result<()>,
 ) -> Result<Option<JournalTransactionId>>;
 
-/// Runs the Incoming Sync of `calendar` through its Account's server
-/// `remote`, by the Sync Engine of the Account's Provider,
-/// with Journal Transactions opened through `record`. The Sync Engine reads
-/// its Known Server Resources from `store` and decides between a First Sync,
-/// page by page while the Calendar holds nothing from its server yet, its
-/// unfinished rest, and an incremental Incoming Sync. Floating times without
-/// a zone of the Calendar's show in `display`. Returns the Calendar's
-/// Journal Transaction, none for a First Sync, which the Change Journal
-/// doesn't record (ADR 0009), or for one that changed nothing.
-pub(crate) fn incoming(
+/// What syncing a Calendar both ways ([`sync_calendar`]) came to, from
+/// which the core sends its Signals (new term: Calendar Sync Result).
+/// Server read-only may have changed and the sync still failed, as when the
+/// server refused a write.
+pub(crate) struct CalendarSyncResult {
+    /// How the sync ended: the Journal Transaction of the Calendar's
+    /// Incoming Sync, none for a First Sync, which the Change Journal
+    /// doesn't record (ADR 0009), or for one that changed nothing. When the
+    /// Outgoing Sync failed but the Incoming Sync ran, its Journal
+    /// Transaction is committed but the failure is returned.
+    pub outcome: Result<Option<JournalTransactionId>>,
+    /// Whether the Calendar's Server read-only changed, which "Calendars
+    /// changed" tells.
+    pub server_read_only_changed: bool,
+}
+
+/// Syncs `calendar` both ways through its Account's server `remote`, by the
+/// Sync Engine of the Account's Provider, in a sync started by `started_by`,
+/// the launch sync when `at_launch`. Journal Transactions open through
+/// `record`; `clock` gives the time of revision of what the Outgoing Sync
+/// writes, and the Display Time Zone, where floating times without a zone
+/// of the Calendar's show.
+///
+/// First its Outgoing Sync sends its Unsent Changes, then its Incoming Sync
+/// brings in what changed on the server, deciding from its Known Server
+/// Resources between a First Sync, page by page while the Calendar holds
+/// nothing from its server yet, its unfinished rest, and an incremental
+/// Incoming Sync. Sending first gets the user's changes to the server
+/// soonest, and the Incoming Sync right after fetches what the server
+/// stored of a write answered without an ETag, and finds what failed a
+/// precondition. The price: a server change since the last sync makes a
+/// write fail its precondition, a request in vain, where an Incoming Sync
+/// first would have read the new version beforehand. A failure of the
+/// Outgoing Sync about the whole Account (see [`about_account`]) stops the
+/// sync; any other still lets the Incoming Sync run, and is the outcome
+/// once it ran, so that the Calendar shows a Sync Error. The Outgoing Sync
+/// records nothing in the Change Journal.
+///
+/// A Server read-only Calendar sends nothing: its Unsent Changes fail with
+/// [`CoreError::WritesRefused`] without a request, the Calendar's Sync
+/// Error, as the server would refuse them. The user's Read-only mark holds
+/// none back: it only stops new changes, so those made before it are sent
+/// (ticket 130). Those of a Calendar whose First Sync is unfinished wait,
+/// as the Mirror doesn't yet hold every Server Object.
+///
+/// Whether the server lets the user change the Calendar, Server read-only,
+/// is read when it is added, and again only when FreeCal has a reason to
+/// think it changed (ticket 130), so that a Poll costs no request for it. A
+/// write the server refuses reads it again, to notice a revoked permission;
+/// the refusal stays the outcome unless that reading fails about the whole
+/// Account. A Server read-only Calendar sends no writes, so nothing tells of
+/// a permission granted again: a sync the user starts and the launch sync
+/// read it again before sending. Trade-off, named: this rule exists because
+/// reading a CalDAV Calendar's privileges costs one request per Calendar,
+/// so a CalDAV cost rule lives in Provider-neutral code; with one Provider,
+/// a rule per Provider would be a seam for a hypothetical (ticket 26 may
+/// move it into the Provider).
+pub(crate) fn sync_calendar(
     remote: &dyn Remote,
     store: &Mutex<Store>,
     calendar: &CalendarToSync,
-    display: Tz,
+    started_by: StartedBy,
+    at_launch: bool,
+    clock: &dyn Clock,
     record: Recorder,
-) -> Result<Option<JournalTransactionId>> {
-    match remote.provider() {
-        Provider::Local => unreachable!("the Local Provider has no server"),
-        Provider::CalDav => caldav::incoming::sync(remote, store, calendar, display, record),
+) -> CalendarSyncResult {
+    let mut server_read_only_changed = false;
+    let mut read_server_read_only = || {
+        let (calendar_id, ref url, _) = *calendar;
+        let server_read_only = remote.server_read_only(url)?;
+        server_read_only_changed |= store.lock().unwrap().write(|database_transaction| {
+            database_transaction.set_server_read_only(calendar_id, server_read_only)
+        })?;
+        Ok(server_read_only)
+    };
+    let outcome = sync_both_ways(
+        remote,
+        store,
+        calendar,
+        at_launch || started_by == StartedBy::User,
+        clock,
+        record,
+        &mut read_server_read_only,
+    );
+    CalendarSyncResult {
+        outcome,
+        server_read_only_changed,
     }
 }
 
-/// Runs the Outgoing Sync of `calendar` through its Account's server
-/// `remote`, by the Sender of the Account's Provider, which sends the
-/// Calendar's Unsent Changes, with `now` as the time of revision of what
-/// it writes, and records nothing in the Change Journal.
-pub(crate) fn outgoing(
+/// The body of [`sync_calendar`], which looks for grants when
+/// `look_for_grants`, and reads Server read-only from the server, and keeps
+/// it, with `read_server_read_only`.
+fn sync_both_ways(
     remote: &dyn Remote,
     store: &Mutex<Store>,
     calendar: &CalendarToSync,
-    server_read_only: bool,
-    now: DateTime<Utc>,
-) -> Result<()> {
-    match remote.provider() {
-        Provider::Local => unreachable!("the Local Provider has no server"),
-        Provider::CalDav => caldav::sender::send(remote, store, calendar, server_read_only, now),
+    look_for_grants: bool,
+    clock: &dyn Clock,
+    record: Recorder,
+    read_server_read_only: &mut dyn FnMut() -> Result<bool>,
+) -> Result<Option<JournalTransactionId>> {
+    let (calendar_id, _, ref state) = *calendar;
+    let mut server_read_only = store
+        .lock()
+        .unwrap()
+        .find_calendar(calendar_id)?
+        .server_read_only;
+    if server_read_only && look_for_grants {
+        server_read_only = read_server_read_only()?;
     }
+    let sent = if server_read_only {
+        // A Calendar whose First Sync is unfinished sends nothing anyway.
+        let has_unsent =
+            state.is_some() && !store.lock().unwrap().unsent_uids(calendar_id)?.is_empty();
+        if has_unsent {
+            Err(CoreError::WritesRefused)
+        } else {
+            Ok(())
+        }
+    } else {
+        let now = clock.now().with_timezone(&Utc);
+        let sent = match remote.provider() {
+            Provider::Local => unreachable!("the Local Provider has no server"),
+            Provider::CalDav => caldav::sender::send(remote, store, calendar, now),
+        };
+        match sent {
+            // Refused by the server: has a permission been revoked?
+            Err(CoreError::WritesRefused) => {
+                if let Err(error) = read_server_read_only() {
+                    if about_account(&error) {
+                        return Err(error);
+                    }
+                    log::warn!(
+                        "Reading the privileges of Calendar {} failed: {error}",
+                        calendar_id.0
+                    );
+                }
+                Err(CoreError::WritesRefused)
+            }
+            sent => sent,
+        }
+    };
+    if let Err(error) = &sent
+        && about_account(error)
+    {
+        return sent.map(|()| None);
+    }
+    let journal_transaction = match remote.provider() {
+        Provider::Local => unreachable!("the Local Provider has no server"),
+        Provider::CalDav => {
+            caldav::incoming::sync(remote, store, calendar, clock.time_zone(), record)?
+        }
+    };
+    sent.map(|()| journal_transaction)
 }
 
 /// Why the Sender's last try to send the Unsent Changes of a UID didn't

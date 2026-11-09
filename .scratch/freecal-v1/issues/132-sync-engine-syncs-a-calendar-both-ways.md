@@ -22,16 +22,21 @@ Spec: US-17, US-30; "Sync engine"; "Writability"; "Calendars changed".
 
 **Blocked by:** 131
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] One entry in `core/src/sync/mod.rs` syncs a Calendar both ways; `sync::incoming` and `sync::outgoing` are gone; `Core::sync_calendar` only starts it and sends Signals from its result
-- [ ] The entry decides whether the Outgoing Sync may send; the CalDAV Sender takes no `server_read_only`
-- [ ] The re-read of privileges (looking for grants, and after a refused write) is the entry's; `look_for_grants` and `server_read_only` no longer travel through the core's sync functions
-- [ ] "Calendars changed" is sent from the entry's result, also when the sync fails with `WritesRefused`
-- [ ] The existing CalDAV, send and Sync Status tests pass unchanged
+- [x] One entry in `core/src/sync/mod.rs` syncs a Calendar both ways; `sync::incoming` and `sync::outgoing` are gone; `Core::sync_calendar` only starts it and sends Signals from its result
+- [x] The entry decides whether the Outgoing Sync may send; the CalDAV Sender takes no `server_read_only`
+- [x] The re-read of privileges (looking for grants, and after a refused write) is the entry's; `look_for_grants` and `server_read_only` no longer travel through the core's sync functions
+- [x] "Calendars changed" is sent from the entry's result, also when the sync fails with `WritesRefused`
+- [x] The existing CalDAV, send and Sync Status tests pass unchanged
 
 ## Comments
 - 2026-11-09 (/improve-codebase-architecture): the user chose: one Sync Engine entry owns order, error precedence, the "may it send?" check and the privilege re-read; the "may it send?" check and the re-read are Provider-neutral for now; the core sends "Calendars changed" from the entry's result; `about_account` is out of scope. Blocked by 131 because both change how Server read-only is read.
 - For ticket 26 (Google): check whether Google needs its own privilege policy; if so, move the re-read into each Provider's Sync Engine.
+- 2026-11-09 (/implement): done. The entry is `sync::sync_calendar` (`core/src/sync/mod.rs`). It takes who started the sync and whether it is the launch sync, and decides from them whether to look for grants. It returns a `CalendarSyncResult`: the outcome (the Incoming Sync's Journal Transaction, or the error) and whether Server read-only changed. `Core::sync_calendar` (`core/src/lib.rs`) only starts it, sends "Calendars changed" when Server read-only changed, and returns the outcome. The core's `read_server_read_only` is gone; the entry re-reads through a closure that remembers whether a reading changed the stored flag.
+  - Signal order, changed: "Calendars changed" now comes after the Incoming Sync's "Occurrences changed", not before it, because the core sends it from the entry's result. No test depends on the order.
+  - Tests: none in `core/tests/` changed. The Sender's two unit tests in `core/src/sync/caldav/sender.rs` only lost the `false` they passed for `server_read_only`; neither tested `true`. The refusal "without a request" stays covered by `caldav_send.rs` through the core.
+  - Left as it is after review: the entry has two exhaustive `match`es on the Provider, one for the Sender and one for the Incoming Sync, as the ticket asks. The entry also checks "a Calendar whose First Sync is unfinished sends nothing" again, as the Sender does, so that a Server read-only Calendar in its First Sync shows no `WritesRefused`, as before.
+  - New term (code name, for approval or renaming): **Calendar Sync Result** (`CalendarSyncResult`), what syncing a Calendar both ways came to: its outcome and whether Server read-only changed.
