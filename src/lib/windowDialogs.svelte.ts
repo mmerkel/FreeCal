@@ -10,7 +10,8 @@ import type {
   When,
 } from '../core/types';
 import { errorText, t, tCount } from '../i18n';
-import { sameRepeat } from './repeat';
+import { repeatMoved, sameRepeat } from './repeat';
+import { fieldsOf } from './when';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
 import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
 import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
@@ -268,7 +269,13 @@ export class WindowDialogs {
       this.openDetails(id, value.recurrenceId);
       return;
     }
-    const change = sameRepeat(draft.repeat, editor.draft.repeat) ? 'edit' : 'editRepeat';
+    // The editor moves the repeat's end date with the start.
+    const leftAlone = repeatMoved(
+      editor.draft.repeat,
+      fieldsOf(editor.draft.when).startDate,
+      fieldsOf(draft.when).startDate,
+    );
+    const change = sameRepeat(draft.repeat, leftAlone) ? 'edit' : 'editRepeat';
     const choice = await this.#askScope(change, id, recurrenceId);
     if (choice === null) return;
     const { scope, exceptionsToo } = choice;

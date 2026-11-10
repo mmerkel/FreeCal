@@ -118,6 +118,21 @@ pub(super) fn repeat_of(fields: &EventFields) -> (Option<Repeat>, bool) {
     (Some(repeat), custom)
 }
 
+/// `repeat` as a change that moves an Occurrence from the date `from` to
+/// `to` leaves it: its end date moved by as many days, as the editor moves
+/// the one it shows and as [`rule_moved`] moves `UNTIL`.
+pub(super) fn repeat_moved(
+    repeat: Option<Repeat>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Option<Repeat> {
+    let mut repeat = repeat?;
+    if let RepeatEnd::Until { date } = &mut repeat.end {
+        *date += to - from;
+    }
+    Some(repeat)
+}
+
 /// The rule text for `repeat` on an Event at `when`. The parts of `kept`,
 /// the rule the Event had, that the editor doesn't set are kept while the
 /// frequency stays, so that "every 2 weeks on Sunday and Tuesday" made
@@ -154,8 +169,9 @@ pub(super) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -
             date.format("%Y%m%d").to_string()
         } else {
             let zone = start_zone(when)?;
-            let last = date.and_time(NaiveTime::MIN) + TimeDelta::days(1) - TimeDelta::seconds(1);
-            instant(last, zone).format("%Y%m%dT%H%M%SZ").to_string()
+            instant(end_of_day(date), zone)
+                .format("%Y%m%dT%H%M%SZ")
+                .to_string()
         };
         text.push_str(&format!(";UNTIL={until}"));
     }
@@ -183,17 +199,28 @@ fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
     let rule = Rule::parse(text)?;
     let mut stored = rule.without(&[]);
     if let Some(until) = rule.until_wall(when) {
-        let until = if when.all_day {
-            until.format("%Y%m%d").to_string()
-        } else {
-            instant(until, start_zone(when).ok()?)
-                .format("%Y%m%dT%H%M%SZ")
-                .to_string()
-        };
-        stored.push_str(&format!(";UNTIL={until}"));
+        stored.push_str(&format!(";UNTIL={}", until_value(until, when)?));
     }
     OccurrenceStarts::new(Rule::parse(&stored)?, when)?;
     Some(stored)
+}
+
+/// The `UNTIL` value for the last start `until`, a wall time in the start's
+/// zone of the Event at `when`, in the form RFC 5545 asks for it: a date for
+/// an all-day Event, otherwise the UTC instant.
+fn until_value(until: NaiveDateTime, when: &StoredWhen) -> Option<String> {
+    Some(if when.all_day {
+        until.format("%Y%m%d").to_string()
+    } else {
+        instant(until, start_zone(when).ok()?)
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
+    })
+}
+
+/// The last second of `date`: the last start an `UNTIL` date allows.
+fn end_of_day(date: NaiveDate) -> NaiveDateTime {
+    date.and_time(NaiveTime::MIN) + TimeDelta::days(1) - TimeDelta::seconds(1)
 }
 
 /// A Recurring Event's rule as an `RRULE` value to write: its parts as
@@ -314,16 +341,27 @@ pub(super) fn readable(fields: &EventFields) -> bool {
 /// the days it names moved by as many days: "Mondays and Wednesdays" a day
 /// later is "Tuesdays and Thursdays", "the 5th" the 6th. A day of the month
 /// moved outside 1 to 31 can't be kept, and the rule repeats from its start
-/// instead. A rule FreeCal can't read stays as it is.
+/// instead. Its `UNTIL` moves with the start, so that the rule keeps its last
+/// Occurrence: the end of a day, as a date gives it and as the editor sets
+/// it, by as many days, any other time by as much time. A rule FreeCal can't
+/// read stays as it is.
 pub(super) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> String {
-    let (Some(rule), Ok(from), Ok(to)) = (Rule::parse(text), first_start(from), first_start(to))
+    let (Some(rule), Ok(was), Ok(start)) = (Rule::parse(text), first_start(from), first_start(to))
     else {
         return text.to_owned();
     };
-    let days = (to.date() - from.date()).num_days();
-    if days == 0 {
+    if start == was && from.all_day == to.all_day {
         return text.to_owned();
     }
+    let days = (start.date() - was.date()).num_days();
+    let until = rule.until_wall(from).and_then(|until| {
+        let moved = if until == end_of_day(until.date()) {
+            until + TimeDelta::days(days)
+        } else {
+            until + (start - was)
+        };
+        until_value(moved, to)
+    });
     let parts: Vec<String> = rule
         .parts
         .iter()
@@ -339,6 +377,7 @@ pub(super) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> Stri
                     .map(|day| month_day_moved(day, days))
                     .collect::<Option<Vec<_>>>()?
                     .join(","),
+                "UNTIL" => until.clone().unwrap_or_else(|| value.clone()),
                 _ => value.clone(),
             };
             Some(format!("{key}={value}"))
@@ -705,7 +744,7 @@ impl Rule {
                 let zone = start_zone(when).ok()?;
                 zone.from_utc_datetime(utc).naive_local()
             }
-            Until::Date(date) => date.and_hms_opt(23, 59, 59)?,
+            Until::Date(date) => end_of_day(*date),
             Until::Floating(wall) => *wall,
         })
     }

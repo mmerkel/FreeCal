@@ -674,17 +674,22 @@ impl Changes {
     ) -> Result<Self> {
         let was = &changing.fields;
         let description = was.description().text;
+        // The repeat the user left alone: its end date moves with the
+        // Occurrence, as the editor moves the one it shows.
+        let shown = was.when.to_when(zone)?.start_date().0;
+        let left_alone = |when: &When| rule::repeat_moved(repeat, shown, when.start_date().0);
         let draft = match change {
             Edit::Draft(draft) => draft,
             Edit::Reschedule(when) => EventDraft {
                 calendar_id,
                 title: was.title.clone(),
+                repeat: left_alone(&when),
                 when,
                 location: was.location.clone(),
                 description: description.clone(),
-                repeat,
             },
         };
+        let repeat = left_alone(&draft.when);
         let when = was.when.edit(draft.when, zone)?;
         let from = changing.slot.as_ref().unwrap_or(&was.when);
         let changed = |was: &String, now: String| (*was != now).then_some(now);

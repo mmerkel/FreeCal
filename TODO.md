@@ -123,6 +123,13 @@ Possible bugs, found by reading the code, not run:
 
 - [ ] `latest` (`core/src/event/mod.rs`) keeps the highest `SEQUENCE` and, on a tie, the version that comes first; `DTSTAMP` isn't read anywhere in `core/src`. RFC 5546 §2.1.5 breaks ties by the latest `DTSTAMP`. Found by reading the code, not run. Ties into "dedupe all Exceptions by `SEQUENCE` in `assemble`" above
 
+## Bug fix: a Recurring Event's end date moves with it
+
+Surprises left as they are:
+
+- [ ] "This event" from the editor: changing an Occurrence's start date moves "Last date" in the editor by as many days, since the scope isn't known before Save. With "This event", only that Occurrence moves, and the Recurring Event keeps its end date, so the date the editor showed isn't saved. Reopening the Exception shows the old end date again. Options: keep it (recommended); shift "Last date" only when editing the whole Recurring Event (con: with "All events" and "This and following" the core would shift the end date anyway, so editor and saved date differ for the common scopes); have the Scope Prompt say "The repeat's end date stays 19 October" (con: more text in a quick dialog)
+- [ ] different time zones: whether the end date was left alone is decided in the display time zone, by the editor (`repeatMoved` in `src/lib/repeat.ts`) and by the core alike (`Changes::of` in `core/src/event/scope.rs`). But the core then moves `UNTIL` by the days the start moved in the Event Time Zone (`rule_moved` in `core/src/event/rule.rs`). When the two zones differ and a move crosses midnight in only one of them, the saved end date can be a day off from the one the editor showed. The Occurrences are right: the series keeps its last one
+
 ## Ticket 80: first sync of a CalDAV Calendar
 
 Review risks left as they are:

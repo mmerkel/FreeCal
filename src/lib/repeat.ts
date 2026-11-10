@@ -43,3 +43,26 @@ export function sameRepeat(a: Repeat | null, b: Repeat | null): boolean {
         : 'never';
   return a.frequency === b.frequency && a.interval === b.interval && end(a) === end(b);
 }
+
+/**
+ * `date` moved by as many days as a start moved from the date `from` to `to`;
+ * unchanged while one of them isn't a date.
+ */
+export function dateMoved(date: string, from: string, to: string): string {
+  try {
+    const days = Temporal.PlainDate.from(from).until(Temporal.PlainDate.from(to)).days;
+    return Temporal.PlainDate.from(date).add({ days }).toString();
+  } catch {
+    return date;
+  }
+}
+
+/**
+ * `repeat` as a change that moves its start from the date `from` to `to` leaves
+ * it: its end date moved by as many days. The editor moves the end date it
+ * shows so, and the core takes a repeat so moved as left alone.
+ */
+export function repeatMoved(repeat: Repeat | null, from: string, to: string): Repeat | null {
+  if (repeat?.end.kind !== 'until') return repeat;
+  return { ...repeat, end: { kind: 'until', date: dateMoved(repeat.end.date, from, to) } };
+}

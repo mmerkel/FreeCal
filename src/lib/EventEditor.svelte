@@ -10,7 +10,7 @@
   import type { Calendar, EventDraft, Frequency, Repeat, RepeatEnd } from '../core/types';
   import { errorText, t, tCount } from '../i18n';
   import Dialog, { enterSubmits } from './Dialog.svelte';
-  import { intervalUnits } from './repeat';
+  import { dateMoved, intervalUnits } from './repeat';
   import { endsBeforeStart, fieldsOf, whenOf } from './when';
 
   interface Props {
@@ -63,6 +63,12 @@
   let count = $state<number | null>(
     start.repeat?.end.kind === 'count' ? start.repeat.end.count : 10,
   );
+
+  /** Sets the start date; the repeat's last date moves by as many days. */
+  function moveStart(date: string) {
+    untilDate = dateMoved(untilDate, times.startDate, date);
+    times.startDate = date;
+  }
 
   /** Every field the user can change, serialized, to tell whether the draft changed. */
   function snapshot() {
@@ -158,7 +164,7 @@
         class="input"
         type="date"
         aria-label={t('event.startDate')}
-        bind:value={times.startDate}
+        bind:value={() => times.startDate, moveStart}
       />
       {#if !times.allDay}
         <input

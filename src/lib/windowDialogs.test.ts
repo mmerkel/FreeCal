@@ -125,6 +125,39 @@ describe('the Scope Prompt of an edit', () => {
   });
 });
 
+/** `draft` a day later, with its repeat's end date as the editor moves it. */
+function aDayLater(draft: EventDraft, repeat: Repeat): EventDraft {
+  const later = (time: string) => Temporal.PlainDateTime.from(time).add({ days: 1 }).toString();
+  if (draft.when.kind !== 'timed') throw new Error('The sample Occurrence is timed');
+  return {
+    ...draft,
+    when: { kind: 'timed', start: later(draft.when.start), end: later(draft.when.end) },
+    repeat,
+  };
+}
+
+describe('the Scope Prompt of a move in the editor', () => {
+  const until = (date: string): Repeat => ({ ...weekly, end: { kind: 'until', date } });
+
+  test('an end date moved as far as the start is no change to the repeat', async () => {
+    const { dialogs } = await editingOccurrence(until('2026-10-19'));
+
+    void dialogs.save(aDayLater(draftOf(dialogs), until('2026-10-20')));
+    await settled();
+
+    expect(dialogs.scopePrompt?.change).toBe('edit');
+  });
+
+  test('an end date kept while the start moves changes the repeat', async () => {
+    const { dialogs } = await editingOccurrence(until('2026-10-19'));
+
+    void dialogs.save(aDayLater(draftOf(dialogs), until('2026-10-19')));
+    await settled();
+
+    expect(dialogs.scopePrompt?.change).toBe('editRepeat');
+  });
+});
+
 describe('the Scope Prompt of a changed repeat', () => {
   test('asks about the repeat, and saves for the scope chosen', async () => {
     const { core, dialogs } = await editingOccurrence();
