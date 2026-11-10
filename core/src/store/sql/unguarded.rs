@@ -233,6 +233,18 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
+    pub fn set_run_in_background(&self, on: bool) -> Result<()> {
+        self.tx
+            .execute("UPDATE app_state SET run_in_background = ?1", [on])?;
+        Ok(())
+    }
+
+    pub fn set_start_at_login(&self, on: bool) -> Result<()> {
+        self.tx
+            .execute("UPDATE app_state SET start_at_login = ?1", [on])?;
+        Ok(())
+    }
+
     /// Records the time zone rules the derived UTC instants are computed
     /// with now.
     pub(crate) fn set_time_zone_rules(&self, rules: &str) -> Result<()> {

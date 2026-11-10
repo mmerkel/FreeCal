@@ -4,6 +4,7 @@ import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/t
 import { calendar, dateChanged } from '../test/answers';
 import { eventId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
+import { DEFAULT_SETTINGS } from './settings';
 import { canEdit, whyReadOnly, WindowModel } from './windowModel.svelte';
 
 const date = (iso: string) => Temporal.PlainDate.from(iso);
@@ -325,12 +326,12 @@ describe('the window’s own state', () => {
   test('a failed settings write puts back the stored settings', async () => {
     const { core, model } = await started();
     core.answer('updateSettings', failure({ code: 'localStoreFailed' }));
-    core.answer('settings', { appearance: 'system' });
+    core.answer('settings', DEFAULT_SETTINGS);
 
     model.changeSettings({ appearance: 'light' });
     await settled();
 
-    expect(model.settings).toEqual({ appearance: 'system' });
+    expect(model.settings).toEqual(DEFAULT_SETTINGS);
     expect(model.settingsFailure).toBeTruthy();
 
     model.forgetSettingsFailure();

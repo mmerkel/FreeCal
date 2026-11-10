@@ -314,13 +314,23 @@ export type ServerLogin = { url: string, username: string, };
 /**
  * The settings of the Settings dialog, as the Local Store keeps them.
  */
-export type Settings = { appearance: Appearance, };
+export type Settings = { appearance: Appearance,
+/**
+ * Whether closing the window keeps FreeCal running in the background
+ * where a system tray exists (US-103, US-106).
+ */
+runInBackground: boolean,
+/**
+ * Whether FreeCal starts at login (US-107). The shell turns it on or
+ * off on the desktop before it is stored.
+ */
+startAtLogin: boolean, };
 
 /**
  * A change to the settings: only the settings it gives change, so that
  * each change in the Settings dialog writes just that one setting.
  */
-export type SettingsUpdate = { appearance?: Appearance, };
+export type SettingsUpdate = { appearance?: Appearance, runInBackground?: boolean, startAtLogin?: boolean, };
 
 /**
  * The sidebar as the user left it: shown or hidden, and its width in `rem`,

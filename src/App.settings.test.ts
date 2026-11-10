@@ -9,6 +9,7 @@ import { systemDarkQuery } from './test/darkQuery';
 import { calendar, firstLaunch } from './test/answers';
 import { failure } from './test/fakeCore';
 import { showApp } from './test/showApp';
+import { DEFAULT_SETTINGS } from './lib/settings';
 
 vi.mock('./lib/CalendarGrid.svelte', () => import('./test/StubGrid.svelte'));
 
@@ -75,7 +76,7 @@ test('choosing an appearance writes it once and applies it at once', async () =>
   expect(within(appearance).getByRole('radio', { name: 'System' })).toBeChecked();
   expect(within(appearance).getByRole('radio', { name: 'System' })).toHaveFocus();
 
-  core.answer('updateSettings', { appearance: 'dark' });
+  core.answer('updateSettings', { ...DEFAULT_SETTINGS, appearance: 'dark' });
   await user.click(within(appearance).getByRole('radio', { name: 'Dark' }));
 
   expect(colourScheme()).toBe('dark');
@@ -84,7 +85,7 @@ test('choosing an appearance writes it once and applies it at once', async () =>
   // Every change is saved at once, so there is nothing to save or cancel.
   expect(within(settings).queryByRole('button', { name: /save|cancel/i })).not.toBeInTheDocument();
 
-  core.answer('updateSettings', { appearance: 'system' });
+  core.answer('updateSettings', DEFAULT_SETTINGS);
   await user.click(within(appearance).getByRole('radio', { name: 'System' }));
   expect(colourScheme()).toBe('light');
   systemDarkQuery.flip(true);
@@ -107,7 +108,7 @@ test('a setting that can’t be saved is reported in words and goes back to the 
 
 test('opens with the stored appearance and shows the window once it is known', async () => {
   const core = firstLaunch();
-  core.answer('settings', { appearance: 'dark' });
+  core.answer('settings', { ...DEFAULT_SETTINGS, appearance: 'dark' });
   let schemeWhenShown: string | undefined;
   const show = core.showWindow;
   core.showWindow = () => {
@@ -125,7 +126,7 @@ test('opens with the stored appearance and shows the window once it is known', a
 
 test('a startup failure is drawn with the frontend’s default settings', async () => {
   const core = firstLaunch();
-  core.answer('settings', { appearance: 'dark' });
+  core.answer('settings', { ...DEFAULT_SETTINGS, appearance: 'dark' });
   core.answer('startupFailure', { code: 'localStoreInUse' });
 
   render(App, { core });

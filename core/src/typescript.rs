@@ -361,11 +361,15 @@ fn samples_file() -> (String, Vec<String>) {
         samples(&[Appearance::System, Appearance::Light, Appearance::Dark]),
         samples(&[Settings {
             appearance: Appearance::Dark,
+            run_in_background: false,
+            start_at_login: true,
         }]),
         samples(&[
             SettingsUpdate::default(),
             SettingsUpdate {
                 appearance: Some(Appearance::Light),
+                run_in_background: Some(false),
+                start_at_login: Some(true),
             },
         ]),
         samples(&[ImportSummary {

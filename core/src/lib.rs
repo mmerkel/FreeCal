@@ -183,6 +183,12 @@ impl Core {
             if let Some(appearance) = update.appearance {
                 database_transaction.set_appearance(appearance)?;
             }
+            if let Some(on) = update.run_in_background {
+                database_transaction.set_run_in_background(on)?;
+            }
+            if let Some(on) = update.start_at_login {
+                database_transaction.set_start_at_login(on)?;
+            }
             Ok(())
         })?;
         store.settings()

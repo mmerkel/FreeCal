@@ -488,11 +488,17 @@ impl Store {
     }
 
     pub fn settings(&self) -> Result<Settings> {
-        let appearance: String =
-            self.conn
-                .query_row("SELECT appearance FROM app_state", [], |row| row.get(0))?;
+        let (appearance, run_in_background, start_at_login): (String, Value, Value) =
+            self.conn.query_row(
+                "SELECT appearance, run_in_background, start_at_login FROM app_state",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+        let defaults = Settings::default();
         Ok(Settings {
             appearance: Appearance::parse(&appearance),
+            run_in_background: stored_switch(run_in_background, defaults.run_in_background),
+            start_at_login: stored_switch(start_at_login, defaults.start_at_login),
         })
     }
 
@@ -721,6 +727,16 @@ pub struct UnsentChangeRow {
 /// Reads the sidebar's stored columns, which are untrusted like every stored
 /// field: anything but 0 shows the sidebar, and anything but a positive number
 /// is the default width.
+/// A stored on/off setting is untrusted like every stored field; anything
+/// but 0 or 1 is its default.
+fn stored_switch(stored: Value, default: bool) -> bool {
+    match stored {
+        Value::Integer(0) => false,
+        Value::Integer(1) => true,
+        _ => default,
+    }
+}
+
 fn sidebar_state(shown: Value, width: Value) -> SidebarState {
     let width = match width {
         Value::Real(width) if width.is_finite() && width > 0.0 => Some(width),

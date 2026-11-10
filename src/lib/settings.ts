@@ -5,4 +5,8 @@ import type { Settings } from '../core/types';
  * Store's. They apply until the core has answered, and for good when it
  * can't start, so that the startup error screen is drawn with them.
  */
-export const DEFAULT_SETTINGS: Settings = { appearance: 'system' };
+export const DEFAULT_SETTINGS: Settings = {
+  appearance: 'system',
+  runInBackground: true,
+  startAtLogin: false,
+};

@@ -221,6 +221,13 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE unsent_change ADD COLUMN send_failure TEXT;
     ",
+    // Ticket 13: whether closing the window keeps FreeCal running in the
+    // background where a tray exists, and whether it starts at login. Both
+    // untrusted when read.
+    "
+    ALTER TABLE app_state ADD COLUMN run_in_background INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN start_at_login INTEGER NOT NULL DEFAULT 0;
+    ",
 ];
 
 /// The Local Calendars a new Local Store starts with: name, colour and whether

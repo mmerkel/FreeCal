@@ -582,13 +582,17 @@ export const samples = {
   ],
   Settings: [
     {
-      "appearance": "dark"
+      "appearance": "dark",
+      "runInBackground": false,
+      "startAtLogin": true
     }
   ],
   SettingsUpdate: [
     {},
     {
-      "appearance": "light"
+      "appearance": "light",
+      "runInBackground": false,
+      "startAtLogin": true
     }
   ],
   ImportSummary: [
