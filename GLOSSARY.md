@@ -261,3 +261,7 @@ _Avoid_: Store (on its own: the Local Store), app state, view model
 **Window Dialogs**:
 The frontend module that holds what is open over the calendar grid, one at a time, and the steps between them: an Event's details and editor, the recurrence scope question, import, notices, settings and About, with the message at the bottom of the window.
 _Avoid_: Modal manager, dialog stack, overlays
+
+**Scope Prompt**:
+The open question which Occurrences of a Recurring Event a change applies to (this one, this and following, or all of them), with the counts of the Exceptions it would change once read. Window Dialogs holds it; the Scope Dialog shows it.
+_Avoid_: Scope question, recurrence dialog
