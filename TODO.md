@@ -2,6 +2,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] ticket 13
+- [ ] test by hand - open box
 - [ ] finish ticket 16
 - [ ] simplify
 - [ ] ticket 19
