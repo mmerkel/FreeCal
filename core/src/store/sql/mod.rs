@@ -25,7 +25,7 @@ mod mirror {
 }
 mod unguarded;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
@@ -42,21 +42,31 @@ use crate::{
     Result, ServerLogin, Settings, SidebarState, View,
 };
 
+/// The integer in column `index` of `row`, untrusted: none for a value of
+/// another type, as one that can't be read.
+fn integer(row: &Row, index: usize) -> rusqlite::Result<Option<i64>> {
+    Ok(match row.get(index)? {
+        Value::Integer(value) => Some(value),
+        _ => None,
+    })
+}
+
+/// The text in column `index` of `row`, untrusted: none for a value of
+/// another type, as one that can't be read.
+fn text(row: &Row, index: usize) -> rusqlite::Result<Option<String>> {
+    Ok(match row.get(index)? {
+        Value::Text(value) => Some(value),
+        _ => None,
+    })
+}
+
 /// The Sync Record in columns 1 to 3 of `row`; a part with a value of
 /// another type is left out, as one that can't be read.
 fn sync_record(row: &Row) -> rusqlite::Result<SyncRecord> {
-    let integer = |index| match row.get(index)? {
-        Value::Integer(value) => Ok::<_, rusqlite::Error>(Some(value)),
-        _ => Ok(None),
-    };
-    let text = |index| match row.get(index)? {
-        Value::Text(value) => Ok::<_, rusqlite::Error>(Some(value)),
-        _ => Ok(None),
-    };
     Ok(SyncRecord::from_stored(
-        integer(1)?,
-        text(2)?.as_deref(),
-        integer(3)?,
+        integer(row, 1)?,
+        text(row, 2)?.as_deref(),
+        integer(row, 3)?,
     ))
 }
 
@@ -99,10 +109,7 @@ fn has_guests(row: &Row, first: usize) -> rusqlite::Result<bool> {
         Value::Text(text) => Some(text),
         _ => Some(String::new()),
     };
-    let own_addresses = match row.get(first + 1)? {
-        Value::Text(text) => Some(text),
-        _ => None,
-    };
+    let own_addresses = text(row, first + 1)?;
     Ok(guests::has_guests(
         attendees.as_deref(),
         own_addresses.as_deref(),
@@ -531,32 +538,59 @@ impl Store {
     }
 
     /// The Unsent Changes of the UID `uid` in a Calendar, whatever their
-    /// recurrence IDs, as the Local Store keeps them, untrusted. A
-    /// recurrence ID or Send Failure that isn't text counts as none.
+    /// recurrence IDs, as the Local Store keeps them, untrusted
+    /// ([`Self::kept_unsent_changes`]).
     pub(crate) fn unsent_changes_of(
         &self,
         calendar_id: CalendarId,
         uid: &str,
     ) -> Result<Vec<KeptUnsentChange>> {
-        let text = |value| match value {
-            Value::Text(text) => Some(text),
-            _ => None,
-        };
+        Ok(self
+            .kept_unsent_changes(
+                "WHERE calendar_id = ?1 AND uid = ?2",
+                params![calendar_id.0, uid],
+            )?
+            .into_iter()
+            .map(|(_, kept)| kept)
+            .collect())
+    }
+
+    /// Every Unsent Change, by Calendar and UID, as the Local Store keeps
+    /// them, untrusted ([`Self::kept_unsent_changes`]).
+    pub(crate) fn unsent_changes_by_uid(
+        &self,
+    ) -> Result<HashMap<(CalendarId, String), Vec<KeptUnsentChange>>> {
+        let mut by_uid: HashMap<_, Vec<_>> = HashMap::new();
+        for (key, kept) in self.kept_unsent_changes("", params![])? {
+            by_uid.entry(key).or_default().push(kept);
+        }
+        Ok(by_uid)
+    }
+
+    /// The Unsent Changes that `filter`, a `WHERE` clause on `params`,
+    /// selects, with their Calendar and UID, in the order they were added. A
+    /// recurrence ID or Send Failure that isn't text counts as none.
+    fn kept_unsent_changes(
+        &self,
+        filter: &str,
+        params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<((CalendarId, String), KeptUnsentChange)>> {
         let kept = self
             .conn
-            .prepare(
-                "SELECT recurrence_id, since, send_failure FROM unsent_change \
-                 WHERE calendar_id = ?1 AND uid = ?2 ORDER BY rowid",
-            )?
-            .query_map(params![calendar_id.0, uid], |row| {
-                Ok(KeptUnsentChange {
-                    recurrence_id: text(row.get(0)?).map(RecurrenceId::obtained),
-                    since: match row.get(1)? {
-                        Value::Integer(since) => Some(since),
-                        _ => None,
+            .prepare_cached(&format!(
+                "SELECT calendar_id, uid, recurrence_id, since, send_failure \
+                 FROM unsent_change {filter} ORDER BY rowid"
+            ))?
+            .query_map(params, |row| {
+                let key = (CalendarId(row.get(0)?), row.get(1)?);
+                Ok((
+                    key,
+                    KeptUnsentChange {
+                        recurrence_id: text(row, 2)?.map(RecurrenceId::obtained),
+                        since: integer(row, 3)?,
+                        send_failure: text(row, 4)?,
                     },
-                    send_failure: text(row.get(2)?),
-                })
+                ))
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(kept)

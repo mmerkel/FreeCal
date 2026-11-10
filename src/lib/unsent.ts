@@ -27,13 +27,22 @@ export function outlineDue(occurrence: Occurrence, offline: boolean): number | u
   return Temporal.Instant.from(occurrence.unsentSince).epochMilliseconds + OUTLINE_DELAY_MS;
 }
 
-/** The server Accounts that are Offline now. */
-export function offlineAccounts(statuses: SyncStatuses | undefined): Set<AccountId> {
-  return new Set(
+/**
+ * The server Accounts that are Offline now: `previous` itself when they are
+ * the same, so that what reads them reacts only when one went or came back.
+ */
+export function offlineAccounts(
+  statuses: SyncStatuses | undefined,
+  previous?: Set<AccountId>,
+): Set<AccountId> {
+  const offline = new Set(
     statuses?.accounts
       .filter((account) => account.report.status.kind === 'offline')
       .map((account) => account.accountId),
   );
+  const same =
+    previous?.size === offline.size && [...offline].every((account) => previous.has(account));
+  return same ? previous : offline;
 }
 
 /** A Sync Status's own reason for holding Unsent Changes back, if it has one. */

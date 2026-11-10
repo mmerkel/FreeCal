@@ -185,8 +185,8 @@ fn sync_statuses(core: State<Core>) -> CommandResult<SyncStatuses> {
 /// Tries to send every Unsent Change before quitting, for a few seconds,
 /// and returns the Sync Statuses then (see [`Core::send_before_quit`]).
 #[tauri::command]
-async fn send_before_quit(core: State<'_, Core>) -> CommandResult<SyncStatuses> {
-    core.send_before_quit().map_err(ErrorCode::from)
+async fn send_before_quit(app: AppHandle) -> CommandResult<SyncStatuses> {
+    off_the_ui_thread(app, |core| core.send_before_quit()).await
 }
 
 /// Sync now, of the Account `account_id`, or of every server Account.

@@ -276,13 +276,13 @@
   });
 
   /** When each Occurrence's dashed outline is due, if it has an Unsent Change (spec: "Event chips stay sparse"). */
-  const outlinesDue = $derived.by(() => {
-    const accountOf = new Map(calendars.map((calendar) => [calendar.id, calendar.accountId]));
-    return occurrences.map((occurrence) => {
-      const account = accountOf.get(occurrence.calendarId);
+  const calendarsById = $derived(new Map(calendars.map((calendar) => [calendar.id, calendar])));
+  const outlinesDue = $derived(
+    occurrences.map((occurrence) => {
+      const account = calendarsById.get(occurrence.calendarId)?.accountId;
       return outlineDue(occurrence, account !== undefined && offlineAccounts.has(account));
-    });
-  });
+    }),
+  );
   /** Counts the outlines that fell due, so that the Occurrences are drawn again then. */
   let outlinesFallen = $state(0);
 
@@ -307,7 +307,6 @@
     const now = Date.now();
     // Without a handler there is nothing to tell about a drag.
     const movable = onreschedule !== undefined;
-    const calendarsById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
     const timeGrid = view !== 'month';
     const events: EventInput[] = occurrences.map((occurrence, index) => {
       const due = outlinesDue[index];

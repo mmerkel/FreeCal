@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CoreApi } from './core/CoreApi';
-  import type { View } from './core/types';
+  import type { AccountId, View } from './core/types';
   import { t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
@@ -104,8 +104,13 @@
     return () => void stopping.then((stop) => stop());
   });
 
-  /** The server Accounts that are Offline, whose Unsent Changes the grid outlines at once. */
-  const offline = $derived(offlineAccounts(model.syncStatuses));
+  /**
+   * The server Accounts that are Offline, whose Unsent Changes the grid
+   * outlines at once; the same Set while they stay the same, so that a Sync
+   * Status change that keeps them doesn't draw the grid again.
+   */
+  let lastOffline: Set<AccountId> | undefined;
+  const offline = $derived((lastOffline = offlineAccounts(model.syncStatuses, lastOffline)));
 
   /** Sync now of every server Account; the Sync Status shows how it goes. */
   function syncNow() {

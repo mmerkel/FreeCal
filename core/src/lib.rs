@@ -66,7 +66,7 @@ use calendar::calendar_name;
 use event::{Edit, Opened};
 use journal::{JournalTransaction, TransactionOrigin};
 use remote::Remote;
-use store::{CalendarToSync, ServerCalendarState, Store};
+use store::{CalendarToSync, Store};
 use sync_scheduler::SyncScheduler;
 use sync_status::{RunningSync, RunningSyncs, SyncStatusKeeper};
 
@@ -486,27 +486,29 @@ impl Core {
     /// what it doesn't send stays in the Local Store for the next launch.
     pub fn send_before_quit(&self) -> Result<SyncStatuses> {
         let deadline = self.clock.now() + SENDING_BEFORE_QUIT;
-        let unsent: Vec<ServerCalendarState> = self
+        let unsent: Vec<_> = self
             .store()
             .server_calendar_states()?
             .into_iter()
             .filter(|calendar| calendar.unsent_changes > 0)
             .collect();
-        if !unsent.is_empty() {
+        let batch = self.ask_for_sync(|scheduler| {
+            if unsent.is_empty() || !scheduler.network_available() {
+                return None;
+            }
+            for calendar in &unsent {
+                scheduler.ask_calendar(calendar.account_id, calendar.calendar_id);
+            }
+            Some(scheduler.next_batch())
+        });
+        if let Some(batch) = batch {
             let mut scheduler = self.scheduler();
-            if scheduler.network_available() {
-                for calendar in &unsent {
-                    scheduler.ask_calendar(calendar.account_id, calendar.calendar_id);
-                }
-                let batch = scheduler.next_batch();
-                self.sync_requested.notify_all();
-                while !scheduler.batch_run(batch) && self.clock.now() < deadline {
-                    scheduler = self
-                        .syncs_ran
-                        .wait_timeout(scheduler, QUIT_CLOCK_CHECK)
-                        .unwrap()
-                        .0;
-                }
+            while !scheduler.batch_run(batch) && self.clock.now() < deadline {
+                scheduler = self
+                    .syncs_ran
+                    .wait_timeout(scheduler, QUIT_CLOCK_CHECK)
+                    .unwrap()
+                    .0;
             }
         }
         self.sync_statuses()

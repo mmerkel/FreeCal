@@ -99,18 +99,24 @@ pub struct UnsentChange {
 }
 
 impl UnsentChange {
-    /// The Unsent Change of the Event Row whose Occurrence is `key`: none
-    /// for an Event Row that isn't an Exception, otherwise its recurrence
-    /// ID in the Normal Form. It is found among `kept`, the Unsent Changes
+    /// The Unsent Change of the Event Row that is the Exception `exception`,
+    /// or none, for one that isn't an Exception; none for an Exception whose
+    /// recurrence ID can't be read, which pairs with nothing. It is found
+    /// among `kept`, the Unsent Changes
     /// of its Calendar and UID, comparing by Occurrence against the
     /// Recurring Event at `recurring` (ADR 0012). A `since` that can't be
     /// read counts as the Unix epoch, so that the change still shows, as
     /// one that waited long.
     fn of_event_row(
         kept: &[KeptUnsentChange],
-        key: Option<&NormalForm>,
+        exception: Option<&Exception>,
         recurring: Option<&ImportedWhen>,
     ) -> Option<Self> {
+        let key = match exception {
+            None => None,
+            Some(Exception { rid: Some(rid), .. }) => Some(rid),
+            Some(Exception { rid: None, .. }) => return None,
+        };
         let found = kept.iter().find(|kept| {
             occurrence_key(kept.recurrence_id.as_ref(), recurring)
                 .is_some_and(|kept_key| kept_key.as_ref() == key)
@@ -717,19 +723,13 @@ impl Opened {
         })
     }
 
-    /// The opened Event's Unsent Change, as `store` keeps it; none for an
-    /// Exception whose recurrence ID can't be read, which pairs with
-    /// nothing.
+    /// The opened Event's Unsent Change, as `store` keeps it
+    /// ([`UnsentChange::of_event_row`]).
     pub fn unsent_change(&self, store: &Store) -> Result<Option<UnsentChange>> {
-        let key = match self.exception() {
-            None => None,
-            Some(Exception { rid: Some(rid), .. }) => Some(rid),
-            Some(Exception { rid: None, .. }) => return Ok(None),
-        };
         let kept = store.unsent_changes_of(self.loaded.calendar_id, &self.loaded.uid)?;
         Ok(UnsentChange::of_event_row(
             &kept,
-            key,
+            self.exception(),
             self.loaded.recurring_when().as_ref(),
         ))
     }
@@ -813,25 +813,24 @@ pub(crate) fn occurrences(
 ) -> Result<Vec<Occurrence>> {
     let range = StoredRange::new(from, to, zone);
     let mut occurrences = Vec::new();
-    // The Events with each UID, and their Unsent Changes, loaded once.
+    // The Events with each UID, loaded once.
     let mut loaded = HashMap::new();
-    let mut unsent = HashMap::new();
+    let unsent = store.unsent_changes_by_uid()?;
     for event in store.shown_events_in(&range)? {
         let mut recurrence_id = None;
-        // The Occurrence of the Event Row, against the Recurring Event at
-        // `recurring`, for its Unsent Change; none for an Exception whose
-        // recurrence ID can't be read, which pairs with nothing.
-        let mut key = Some(None);
-        let mut recurring = None;
+        let kept = unsent.get(&(event.calendar_id, event.uid.clone()));
+        let mut unsent_since = None;
         if event.fields.recurrence_id.is_some() {
             let with_uid = with_uid_of(&mut loaded, store, &event)?;
-            recurring = with_uid.recurring_when();
             let own = with_uid
                 .exceptions
                 .iter()
                 .find(|exception| exception.id == event.id);
-            key = own.and_then(|own| own.rid.clone()).map(Some);
             if let Some(own) = own {
+                unsent_since = kept.and_then(|kept| {
+                    let recurring = with_uid.recurring_when();
+                    UnsentChange::of_event_row(kept, Some(own), recurring.as_ref())
+                });
                 let first = own.rid.as_ref().and_then(|rid| with_uid.exception_at(rid));
                 if first.is_some_and(|first| first.id != own.id) {
                     continue;
@@ -840,7 +839,10 @@ pub(crate) fn occurrences(
                     recurrence_id = own.rid.clone().map(NormalForm::into_string);
                 }
             }
+        } else if let Some(kept) = kept {
+            unsent_since = UnsentChange::of_event_row(kept, None, None);
         }
+        let unsent_since = unsent_since.map(|unsent| unsent.since);
         let expanded = match event.fields.rule {
             None => None,
             Some(_) => {
@@ -851,19 +853,6 @@ pub(crate) fn occurrences(
                     .collect();
                 rule::occurrences_in(&event.fields, &changed, &range)?
             }
-        };
-        let unsent_since = match key {
-            Some(key) => {
-                let kept = match unsent.entry((event.calendar_id, event.uid.clone())) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        entry.insert(store.unsent_changes_of(event.calendar_id, &event.uid)?)
-                    }
-                };
-                UnsentChange::of_event_row(kept, key.as_ref(), recurring.as_ref())
-                    .map(|unsent| unsent.since)
-            }
-            None => None,
         };
         let occurrence = |when: &StoredWhen, recurrence_id| -> Result<Occurrence> {
             Ok(Occurrence {

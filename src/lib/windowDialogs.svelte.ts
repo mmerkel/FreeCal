@@ -422,9 +422,10 @@ export class WindowDialogs {
   async runImport(calendarId: CalendarId, existing: ExistingEvents) {
     if (this.#open?.kind !== 'importing') return;
     const { file } = this.#open;
-    this.#working = t('working.importing', { file });
     try {
-      const outcome = await this.#core.runImport(calendarId, existing);
+      const outcome = await this.#whileWorking(t('working.importing', { file }), () =>
+        this.#core.runImport(calendarId, existing),
+      );
       const { journalTransaction } = outcome;
       this.close();
       this.#toast = {
@@ -442,8 +443,6 @@ export class WindowDialogs {
       };
     } catch (error) {
       this.#importFailure = t('import.failed', { error: errorText(error) });
-    } finally {
-      this.#working = undefined;
     }
   }
 
@@ -463,18 +462,12 @@ export class WindowDialogs {
     if (this.#working !== undefined || this.#quitting !== undefined) return;
     // Read now, as the window's may lag behind a change just made.
     const before = await this.#core.syncStatuses().catch(() => this.#model.syncStatuses);
-    const waiting = before ? unsentCount(before) : 0;
-    if (waiting === 0) return this.quitAnyway();
-    this.#working = tCount('working.sending', waiting);
-    let after = before;
-    try {
-      after = await this.#core.sendBeforeQuit();
-    } catch {
+    if (!before || unsentCount(before) === 0) return this.quitAnyway();
+    const after = await this.#whileWorking(tCount('working.sending', unsentCount(before)), () =>
       // What waited before still waits, as far as the window knows.
-    } finally {
-      this.#working = undefined;
-    }
-    const unsent = after ? unsentAtQuit(after, this.#model.directory?.calendars ?? []) : [];
+      this.#core.sendBeforeQuit().catch(() => before),
+    );
+    const unsent = unsentAtQuit(after, this.#model.directory?.calendars ?? []);
     if (unsent.length === 0) return this.quitAnyway();
     this.#quitting = unsent;
   }
@@ -510,9 +503,10 @@ export class WindowDialogs {
   /** Undoes an import, saying "Working…" meanwhile; a failed undo can be retried. */
   async #undoImport(file: string, id: JournalTransactionId) {
     this.dismissToast();
-    this.#working = t('working.undoingImport', { file });
     try {
-      await this.#core.undoJournalTransaction(id);
+      await this.#whileWorking(t('working.undoingImport', { file }), () =>
+        this.#core.undoJournalTransaction(id),
+      );
       this.#toast = { message: t('import.undone', { file }) };
     } catch (error) {
       // Undo can succeed later, such as once the Calendar is writable again.
@@ -520,6 +514,14 @@ export class WindowDialogs {
         message: t('import.undoFailed', { file, error: errorText(error) }),
         undo: () => void this.#undoImport(file, id),
       };
+    }
+  }
+
+  /** Runs `run`, saying `message` under "Working…" until it settles. */
+  async #whileWorking<T>(message: string, run: () => Promise<T>): Promise<T> {
+    this.#working = message;
+    try {
+      return await run();
     } finally {
       this.#working = undefined;
     }
