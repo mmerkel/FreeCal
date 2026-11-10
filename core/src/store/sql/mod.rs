@@ -724,9 +724,6 @@ pub struct UnsentChangeRow {
     pub since: i64,
 }
 
-/// Reads the sidebar's stored columns, which are untrusted like every stored
-/// field: anything but 0 shows the sidebar, and anything but a positive number
-/// is the default width.
 /// A stored on/off setting is untrusted like every stored field; anything
 /// but 0 or 1 is its default.
 fn stored_switch(stored: Value, default: bool) -> bool {
@@ -737,6 +734,9 @@ fn stored_switch(stored: Value, default: bool) -> bool {
     }
 }
 
+/// Reads the sidebar's stored columns, which are untrusted like every stored
+/// field: anything but 0 shows the sidebar, and anything but a positive number
+/// is the default width.
 fn sidebar_state(shown: Value, width: Value) -> SidebarState {
     let width = match width {
         Value::Real(width) if width.is_finite() && width > 0.0 => Some(width),

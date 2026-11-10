@@ -15,7 +15,7 @@ The decisions, with the strongest con of each (details in ticket 13's comments):
   - [ ] A stored on/off setting that isn't 0 or 1 reads as its default (`stored_switch`). Con: the sidebar's `shown` flag uses another rule (anything but 0 is on).
 - **Shell layer**
   - [ ] For background running the window is destroyed, not hidden, and created again (`reopen_main_window`). The user accepted this for now on 2026-11-10, on one condition: closing the window must act as Cancel on whatever dialog is open. Still open: does closing with unsaved changes in the event editor ask "Discard changes?" as Cancel does (the shell asks the window to cancel first and closes once it answers, or after a couple of seconds without an answer), or drop them silently? The shell also has to discard a picked import file on close.
-  - [ ] Start at login asks the Background portal first and, outside Flatpak, writes FreeCal's own autostart file where the portal didn't. Con: two writers own one file.
+  - [ ] Start at login: inside Flatpak only the Background portal is asked; outside Flatpak FreeCal writes its own autostart file and never asks the portal (changed after the review: there the portal named the entry after the terminal's app ID). Con: outside Flatpak the desktop never asks the user.
   - [ ] No `org.freedesktop.host.portal.Registry.Register` call. Con: a build started from a terminal always takes the file path.
   - [ ] At login, FreeCal opens its window as at any launch, not straight into the tray. Con: the window pops up at every login.
   - [ ] Tray Quit in the background quits at once without trying to send the Unsent Changes. Con: spec "Quitting" says tray Quit tries first.

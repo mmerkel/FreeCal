@@ -1,10 +1,11 @@
-//! Start at login (US-107) on the Linux desktop. FreeCal asks the
-//! Background portal, which writes or deletes the XDG autostart entry
-//! `~/.config/autostart/<app ID>.desktop` and may ask the user first. Where
-//! FreeCal runs outside Flatpak and the portal can't do it, as when it has
-//! no portal or can't tell FreeCal's app ID (`docs/research/autostart-state.md`),
-//! FreeCal writes or deletes the same file itself. Inside Flatpak only the
-//! portal can reach it.
+//! Start at login (US-107) on the Linux desktop, through the XDG autostart
+//! entry `~/.config/autostart/<app ID>.desktop`. Inside Flatpak only the
+//! Background portal can reach it: FreeCal asks the portal, which writes or
+//! deletes it and may ask the user first. Outside Flatpak FreeCal writes or
+//! deletes it itself and never asks the portal, which there names the entry
+//! after whatever app ID it finds, such as that of the terminal FreeCal was
+//! started from (`docs/research/autostart-state.md`). So each entry has one
+//! writer.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -52,23 +53,29 @@ impl StartAtLogin {
     /// when the user or the desktop refused it, with `StartAtLoginFailed`
     /// when it couldn't be done.
     pub fn set(&self, on: bool) -> Result<(), ErrorCode> {
-        self.set_through(Connection::session(), on)
+        self.set_through(Connection::session, on)
     }
 
-    fn set_through(&self, session: zbus::Result<Connection>, on: bool) -> Result<(), ErrorCode> {
+    fn set_through(
+        &self,
+        session: impl FnOnce() -> zbus::Result<Connection>,
+        on: bool,
+    ) -> Result<(), ErrorCode> {
+        if !self.sandboxed {
+            return self
+                .write_entry(on)
+                .map_err(|_| ErrorCode::StartAtLoginFailed);
+        }
         let response =
-            session.and_then(|connection| request_background(&connection, on, &self.commandline));
+            session().and_then(|connection| request_background(&connection, on, &self.commandline));
         match portal_outcome(response, on) {
             PortalOutcome::Done => Ok(()),
             PortalOutcome::Refused => Err(ErrorCode::StartAtLoginRefused),
-            PortalOutcome::NotDone if self.sandboxed => Err(ErrorCode::StartAtLoginFailed),
-            PortalOutcome::NotDone => self
-                .write_entry(on)
-                .map_err(|_| ErrorCode::StartAtLoginFailed),
+            PortalOutcome::NotDone => Err(ErrorCode::StartAtLoginFailed),
         }
     }
 
-    /// Writes or deletes the autostart entry, where the portal didn't.
+    /// Writes or deletes the autostart entry, outside Flatpak.
     fn write_entry(&self, on: bool) -> std::io::Result<()> {
         let file = self.autostart_dir.join(format!("{}.desktop", self.app_id));
         if !on {
@@ -373,8 +380,8 @@ mod tests {
         }
 
         fn set(&self, on: bool) -> Result<(), ErrorCode> {
-            let session = self.bus.connect().build();
-            self.start_at_login().set_through(session, on)
+            self.start_at_login()
+                .set_through(|| self.bus.connect().build(), on)
         }
 
         fn asked(&self) -> Asked {
@@ -388,8 +395,8 @@ mod tests {
     }
 
     #[test]
-    fn the_portal_is_asked_with_the_choice_and_freecals_own_command() {
-        let desktop = Desktop::portal_that_does_it();
+    fn inside_flatpak_the_portal_is_asked_with_the_choice_and_freecals_own_command() {
+        let desktop = Desktop::portal_that_does_it().sandboxed();
 
         assert_eq!(desktop.set(true), Ok(()));
 
@@ -406,7 +413,7 @@ mod tests {
 
     #[test]
     fn turning_it_off_asks_the_portal_too() {
-        let desktop = Desktop::portal_that_does_it();
+        let desktop = Desktop::portal_that_does_it().sandboxed();
 
         assert_eq!(desktop.set(false), Ok(()));
 
@@ -415,7 +422,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_request_is_refused() {
-        let desktop = Desktop::with_portal(1, false, Some(false));
+        let desktop = Desktop::with_portal(1, false, Some(false)).sandboxed();
 
         assert_eq!(desktop.set(true), Err(ErrorCode::StartAtLoginRefused));
         assert_eq!(desktop.entry(), None);
@@ -424,17 +431,25 @@ mod tests {
     #[test]
     fn running_in_the_background_not_allowed_is_refused() {
         // The portal then leaves the autostart entry as it was.
-        let desktop = Desktop::with_portal(0, false, Some(false));
+        let desktop = Desktop::with_portal(0, false, Some(false)).sandboxed();
 
         assert_eq!(desktop.set(false), Err(ErrorCode::StartAtLoginRefused));
     }
 
     #[test]
-    fn outside_flatpak_freecal_writes_the_entry_where_the_portal_cant_tell_its_app_id() {
-        // As the portal answers then.
-        let desktop = Desktop::with_portal(2, false, Some(false));
+    fn outside_flatpak_freecal_writes_its_own_entry_without_asking_the_portal() {
+        // Outside Flatpak the portal names the entry after whatever app ID it
+        // finds, such as the terminal's FreeCal was started from.
+        let desktop = Desktop::portal_that_does_it();
 
         assert_eq!(desktop.set(true), Ok(()));
+
+        assert!(
+            desktop
+                .asked
+                .recv_timeout(Duration::from_millis(200))
+                .is_err()
+        );
 
         assert_eq!(
             desktop.entry().unwrap(),
@@ -460,6 +475,7 @@ mod tests {
 
     #[test]
     fn inside_flatpak_only_the_portal_can_do_it() {
+        // As the portal answers where it can't tell FreeCal's app ID.
         let failing = Desktop::with_portal(2, false, Some(false)).sandboxed();
         let missing = Desktop::without_portal().sandboxed();
 

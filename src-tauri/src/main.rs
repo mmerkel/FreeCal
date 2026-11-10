@@ -127,20 +127,20 @@ fn settings(core: State<Core>) -> CommandResult<Settings> {
 
 /// Changes the settings. Start at login is turned on or off on the desktop
 /// first, and kept only when that worked; the portal may ask the user, so
-/// this runs off the UI thread.
+/// that step waits on a thread of its own. The window allows one such change
+/// at a time.
 #[tauri::command]
 async fn update_settings(app: AppHandle, update: SettingsUpdate) -> CommandResult<Settings> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some(on) = update.start_at_login {
-            set_start_at_login(&app, on)?;
-        }
-        app.state::<Core>()
-            .update_settings(update)
-            .map_err(ErrorCode::from)
-    })
-    .await
-    // A panic there is a bug, as it would be in a command of its own.
-    .expect("updating the settings panicked")
+    if let Some(on) = update.start_at_login {
+        let desktop = app.clone();
+        tauri::async_runtime::spawn_blocking(move || set_start_at_login(&desktop, on))
+            .await
+            // A panic there is a bug, as it would be in a command of its own.
+            .expect("turning start at login on or off panicked")?;
+    }
+    app.state::<Core>()
+        .update_settings(update)
+        .map_err(ErrorCode::from)
 }
 
 #[cfg(target_os = "linux")]
@@ -870,9 +870,10 @@ fn main() {
                     core.set_window_open(false);
                 }
                 // Closing the window cancels whatever dialog it showed, the
-                // import dialog too, so the picked file goes. An import still
-                // running holds it; this thread mustn't wait for that, and a
-                // file left over is replaced by the next pick anyway.
+                // import dialog too, so the picked file goes. A preview or an
+                // import still running holds it, which this thread mustn't
+                // wait for, and a file dialog may still pick one after this;
+                // a file left over is replaced by the next pick.
                 if let Ok(mut picked) = window.state::<PickedImport>().0.try_lock() {
                     *picked = None;
                 }
