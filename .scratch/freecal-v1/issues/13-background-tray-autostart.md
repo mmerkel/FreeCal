@@ -8,14 +8,14 @@
 
 **Effort:** M
 
-- [ ] At every window close, a D-Bus check for a StatusNotifierWatcher with a registered host decides whether to keep running or quit
-- [ ] Background running is on by default and can be turned off, so closing always quits
-- [ ] Start at login is off by default and uses the Background portal where available
-- [ ] A StatusNotifierItem tray icon (works natively on KDE Plasma) with a menu: Open FreeCal, Quit
-- [ ] When the window is re-created, the frontend subscribes to Signals first and then reads current state
+- [x] At every window close, a D-Bus check for a StatusNotifierWatcher with a registered host decides whether to keep running or quit
+- [x] Background running is on by default and can be turned off, so closing always quits
+- [x] Start at login is off by default and uses the Background portal where available
+- [x] A StatusNotifierItem tray icon (works natively on KDE Plasma) with a menu: Open FreeCal, Quit
+- [x] When the window is re-created, the frontend subscribes to Signals first and then reads current state
 - [ ] Tray detection, tray and autostart are behind fakeable desktop interfaces with tests
-- [ ] The Background section of Settings has "Keep running in the background" and "Start at login" switches. The background switch is always enabled, with the hint "Needs a system tray; without one, closing quits", because a tray is only checked for at window close
-- [ ] Turning on start at login goes through the Background portal at the moment the switch is flipped (the portal may ask the user); if it is refused, the switch goes back off with a translated message
+- [x] The Background section of Settings has "Keep running in the background" and "Start at login" switches. The background switch is always enabled, with the hint "Needs a system tray; without one, closing quits", because a tray is only checked for at window close
+- [x] Turning on start at login goes through the Background portal at the moment the switch is flipped (the portal may ask the user); if it is refused, the switch goes back off with a translated message
 
 ## Comments
 
