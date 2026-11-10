@@ -3,5 +3,6 @@
     "allow": [
       "Read(//tmp/freecal-run/**)"
     ]
-  }
+  },
+  "autoCompactWindow": 200000
 }

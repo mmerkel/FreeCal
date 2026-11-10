@@ -7,6 +7,10 @@ The rules a review checks a diff against. They are judgement calls; mechanical r
 - The core's push messages are always called Signals, never "events" (calendar Events) or "notifications" (desktop notifications).
 - Domain terms follow `GLOSSARY.md`.
 
+## Signals
+
+- A write that changes what a core read returns sends the Signal that makes the window read it again, also when it records no Journal Transaction, as a send or a stored Send Failure does. A test checks the Signal goes out.
+
 ## Frontend
 
 - Every UI string goes through the i18n layer (`t` in `src/i18n`).

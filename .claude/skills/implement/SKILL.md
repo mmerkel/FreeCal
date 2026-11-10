@@ -6,6 +6,12 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets.
 
+Read the ticket's comments first. When they leave a grilling open, hold it with /grilling before writing code. With the user away, decide each question yourself, name its strongest con, and list these decisions first in the ticket comment and the report, marked "decision, for review".
+
+Map the code through an Explore subagent: ask for `file:line` pointers to the seams and tests the work touches, not file contents. Then read only the lines you change.
+
+When the work spans more than one layer (the core, the shell, the frontend), build one layer at a time. Once a layer's checks pass, commit it, report what's done and which layer is next, and stop so the user can `/compact` or start a fresh session. The review comes after the last layer, from the commit before the first.
+
 Use /tdd where possible, at pre-agreed seams.
 
 Run typechecking regularly and single test files regularly. The commit's pre-commit hook runs the full suite; a failing hook means the work isn't done.
