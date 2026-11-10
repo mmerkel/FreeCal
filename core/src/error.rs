@@ -271,6 +271,10 @@ pub enum ErrorCode {
     LinkNotOpened,
     /// The window couldn't be shown.
     WindowNotShown,
+    /// The user or the desktop refused to start FreeCal at login.
+    StartAtLoginRefused,
+    /// Starting FreeCal at login couldn't be turned on or off.
+    StartAtLoginFailed,
 }
 
 impl ErrorCode {
@@ -343,6 +347,8 @@ impl ErrorCode {
             ErrorCode::LinkNotAllowed,
             ErrorCode::LinkNotOpened,
             ErrorCode::WindowNotShown,
+            ErrorCode::StartAtLoginRefused,
+            ErrorCode::StartAtLoginFailed,
         ]
     }
 }

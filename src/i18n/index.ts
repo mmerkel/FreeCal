@@ -69,6 +69,8 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   linkNotAllowed: 'error.linkNotAllowed',
   linkNotOpened: 'error.linkNotOpened',
   windowNotShown: 'error.windowNotShown',
+  startAtLoginRefused: 'error.startAtLoginRefused',
+  startAtLoginFailed: 'error.startAtLoginFailed',
 };
 
 /** The startup error screen's own words for why the core couldn't open. */

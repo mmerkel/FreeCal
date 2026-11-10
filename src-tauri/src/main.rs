@@ -2,10 +2,15 @@
 //! commands and forwards the core's Signals as Tauri events.
 
 #[cfg(target_os = "linux")]
+mod autostart;
+#[cfg(target_os = "linux")]
 mod desktop_watch;
 #[cfg(target_os = "linux")]
 mod handoff;
 mod keyring;
+#[cfg(all(test, target_os = "linux"))]
+mod test_bus;
+mod tray;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,6 +74,13 @@ struct SessionEnding(AtomicBool);
 /// of the [`Core`], and the window shows it on the startup error screen.
 struct StartupFailure(ErrorCode);
 
+/// Whether the window shows the startup error screen: because the core
+/// couldn't open its Local Store, or because the window's own start failed.
+/// Then closing the window quits FreeCal, which has nothing to keep running
+/// for.
+#[derive(Default)]
+struct StartupFailed(AtomicBool);
+
 /// The file the user picked to import, with its latest preview. It is held
 /// here, so that the window never handles paths or the parsed Events: it
 /// can't make the shell read any other file.
@@ -113,9 +125,42 @@ fn settings(core: State<Core>) -> CommandResult<Settings> {
     core.settings().map_err(ErrorCode::from)
 }
 
+/// Changes the settings. Start at login is turned on or off on the desktop
+/// first, and kept only when that worked; the portal may ask the user, so
+/// this runs off the UI thread.
 #[tauri::command]
-fn update_settings(core: State<Core>, update: SettingsUpdate) -> CommandResult<Settings> {
-    core.update_settings(update).map_err(ErrorCode::from)
+async fn update_settings(app: AppHandle, update: SettingsUpdate) -> CommandResult<Settings> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(on) = update.start_at_login {
+            set_start_at_login(&app, on)?;
+        }
+        app.state::<Core>()
+            .update_settings(update)
+            .map_err(ErrorCode::from)
+    })
+    .await
+    // A panic there is a bug, as it would be in a command of its own.
+    .expect("updating the settings panicked")
+}
+
+#[cfg(target_os = "linux")]
+fn set_start_at_login(app: &AppHandle, on: bool) -> CommandResult<()> {
+    let config_dir = app
+        .path()
+        .config_dir()
+        .map_err(|_| ErrorCode::StartAtLoginFailed)?;
+    autostart::StartAtLogin::current(
+        &app.config().identifier,
+        &app.package_info().name,
+        &config_dir,
+    )
+    .ok_or(ErrorCode::StartAtLoginFailed)?
+    .set(on)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_start_at_login(_app: &AppHandle, _on: bool) -> CommandResult<()> {
+    Err(ErrorCode::StartAtLoginFailed)
 }
 
 #[tauri::command]
@@ -464,28 +509,168 @@ fn startup_failure(app: AppHandle) -> Option<ErrorCode> {
         .map(|failure| failure.0.clone())
 }
 
+/// The window shows the startup error screen although the core opened, as
+/// when its first reads failed: closing it then quits FreeCal.
+#[tauri::command]
+fn window_failed_to_start(app: AppHandle) {
+    app.state::<StartupFailed>().0.store(true, Ordering::SeqCst);
+}
+
 /// Ends FreeCal, also when it would otherwise keep running in the background.
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
 }
 
-/// Whether closing `window` should first try to send the Unsent Changes:
-/// some wait, and the session isn't ending. When they can't be counted,
-/// closing quits.
-fn unsent_changes_wait(window: &tauri::Window) -> bool {
-    let Some(core) = window.try_state::<Core>() else {
-        return false;
-    };
-    if window.state::<SessionEnding>().0.load(Ordering::SeqCst) {
-        return false;
+/// What closing the window does.
+#[derive(Debug, PartialEq)]
+enum Closing {
+    /// The window goes and FreeCal keeps running in the background, in the
+    /// tray (US-103).
+    ToBackground,
+    /// The frontend quits as Quit in the main menu does, trying to send the
+    /// Unsent Changes first.
+    AskToQuit,
+    Quit,
+}
+
+/// What closing the window does: with background running on and a tray
+/// there, FreeCal keeps running (US-103, US-106); otherwise it quits (US-104),
+/// trying to send the Unsent Changes first when some wait. Logout and
+/// shutdown quit at once and never wait for that (spec: "Quitting").
+fn closing(
+    session_ending: bool,
+    run_in_background: bool,
+    tray_present: impl FnOnce() -> bool,
+    unsent_changes_wait: impl FnOnce() -> bool,
+) -> Closing {
+    if session_ending {
+        Closing::Quit
+    } else if run_in_background && tray_present() {
+        Closing::ToBackground
+    } else if unsent_changes_wait() {
+        Closing::AskToQuit
+    } else {
+        Closing::Quit
     }
+}
+
+/// Does what closing the window does. Runs on a thread of its own, since
+/// the tray check asks the desktop.
+fn close_main_window(app: &AppHandle) {
+    let Some(core) = app.try_state::<Core>() else {
+        return app.exit(0);
+    };
+    let closed = closing(
+        app.state::<SessionEnding>().0.load(Ordering::SeqCst),
+        // When the settings can't be read, closing quits rather than risk
+        // FreeCal running on unseen.
+        core.settings()
+            .is_ok_and(|settings| settings.run_in_background),
+        || tray_present(app),
+        || unsent_changes_wait(&core),
+    );
+    match closed {
+        // The window is gone rather than hidden, so that it holds no memory
+        // in the background; Open FreeCal creates it again.
+        Closing::ToBackground => {
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                let _ = window.destroy();
+            }
+        }
+        Closing::AskToQuit => {
+            let _ = app.emit_to(MAIN_WINDOW, QUIT_ASKED_EVENT, ());
+        }
+        Closing::Quit => app.exit(0),
+    }
+}
+
+/// Whether there is a tray with FreeCal's icon in it.
+fn tray_present(app: &AppHandle) -> bool {
+    #[cfg(target_os = "linux")]
+    let desktop_tray = desktop_watch::tray_present();
+    // Other systems are for later.
+    #[cfg(not(target_os = "linux"))]
+    let desktop_tray = false;
+    desktop_tray && app.tray_by_id(tray::TRAY).is_some()
+}
+
+/// Whether some Unsent Changes wait. When they can't be counted, none do.
+fn unsent_changes_wait(core: &Core) -> bool {
     core.sync_statuses().is_ok_and(|statuses| {
         statuses
             .accounts
             .iter()
             .any(|account| account.report.unsent_changes > 0)
     })
+}
+
+/// Does what the user picked in the tray menu.
+fn on_tray_choice(app: &AppHandle, choice: tray::TrayChoice) {
+    match choice {
+        tray::TrayChoice::OpenFreeCal => open_main_window(app),
+        // As Quit in the main menu, in the window, which comes to the front
+        // for it; with no window there to ask, FreeCal quits at once and
+        // the Unsent Changes stay in the Local Store.
+        tray::TrayChoice::Quit => {
+            let window_there = app.get_webview_window(MAIN_WINDOW).is_some();
+            if window_there && !app.state::<StartupFailed>().0.load(Ordering::SeqCst) {
+                open_main_window(app);
+                let _ = app.emit_to(MAIN_WINDOW, QUIT_ASKED_EVENT, ());
+            } else {
+                app.exit(0);
+            }
+        }
+    }
+}
+
+/// Brings the window to the front, creating it again when FreeCal runs in
+/// the background.
+fn open_main_window(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    bring_to_front(app, None);
+    #[cfg(not(target_os = "linux"))]
+    if app.get_webview_window(MAIN_WINDOW).is_some() {
+        let _ = show_main_window(app);
+    } else {
+        reopen_main_window(app);
+    }
+}
+
+/// Creates the window again after it closed for background running. Like
+/// the first, it starts hidden and the frontend shows it, after subscribing
+/// to the Signals and reading the current state.
+fn reopen_main_window(app: &AppHandle) {
+    let Some(config) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW)
+    else {
+        return;
+    };
+    let created =
+        tauri::WebviewWindowBuilder::from_config(app, config).and_then(|window| window.build());
+    match created {
+        Ok(_) => {
+            if let Some(core) = app.try_state::<Core>() {
+                core.set_window_open(true);
+            }
+            show_main_window_later(app);
+        }
+        Err(error) => eprintln!("FreeCal can't open its window again: {error}"),
+    }
+}
+
+/// Shows the window after [`SHOW_WINDOW_FALLBACK`], should the frontend
+/// never get that far.
+fn show_main_window_later(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(SHOW_WINDOW_FALLBACK);
+        let _ = show_main_window(&handle);
+    });
 }
 
 fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
@@ -498,15 +683,17 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     }
 }
 
-/// Brings the window to the front for a second launch. Its activation
-/// token is what lets the compositor raise the window; without it KWin on
-/// Wayland only marks FreeCal in the taskbar.
+/// Brings the window to the front, for a second launch or the tray, and
+/// creates it again when FreeCal runs in the background. A second launch's
+/// activation token is what lets the compositor raise the window; without
+/// it KWin on Wayland only marks FreeCal in the taskbar. A window created
+/// again doesn't use it.
 #[cfg(target_os = "linux")]
 fn bring_to_front(app: &AppHandle, activation_token: Option<String>) {
     use gtk::prelude::*;
 
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
-        return;
+        return reopen_main_window(app);
     };
     // GTK only works on the main thread.
     let _ = app.run_on_main_thread(move || {
@@ -628,6 +815,7 @@ fn main() {
         .plugin(log_plugin())
         .manage(PickedImport::default())
         .manage(SessionEnding::default())
+        .manage(StartupFailed::default())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
@@ -647,34 +835,40 @@ fn main() {
                         }
                     });
                     run_scheduled_syncs(app.handle());
+                    // Without its icon, closing the window quits.
+                    if let Err(error) = tray::show(app.handle(), on_tray_choice) {
+                        eprintln!("FreeCal can't show its tray icon: {error}");
+                    }
                 }
                 Err(error) => {
                     eprintln!("FreeCal could not open its Local Store: {error}");
                     app.manage(StartupFailure(error.code()));
+                    app.state::<StartupFailed>().0.store(true, Ordering::SeqCst);
                 }
             }
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(SHOW_WINDOW_FALLBACK);
-                let _ = show_main_window(&handle);
-            });
+            show_main_window_later(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| match event {
             // Closing the startup error screen quits FreeCal, which has
             // nothing to keep running for.
             WindowEvent::CloseRequested { .. }
-                if window.try_state::<StartupFailure>().is_some() =>
+                if window.state::<StartupFailed>().0.load(Ordering::SeqCst) =>
             {
                 window.app_handle().exit(0);
             }
-            // Closing the window quits FreeCal (background running is ticket
-            // 13's); with Unsent Changes waiting, the frontend quits as Quit
-            // in the main menu does, trying to send them first. Logout and
-            // shutdown never wait for that.
-            WindowEvent::CloseRequested { api, .. } if unsent_changes_wait(window) => {
+            // The close decides between running on in the background and
+            // quitting (`closing`), off the UI thread.
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let _ = window.emit(QUIT_ASKED_EVENT, ());
+                let app = window.app_handle().clone();
+                std::thread::spawn(move || close_main_window(&app));
+            }
+            // The Sync Scheduler polls less often in the background.
+            WindowEvent::Destroyed => {
+                if let Some(core) = window.try_state::<Core>() {
+                    core.set_window_open(false);
+                }
             }
             WindowEvent::Focused(true) => {
                 if let Some(core) = window.try_state::<Core>() {
@@ -727,8 +921,64 @@ fn main() {
             version,
             show_window,
             startup_failure,
+            window_failed_to_start,
             quit,
         ])
-        .run(tauri::generate_context!())
-        .expect("FreeCal failed to start");
+        .build(tauri::generate_context!())
+        .expect("FreeCal failed to start")
+        .run(|_, event| {
+            // The window closing never ends FreeCal by itself: the close
+            // decides (`close_main_window`), and quitting goes through
+            // `exit`, which gives a code.
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
+                api.prevent_exit();
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What closing does with background running `on`, and whether a tray
+    /// exists and Unsent Changes wait.
+    fn closing_with(on: bool, tray: bool, unsent: bool) -> Closing {
+        closing(false, on, || tray, || unsent)
+    }
+
+    #[test]
+    fn with_a_tray_closing_keeps_freecal_running_in_the_background() {
+        assert_eq!(closing_with(true, true, false), Closing::ToBackground);
+        // The Unsent Changes are sent from the background.
+        assert_eq!(closing_with(true, true, true), Closing::ToBackground);
+    }
+
+    #[test]
+    fn without_a_tray_closing_quits() {
+        assert_eq!(closing_with(true, false, false), Closing::Quit);
+        assert_eq!(closing_with(true, false, true), Closing::AskToQuit);
+    }
+
+    #[test]
+    fn with_background_running_off_closing_quits_without_asking_for_a_tray() {
+        let closed = closing(false, false, || panic!("asked for a tray"), || false);
+
+        assert_eq!(closed, Closing::Quit);
+        assert_eq!(closing_with(false, true, true), Closing::AskToQuit);
+    }
+
+    #[test]
+    fn as_the_session_ends_closing_quits_at_once() {
+        let closed = closing(
+            true,
+            true,
+            || panic!("asked for a tray"),
+            || panic!("counted the Unsent Changes"),
+        );
+
+        assert_eq!(closed, Closing::Quit);
+    }
 }

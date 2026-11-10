@@ -874,6 +874,12 @@ export const samples = {
     },
     {
       "code": "windowNotShown"
+    },
+    {
+      "code": "startAtLoginRefused"
+    },
+    {
+      "code": "startAtLoginFailed"
     }
   ],
 } satisfies Samples;

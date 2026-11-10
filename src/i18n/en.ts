@@ -340,6 +340,8 @@ export const en = {
   'error.linkNotAllowed': 'FreeCal opens only web and email links',
   'error.linkNotOpened': 'the system couldn’t open it',
   'error.windowNotShown': 'the window couldn’t be shown',
+  'error.startAtLoginRefused': 'the desktop refused to change whether FreeCal starts at login',
+  'error.startAtLoginFailed': 'the desktop couldn’t change whether FreeCal starts at login',
   'common.ok': 'OK',
   'common.cancel': 'Cancel',
   'common.close': 'Close',

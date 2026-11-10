@@ -6,9 +6,11 @@
 //! logind for a shutdown. Each watch runs on a thread of its own for as
 //! long as FreeCal runs. Without a portal or logind, nothing is reported:
 //! the network is then taken as available, and Offline is decided by each
-//! Account's requests.
+//! Account's requests. It also tells whether the desktop has a system tray,
+//! which decides what closing the window does (US-103, US-104).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use zbus::blocking::Connection;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
@@ -70,6 +72,40 @@ trait Inhibit {
         session_handle: ObjectPath<'_>,
         state: HashMap<String, OwnedValue>,
     ) -> zbus::Result<()>;
+}
+
+#[zbus::proxy(
+    interface = "org.kde.StatusNotifierWatcher",
+    default_service = "org.kde.StatusNotifierWatcher",
+    default_path = "/StatusNotifierWatcher"
+)]
+trait StatusNotifierWatcher {
+    /// Whether a tray shows the StatusNotifierItems registered with it.
+    #[zbus(property)]
+    fn is_status_notifier_host_registered(&self) -> zbus::Result<bool>;
+}
+
+/// How long the tray check waits for the desktop at most. It runs while
+/// the window closes, which a hung desktop must not hold up for long.
+const TRAY_CHECK_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Whether the desktop has a system tray right now: a StatusNotifierWatcher
+/// with a host registered (spec: "Tray detection"). Asked at every window
+/// close, so that a tray turned on while FreeCal runs counts at the next
+/// one (US-105). When the desktop can't be asked, there is none.
+pub fn tray_present() -> bool {
+    zbus::blocking::connection::Builder::session()
+        .and_then(|builder| builder.method_timeout(TRAY_CHECK_TIMEOUT).build())
+        .and_then(|connection| tray_host_registered(&connection))
+        .unwrap_or(false)
+}
+
+fn tray_host_registered(connection: &Connection) -> zbus::Result<bool> {
+    StatusNotifierWatcherProxyBlocking::builder(connection)
+        // One reading, so no cache that would follow the changes.
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()?
+        .is_status_notifier_host_registered()
 }
 
 /// The Inhibit portal's `session-state` once the session's end is asked
@@ -173,52 +209,14 @@ fn wakes(on_wake: &impl Fn()) -> zbus::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
-    use std::process::{Child, Command, Stdio};
+    use crate::test_bus::PrivateBus;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
-    use zbus::blocking::connection::Builder;
 
     const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
     const PORTAL_INTERFACE: &str = "org.freedesktop.portal.NetworkMonitor";
-
-    /// A session bus of the test's own, so that the bus routes signals by
-    /// the match rules FreeCal asks for, as the real one does.
-    struct PrivateBus {
-        daemon: Child,
-        address: String,
-    }
-
-    impl PrivateBus {
-        fn start() -> Self {
-            let mut daemon = Command::new("dbus-daemon")
-                .args(["--session", "--nofork", "--print-address=1"])
-                .stdout(Stdio::piped())
-                .spawn()
-                .expect("the tests need dbus-daemon");
-            let mut address = String::new();
-            BufReader::new(daemon.stdout.take().unwrap())
-                .read_line(&mut address)
-                .unwrap();
-            Self {
-                daemon,
-                address: address.trim().to_owned(),
-            }
-        }
-
-        fn connect(&self) -> Builder<'static> {
-            Builder::address(self.address.as_str()).unwrap()
-        }
-    }
-
-    impl Drop for PrivateBus {
-        fn drop(&mut self) {
-            let _ = self.daemon.kill();
-            let _ = self.daemon.wait();
-        }
-    }
 
     /// Stands in for xdg-desktop-portal's NetworkMonitor.
     struct FakeNetworkMonitor {
@@ -345,6 +343,53 @@ mod tests {
 
     #[zbus::interface(name = "org.freedesktop.login1.Manager")]
     impl FakeLogin {}
+
+    /// Out of reach of the type zbus makes for the NetworkMonitor's
+    /// `changed` signal, which the property's code would clash with.
+    mod fake_tray {
+        /// Stands in for the StatusNotifierWatcher of a desktop's tray.
+        pub struct FakeWatcher {
+            pub host: bool,
+        }
+
+        #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
+        impl FakeWatcher {
+            #[zbus(property)]
+            fn is_status_notifier_host_registered(&self) -> bool {
+                self.host
+            }
+        }
+    }
+    use fake_tray::FakeWatcher;
+
+    fn tray_check(watcher: Option<FakeWatcher>) -> bool {
+        let bus = PrivateBus::start();
+        let _desktop = watcher.map(|watcher| {
+            bus.connect()
+                .name("org.kde.StatusNotifierWatcher")
+                .unwrap()
+                .serve_at("/StatusNotifierWatcher", watcher)
+                .unwrap()
+                .build()
+                .unwrap()
+        });
+        tray_host_registered(&bus.connect().build().unwrap()).unwrap_or(false)
+    }
+
+    #[test]
+    fn a_tray_exists_where_a_watcher_has_a_host_registered() {
+        assert!(tray_check(Some(FakeWatcher { host: true })));
+    }
+
+    #[test]
+    fn a_watcher_without_a_host_is_no_tray() {
+        assert!(!tray_check(Some(FakeWatcher { host: false })));
+    }
+
+    #[test]
+    fn without_a_watcher_there_is_no_tray() {
+        assert!(!tray_check(None));
+    }
 
     #[test]
     fn a_shutdown_ends_the_session() {
