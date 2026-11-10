@@ -4,5 +4,8 @@
       "Read(//tmp/freecal-run/**)"
     ]
   },
-  "autoCompactWindow": 200000
+  "autoCompactWindow": 200000,
+  "worktree": {
+    "baseRef": "head"
+  }
 }

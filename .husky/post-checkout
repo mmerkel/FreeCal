@@ -1,0 +1,6 @@
+# A new worktree (`git worktree add`, Claude Code's EnterWorktree or `claude -w`) has no node_modules, so the
+# frontend checks fail in it; a symlink to the main checkout's doesn't help, as Vite refuses files outside the worktree.
+# Install it here when it's missing. Husky runs the main checkout's copy of this file, in the new worktree.
+[ -d node_modules ] || [ ! -f package-lock.json ] && exit 0
+echo "post-checkout: no node_modules here, running npm ci"
+npm ci --prefer-offline --no-audit --no-fund --loglevel=error
