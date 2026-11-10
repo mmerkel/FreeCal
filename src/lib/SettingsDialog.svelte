@@ -12,12 +12,14 @@
     settings: Settings;
     /** Why the last change couldn't be saved, if it couldn't. */
     failure?: string;
+    /** Whether the desktop is still being asked to change start at login. */
+    startAtLoginPending?: boolean;
     /** One setting changed; `update` gives only that one. */
     onchange: (update: SettingsUpdate) => void;
     onclose: () => void;
   }
 
-  let { settings, failure, onchange, onclose }: Props = $props();
+  let { settings, failure, startAtLoginPending = false, onchange, onclose }: Props = $props();
 
   const id = $props.id();
 
@@ -31,7 +33,7 @@
 <Dialog title={t('settings.title')} {onclose}>
   <fieldset class="setting">
     <legend>{t('settings.appearance')}</legend>
-    <div class="choices">
+    <div class="segmented">
       {#each appearances as appearance (appearance.value)}
         <label>
           <input
@@ -45,6 +47,37 @@
           {t(appearance.label)}
         </label>
       {/each}
+    </div>
+  </fieldset>
+  <!-- A tray is only looked for when the window closes, so the switch for
+       background running is always enabled and says what it needs. -->
+  <fieldset class="setting">
+    <legend>{t('settings.background')}</legend>
+    <div class="switches">
+      <div>
+        <label class="check">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={settings.runInBackground}
+            aria-describedby="{id}-tray-hint"
+            onchange={(event) => onchange({ runInBackground: event.currentTarget.checked })}
+          />
+          {t('settings.runInBackground')}
+        </label>
+        <p id="{id}-tray-hint" class="note hint">{t('settings.runInBackgroundHint')}</p>
+      </div>
+      <!-- Disabled while the desktop is asked, which may show its own dialog. -->
+      <label class="check">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={settings.startAtLogin}
+          disabled={startAtLoginPending}
+          onchange={(event) => onchange({ startAtLogin: event.currentTarget.checked })}
+        />
+        {t('settings.startAtLogin')}
+      </label>
     </div>
   </fieldset>
   {#if failure}
@@ -66,15 +99,19 @@
     font-weight: 600;
   }
 
+  .setting + .setting {
+    margin-top: var(--space-5);
+  }
+
   /* A segmented control, like the toolbar's view switch. */
-  .choices {
+  .segmented {
     display: flex;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
   }
 
-  label {
+  .segmented label {
     display: flex;
     flex: 1;
     align-items: center;
@@ -85,31 +122,46 @@
     cursor: pointer;
   }
 
-  label + label {
+  .segmented label + label {
     border-left: 1px solid var(--border);
   }
 
-  label:hover {
+  .segmented label:hover {
     background: var(--hover);
     color: var(--foreground);
   }
 
-  label:has(input:checked) {
+  .segmented label:has(input:checked) {
     background: var(--hover-strong);
     color: var(--foreground);
     font-weight: 500;
   }
 
-  label:has(input:focus-visible) {
+  .segmented label:has(input:focus-visible) {
     outline: 2px solid var(--focus-ring);
     outline-offset: -2px;
   }
 
   /* The radio itself is hidden but stays focusable and keyboard-operable. */
-  input {
+  .segmented input {
     position: absolute;
     opacity: 0;
     pointer-events: none;
+  }
+
+  .switches {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .switches input {
+    margin: 0;
+  }
+
+  /* Under the switch's words, past the box (WebKitGTK's is 13px wide);
+     more specific than the dialog's paragraphs. */
+  .switches .hint {
+    margin: var(--space-1) 0 0 calc(13px + var(--space-3));
   }
 
   .failure {

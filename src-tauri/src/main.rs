@@ -869,6 +869,13 @@ fn main() {
                 if let Some(core) = window.try_state::<Core>() {
                     core.set_window_open(false);
                 }
+                // Closing the window cancels whatever dialog it showed, the
+                // import dialog too, so the picked file goes. An import still
+                // running holds it; this thread mustn't wait for that, and a
+                // file left over is replaced by the next pick anyway.
+                if let Ok(mut picked) = window.state::<PickedImport>().0.try_lock() {
+                    *picked = None;
+                }
             }
             WindowEvent::Focused(true) => {
                 if let Some(core) = window.try_state::<Core>() {

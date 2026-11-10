@@ -55,6 +55,7 @@ describe('startup', () => {
     const { model } = await started(core);
 
     expect(model.startupReason).toBeTruthy();
+    // The shell knows of its own failure already.
     expect(core.calls.map((call) => call.method)).toEqual(['startupFailure', 'showWindow']);
   });
 
@@ -65,6 +66,8 @@ describe('startup', () => {
     const { model } = await started(core);
 
     expect(model.startupReason).toBeTruthy();
+    // So that closing the window quits instead of going to the background.
+    expect(core.callsOf('windowFailedToStart')).toEqual([[]]);
   });
 
   test('a "Date changed" during startup is newer than the date read', async () => {

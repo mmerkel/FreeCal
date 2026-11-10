@@ -22,6 +22,10 @@ The decisions, with the strongest con of each (details in ticket 13's comments):
   - [ ] The tray menu's labels are English text in the shell. Con: no translations until the shell has an i18n.
   - [ ] A close goes to the background only with a tray host and FreeCal's own icon; unreadable settings quit; the tray check waits 1 s at most. Con: a hung desktop delays the close by up to that second.
   - [ ] FreeCal ends only through `exit`; an exit request without a code is refused. Con: after a webview crash FreeCal keeps running with only the tray to quit it.
-- [ ] Decisions the frontend layer (ticket 13, layer 3) makes before this session are added here.
+- **Frontend layer**
+  - [ ] Both switches are the system's checkboxes marked as switches. Con: they look like checkboxes, not sliding switches.
+  - [ ] The Start at login switch is disabled while the desktop is asked. Con: while the portal's dialog waits, it is greyed out without saying why.
+  - [ ] A refusal reuses "The setting couldn’t be saved: …". Con: "saved" is slightly off when the desktop said no.
+  - [ ] A picked import file is let go when the window is destroyed, unless its import is running then. Con: that file stays held until the next pick.
 
 ## Comments

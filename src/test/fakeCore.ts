@@ -143,6 +143,7 @@ export class FakeCore {
     // A version is no type of the interface, so it has no sample.
     version: () => '0.0.0',
     showWindow: () => undefined,
+    windowFailedToStart: () => undefined,
     quit: () => undefined,
   };
 

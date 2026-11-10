@@ -73,6 +73,7 @@ export class WindowModel {
   #startupReason = $state<string>();
   #settings = $state<Settings>({ ...DEFAULT_SETTINGS });
   #settingsFailure = $state<string>();
+  #startAtLoginPending = $state(false);
   #today = $state<Temporal.PlainDate>();
   #navigation = $state<Navigation>();
   #viewSaveFailure = $state<string>();
@@ -114,6 +115,14 @@ export class WindowModel {
   /** Why the last settings write failed, until one succeeds or the settings open again. */
   get settingsFailure() {
     return this.#settingsFailure;
+  }
+  /**
+   * Whether the desktop is still being asked to change start at login, which
+   * may show the user a dialog first. A second change meanwhile could reach
+   * the desktop and the Local Store in different orders.
+   */
+  get startAtLoginPending() {
+    return this.#startAtLoginPending;
   }
   get today() {
     return this.#today;
@@ -186,10 +195,11 @@ export class WindowModel {
       this.#navigation = opening(view, this.#today);
     };
 
-    start().catch((error) =>
+    start().catch((error) => {
+      this.#core.windowFailedToStart().catch(() => {});
       // Drawn with the default settings.
-      this.#failStartup(t('app.loadFailed', { error: errorText(error) })),
-    );
+      this.#failStartup(t('app.loadFailed', { error: errorText(error) }));
+    });
     return () => {
       stopped = true;
       unsubscribe?.();
@@ -225,7 +235,11 @@ export class WindowModel {
   /** Writes one changed setting; it has taken effect before the core answers. */
   changeSettings(update: SettingsUpdate) {
     this.#settings = { ...this.#settings, ...update };
-    this.#core.updateSettings(update).then(
+    const startAtLogin = update.startAtLogin !== undefined;
+    if (startAtLogin) this.#startAtLoginPending = true;
+    const changing = this.#core.updateSettings(update);
+    if (startAtLogin) changing.finally(() => (this.#startAtLoginPending = false)).catch(() => {});
+    changing.then(
       () => (this.#settingsFailure = undefined),
       (error) => {
         this.#settingsFailure = t('settings.saveFailed', { error: errorText(error) });

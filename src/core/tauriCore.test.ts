@@ -192,6 +192,7 @@ test('the app commands pass their arguments under the names the shell expects', 
   await tauriCore.updateSettings({ appearance: 'dark' });
   expect(await tauriCore.version()).toBe('0.1.0');
   await tauriCore.showWindow();
+  await tauriCore.windowFailedToStart();
   await tauriCore.quit();
 
   expect(invoked).toEqual([
@@ -199,6 +200,7 @@ test('the app commands pass their arguments under the names the shell expects', 
     ['update_settings', { update: { appearance: 'dark' } }],
     ['version', {}],
     ['show_window', {}],
+    ['window_failed_to_start', {}],
     ['quit', {}],
   ]);
 });

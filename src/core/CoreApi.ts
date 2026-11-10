@@ -213,6 +213,12 @@ export interface CoreApi {
    * theme. Called once the appearance is known, or that it can't be.
    */
   showWindow(): Promise<void>;
+  /**
+   * The window shows the startup error screen although FreeCal started, as
+   * when its first reads failed, so that closing it quits FreeCal instead
+   * of keeping it in the background.
+   */
+  windowFailedToStart(): Promise<void>;
   /** Ends FreeCal, also when it would otherwise keep running in the background. */
   quit(): Promise<void>;
 }

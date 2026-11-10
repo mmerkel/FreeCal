@@ -210,3 +210,69 @@ test('Quit ends FreeCal', async () => {
 
   expect(core.callsOf('quit')).toEqual([[]]);
 });
+
+test('the Background section has both switches as stored, with the tray hint', async () => {
+  const core = firstLaunch();
+  core.answer('settings', { ...DEFAULT_SETTINGS, runInBackground: true, startAtLogin: false });
+  const { user } = await showApp(core);
+
+  await user.keyboard('{Control>},{/Control}');
+  const background = within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('group', {
+    name: 'Background',
+  });
+
+  const keepRunning = within(background).getByRole('switch', {
+    name: 'Keep running in the background',
+  });
+  expect(keepRunning).toBeChecked();
+  expect(keepRunning).toBeEnabled();
+  expect(keepRunning).toHaveAccessibleDescription(
+    'Needs a system tray; without one, closing quits',
+  );
+  expect(within(background).getByRole('switch', { name: 'Start at login' })).not.toBeChecked();
+});
+
+test('turning background running off writes only that setting', async () => {
+  const { core, user } = await showApp();
+  core.answer('updateSettings', { ...DEFAULT_SETTINGS, runInBackground: false });
+
+  await user.keyboard('{Control>},{/Control}');
+  const keepRunning = screen.getByRole('switch', { name: 'Keep running in the background' });
+  await user.click(keepRunning);
+
+  expect(keepRunning).not.toBeChecked();
+  expect(core.callsOf('updateSettings')).toEqual([[{ runInBackground: false }]]);
+});
+
+test('start at login shows on while the desktop is asked, and can’t be flipped again meanwhile', async () => {
+  const { core, user } = await showApp();
+  const answer = core.pending('updateSettings');
+
+  await user.keyboard('{Control>},{/Control}');
+  const startAtLogin = screen.getByRole('switch', { name: 'Start at login' });
+  await user.click(startAtLogin);
+
+  expect(startAtLogin).toBeChecked();
+  expect(startAtLogin).toBeDisabled();
+  expect(core.callsOf('updateSettings')).toEqual([[{ startAtLogin: true }]]);
+
+  answer.resolve({ ...DEFAULT_SETTINGS, startAtLogin: true });
+  await waitFor(() => expect(startAtLogin).toBeEnabled());
+  expect(startAtLogin).toBeChecked();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('start at login that the desktop refuses goes back off, saying why', async () => {
+  const { core, user } = await showApp();
+  core.answer('updateSettings', failure({ code: 'startAtLoginRefused' }));
+
+  await user.keyboard('{Control>},{/Control}');
+  const startAtLogin = screen.getByRole('switch', { name: 'Start at login' });
+  await user.click(startAtLogin);
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'The setting couldn’t be saved: the desktop refused to change whether FreeCal starts at login',
+  );
+  await waitFor(() => expect(startAtLogin).not.toBeChecked());
+  expect(startAtLogin).toBeEnabled();
+});

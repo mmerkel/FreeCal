@@ -263,6 +263,7 @@
     <SettingsDialog
       settings={model.settings}
       failure={model.settingsFailure}
+      startAtLoginPending={model.startAtLoginPending}
       onchange={(update) => model.changeSettings(update)}
       onclose={() => dialogs.close()}
     />

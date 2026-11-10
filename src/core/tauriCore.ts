@@ -62,5 +62,6 @@ export const tauriCore: CoreApi = {
   openLink: (url) => invoke('open_link', { url }),
   version: () => invoke('version'),
   showWindow: () => invoke('show_window'),
+  windowFailedToStart: () => invoke('window_failed_to_start'),
   quit: () => invoke('quit'),
 };
