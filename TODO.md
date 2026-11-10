@@ -121,12 +121,6 @@ Possible bugs, found by reading the code, not run:
 
 - [ ] `latest` (`core/src/event/mod.rs`) keeps the highest `SEQUENCE` and, on a tie, the version that comes first; `DTSTAMP` isn't read anywhere in `core/src`. RFC 5546 §2.1.5 breaks ties by the latest `DTSTAMP`. Found by reading the code, not run. Ties into "dedupe all Exceptions by `SEQUENCE` in `assemble`" above
 
-## Bug fix: a Recurring Event's end date moves with it
-
-Choice to review:
-
-- [ ] a move in the grid and an edit in the editor treat the end date of a repeat differently. A move moves it with the start, so the Recurring Event keeps its last Occurrence. An edit keeps the end date the editor shows (`EndDate` in `core/src/event/rule.rs`), so moving the start a day later there drops the last Occurrence, and a week earlier adds one, unless the user changes "Last date" too. An end given as the instant of the last Occurrence (as Google writes it) becomes the end of that day on such an edit
-
 ## Ticket 80: first sync of a CalDAV Calendar
 
 Review risks left as they are:
