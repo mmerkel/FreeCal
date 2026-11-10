@@ -1,8 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] ticket 18
-- [ ] simplify
 - [ ] BUG:
   - [ ] in the database in the default xdg folder: dragging "Test event 1", first occurrence (Nov 5 at 11am) to Nov 6 makes the second occurrence disappear!  Seems like a problem with final date that is not changed accordingly? Maybe rather work with durations if possible?
 - [ ] ticket 13
