@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Repeat } from '../core/types';
-import { describeRepeat, repeatMoved } from './repeat';
+import { describeRepeat } from './repeat';
 
 const weekly: Repeat = { frequency: 'weekly', interval: 1, end: { kind: 'never' } };
 
@@ -31,19 +31,4 @@ test('a custom rule says that it has more than the editor shows', () => {
   expect(describeRepeat(weekly, true)).toBe('Every week, by further rules');
   expect(describeRepeat(null, true)).toBe('Repeats by a custom rule');
   expect(describeRepeat(null, false)).toBeUndefined();
-});
-
-test('a repeat moved with its start moves its end date by as many days', () => {
-  const until: Repeat = { ...weekly, end: { kind: 'until', date: '2026-10-19' } };
-
-  expect(repeatMoved(until, '2026-10-05', '2026-10-06')).toEqual({
-    ...weekly,
-    end: { kind: 'until', date: '2026-10-20' },
-  });
-  expect(repeatMoved(until, '2026-10-05', '2026-09-28')?.end).toEqual({
-    kind: 'until',
-    date: '2026-10-12',
-  });
-  expect(repeatMoved(weekly, '2026-10-05', '2026-10-06')).toEqual(weekly);
-  expect(repeatMoved(null, '2026-10-05', '2026-10-06')).toBeNull();
 });

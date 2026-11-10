@@ -921,42 +921,10 @@ fn moving_this_and_following_events_a_day_later_keeps_their_last_occurrence() {
     );
 }
 
-/// The editor moves the end date it shows with the start, as a move does;
-/// a repeat with that end date is the one the user left alone.
+/// The editor shows the end date, and the user changes it there: an edit
+/// keeps it, unlike a move in the grid.
 #[test]
-fn an_edit_with_the_end_date_moved_as_far_as_the_start_moves_all_events_like_a_move() {
-    let harness = Harness::new();
-    let core = harness.open();
-    let home = calendar(&core, "Home");
-    let id = yoga(&core, home.id, until("2026-10-19"));
-    let first = on(&core, "2026-10-05");
-
-    core.edit_occurrence(
-        id,
-        rid(&first),
-        Scope::All,
-        false,
-        EventDraft {
-            when: timed("2026-10-06T18:00:00", "2026-10-06T19:00:00"),
-            repeat: Some(weekly(until("2026-10-20"))),
-            ..draft_of(&core, &first)
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        starts_from_september(&core),
-        [
-            "2026-10-06 18:00:00",
-            "2026-10-13 18:00:00",
-            "2026-10-20 18:00:00"
-        ]
-    );
-}
-
-/// The user put the end date back after the editor moved it with the start.
-#[test]
-fn an_edit_that_keeps_the_end_date_while_the_start_moves_ends_on_that_date() {
+fn an_edit_that_moves_all_events_keeps_the_end_date_the_editor_shows() {
     let harness = Harness::new();
     let core = harness.open();
     let home = calendar(&core, "Home");
@@ -979,6 +947,52 @@ fn an_edit_that_keeps_the_end_date_while_the_start_moves_ends_on_that_date() {
         starts_from_september(&core),
         ["2026-10-06 18:00:00", "2026-10-13 18:00:00"]
     );
+    assert_eq!(
+        core.event(id).unwrap().repeat.unwrap().end,
+        until("2026-10-19")
+    );
+}
+
+/// An end given as the instant of the last Occurrence becomes the end of
+/// the day the editor shows.
+#[test]
+fn an_edit_later_in_the_day_keeps_the_last_occurrence_of_an_end_at_its_start() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    import(
+        &core,
+        home.id,
+        "BEGIN:VEVENT\nUID:yoga\nSUMMARY:Yoga\n\
+         DTSTART;TZID=Europe/Berlin:20261005T180000\nDTEND;TZID=Europe/Berlin:20261005T190000\n\
+         RRULE:FREQ=WEEKLY;UNTIL=20261019T160000Z\nEND:VEVENT\n",
+    );
+    let first = on(&core, "2026-10-05");
+
+    core.edit_occurrence(
+        first.event_id,
+        rid(&first),
+        Scope::All,
+        false,
+        EventDraft {
+            when: timed("2026-10-05T20:00:00", "2026-10-05T21:00:00"),
+            ..draft_of(&core, &first)
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        starts_from_september(&core),
+        [
+            "2026-10-05 20:00:00",
+            "2026-10-12 20:00:00",
+            "2026-10-19 20:00:00"
+        ]
+    );
+    assert_eq!(
+        core.event(first.event_id).unwrap().repeat.unwrap().end,
+        until("2026-10-19")
+    );
 }
 
 #[test]
@@ -996,7 +1010,6 @@ fn this_event_moved_in_the_editor_leaves_the_end_date_of_the_rule() {
         false,
         EventDraft {
             when: timed("2026-10-13T18:00:00", "2026-10-13T19:00:00"),
-            repeat: Some(weekly(until("2026-10-20"))),
             ..draft_of(&core, &second)
         },
     )

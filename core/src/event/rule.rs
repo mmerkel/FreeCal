@@ -118,21 +118,6 @@ pub(super) fn repeat_of(fields: &EventFields) -> (Option<Repeat>, bool) {
     (Some(repeat), custom)
 }
 
-/// `repeat` as a change that moves an Occurrence from the date `from` to
-/// `to` leaves it: its end date moved by as many days, as the editor moves
-/// the one it shows and as [`rule_moved`] moves `UNTIL`.
-pub(super) fn repeat_moved(
-    repeat: Option<Repeat>,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> Option<Repeat> {
-    let mut repeat = repeat?;
-    if let RepeatEnd::Until { date } = &mut repeat.end {
-        *date += to - from;
-    }
-    Some(repeat)
-}
-
 /// The rule text for `repeat` on an Event at `when`. The parts of `kept`,
 /// the rule the Event had, that the editor doesn't set are kept while the
 /// frequency stays, so that "every 2 weeks on Sunday and Tuesday" made
@@ -341,24 +326,30 @@ pub(super) fn readable(fields: &EventFields) -> bool {
 /// the days it names moved by as many days: "Mondays and Wednesdays" a day
 /// later is "Tuesdays and Thursdays", "the 5th" the 6th. A day of the month
 /// moved outside 1 to 31 can't be kept, and the rule repeats from its start
-/// instead. Its `UNTIL` moves with the start, so that the rule keeps its last
-/// Occurrence: the end of a day, as a date gives it and as the editor sets
-/// it, by as many days, any other time by as much time. A rule FreeCal can't
-/// read stays as it is.
-pub(super) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> String {
-    let (Some(rule), Ok(was), Ok(start)) = (Rule::parse(text), first_start(from), first_start(to))
+/// instead. Its `UNTIL` does as `end_date` says. A rule FreeCal can't read
+/// stays as it is.
+pub(super) fn rule_moved(
+    text: &str,
+    from: &StoredWhen,
+    to: &StoredWhen,
+    end_date: EndDate,
+) -> String {
+    let (Some(rule), Ok(from_start), Ok(to_start)) =
+        (Rule::parse(text), first_start(from), first_start(to))
     else {
         return text.to_owned();
     };
-    if start == was && from.all_day == to.all_day {
+    if to_start == from_start && from.all_day == to.all_day {
         return text.to_owned();
     }
-    let days = (start.date() - was.date()).num_days();
+    let days = (to_start.date() - from_start.date()).num_days();
     let until = rule.until_wall(from).and_then(|until| {
-        let moved = if until == end_of_day(until.date()) {
-            until + TimeDelta::days(days)
-        } else {
-            until + (start - was)
+        let moved = match end_date {
+            EndDate::MovesWithStart if until == end_of_day(until.date()) => {
+                until + TimeDelta::days(days)
+            }
+            EndDate::MovesWithStart => until + (to_start - from_start),
+            EndDate::Stays => end_of_day(until.date()),
         };
         until_value(moved, to)
     });
@@ -384,6 +375,18 @@ pub(super) fn rule_moved(text: &str, from: &StoredWhen, to: &StoredWhen) -> Stri
         })
         .collect();
     parts.join(";")
+}
+
+/// What moving a Recurring Event does to the end date of its rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EndDate {
+    /// It moves with the start, so that the rule keeps its last Occurrence:
+    /// the end of a day, as a date gives it and as the editor sets it, by as
+    /// many days, any other time by as much time. A move in the grid.
+    MovesWithStart,
+    /// It stays the date it is, as the end of that day: the editor shows it
+    /// and the user changes it there.
+    Stays,
 }
 
 const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];

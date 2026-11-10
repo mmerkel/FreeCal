@@ -14,6 +14,7 @@
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
+use super::rule::EndDate;
 use super::{
     EventDraft, EventFields, Exception, Loaded, NormalForm, Opened, Source, StoredWhen, new_uid,
     rule,
@@ -343,7 +344,9 @@ impl Loaded {
             new.zone_pinned = false;
         }
         // The days the rule names move with its first Occurrence.
-        let moved = |rule: Option<&str>| rule.map(|text| rule::rule_moved(text, first, &new.when));
+        let moved = |rule: Option<&str>| {
+            rule.map(|text| rule::rule_moved(text, first, &new.when, changes.end_date))
+        };
         new.rule = match changes.repeat {
             None => moved(rule.as_deref()),
             Some(None) => None,
@@ -656,6 +659,9 @@ struct Changes {
     /// The new repeat rule of the Recurring Event, none for an Event that
     /// doesn't repeat any more.
     repeat: Option<Option<Repeat>>,
+    /// What a move does to the end date of the rule: the editor shows it, so
+    /// an edit keeps it; a move in the grid moves it with the start.
+    end_date: EndDate,
     /// Whether the Exceptions in the scope take the changes in what they
     /// changed on their own too, and shift their own times by as much.
     exceptions_too: bool,
@@ -674,22 +680,20 @@ impl Changes {
     ) -> Result<Self> {
         let was = &changing.fields;
         let description = was.description().text;
-        // The repeat the user left alone: its end date moves with the
-        // Occurrence, as the editor moves the one it shows.
-        let shown = was.when.to_when(zone)?.start_date().0;
-        let left_alone = |when: &When| rule::repeat_moved(repeat, shown, when.start_date().0);
-        let draft = match change {
-            Edit::Draft(draft) => draft,
-            Edit::Reschedule(when) => EventDraft {
-                calendar_id,
-                title: was.title.clone(),
-                repeat: left_alone(&when),
-                when,
-                location: was.location.clone(),
-                description: description.clone(),
-            },
+        let (draft, end_date) = match change {
+            Edit::Draft(draft) => (draft, EndDate::Stays),
+            Edit::Reschedule(when) => (
+                EventDraft {
+                    calendar_id,
+                    title: was.title.clone(),
+                    when,
+                    location: was.location.clone(),
+                    description: description.clone(),
+                    repeat,
+                },
+                EndDate::MovesWithStart,
+            ),
         };
-        let repeat = left_alone(&draft.when);
         let when = was.when.edit(draft.when, zone)?;
         let from = changing.slot.as_ref().unwrap_or(&was.when);
         let changed = |was: &String, now: String| (*was != now).then_some(now);
@@ -700,6 +704,7 @@ impl Changes {
             when: (when != was.when).then(|| (from.clone(), when)),
             calendar_id: (draft.calendar_id != calendar_id).then_some(draft.calendar_id),
             repeat: (draft.repeat != repeat).then_some(draft.repeat),
+            end_date,
             exceptions_too,
         })
     }

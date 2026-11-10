@@ -269,7 +269,7 @@ test('a repeat ends on a date or after a number of times', async () => {
   ]);
 });
 
-test('the last date of a repeat moves with the start date and stays editable', async () => {
+test('the last date of a repeat stays when the start date moves', async () => {
   const user = userEvent.setup();
   const repeat = {
     frequency: 'weekly',
@@ -277,21 +277,13 @@ test('the last date of a repeat moves with the start date and stays editable', a
     end: { kind: 'until', date: '2026-10-19' },
   } as const;
   const { onsave } = show({ mode: 'edit', initial: { ...initial, repeat } });
-  const last = screen.getByLabelText('Last date');
 
   await fireEvent.input(screen.getByLabelText('Start date'), { target: { value: '2026-10-06' } });
   await fireEvent.input(screen.getByLabelText('End date'), { target: { value: '2026-10-06' } });
-
-  expect(last).toHaveValue('2026-10-20');
-
-  await fireEvent.input(last, { target: { value: '2026-10-19' } });
   await user.click(screen.getByRole('button', { name: 'Save' }));
 
-  expect(onsave).toHaveBeenCalledWith(
-    expect.objectContaining({
-      repeat: { ...repeat, end: { kind: 'until', date: '2026-10-19' } },
-    }),
-  );
+  expect(screen.getByLabelText('Last date')).toHaveValue('2026-10-19');
+  expect(onsave).toHaveBeenCalledWith(expect.objectContaining({ repeat }));
 });
 
 test('a repeat without any occurrence can’t be saved', async () => {

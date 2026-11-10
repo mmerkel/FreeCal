@@ -123,10 +123,9 @@ Possible bugs, found by reading the code, not run:
 
 ## Bug fix: a Recurring Event's end date moves with it
 
-Surprises left as they are:
+Choice to review:
 
-- [ ] "This event" from the editor: changing an Occurrence's start date moves "Last date" in the editor by as many days, since the scope isn't known before Save. With "This event", only that Occurrence moves, and the Recurring Event keeps its end date, so the date the editor showed isn't saved. Reopening the Exception shows the old end date again. Options: keep it (recommended); shift "Last date" only when editing the whole Recurring Event (con: with "All events" and "This and following" the core would shift the end date anyway, so editor and saved date differ for the common scopes); have the Scope Prompt say "The repeat's end date stays 19 October" (con: more text in a quick dialog)
-- [ ] different time zones: whether the end date was left alone is decided in the display time zone, by the editor (`repeatMoved` in `src/lib/repeat.ts`) and by the core alike (`Changes::of` in `core/src/event/scope.rs`). But the core then moves `UNTIL` by the days the start moved in the Event Time Zone (`rule_moved` in `core/src/event/rule.rs`). When the two zones differ and a move crosses midnight in only one of them, the saved end date can be a day off from the one the editor showed. The Occurrences are right: the series keeps its last one
+- [ ] a move in the grid and an edit in the editor treat the end date of a repeat differently. A move moves it with the start, so the Recurring Event keeps its last Occurrence. An edit keeps the end date the editor shows (`EndDate` in `core/src/event/rule.rs`), so moving the start a day later there drops the last Occurrence, and a week earlier adds one, unless the user changes "Last date" too. An end given as the instant of the last Occurrence (as Google writes it) becomes the end of that day on such an edit
 
 ## Ticket 80: first sync of a CalDAV Calendar
 
