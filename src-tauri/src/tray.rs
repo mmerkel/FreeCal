@@ -1,8 +1,8 @@
 //! FreeCal's tray icon: a StatusNotifierItem through Tauri, which KDE Plasma
 //! shows natively (US-108). A left click opens the window; a right click
 //! opens the menu. Linux gives the icon clicks only through the KSNI backend
-//! of Tauri's tray crate, which `Cargo.toml` turns on. The icon's status and
-//! Sync now are tickets 23 and 16.
+//! of Tauri's tray crate, which `Cargo.toml` turns on. The icon's status is
+//! ticket 23.
 
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -15,10 +15,13 @@ pub const TRAY: &str = "freecal";
 /// What the user picked in the tray menu.
 pub enum TrayChoice {
     OpenFreeCal,
+    /// Sync now, of every server Account.
+    SyncNow,
     Quit,
 }
 
 const OPEN_FREECAL: &str = "open-freecal";
+const SYNC_NOW: &str = "sync-now";
 const QUIT: &str = "quit";
 
 /// Puts FreeCal's icon in the tray, with `on_choice` for its menu and its
@@ -33,6 +36,7 @@ pub fn show(
         app,
         &[
             &MenuItem::with_id(app, OPEN_FREECAL, "Open FreeCal", true, None::<&str>)?,
+            &MenuItem::with_id(app, SYNC_NOW, "Sync now", true, None::<&str>)?,
             &MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?,
         ],
     )?;
@@ -44,6 +48,7 @@ pub fn show(
         .on_menu_event(move |app, event| {
             let choice = match event.id().as_ref() {
                 OPEN_FREECAL => TrayChoice::OpenFreeCal,
+                SYNC_NOW => TrayChoice::SyncNow,
                 QUIT => TrayChoice::Quit,
                 _ => return,
             };

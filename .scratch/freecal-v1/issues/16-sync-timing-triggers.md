@@ -4,13 +4,13 @@
 
 **Blocked by:** 13, 15
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] Polls every 5 minutes with the window open and every 15 minutes in the background (controllable clock)
+- [x] Polls every 5 minutes with the window open and every 15 minutes in the background (controllable clock)
 - [x] Syncs on window focus, on wake from sleep and after local edits
-- [ ] Sync now: per Account or for all; a window control, a Google-style shortcut and a tray menu item
+- [x] Sync now: per Account or for all; a window control, a Google-style shortcut and a tray menu item
 - [x] The NetworkMonitor portal is watched: when the network returns, a sync runs right away; with no network at all, polls are skipped and every server Account is marked Offline without trying (tested with a controllable fake network status)
 
 ## Comments
@@ -33,3 +33,7 @@
   - Desktop Watch (new term): the shell's threads that watch the desktop for the network status and waking from sleep (`desktop_watch`).
 - 2026-11-07 (review with the user): Sync Scheduler, Poll, Sync Trigger, Sync Requests and Desktop Watch approved as code names; Sync Scheduler and Poll also added to the Internals section of `GLOSSARY.md`.
 - 2026-11-07 (user): the poll with the window open is every 5 minutes, not the spec's 2 (`POLL_WITH_WINDOW`, `core/src/sync_scheduler.rs`). The background poll stays at 15 minutes. Settings for these times are out of scope for v1 (spec, "Out of Scope").
+- 2026-11-14 (implementation, finishing after ticket 13).
+  - Box 1: ticket 13 now tells the core when the window hides and shows (`Core::set_window_open`, called by `close_main_window` and `bring_to_front`, `src-tauri/src/main.rs`), so the background poll of 15 minutes applies while the window is hidden. The timing itself was already tested with the controllable clock (`core/tests/sync_timing.rs`).
+  - Box 3: the tray menu now reads Open FreeCal, Sync now, Quit (US-110), and Sync now there is the window's Sync now for all, `Core::sync_now(None)` (`TrayChoice::SyncNow`, `src-tauri/src/tray.rs`; `on_tray_choice`, `src-tauri/src/main.rs`). After a failed start, with no Core, it does nothing.
+  - Like the rest of the tray menu, it has no fake or test (ticket 13's comment of 2026-11-14). Checked in the debug build on Xvfb, on the user's bus: the menu's layout over D-Bus lists the three items in that order, and a click on Sync now synced a CalDAV Account at that second (its `last_sync_at`, after the launch poll's).

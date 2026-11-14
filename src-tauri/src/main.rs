@@ -630,6 +630,13 @@ fn unsent_changes_wait(core: &Core) -> bool {
 fn on_tray_choice(app: &AppHandle, choice: tray::TrayChoice) {
     match choice {
         tray::TrayChoice::OpenFreeCal => open_main_window(app),
+        // As the window's Sync now for all; without a Core (a failed start)
+        // there is nothing to sync.
+        tray::TrayChoice::SyncNow => {
+            if let Some(core) = app.try_state::<Core>() {
+                core.sync_now(None);
+            }
+        }
         // As Quit in the main menu, in the window, which comes to the front
         // for it; with the window hidden in the background, FreeCal quits at
         // once and the Unsent Changes stay in the Local Store.
