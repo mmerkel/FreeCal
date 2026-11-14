@@ -138,7 +138,11 @@ fn logouts(connection: &Connection, on_change: &impl Fn(bool)) -> zbus::Result<(
     // Subscribed before the monitor starts, so that no change falls in the
     // gap.
     let changes = inhibit.receive_state_changed()?;
-    inhibit.create_monitor("", HashMap::new())?;
+    // xdg-desktop-portal 1.21 aborts on a monitor without a session token,
+    // though the portal's documentation calls it optional. One monitor per
+    // connection, so a fixed token can't clash.
+    let options = HashMap::from([("session_handle_token", Value::from("freecal_session_end"))]);
+    inhibit.create_monitor("", options)?;
     for change in changes {
         let args = change.args()?;
         let state = args
@@ -278,12 +282,24 @@ mod tests {
         fn create_monitor(
             &self,
             _window: &str,
-            _options: HashMap<&str, Value<'_>>,
-        ) -> OwnedObjectPath {
+            options: HashMap<&str, Value<'_>>,
+        ) -> zbus::fdo::Result<OwnedObjectPath> {
+            // xdg-desktop-portal 1.21 aborts on a monitor without a session
+            // token instead of answering with an error.
+            let token = options
+                .get("session_handle_token")
+                .and_then(|token| <&str>::try_from(token).ok());
+            if token.is_none_or(str::is_empty) {
+                return Err(zbus::fdo::Error::InvalidArgs(
+                    "no session_handle_token".into(),
+                ));
+            }
             self.started.send(()).unwrap();
-            ObjectPath::try_from("/org/freedesktop/portal/desktop/request/1_1/t")
-                .unwrap()
-                .into()
+            Ok(
+                ObjectPath::try_from("/org/freedesktop/portal/desktop/request/1_1/t")
+                    .unwrap()
+                    .into(),
+            )
         }
 
         fn query_end_response(&self, session_handle: ObjectPath<'_>) {
