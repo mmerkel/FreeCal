@@ -25,6 +25,12 @@ Spec: "Untrusted content"; "Moves across Accounts"; "Change Journal". ADRs 0010,
 - [ ] Undoing a sent DELETE puts the Event back with what FreeCal doesn't show, and at its href if the decision keeps it
 - [ ] The new Recurring Event of "this and following events" is decided: takes the original's unknown properties along, or not
 - [ ] Tested against Radicale
+- [ ] A grilling on making the Change Journal more about the server's contents (see the comment of 2026-11-14), its decisions in the ADR
 
 ## Comments
 - 2026-11-08 (/implement 125): the tests to extend are in `core/tests/caldav_send.rs`: `an_event_moved_to_another_calendar_moves_on_the_server` and `undo::undoing_a_sent_delete_puts_the_event_back_under_its_uid` (which asserts the `<UID>.ics` name today).
+- 2026-11-14: Widened by the user: decide, in one consideration with where unknown fields live, whether and how the Change Journal becomes more about the server's contents. Today it records the Local Store's point of view: a Journal Event Modification holds the previous Event Version, which holds no server data (ADR 0011), and an Incoming Sync is one more Journal Transaction. Three aspects, to be held with /grilling before building:
+  1. **What the Change Journal stores:** the server's text of the Event too (unknown fields, href), so an undo puts the Server Object back exactly. This is the first option above.
+  2. **What the timeline shows:** for each change, whether it has reached the server yet (sent or an Unsent Change), or the server's state next to the local one. Touches ticket 19's Change Journal list and the sync status.
+  3. **What undo means:** setting a Calendar back to what its server held at a given time, rather than reversing local changes. Would revise ADR 0009 and ticket 19's "undo everything in a Calendar since…".
+  Ticket 19 goes ahead as specified first, so there's a working version; what this ticket decides may change it later. The Effort (L) is likely to grow once the grilling has scoped it.
