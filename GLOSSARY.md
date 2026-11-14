@@ -114,6 +114,10 @@ _Avoid_: Modification (on its own), entry, journal entry, change (on its own: Un
 The fields FreeCal manages of one Event at one moment, as a Journal Event Modification stores it. Server data is not part of it.
 _Avoid_: Version (on its own), revision, snapshot (a Snapshot is a backup file)
 
+**Undo History**:
+What Ctrl+Z and Ctrl+Shift+Z step through, read from the Change Journal: the user's own changes and imports not yet undone, newest first, and the undos made since the user's last change, which redo brings back. A restart doesn't reset it.
+_Avoid_: Session Undo, undo stack, History (on its own: an Event's History)
+
 **Mass-Change Guard**:
 The safeguard that pauses a Calendar's sync and asks the user before one sync deletes or changes an unusually large number of its Events.
 _Avoid_: Circuit breaker, sync limit
