@@ -9,7 +9,13 @@ export default defineConfig({
   plugins: [svelte(), svelteTesting()],
   clearScreen: false,
   server: { port: 1420, strictPort: true },
-  build: { target: 'safari16', outDir: 'dist' },
+  build: {
+    target: 'safari16',
+    outDir: 'dist',
+    // Tauri loads the bundle from disk, so the 500 kB default (meant for
+    // downloads) doesn't apply; the limit still flags a doubling in size.
+    chunkSizeWarningLimit: 1000,
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
