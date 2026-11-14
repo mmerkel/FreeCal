@@ -171,6 +171,10 @@ test('the import commands pass their arguments under the names the shell expects
   await tauriCore.runImport(calendarId(2), 'skip');
   await tauriCore.discardImport();
   await tauriCore.undo({ kind: 'journalTransaction', id: journalTransactionId(4) }, null);
+  await tauriCore.changeJournal();
+  await tauriCore.journalTransactionEvents(journalTransactionId(4));
+  await tauriCore.eventHistory(eventId(3));
+  await tauriCore.undoHistory();
 
   expect(invoked).toEqual([
     ['pick_import_file', { title: 'Import', filter: 'Calendar files' }],
@@ -178,6 +182,10 @@ test('the import commands pass their arguments under the names the shell expects
     ['run_import', { calendarId: 2, existing: 'skip' }],
     ['discard_import', {}],
     ['undo', { target: { kind: 'journalTransaction', id: 4 }, approved: null }],
+    ['change_journal', {}],
+    ['journal_transaction_events', { id: 4 }],
+    ['event_history', { id: 3 }],
+    ['undo_history', {}],
   ]);
 });
 

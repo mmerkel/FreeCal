@@ -15,6 +15,9 @@ import type {
   ExistingEvents,
   ImportOutcome,
   ImportSummary,
+  JournalTransactionId,
+  ListedJournalEventModification,
+  ListedJournalTransaction,
   Occurrence,
   Scope,
   Settings,
@@ -22,6 +25,7 @@ import type {
   SidebarState,
   Signal,
   SyncStatuses,
+  UndoHistory,
   UndoOutcome,
   UndoTarget,
   View,
@@ -209,6 +213,20 @@ export interface CoreApi {
    * which redoes it.
    */
   undo(target: UndoTarget, approved: DangerousUndo | null): Promise<Changed<UndoOutcome>>;
+  /** The Change Journal list: every Journal Transaction, newest first. */
+  changeJournal(): Promise<ListedJournalTransaction[]>;
+  /** The Events a Journal Transaction changed, in that order, each with what its Undo undoes. */
+  journalTransactionEvents(id: JournalTransactionId): Promise<ListedJournalEventModification[]>;
+  /**
+   * An Event's History: the changes to it, a Recurring Event with its
+   * Exceptions, newest first, each with what its Undo undoes.
+   */
+  eventHistory(id: EventId): Promise<ListedJournalEventModification[]>;
+  /**
+   * What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo History,
+   * each step with the user change it is about.
+   */
+  undoHistory(): Promise<UndoHistory>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
   /** FreeCal's version, such as `0.1.0`. */

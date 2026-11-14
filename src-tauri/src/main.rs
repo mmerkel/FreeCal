@@ -21,9 +21,10 @@ use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
     Changed, Colour, Core, DangerousUndo, ErrorCode, Event, EventDraft, EventId, ExceptionCounts,
-    ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope,
-    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SyncTrigger,
-    SystemClock, UndoOutcome, UndoTarget, View, When, link_allowed,
+    ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, JournalTransactionId,
+    ListedJournalEventModification, ListedJournalTransaction, Occurrence, Scope, Settings,
+    SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SyncTrigger, SystemClock,
+    UndoHistory, UndoOutcome, UndoTarget, View, When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -523,6 +524,36 @@ async fn undo(
         .map_err(ErrorCode::from)
 }
 
+/// The Change Journal list: every Journal Transaction, newest first.
+#[tauri::command]
+fn change_journal(core: State<Core>) -> CommandResult<Vec<ListedJournalTransaction>> {
+    core.change_journal().map_err(ErrorCode::from)
+}
+
+/// The Events a Journal Transaction changed, each with what its Undo undoes.
+#[tauri::command]
+fn journal_transaction_events(
+    core: State<Core>,
+    id: JournalTransactionId,
+) -> CommandResult<Vec<ListedJournalEventModification>> {
+    core.journal_transaction_events(id).map_err(ErrorCode::from)
+}
+
+/// An Event's History, newest first, each change with what its Undo undoes.
+#[tauri::command]
+fn event_history(
+    core: State<Core>,
+    id: EventId,
+) -> CommandResult<Vec<ListedJournalEventModification>> {
+    core.event_history(id).map_err(ErrorCode::from)
+}
+
+/// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo History.
+#[tauri::command]
+fn undo_history(core: State<Core>) -> CommandResult<UndoHistory> {
+    core.undo_history().map_err(ErrorCode::from)
+}
+
 /// Opens a link from a description or location in the system browser. The scheme
 /// is checked again here, so that the window can't open anything else even if
 /// it asks to.
@@ -955,6 +986,10 @@ fn main() {
             run_import,
             discard_import,
             undo,
+            change_journal,
+            journal_transaction_events,
+            event_history,
+            undo_history,
             open_link,
             version,
             show_window,

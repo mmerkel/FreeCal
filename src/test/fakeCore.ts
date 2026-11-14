@@ -147,6 +147,11 @@ export class FakeCore {
     runImport: () => first(samples.ImportOutcome),
     discardImport: () => undefined,
     undo: () => changed<UndoOutcome>({ kind: 'undone', skipped: [] }),
+    changeJournal: () => every(samples.ListedJournalTransaction),
+    journalTransactionEvents: () => every(samples.ListedJournalEventModification),
+    eventHistory: () => every(samples.ListedJournalEventModification),
+    // Nothing to undo or redo, as on a new Local Store.
+    undoHistory: () => ({ undo: null, redo: null }),
     openLink: () => undefined,
     // A version is no type of the interface, so it has no sample.
     version: () => '0.0.0',
