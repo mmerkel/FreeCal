@@ -755,16 +755,35 @@ export const samples = {
     }
   ],
   TransactionOrigin: [
-    "userAction",
-    "import",
-    "undo",
-    "firstSync",
-    "incomingSync"
+    {
+      "kind": "userAction",
+      "action": "moved"
+    },
+    {
+      "kind": "import"
+    },
+    {
+      "kind": "undo"
+    },
+    {
+      "kind": "firstSync"
+    },
+    {
+      "kind": "incomingSync"
+    }
+  ],
+  UserAction: [
+    "created",
+    "edited",
+    "moved",
+    "deleted"
   ],
   ListedJournalTransaction: [
     {
       "id": 6,
-      "origin": "undo",
+      "origin": {
+        "kind": "undo"
+      },
       "madeAt": 1791100860,
       "undoes": 5,
       "events": 1,
@@ -775,11 +794,14 @@ export const samples = {
       "titles": [
         "Dentist"
       ],
-      "undonePerEvent": false
+      "undonePerEvent": false,
+      "undoChangedNothing": false
     },
     {
       "id": 5,
-      "origin": "incomingSync",
+      "origin": {
+        "kind": "incomingSync"
+      },
       "madeAt": 1791100800,
       "undoes": null,
       "events": 3,
@@ -793,7 +815,27 @@ export const samples = {
         "Yoga",
         ""
       ],
-      "undonePerEvent": true
+      "undonePerEvent": true,
+      "undoChangedNothing": true
+    },
+    {
+      "id": 4,
+      "origin": {
+        "kind": "userAction",
+        "action": "moved"
+      },
+      "madeAt": 1791100700,
+      "undoes": null,
+      "events": 1,
+      "undoneEvents": 0,
+      "calendarIds": [
+        2
+      ],
+      "titles": [
+        "Dentist"
+      ],
+      "undonePerEvent": false,
+      "undoChangedNothing": false
     }
   ],
   JournalEventModificationKind: [
@@ -804,7 +846,9 @@ export const samples = {
   ListedJournalEventModification: [
     {
       "journalTransaction": 5,
-      "origin": "incomingSync",
+      "origin": {
+        "kind": "incomingSync"
+      },
       "madeAt": 1791100800,
       "eventId": 3,
       "title": "Standup",
@@ -819,7 +863,10 @@ export const samples = {
     },
     {
       "journalTransaction": 4,
-      "origin": "userAction",
+      "origin": {
+        "kind": "userAction",
+        "action": "deleted"
+      },
       "madeAt": 1791100700,
       "eventId": 3,
       "title": "Standup",
@@ -829,11 +876,29 @@ export const samples = {
       "undo": null
     }
   ],
-  SessionUndo: [
+  UndoHistory: [
     {
       "undo": {
         "journalTransaction": 6,
-        "userChange": 4
+        "userChange": {
+          "id": 4,
+          "origin": {
+            "kind": "userAction",
+            "action": "moved"
+          },
+          "madeAt": 1791100700,
+          "undoes": null,
+          "events": 1,
+          "undoneEvents": 0,
+          "calendarIds": [
+            2
+          ],
+          "titles": [
+            "Dentist"
+          ],
+          "undonePerEvent": false,
+          "undoChangedNothing": false
+        }
       },
       "redo": {
         "journalTransaction": 7,
@@ -845,10 +910,28 @@ export const samples = {
       "redo": null
     }
   ],
-  SessionUndoStep: [
+  UndoHistoryStep: [
     {
       "journalTransaction": 6,
-      "userChange": 4
+      "userChange": {
+        "id": 4,
+        "origin": {
+          "kind": "userAction",
+          "action": "moved"
+        },
+        "madeAt": 1791100700,
+        "undoes": null,
+        "events": 1,
+        "undoneEvents": 0,
+        "calendarIds": [
+          2
+        ],
+        "titles": [
+          "Dentist"
+        ],
+        "undonePerEvent": false,
+        "undoChangedNothing": false
+      }
     }
   ],
   LaterJournalTransaction: [
@@ -1127,11 +1210,12 @@ type Samples = {
   Changed: Unbranded<T.Changed<T.Event>>[];
   UndoTarget: Unbranded<T.UndoTarget>[];
   TransactionOrigin: Unbranded<T.TransactionOrigin>[];
+  UserAction: Unbranded<T.UserAction>[];
   ListedJournalTransaction: Unbranded<T.ListedJournalTransaction>[];
   JournalEventModificationKind: Unbranded<T.JournalEventModificationKind>[];
   ListedJournalEventModification: Unbranded<T.ListedJournalEventModification>[];
-  SessionUndo: Unbranded<T.SessionUndo>[];
-  SessionUndoStep: Unbranded<T.SessionUndoStep>[];
+  UndoHistory: Unbranded<T.UndoHistory>[];
+  UndoHistoryStep: Unbranded<T.UndoHistoryStep>[];
   LaterJournalTransaction: Unbranded<T.LaterJournalTransaction>[];
   DangerousUndo: Unbranded<T.DangerousUndo>[];
   SkipReason: Unbranded<T.SkipReason>[];

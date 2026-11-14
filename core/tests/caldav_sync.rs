@@ -550,7 +550,7 @@ mod undo {
     /// Ticket 19: "Changed on the server: 1 Event in Work", which Ctrl+Z
     /// never undoes.
     #[test]
-    fn an_incoming_sync_is_listed_in_the_change_journal_and_not_on_session_undo() {
+    fn an_incoming_sync_is_listed_in_the_change_journal_and_not_on_undo_history() {
         let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         synced.put("standup", standup("Standup moved"));
 
@@ -561,7 +561,7 @@ mod undo {
         assert_eq!(listed.origin, freecal_core::TransactionOrigin::IncomingSync);
         assert_eq!((listed.events, listed.calendar_ids), (1, vec![synced.work]));
         assert!(listed.undone_per_event);
-        assert_eq!(synced.core.session_undo().unwrap().undo, None);
+        assert_eq!(synced.core.undo_history().unwrap().undo, None);
     }
 
     /// ADR 0015: the next write is conditional on what the server has now.

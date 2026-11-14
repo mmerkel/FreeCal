@@ -1,10 +1,11 @@
 //! What the user sees of the Change Journal (ticket 19): the Change Journal
 //! list, one timeline of Journal Transactions that expand into their
-//! Events; an Event's History; and Session Undo, what Ctrl+Z undoes and
-//! Ctrl+Shift+Z redoes, worked out from the Change Journal so that an undo
-//! from the list or a History counts at once.
+//! Events; an Event's History; and the Undo History, what Ctrl+Z undoes and
+//! Ctrl+Shift+Z redoes, worked out from the Change Journal alone so that an
+//! undo from the list or a History counts at once, and a restart changes
+//! nothing.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use serde::Serialize;
 
@@ -41,6 +42,9 @@ pub struct ListedJournalTransaction {
     /// Incoming Sync's; a user action's and an undo's are undone only whole
     /// (ADR 0009).
     pub undone_per_event: bool,
+    /// Whether undoing it whole changed nothing, every Event skipped; the
+    /// Undo History passes over it.
+    pub undo_changed_nothing: bool,
 }
 
 /// What a Journal Event Modification did to its Event.
@@ -78,102 +82,66 @@ pub struct ListedJournalEventModification {
     pub undo: Option<UndoTarget>,
 }
 
-/// What Ctrl+Z and Ctrl+Shift+Z undo next (new term: Session Undo): the
-/// user's own changes of this session, newest first, and the undos made
-/// since their last change.
+/// What Ctrl+Z and Ctrl+Shift+Z undo next, from the Undo History: the
+/// user's own changes, newest first, and the undos made since their last
+/// change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-pub struct SessionUndo {
-    /// What Ctrl+Z undoes: the newest Journal Transaction of this session
-    /// that is a user action, an import or a redo and isn't wholly undone.
-    pub undo: Option<SessionUndoStep>,
+pub struct UndoHistory {
+    /// What Ctrl+Z undoes: the newest Journal Transaction that is a user
+    /// action, an import or a redo, isn't wholly undone, and whose undo
+    /// didn't change nothing.
+    pub undo: Option<UndoHistoryStep>,
     /// What Ctrl+Shift+Z redoes, by undoing it: the newest undo made since
-    /// the user's last change in this session, and since FreeCal started,
-    /// that isn't a redo and isn't undone.
-    pub redo: Option<SessionUndoStep>,
+    /// the user's last change that isn't a redo and isn't undone.
+    pub redo: Option<UndoHistoryStep>,
 }
 
-/// One step of Session Undo.
+/// One step of the Undo History.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-pub struct SessionUndoStep {
+pub struct UndoHistoryStep {
     /// The Journal Transaction to undo whole.
     pub journal_transaction: JournalTransactionId,
     /// The user action or import the step undoes or redoes, through the
-    /// undos between; none for an undo of a Calendar since a given time, or
-    /// of an Incoming Sync.
-    pub user_change: Option<JournalTransactionId>,
+    /// undos between, which a toast names; none for an undo of a Calendar
+    /// since a given time, or of an Incoming Sync.
+    pub user_change: Option<ListedJournalTransaction>,
 }
 
-/// What Session Undo remembers of this session: where it started, and the
-/// Journal Transactions it passes over.
-#[derive(Debug, Default)]
-pub(crate) struct Session {
-    /// The newest Journal Transaction when FreeCal started; later ones are
-    /// this session's.
-    started_after: Option<JournalTransactionId>,
-    /// The Journal Transactions whose undo changed nothing, every Event
-    /// skipped, which Session Undo passes over so that the next Ctrl+Z goes
-    /// on to the one before.
-    passed_over: BTreeSet<JournalTransactionId>,
-}
-
-impl Session {
-    /// A session starting now, on the Local Store `store`.
-    pub(crate) fn now(store: &Store) -> Result<Self> {
-        Ok(Self {
-            started_after: store.latest_journal_transaction()?,
-            passed_over: BTreeSet::new(),
+/// The Undo History, worked out from `listed`, the Change Journal list.
+pub(crate) fn undo_history(listed: &[ListedJournalTransaction]) -> UndoHistory {
+    let by_id: HashMap<_, _> = listed
+        .iter()
+        .map(|journal_transaction| (journal_transaction.id, journal_transaction))
+        .collect();
+    let open = |journal_transaction: &ListedJournalTransaction| {
+        journal_transaction.undone_events < journal_transaction.events
+            && !journal_transaction.undo_changed_nothing
+    };
+    let step = |journal_transaction: &ListedJournalTransaction| UndoHistoryStep {
+        journal_transaction: journal_transaction.id,
+        user_change: user_change(journal_transaction, &by_id).cloned(),
+    };
+    let undo = listed
+        .iter()
+        .find(|journal_transaction| {
+            open(journal_transaction)
+                && (is_user_change(journal_transaction) || is_redo(journal_transaction, &by_id))
         })
-    }
-
-    /// Notes that undoing the Journal Transaction `id` whole changed
-    /// nothing.
-    pub(crate) fn pass_over(&mut self, id: JournalTransactionId) {
-        self.passed_over.insert(id);
-    }
-
-    /// Session Undo, worked out from `listed`, the Change Journal list.
-    pub(crate) fn session_undo(&self, listed: &[ListedJournalTransaction]) -> SessionUndo {
-        let by_id: HashMap<_, _> = listed
-            .iter()
-            .map(|journal_transaction| (journal_transaction.id, journal_transaction))
-            .collect();
-        let session: Vec<_> = listed
-            .iter()
-            .filter(|journal_transaction| {
-                self.started_after
-                    .is_none_or(|started_after| journal_transaction.id > started_after)
-            })
-            .collect();
-        let open = |journal_transaction: &ListedJournalTransaction| {
-            journal_transaction.undone_events < journal_transaction.events
-                && !self.passed_over.contains(&journal_transaction.id)
-        };
-        let step = |journal_transaction: &ListedJournalTransaction| SessionUndoStep {
-            journal_transaction: journal_transaction.id,
-            user_change: user_change(journal_transaction, &by_id),
-        };
-        let undo = session
-            .iter()
-            .find(|journal_transaction| {
-                open(journal_transaction)
-                    && (is_user_change(journal_transaction) || is_redo(journal_transaction, &by_id))
-            })
-            .map(|journal_transaction| step(journal_transaction));
-        let redo = session
-            .iter()
-            .take_while(|journal_transaction| !is_user_change(journal_transaction))
-            .find(|journal_transaction| {
-                journal_transaction.origin == TransactionOrigin::Undo
-                    && open(journal_transaction)
-                    && !is_redo(journal_transaction, &by_id)
-            })
-            .map(|journal_transaction| step(journal_transaction));
-        SessionUndo { undo, redo }
-    }
+        .map(step);
+    let redo = listed
+        .iter()
+        .take_while(|journal_transaction| !is_user_change(journal_transaction))
+        .find(|journal_transaction| {
+            journal_transaction.origin == TransactionOrigin::Undo
+                && open(journal_transaction)
+                && !is_redo(journal_transaction, &by_id)
+        })
+        .map(step);
+    UndoHistory { undo, redo }
 }
 
 /// Whether a Journal Transaction is one of the user's own changes, as
@@ -181,7 +149,7 @@ impl Session {
 fn is_user_change(journal_transaction: &ListedJournalTransaction) -> bool {
     matches!(
         journal_transaction.origin,
-        TransactionOrigin::UserAction | TransactionOrigin::Import
+        TransactionOrigin::UserAction { .. } | TransactionOrigin::Import
     )
 }
 
@@ -211,17 +179,17 @@ fn is_redo(
 
 /// The user action or import that `journal_transaction` is, or undoes or
 /// redoes through the undos between.
-fn user_change(
-    journal_transaction: &ListedJournalTransaction,
-    by_id: &HashMap<JournalTransactionId, &ListedJournalTransaction>,
-) -> Option<JournalTransactionId> {
+fn user_change<'a>(
+    journal_transaction: &'a ListedJournalTransaction,
+    by_id: &HashMap<JournalTransactionId, &'a ListedJournalTransaction>,
+) -> Option<&'a ListedJournalTransaction> {
     let first = undo_chain(journal_transaction, by_id)
         .last()
         .map_or(Some(journal_transaction.id), |undo| undo.undoes)?;
     by_id
         .get(&first)
+        .copied()
         .filter(|first| is_user_change(first))
-        .map(|first| first.id)
 }
 
 /// The Change Journal list: every Journal Transaction, newest first.
@@ -266,6 +234,7 @@ fn listed_journal_transaction(stored: StoredJournalTransaction) -> ListedJournal
         calendar_ids,
         titles,
         undone_per_event: undone_per_event(stored.origin),
+        undo_changed_nothing: stored.undo_changed_nothing,
     }
 }
 

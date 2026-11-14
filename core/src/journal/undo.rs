@@ -136,7 +136,9 @@ pub enum UndoOutcome {
 
 /// Undoes `target` as a Journal Transaction with the Transaction Origin
 /// undo, made at `made_at` (Unix seconds), unless it is a Dangerous Undo
-/// other than `approved`. Refused for a user action's Journal Transaction
+/// other than `approved`. A whole Journal Transaction whose undo changed
+/// nothing, every Event skipped, is marked so, and the Undo History passes
+/// over it. Refused for a user action's Journal Transaction
 /// picked one Event at a time ([`CoreError::UndoneOnlyWhole`]), for a
 /// target undone already, and while an Event Version that isn't an
 /// Exception would join another with its UID in its Calendar (ticket 104).
@@ -160,6 +162,13 @@ pub(crate) fn undo(
                 return Ok(UndoOutcome::Dangerous { danger, skipped });
             }
             plan.run(journal_transaction)?;
+            if let UndoTarget::JournalTransaction { id } = target
+                && plan.undone.is_empty()
+            {
+                journal_transaction
+                    .database_transaction
+                    .mark_undo_changed_nothing(WRITE_PERMISSION, id)?;
+            }
             Ok(UndoOutcome::Undone { skipped })
         },
     )

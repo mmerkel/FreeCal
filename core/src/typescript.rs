@@ -26,8 +26,8 @@ use crate::{
 };
 use crate::{
     DangerousUndo, JournalEventModificationKind, LaterJournalTransaction,
-    ListedJournalEventModification, ListedJournalTransaction, SessionUndo, SessionUndoStep,
-    SkipReason, SkippedEvent, TransactionOrigin, UndoOutcome, UndoTarget,
+    ListedJournalEventModification, ListedJournalTransaction, SkipReason, SkippedEvent,
+    TransactionOrigin, UndoHistory, UndoHistoryStep, UndoOutcome, UndoTarget, UserAction,
 };
 
 const TYPES: &str = "../src/core/types.generated.ts";
@@ -90,7 +90,7 @@ fn types() -> (String, Vec<String>) {
     types.visit::<Changed<UndoOutcome>>();
     types.visit::<ListedJournalTransaction>();
     types.visit::<ListedJournalEventModification>();
-    types.visit::<SessionUndo>();
+    types.visit::<UndoHistory>();
     types.visit::<ErrorCode>();
     types.visit::<SyncStatuses>();
     let names = types.declarations.keys().cloned().collect();
@@ -218,6 +218,20 @@ fn samples_file() -> (String, Vec<String>) {
         name: "Work".to_owned(),
         colour: Some(Colour::parse("#3a86ff").unwrap()),
         read_only: false,
+    };
+    let moved = ListedJournalTransaction {
+        id: JournalTransactionId(4),
+        origin: TransactionOrigin::UserAction {
+            action: UserAction::Moved,
+        },
+        made_at: 1_791_100_700,
+        undoes: None,
+        events: 1,
+        undone_events: 0,
+        calendar_ids: vec![CalendarId(2)],
+        titles: vec!["Dentist".to_owned()],
+        undone_per_event: false,
+        undo_changed_nothing: false,
     };
     let later = LaterJournalTransaction {
         id: JournalTransactionId(5),
@@ -449,11 +463,19 @@ fn samples_file() -> (String, Vec<String>) {
             },
         ]),
         samples(&[
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: UserAction::Moved,
+            },
             TransactionOrigin::Import,
             TransactionOrigin::Undo,
             TransactionOrigin::FirstSync,
             TransactionOrigin::IncomingSync,
+        ]),
+        samples(&[
+            UserAction::Created,
+            UserAction::Edited,
+            UserAction::Moved,
+            UserAction::Deleted,
         ]),
         samples(&[
             ListedJournalTransaction {
@@ -466,6 +488,7 @@ fn samples_file() -> (String, Vec<String>) {
                 calendar_ids: vec![CalendarId(2)],
                 titles: vec!["Dentist".to_owned()],
                 undone_per_event: false,
+                undo_changed_nothing: false,
             },
             ListedJournalTransaction {
                 id: JournalTransactionId(5),
@@ -477,7 +500,9 @@ fn samples_file() -> (String, Vec<String>) {
                 calendar_ids: vec![CalendarId(2), CalendarId(3)],
                 titles: vec!["Standup".to_owned(), "Yoga".to_owned(), String::new()],
                 undone_per_event: true,
+                undo_changed_nothing: true,
             },
+            moved.clone(),
         ]),
         samples(&[
             JournalEventModificationKind::Created,
@@ -501,7 +526,9 @@ fn samples_file() -> (String, Vec<String>) {
             },
             ListedJournalEventModification {
                 journal_transaction: JournalTransactionId(4),
-                origin: TransactionOrigin::UserAction,
+                origin: TransactionOrigin::UserAction {
+                    action: UserAction::Deleted,
+                },
                 made_at: 1_791_100_700,
                 event_id: EventId(3),
                 title: "Standup".to_owned(),
@@ -512,24 +539,24 @@ fn samples_file() -> (String, Vec<String>) {
             },
         ]),
         samples(&[
-            SessionUndo {
-                undo: Some(SessionUndoStep {
+            UndoHistory {
+                undo: Some(UndoHistoryStep {
                     journal_transaction: JournalTransactionId(6),
-                    user_change: Some(JournalTransactionId(4)),
+                    user_change: Some(moved.clone()),
                 }),
-                redo: Some(SessionUndoStep {
+                redo: Some(UndoHistoryStep {
                     journal_transaction: JournalTransactionId(7),
                     user_change: None,
                 }),
             },
-            SessionUndo {
+            UndoHistory {
                 undo: None,
                 redo: None,
             },
         ]),
-        samples(&[SessionUndoStep {
+        samples(&[UndoHistoryStep {
             journal_transaction: JournalTransactionId(6),
-            user_change: Some(JournalTransactionId(4)),
+            user_change: Some(moved),
         }]),
         samples(std::slice::from_ref(&later)),
         samples(std::slice::from_ref(&danger)),

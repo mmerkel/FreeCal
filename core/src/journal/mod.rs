@@ -28,9 +28,9 @@ mod undo;
 
 pub use list::{
     JournalEventModificationKind, ListedJournalEventModification, ListedJournalTransaction,
-    SessionUndo, SessionUndoStep,
+    UndoHistory, UndoHistoryStep,
 };
-pub(crate) use list::{Session, change_journal, event_history, journal_transaction_events};
+pub(crate) use list::{change_journal, event_history, journal_transaction_events, undo_history};
 pub(crate) use undo::undo;
 pub use undo::{
     DangerousUndo, LaterJournalTransaction, SkipReason, SkippedEvent, UndoOutcome, UndoTarget,
@@ -94,9 +94,13 @@ pub struct Changed<T> {
 /// Snapshot restore and Conflict resolution come with their tickets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TransactionOrigin {
-    UserAction,
+    /// One of the user's own changes, of the kind `action`, which a toast
+    /// and Ctrl+Z name.
+    UserAction {
+        action: UserAction,
+    },
     Import,
     Undo,
     /// A Calendar's First Sync: it writes like any Transaction Origin but
@@ -108,28 +112,59 @@ pub enum TransactionOrigin {
     IncomingSync,
 }
 
-impl TransactionOrigin {
-    /// How a stored Journal Transaction records it; none for a Transaction
-    /// Origin that isn't recorded.
-    fn recorded_as(self) -> Option<&'static str> {
+/// The kind of a user action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum UserAction {
+    Created,
+    Edited,
+    /// A drag or a resize in the grid.
+    Moved,
+    Deleted,
+}
+
+impl UserAction {
+    fn recorded_as(self) -> &'static str {
         match self {
-            TransactionOrigin::UserAction => Some("user"),
-            TransactionOrigin::Import => Some("import"),
-            TransactionOrigin::Undo => Some("undo"),
-            TransactionOrigin::IncomingSync => Some("incoming_sync"),
+            UserAction::Created => "created",
+            UserAction::Edited => "edited",
+            UserAction::Moved => "moved",
+            UserAction::Deleted => "deleted",
+        }
+    }
+}
+
+impl TransactionOrigin {
+    /// How a stored Journal Transaction records it, with the kind of a user
+    /// action; none for a Transaction Origin that isn't recorded.
+    fn recorded_as(self) -> Option<(&'static str, Option<&'static str>)> {
+        match self {
+            TransactionOrigin::UserAction { action } => Some(("user", Some(action.recorded_as()))),
+            TransactionOrigin::Import => Some(("import", None)),
+            TransactionOrigin::Undo => Some(("undo", None)),
+            TransactionOrigin::IncomingSync => Some(("incoming_sync", None)),
             TransactionOrigin::FirstSync => None,
         }
     }
 
     /// The Transaction Origin a stored Journal Transaction records as
-    /// `recorded`. One FreeCal didn't write reads as a user action, whose
-    /// Journal Transactions are undone only whole.
-    pub(crate) fn recorded(recorded: &str) -> Self {
+    /// `recorded`, with the kind of a user action `action`. One FreeCal
+    /// didn't write reads as a user action, whose Journal Transactions are
+    /// undone only whole, and a kind it didn't write as an edit.
+    pub(crate) fn recorded(recorded: &str, action: Option<&str>) -> Self {
         match recorded {
             "import" => TransactionOrigin::Import,
             "undo" => TransactionOrigin::Undo,
             "incoming_sync" => TransactionOrigin::IncomingSync,
-            _ => TransactionOrigin::UserAction,
+            _ => TransactionOrigin::UserAction {
+                action: match action {
+                    Some("created") => UserAction::Created,
+                    Some("moved") => UserAction::Moved,
+                    Some("deleted") => UserAction::Deleted,
+                    _ => UserAction::Edited,
+                },
+            },
         }
     }
 
@@ -464,7 +499,7 @@ impl JournalTransaction<'_> {
                 )?;
             }
         }
-        let Some(origin) = self.origin.recorded_as() else {
+        let Some((origin, action)) = self.origin.recorded_as() else {
             return Ok(());
         };
         let journal_transaction = match self.id {
@@ -474,6 +509,7 @@ impl JournalTransaction<'_> {
                 .insert(self.database_transaction.insert_journal_transaction(
                     WRITE_PERMISSION,
                     origin,
+                    action,
                     self.made_at,
                     self.undoes,
                 )?),
@@ -791,7 +827,9 @@ mod tests {
     #[test]
     fn event_rows_find_their_server_object_by_their_uid_whatever_changed_them() {
         for origin in [
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             TransactionOrigin::Import,
             TransactionOrigin::IncomingSync,
         ] {
@@ -821,7 +859,9 @@ mod tests {
 
         record(
             &pulled.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             0,
             |journal_transaction| journal_transaction.replace(pulled.id, &moved),
         )
@@ -841,7 +881,9 @@ mod tests {
 
         let (joined, other) = record(
             &pulled.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             0,
             |journal_transaction| {
                 Ok((
@@ -980,9 +1022,16 @@ mod tests {
             made_at: i64,
             change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
         ) -> T {
-            record(&self.store, TransactionOrigin::UserAction, made_at, change)
-                .unwrap()
-                .value
+            record(
+                &self.store,
+                TransactionOrigin::UserAction {
+                    action: crate::journal::UserAction::Edited,
+                },
+                made_at,
+                change,
+            )
+            .unwrap()
+            .value
         }
 
         fn unsent(&self) -> Vec<UnsentChangeRow> {
@@ -1072,7 +1121,9 @@ mod tests {
 
         let journal_transaction = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             7,
             |journal_transaction| journal_transaction.delete(on_server.id),
         )
@@ -1164,7 +1215,9 @@ mod tests {
 
         let second = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             7,
             |journal_transaction| journal_transaction.create("dentist", &on_server.event),
         );
@@ -1173,7 +1226,9 @@ mod tests {
         });
         let moved_in = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             9,
             |journal_transaction| journal_transaction.replace(other, &on_server.event),
         );
@@ -1207,7 +1262,9 @@ mod tests {
         let on_server = OnServer::new();
         let deleted = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             7,
             |journal_transaction| journal_transaction.delete(on_server.id),
         )
@@ -1242,7 +1299,9 @@ mod tests {
         moved.calendar_id = on_server.local;
         let move_out = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             7,
             |journal_transaction| journal_transaction.replace(on_server.id, &moved),
         )
@@ -1275,7 +1334,9 @@ mod tests {
         let on_server = OnServer::new();
         let both = record(
             &on_server.store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             7,
             |journal_transaction| {
                 journal_transaction.delete(on_server.id)?;

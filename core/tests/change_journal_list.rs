@@ -1,14 +1,14 @@
 //! What the user sees of the Change Journal (ticket 19): the timeline of
 //! Journal Transactions, each with its Events, an Event's History, undoing
-//! a Calendar since a given time, and Session Undo, what Ctrl+Z undoes and
-//! Ctrl+Shift+Z redoes.
+//! a Calendar since a given time, and the Undo History, what Ctrl+Z undoes
+//! and Ctrl+Shift+Z redoes.
 
 mod support;
 
 use freecal_core::{
     Core, Event, ExistingEvents, ImportFile, JournalEventModificationKind, JournalTransactionId,
-    ListedJournalEventModification, ListedJournalTransaction, RepeatEnd, Scope, SessionUndo,
-    SessionUndoStep, Signal, TransactionOrigin, UndoOutcome, UndoTarget,
+    ListedJournalEventModification, ListedJournalTransaction, RepeatEnd, Scope, Signal,
+    TransactionOrigin, UndoHistoryStep, UndoOutcome, UndoTarget, UserAction,
 };
 use support::{Harness, UndoApproved, calendar, date, dentist, draft, event, ics, timed, yoga};
 
@@ -91,6 +91,7 @@ mod the_timeline {
                 calendar_ids: vec![home.id],
                 titles: titles.iter().map(|title| (*title).to_owned()).collect(),
                 undone_per_event: per_event,
+                undo_changed_nothing: false,
             }
         };
         assert_eq!(
@@ -116,7 +117,9 @@ mod the_timeline {
                 ),
                 expected(
                     edited,
-                    TransactionOrigin::UserAction,
+                    TransactionOrigin::UserAction {
+                        action: UserAction::Edited
+                    },
                     None,
                     1,
                     1,
@@ -125,7 +128,9 @@ mod the_timeline {
                 ),
                 expected(
                     created,
-                    TransactionOrigin::UserAction,
+                    TransactionOrigin::UserAction {
+                        action: UserAction::Created
+                    },
                     None,
                     1,
                     0,
@@ -468,36 +473,76 @@ mod undoing_a_calendar_since_a_given_time {
     }
 }
 
-mod session_undo {
+mod the_undo_history {
     use super::*;
 
-    fn step(
-        journal_transaction: JournalTransactionId,
-        user_change: JournalTransactionId,
-    ) -> SessionUndoStep {
-        SessionUndoStep {
-            journal_transaction,
-            user_change: Some(user_change),
-        }
+    /// One step, as the Journal Transaction to undo and the user change it
+    /// undoes or redoes.
+    type Step = Option<(JournalTransactionId, Option<JournalTransactionId>)>;
+
+    fn ids(step: Option<UndoHistoryStep>) -> Step {
+        step.map(|step| {
+            (
+                step.journal_transaction,
+                step.user_change.map(|user_change| user_change.id),
+            )
+        })
+    }
+
+    /// What Ctrl+Z and Ctrl+Shift+Z undo next, in that order.
+    fn steps(core: &Core) -> (Step, Step) {
+        let history = core.undo_history().unwrap();
+        (ids(history.undo), ids(history.redo))
+    }
+
+    fn step(journal_transaction: JournalTransactionId, user_change: JournalTransactionId) -> Step {
+        Some((journal_transaction, Some(user_change)))
     }
 
     #[test]
-    fn holds_nothing_from_an_earlier_launch() {
+    fn outlasts_a_restart() {
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
         let home = calendar(&core, "Home");
-        core.create_event(dentist(home.id)).unwrap();
+        let created = core
+            .create_event(dentist(home.id))
+            .unwrap()
+            .journal_transaction
+            .unwrap();
         drop(core);
 
         let core = harness.open();
 
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: None,
-                redo: None
-            }
-        );
+        assert_eq!(steps(&core), (step(created, created), None));
+    }
+
+    #[test]
+    fn names_the_kind_of_each_user_action() {
+        let harness = Harness::new();
+        let core = harness.open_without_starting_calendars();
+        let home = calendar(&core, "Home");
+        let created = core.create_event(dentist(home.id)).unwrap().value;
+        let action = |core: &Core| match core.undo_history().unwrap().undo.unwrap().user_change {
+            Some(ListedJournalTransaction {
+                origin: TransactionOrigin::UserAction { action },
+                ..
+            }) => action,
+            other => panic!("not a user action: {other:?}"),
+        };
+        assert_eq!(action(&core), UserAction::Created);
+
+        renamed(&core, &created, "Dentist at 9");
+        assert_eq!(action(&core), UserAction::Edited);
+
+        core.reschedule_event(
+            created.id,
+            timed("2026-10-05T12:00:00", "2026-10-05T13:00:00"),
+        )
+        .unwrap();
+        assert_eq!(action(&core), UserAction::Moved);
+
+        core.delete_event(created.id).unwrap();
+        assert_eq!(action(&core), UserAction::Deleted);
     }
 
     #[test]
@@ -509,13 +554,7 @@ mod session_undo {
         let dentist = created.value;
         let created = created.journal_transaction.unwrap();
         let edited = renamed(&core, &dentist, "Dentist at 9");
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(edited, edited)),
-                redo: None
-            }
-        );
+        assert_eq!(steps(&core), (step(edited, edited), None));
 
         let undid_edit = core
             .undo(whole(edited), None)
@@ -527,13 +566,7 @@ mod session_undo {
             .unwrap()
             .journal_transaction
             .unwrap();
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: None,
-                redo: Some(step(undid_create, created))
-            }
-        );
+        assert_eq!(steps(&core), (None, step(undid_create, created)));
 
         let redid_create = core
             .undo(whole(undid_create), None)
@@ -541,11 +574,8 @@ mod session_undo {
             .journal_transaction
             .unwrap();
         assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(redid_create, created)),
-                redo: Some(step(undid_edit, edited))
-            }
+            steps(&core),
+            (step(redid_create, created), step(undid_edit, edited))
         );
 
         let redid_edit = core
@@ -554,13 +584,7 @@ mod session_undo {
             .journal_transaction
             .unwrap();
         assert_eq!(titles(&core), vec!["Dentist at 9"]);
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(redid_edit, edited)),
-                redo: None
-            }
-        );
+        assert_eq!(steps(&core), (step(redid_edit, edited), None));
 
         // Undoing a redo again is an undo, which can be redone.
         let undid_again = core
@@ -569,11 +593,8 @@ mod session_undo {
             .journal_transaction
             .unwrap();
         assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(redid_create, created)),
-                redo: Some(step(undid_again, edited))
-            }
+            steps(&core),
+            (step(redid_create, created), step(undid_again, edited))
         );
     }
 
@@ -597,13 +618,7 @@ mod session_undo {
             .journal_transaction
             .unwrap();
 
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(lunch, lunch)),
-                redo: None
-            }
-        );
+        assert_eq!(steps(&core), (step(lunch, lunch), None));
     }
 
     #[test]
@@ -623,13 +638,7 @@ mod session_undo {
             .journal_transaction
             .unwrap();
 
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(created, created)),
-                redo: Some(step(undone, edited))
-            }
-        );
+        assert_eq!(steps(&core), (step(created, created), step(undone, edited)));
     }
 
     #[test]
@@ -660,11 +669,8 @@ mod session_undo {
             .unwrap();
 
         assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(imported, imported)),
-                redo: Some(step(undid_a, imported))
-            }
+            steps(&core),
+            (step(imported, imported), step(undid_a, imported))
         );
     }
 
@@ -688,16 +694,7 @@ mod session_undo {
             .journal_transaction
             .unwrap();
 
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: None,
-                redo: Some(SessionUndoStep {
-                    journal_transaction: undone,
-                    user_change: None
-                })
-            }
-        );
+        assert_eq!(steps(&core), (None, Some((undone, None))));
     }
 
     #[test]
@@ -722,17 +719,19 @@ mod session_undo {
 
         assert_eq!(undone.journal_transaction, None);
         assert!(matches!(undone.value, UndoOutcome::Undone { ref skipped } if skipped.len() == 1));
-        assert_eq!(
-            core.session_undo().unwrap(),
-            SessionUndo {
-                undo: Some(step(created, created)),
-                redo: None
-            }
+        assert!(
+            core.change_journal()
+                .unwrap()
+                .iter()
+                .any(|listed| listed.id == in_home && listed.undo_changed_nothing)
         );
+        drop(core);
+        let core = harness.open();
+        assert_eq!(steps(&core), (step(created, created), None));
     }
 
     #[test]
-    fn approved_undo_runs_on_the_session_step() {
+    fn approved_undo_runs_on_the_undo_history_step() {
         let harness = Harness::new();
         let core = harness.open_without_starting_calendars();
         let home = calendar(&core, "Home");
@@ -742,13 +741,10 @@ mod session_undo {
             .journal_transaction
             .unwrap();
 
-        let step = core.session_undo().unwrap().undo.unwrap();
+        let step = core.undo_history().unwrap().undo.unwrap();
         core.undo_approved(step.journal_transaction).unwrap();
 
         assert_eq!(titles(&core), Vec::<String>::new());
-        assert_eq!(
-            core.session_undo().unwrap().redo.unwrap().user_change,
-            Some(created)
-        );
+        assert_eq!(steps(&core).1.unwrap().1, Some(created));
     }
 }

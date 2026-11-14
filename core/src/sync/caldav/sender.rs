@@ -430,7 +430,9 @@ mod tests {
         let calendar_id = store.writable_server_calendar();
         record(
             &store,
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             0,
             |journal_transaction| {
                 journal_transaction.create("dentist", &dentist(calendar_id, "Dentist"))?;
@@ -623,7 +625,9 @@ mod tests {
         let change = |change: &dyn Fn(&mut journal::JournalTransaction) -> Result<()>| {
             record(
                 &store.lock().unwrap(),
-                TransactionOrigin::UserAction,
+                TransactionOrigin::UserAction {
+                    action: crate::journal::UserAction::Edited,
+                },
                 0,
                 |journal_transaction| change(journal_transaction),
             )
@@ -632,7 +636,9 @@ mod tests {
         let mut id = None;
         record(
             &store.lock().unwrap(),
-            TransactionOrigin::UserAction,
+            TransactionOrigin::UserAction {
+                action: crate::journal::UserAction::Edited,
+            },
             0,
             |journal_transaction| {
                 id = Some(journal_transaction.create("dentist", &dentist(calendar_id, "Dentist"))?);

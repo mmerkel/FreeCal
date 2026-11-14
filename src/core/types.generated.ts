@@ -312,7 +312,12 @@ titles: Array<string>,
  * Incoming Sync's; a user action's and an undo's are undone only whole
  * (ADR 0009).
  */
-undonePerEvent: boolean, };
+undonePerEvent: boolean,
+/**
+ * Whether undoing it whole changed nothing, every Event skipped; the
+ * Undo History passes over it.
+ */
+undoChangedNothing: boolean, };
 
 /**
  * One dated appearance of an Event in the grid. A single Event has exactly
@@ -417,39 +422,6 @@ export type SendFailure = { "kind": "serverChanged" } | { "kind": "addressTaken"
 export type ServerLogin = { url: string, username: string, };
 
 /**
- * What Ctrl+Z and Ctrl+Shift+Z undo next (new term: Session Undo): the
- * user's own changes of this session, newest first, and the undos made
- * since their last change.
- */
-export type SessionUndo = {
-/**
- * What Ctrl+Z undoes: the newest Journal Transaction of this session
- * that is a user action, an import or a redo and isn't wholly undone.
- */
-undo: SessionUndoStep | null,
-/**
- * What Ctrl+Shift+Z redoes, by undoing it: the newest undo made since
- * the user's last change in this session, and since FreeCal started,
- * that isn't a redo and isn't undone.
- */
-redo: SessionUndoStep | null, };
-
-/**
- * One step of Session Undo.
- */
-export type SessionUndoStep = {
-/**
- * The Journal Transaction to undo whole.
- */
-journalTransaction: JournalTransactionId,
-/**
- * The user action or import the step undoes or redoes, through the
- * undos between; none for an undo of a Calendar since a given time, or
- * of an Incoming Sync.
- */
-userChange: JournalTransactionId | null, };
-
-/**
  * The settings of the Settings dialog, as the Local Store keeps them.
  */
 export type Settings = { appearance: Appearance,
@@ -546,7 +518,40 @@ export type SyncStatuses = { overall: OverallStatus, accounts: Array<AccountSync
  * may write.
  * Snapshot restore and Conflict resolution come with their tickets.
  */
-export type TransactionOrigin = "userAction" | "import" | "undo" | "firstSync" | "incomingSync";
+export type TransactionOrigin = { "kind": "userAction", action: UserAction, } | { "kind": "import" } | { "kind": "undo" } | { "kind": "firstSync" } | { "kind": "incomingSync" };
+
+/**
+ * What Ctrl+Z and Ctrl+Shift+Z undo next, from the Undo History: the
+ * user's own changes, newest first, and the undos made since their last
+ * change.
+ */
+export type UndoHistory = {
+/**
+ * What Ctrl+Z undoes: the newest Journal Transaction that is a user
+ * action, an import or a redo, isn't wholly undone, and whose undo
+ * didn't change nothing.
+ */
+undo: UndoHistoryStep | null,
+/**
+ * What Ctrl+Shift+Z redoes, by undoing it: the newest undo made since
+ * the user's last change that isn't a redo and isn't undone.
+ */
+redo: UndoHistoryStep | null, };
+
+/**
+ * One step of the Undo History.
+ */
+export type UndoHistoryStep = {
+/**
+ * The Journal Transaction to undo whole.
+ */
+journalTransaction: JournalTransactionId,
+/**
+ * The user action or import the step undoes or redoes, through the
+ * undos between, which a toast names; none for an undo of a Calendar
+ * since a given time, or of an Incoming Sync.
+ */
+userChange: ListedJournalTransaction | null, };
 
 /**
  * What an undo did.
@@ -568,6 +573,11 @@ export type UnsentChange = {
  * An instant, in RFC 3339 UTC.
  */
 since: string, sendFailure: SendFailure | null, };
+
+/**
+ * The kind of a user action.
+ */
+export type UserAction = "created" | "edited" | "moved" | "deleted";
 
 /**
  * The views the grid offers. FreeCal opens in month view on first launch,

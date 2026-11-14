@@ -50,8 +50,9 @@ pub use import::{
 };
 pub use journal::{
     Changed, DangerousUndo, JournalEventModificationKind, JournalTransactionId,
-    LaterJournalTransaction, ListedJournalEventModification, ListedJournalTransaction, SessionUndo,
-    SessionUndoStep, SkipReason, SkippedEvent, TransactionOrigin, UndoOutcome, UndoTarget,
+    LaterJournalTransaction, ListedJournalEventModification, ListedJournalTransaction, SkipReason,
+    SkippedEvent, TransactionOrigin, UndoHistory, UndoHistoryStep, UndoOutcome, UndoTarget,
+    UserAction,
 };
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
@@ -106,9 +107,6 @@ pub struct Core {
     sync_requested: Condvar,
     /// Wakes [`Core::send_before_quit`] when the syncs due finished running.
     syncs_ran: Condvar,
-    /// What Session Undo remembers of this session. Never locked together
-    /// with the Store lock.
-    session: Mutex<journal::Session>,
 }
 
 impl Core {
@@ -125,7 +123,6 @@ impl Core {
         let lock = lock_local_store(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
         journal::remove_expired(&store, clock.now().timestamp())?;
-        let session = Mutex::new(journal::Session::now(&store)?);
         let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
             _lock: lock,
@@ -138,7 +135,6 @@ impl Core {
             scheduler: Mutex::new(SyncScheduler::default()),
             sync_requested: Condvar::new(),
             syncs_ran: Condvar::new(),
-            session,
         })
     }
 
@@ -828,7 +824,7 @@ impl Core {
     /// draft has a repeat rule.
     pub fn create_event(&self, draft: EventDraft) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let created = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+        let created = self.record(user_action(UserAction::Created), |journal_transaction| {
             event::create_event(journal_transaction, zone, draft)
         })?;
         self.changed_event(created)
@@ -855,7 +851,7 @@ impl Core {
 
     fn edit_whole(&self, id: EventId, edit: Edit) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
-        let edited = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+        let edited = self.record(edit.user_action(), |journal_transaction| {
             event::edit_event(journal_transaction, zone, id, edit)
         })?;
         self.changed_event(Changed {
@@ -921,7 +917,7 @@ impl Core {
         edit: Edit,
     ) -> Result<Changed<Occurrence>> {
         let zone = self.clock.time_zone();
-        let edited = self.record(TransactionOrigin::UserAction, |journal_transaction| {
+        let edited = self.record(edit.user_action(), |journal_transaction| {
             event::edit_occurrence(
                 journal_transaction,
                 zone,
@@ -956,7 +952,7 @@ impl Core {
     /// one of its Exceptions, that is the whole Recurring Event with all its
     /// Exceptions.
     pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
-        self.record(TransactionOrigin::UserAction, |journal_transaction| {
+        self.record(user_action(UserAction::Deleted), |journal_transaction| {
             Opened::load(journal_transaction, id)?.delete(journal_transaction)
         })
     }
@@ -967,7 +963,7 @@ impl Core {
     /// Exception, and an Exception that changed it is deleted. The only
     /// Occurrence of a single Event is the Event.
     pub fn delete_occurrence(&self, id: EventId, recurrence_id: &str) -> Result<Changed<()>> {
-        self.record(TransactionOrigin::UserAction, |journal_transaction| {
+        self.record(user_action(UserAction::Deleted), |journal_transaction| {
             event::cancel_occurrence(journal_transaction, id, recurrence_id)
         })
     }
@@ -1013,7 +1009,7 @@ impl Core {
     /// Journal Transaction or Event undone already; a Calendar with nothing
     /// to undo since then changes nothing. The undo is a Journal Transaction
     /// itself, and undoing it redoes the change. A whole Journal Transaction
-    /// whose undo changed nothing leaves Session Undo.
+    /// whose undo changed nothing is marked so, and leaves the Undo History.
     pub fn undo(
         &self,
         target: UndoTarget,
@@ -1025,11 +1021,6 @@ impl Core {
             approved,
             self.clock.now().timestamp(),
         )?;
-        if let (UndoTarget::JournalTransaction { id }, None, UndoOutcome::Undone { .. }) =
-            (target, undone.journal_transaction, &undone.value)
-        {
-            self.session().pass_over(id);
-        }
         Ok(self.signal(undone, TransactionOrigin::Undo))
     }
 
@@ -1053,16 +1044,13 @@ impl Core {
         journal::event_history(&self.store(), id)
     }
 
-    /// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Change
-    /// Journal: the user's own changes since FreeCal started, and the undos
-    /// since their last change.
-    pub fn session_undo(&self) -> Result<SessionUndo> {
-        let listed = journal::change_journal(&self.store())?;
-        Ok(self.session().session_undo(&listed))
-    }
-
-    fn session(&self) -> std::sync::MutexGuard<'_, journal::Session> {
-        self.session.lock().unwrap()
+    /// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo
+    /// History: the user's own changes, and the undos since their last
+    /// change.
+    pub fn undo_history(&self) -> Result<UndoHistory> {
+        Ok(journal::undo_history(&journal::change_journal(
+            &self.store(),
+        )?))
     }
 
     /// Runs `change` as one Journal Transaction of `origin` and sends
@@ -1161,4 +1149,9 @@ fn server_accounts_of(store: &Store) -> Result<Vec<AccountId>> {
 /// Every Calendar a server offers, added or not; none without a server.
 fn offered_by(remote: Option<&dyn Remote>) -> Result<Vec<AvailableCalendar>> {
     remote.map_or_else(|| Ok(Vec::new()), Remote::discover)
+}
+
+/// The Transaction Origin of a user action of the kind `action`.
+fn user_action(action: UserAction) -> TransactionOrigin {
+    TransactionOrigin::UserAction { action }
 }

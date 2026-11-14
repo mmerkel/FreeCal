@@ -19,7 +19,7 @@ use super::{
     EventDraft, EventFields, Exception, Loaded, NormalForm, Opened, Source, StoredWhen, new_uid,
     rule,
 };
-use crate::journal::JournalTransaction;
+use crate::journal::{JournalTransaction, TransactionOrigin, UserAction};
 use crate::store::StoredEvent;
 use crate::{CalendarId, CoreError, EventId, Repeat, Result, When};
 
@@ -95,6 +95,18 @@ pub(crate) fn exception_counts(
 pub(crate) enum Edit {
     Draft(EventDraft),
     Reschedule(When),
+}
+
+impl Edit {
+    /// The Transaction Origin of the user action that makes it.
+    pub(crate) fn user_action(&self) -> TransactionOrigin {
+        TransactionOrigin::UserAction {
+            action: match self {
+                Edit::Draft(_) => UserAction::Edited,
+                Edit::Reschedule(_) => UserAction::Moved,
+            },
+        }
+    }
 }
 
 /// The Occurrence that the changed one is now: its Event, title, time and

@@ -228,18 +228,28 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE app_state ADD COLUMN run_in_background INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE app_state ADD COLUMN start_at_login INTEGER NOT NULL DEFAULT 0;
     ",
-    // Ticket 19: what the Change Journal list and an Event's History show.
-    // An undo's Journal Transaction keeps the Journal Transaction it was
-    // asked to undo, none for a Calendar since a given time, so that Session
-    // Undo tells an undo from a redo; no foreign key, as the 90-day removal
-    // may take that one first. A Journal Event Modification keeps the
-    // Calendar and title of the Event Version it made, none when it deleted
-    // the Event. Its History is read by UID. All untrusted when read.
+    // Ticket 19: what the Change Journal list, an Event's History and the
+    // Undo History show. An undo's Journal Transaction keeps the Journal
+    // Transaction it was asked to undo, none for a Calendar since a given
+    // time, so that the Undo History tells an undo from a redo; no foreign
+    // key, as the 90-day removal may take that one first. A Journal Event
+    // Modification keeps the Calendar and title of the Event Version it
+    // made, none when it deleted the Event. Its History is read by UID. All
+    // untrusted when read.
     "
     ALTER TABLE journal_transaction ADD COLUMN undoes INTEGER;
     ALTER TABLE journal_event_modification ADD COLUMN made_calendar_id INTEGER;
     ALTER TABLE journal_event_modification ADD COLUMN made_title TEXT;
     CREATE INDEX journal_event_modification_uid ON journal_event_modification (uid);
+    ",
+    // Ticket 19: the Undo History outlasts a restart. A user action's
+    // Journal Transaction keeps its kind (`UserAction`), which a toast
+    // names; `undo_changed_nothing` marks one whose undo whole changed
+    // nothing, every Event skipped, which the Undo History passes over.
+    // Untrusted when read.
+    "
+    ALTER TABLE journal_transaction ADD COLUMN user_action TEXT;
+    ALTER TABLE journal_transaction ADD COLUMN undo_changed_nothing INTEGER NOT NULL DEFAULT 0;
     ",
 ];
 

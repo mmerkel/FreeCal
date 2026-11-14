@@ -131,19 +131,21 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
-    /// Stores a new Journal Transaction, as `origin` records it, made at
-    /// `made_at`; for an undo, the Journal Transaction `undoes` it was asked
-    /// to undo.
+    /// Stores a new Journal Transaction, as `origin` and the kind of a user
+    /// action `action` record it, made at `made_at`; for an undo, the
+    /// Journal Transaction `undoes` it was asked to undo.
     pub(crate) fn insert_journal_transaction(
         &self,
         _: &JournalWritePermission,
         origin: &str,
+        action: Option<&str>,
         made_at: i64,
         undoes: Option<JournalTransactionId>,
     ) -> Result<JournalTransactionId> {
         self.tx.execute(
-            "INSERT INTO journal_transaction (origin, made_at, undoes) VALUES (?1, ?2, ?3)",
-            params![origin, made_at, undoes.map(|id| id.0)],
+            "INSERT INTO journal_transaction (origin, user_action, made_at, undoes) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![origin, action, made_at, undoes.map(|id| id.0)],
         )?;
         Ok(JournalTransactionId(self.tx.last_insert_rowid()))
     }
@@ -196,6 +198,20 @@ impl DatabaseTransaction<'_> {
                     .and_then(|fields| fields.recurrence_id.as_ref())
                     .map(RecurrenceId::as_obtained),
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Marks that undoing the Journal Transaction `id` whole changed nothing,
+    /// so that the Undo History passes over it.
+    pub(crate) fn mark_undo_changed_nothing(
+        &self,
+        _: &JournalWritePermission,
+        id: JournalTransactionId,
+    ) -> Result<()> {
+        self.tx.execute(
+            "UPDATE journal_transaction SET undo_changed_nothing = 1 WHERE id = ?1",
+            [id.0],
         )?;
         Ok(())
     }
