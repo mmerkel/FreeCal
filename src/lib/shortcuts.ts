@@ -14,14 +14,24 @@ export type ShortcutAction =
   | 'today'
   | 'sync'
   | 'settings'
-  | 'sidebar';
+  | 'sidebar'
+  | 'undo'
+  | 'redo';
 
 interface Shortcut {
   /** `KeyboardEvent.key`. */
   key: string;
-  /** Pressed together with Ctrl. Such a shortcut also acts while typing. */
+  /**
+   * Pressed together with Ctrl. Such a shortcut also acts while typing,
+   * unless a text field has it too. Its letter counts in either case.
+   */
   ctrl?: boolean;
+  /** Pressed together with Shift too; only for a shortcut with Ctrl. */
+  shift?: boolean;
 }
+
+/** The shortcuts a text field has too, which don't act while typing. */
+const TEXT_FIELD_ACTIONS: readonly ShortcutAction[] = ['undo', 'redo'];
 
 /** Each action's keys; hints show the first one. */
 const SHORTCUTS: Record<ShortcutAction, readonly Shortcut[]> = {
@@ -36,18 +46,32 @@ const SHORTCUTS: Record<ShortcutAction, readonly Shortcut[]> = {
   sync: [{ key: 'r' }],
   settings: [{ key: ',', ctrl: true }],
   sidebar: [{ key: 'F9' }],
+  undo: [{ key: 'z', ctrl: true }],
+  redo: [
+    { key: 'z', ctrl: true, shift: true },
+    { key: 'y', ctrl: true },
+  ],
 };
 
-/** The shortcut `key` presses, if any. Alt, Meta and held-down keys never count. */
+/**
+ * The shortcut `key` presses, if any, and whether it acts while typing.
+ * Alt, Meta and held-down keys never count.
+ */
 export function shortcutFor(
   key: KeyboardEvent,
-): { action: ShortcutAction; ctrl: boolean } | undefined {
+): { action: ShortcutAction; whileTyping: boolean } | undefined {
   if (key.altKey || key.metaKey || key.repeat) return undefined;
   for (const [action, shortcuts] of Object.entries(SHORTCUTS) as [ShortcutAction, Shortcut[]][]) {
-    const found = shortcuts.find(
-      (shortcut) => shortcut.key === key.key && Boolean(shortcut.ctrl) === key.ctrlKey,
+    const found = shortcuts.find((shortcut) =>
+      shortcut.ctrl
+        ? key.ctrlKey &&
+          key.key.toLowerCase() === shortcut.key &&
+          Boolean(shortcut.shift) === key.shiftKey
+        : !key.ctrlKey && key.key === shortcut.key,
     );
-    if (found) return { action, ctrl: Boolean(found.ctrl) };
+    if (found) {
+      return { action, whileTyping: Boolean(found.ctrl) && !TEXT_FIELD_ACTIONS.includes(action) };
+    }
   }
   return undefined;
 }
@@ -56,6 +80,7 @@ export function shortcutFor(
 export function shortcutKeys(action: ShortcutAction): string {
   const [first] = SHORTCUTS[action];
   const key = first.key.toUpperCase();
+  if (first.shift) return t('shortcut.ctrlShift', { key });
   return first.ctrl ? t('shortcut.ctrl', { key }) : key;
 }
 

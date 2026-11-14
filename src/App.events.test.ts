@@ -360,7 +360,7 @@ test('cancelling an edit returns to the unchanged details', async () => {
   expect(core.callsOf('editEvent')).toEqual([]);
 });
 
-test('deleting an Event asks first, then deletes it through the core', async () => {
+test('deleting an Event deletes it at once, and the toast’s Undo brings it back', async () => {
   const user = userEvent.setup();
   const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
   const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
@@ -370,37 +370,47 @@ test('deleting an Event asks first, then deletes it through the core', async () 
   const details = await openOccurrence(user, core, doomed);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
-  expect(ask).toHaveTextContent('“⁨Doomed⁩” will be deleted.');
-  expect(within(ask).queryByRole('button', { name: 'Close' })).toBeNull();
-  expect(core.callsOf('deleteEvent')).toEqual([]);
-  await user.click(within(ask).getByRole('button', { name: 'Delete' }));
 
+  expect(screen.queryByRole('alertdialog')).toBeNull();
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(core.callsOf('deleteEvent')).toEqual([[doomed.id]]);
   occurrencesChanged(core, [home], [kept]);
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'Doomed' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'Kept' })).toBeInTheDocument();
+  const toast = screen.getByRole('status');
+  expect(toast).toHaveTextContent('Event deleted');
+
+  await user.click(within(toast).getByRole('button', { name: 'Undo' }));
+
+  expect(core.callsOf('undo')).toHaveLength(1);
+  await waitFor(() =>
+    expect(screen.getByRole('status')).toHaveTextContent('Undone: deleting “⁨Doomed⁩”.'),
+  );
+  expect(
+    within(screen.getByRole('status')).getByRole('button', { name: 'Redo' }),
+  ).toBeInTheDocument();
 });
 
-test('Cancel and Escape in the delete question keep the Event', async () => {
+test('Ctrl+Z and Ctrl+Shift+Z undo and redo, but not while a dialog is open', async () => {
   const user = userEvent.setup();
-  const kept = event({ calendarId: home.id, title: 'Kept', when: monday });
-  const core = firstLaunch({ calendars: [home], events: [kept] });
+  const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
+  const core = firstLaunch({ calendars: [home], events: [doomed] });
   await showApp(core);
-  const details = await openOccurrence(user, core, kept);
-
+  const details = await openOccurrence(user, core, doomed);
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
-  expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
-  await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
-  expect(screen.queryByRole('alertdialog')).toBeNull();
-  await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-  expect(screen.queryByRole('alertdialog')).toBeNull();
-  expect(screen.getByRole('dialog', { name: 'Kept' })).toBeInTheDocument();
-  expect(core.callsOf('deleteEvent')).toEqual([]);
+  await user.keyboard('{Control>}z{/Control}');
+  await waitFor(() => expect(core.callsOf('undo')).toHaveLength(1));
+  await user.keyboard('{Control>}{Shift>}Z{/Shift}{/Control}');
+  await waitFor(() => expect(core.callsOf('undo')).toHaveLength(2));
+  expect(screen.getByRole('status')).toHaveTextContent('Redone: deleting “⁨Doomed⁩”.');
+
+  await user.keyboard('{Control>},{/Control}');
+  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+  await user.keyboard('{Control>}z{/Control}');
+
+  expect(core.callsOf('undo')).toHaveLength(2);
 });
 
 test('“Occurrences changed” re-fetches the visible range and keeps the open Event', async () => {
@@ -694,7 +704,7 @@ test('a refused drag names a hostile Event and Calendar as text', async () => {
   expect(document.querySelector('img, script')).toBeNull();
 });
 
-test('the delete question names a hostile Event as text', async () => {
+test('the toast after undoing a delete names a hostile Event as text', async () => {
   const user = userEvent.setup();
   const hostileTitle = event({ calendarId: home.id, title: hostile.title, when: monday });
   const core = firstLaunch({ calendars: [home], events: [hostileTitle] });
@@ -705,11 +715,16 @@ test('the delete question names a hostile Event as text', async () => {
     hostileTitle,
     hostile.title.replace(/\r\n/g, ' '),
   );
-
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
-  expect(ask.querySelector('.body p')!.textContent).toBe(hostile.expected.deleteQuestion);
+  await user.keyboard('{Control>}z{/Control}');
+
+  await waitFor(() =>
+    expect(screen.getByRole('status').querySelector('p')!.textContent).toBe(
+      hostile.expected.undoneDelete,
+    ),
+  );
   expect(document.querySelector('img, script')).toBeNull();
 });
 
@@ -763,7 +778,7 @@ test('deleting an Occurrence asks, and “This event” deletes only that one', 
   const { core, grid, details } = await openYoga(user, 1);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  const ask = screen.getByRole('alertdialog', { name: 'Delete a repeating event' });
   expect(ask).toHaveTextContent('Delete only this event, or all events it repeats with?');
   await user.click(within(ask).getByRole('button', { name: 'This event' }));
 
@@ -881,7 +896,7 @@ test('an Exception edits without a repeat, and Delete still asks', async () => {
   const details = await openOccurrence(user, core, exception);
 
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
-  const ask = screen.getByRole('alertdialog', { name: 'Delete this event?' });
+  const ask = screen.getByRole('alertdialog', { name: 'Delete a repeating event' });
   expect(within(ask).getByRole('button', { name: 'This event' })).toBeInTheDocument();
   await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
   await user.click(within(details).getByRole('button', { name: 'Edit' }));

@@ -27,8 +27,9 @@
   import StartupError from './lib/StartupError.svelte';
   import Toast from './lib/Toast.svelte';
   import Toolbar from './lib/Toolbar.svelte';
+  import UndoDialog from './lib/UndoDialog.svelte';
   import { whenForShortcut } from './lib/when';
-  import { WindowDialogs } from './lib/windowDialogs.svelte';
+  import { actionText, WindowDialogs } from './lib/windowDialogs.svelte';
   import { WindowModel } from './lib/windowModel.svelte';
   import WorkingDialog from './lib/WorkingDialog.svelte';
   import QuitDialog from './lib/QuitDialog.svelte';
@@ -130,6 +131,8 @@
     sync: syncNow,
     settings: () => dialogs.openSettings(),
     sidebar: () => model.toggleSidebar(),
+    undo: () => void dialogs.undo(),
+    redo: () => void dialogs.redo(),
   };
 
   function showView(view: View) {
@@ -137,8 +140,8 @@
   }
 
   /**
-   * Shortcuts act unless a dialog or menu is open. Those without Ctrl also
-   * wait while the user is typing.
+   * Shortcuts act unless a dialog or menu is open. Most of those without
+   * Ctrl also wait while the user is typing, and those a text field has too.
    */
   function onkeydown(key: KeyboardEvent) {
     const shortcut = shortcutFor(key);
@@ -149,7 +152,7 @@
     const typing = 'input, textarea, select, [contenteditable]';
     if (
       target instanceof Element &&
-      target.closest(shortcut.ctrl ? '[role="menu"]' : `${typing}, [role="menu"]`)
+      target.closest(shortcut.whileTyping ? '[role="menu"]' : `${typing}, [role="menu"]`)
     ) {
       return;
     }
@@ -309,13 +312,27 @@
     />
   {/if}
 
+  {#if dialogs.undoQuestion}
+    {@const question = dialogs.undoQuestion}
+    <UndoDialog
+      danger={question.danger}
+      action={actionText(question.action)}
+      redo={question.redo}
+      onanswer={(approved) => dialogs.answerUndo(approved)}
+    />
+  {/if}
+
   {#if dialogs.toast}
     {@const shown = dialogs.toast}
-    <Toast
-      message={shown.message}
-      action={shown.undo && { label: t('import.undo'), run: shown.undo }}
-      ondismiss={() => dialogs.dismissToast()}
-    />
+    <!-- A new toast is a new Toast, whose time starts anew. -->
+    {#key shown}
+      <Toast
+        message={shown.message}
+        action={shown.action}
+        stays={shown.stays}
+        ondismiss={() => dialogs.dismissToast()}
+      />
+    {/key}
   {/if}
   {#if dialogs.working}
     <WorkingDialog message={dialogs.working} />

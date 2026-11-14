@@ -3,8 +3,9 @@
   Calendar, with Edit and Delete icons for Events of writable Calendars
   without guests; the others say they are read-only and why: a Read-only
   Calendar, or guests, with where to edit it instead. An Event with an
-  Unsent Change says "Not yet synced", and why. Delete asks first, and for an
-  Occurrence of a Recurring Event whether to delete it alone or all. A click
+  Unsent Change says "Not yet synced", and why. Delete deletes at once, as it
+  can be undone; for an Event that repeats it asks whether to delete the
+  Occurrence alone or all. A click
   on the backdrop closes the details.
 -->
 <script lang="ts">
@@ -66,7 +67,7 @@
   const recurring = $derived(
     repeat !== undefined || event.recurrenceId !== null || ondeleteoccurrence !== undefined,
   );
-  /** Whether Delete is asking for confirmation. */
+  /** Whether Delete is asking which Occurrences to delete. */
   let asking = $state(false);
 
   /** Closes the question, then deletes as answered. */
@@ -93,7 +94,7 @@
         class="icon-button"
         aria-label={t('event.delete')}
         title={t('event.delete')}
-        onclick={() => (asking = true)}
+        onclick={() => (recurring ? (asking = true) : ondelete())}
       >
         <Trash size={16} aria-hidden="true" />
       </button>
@@ -162,12 +163,8 @@
 
   {#if asking}
     <Dialog role="alertdialog" title={t('event.deleteTitle')} onclose={() => (asking = false)}>
-      {#if recurring}
-        <p>{t('event.deleteRecurring', { title })}</p>
-        <p>{t('event.deleteWhich')}</p>
-      {:else}
-        <p>{t('event.deleteBody', { title })}</p>
-      {/if}
+      <p>{t('event.deleteRecurring', { title })}</p>
+      <p>{t('event.deleteWhich')}</p>
       {#snippet actions()}
         <button
           type="button"
@@ -177,19 +174,13 @@
         >
           {t('common.cancel')}
         </button>
-        {#if recurring}
-          <button type="button" class="button danger" onclick={() => answer(ondelete)}>
-            {t('event.deleteAll')}
-          </button>
-          {#if ondeleteoccurrence}
-            {@const deleteOccurrence = ondeleteoccurrence}
-            <button type="button" class="button danger" onclick={() => answer(deleteOccurrence)}>
-              {t('event.deleteThis')}
-            </button>
-          {/if}
-        {:else}
-          <button type="button" class="button danger" onclick={() => answer(ondelete)}>
-            {t('event.delete')}
+        <button type="button" class="button danger" onclick={() => answer(ondelete)}>
+          {t('event.deleteAll')}
+        </button>
+        {#if ondeleteoccurrence}
+          {@const deleteOccurrence = ondeleteoccurrence}
+          <button type="button" class="button danger" onclick={() => answer(deleteOccurrence)}>
+            {t('event.deleteThis')}
           </button>
         {/if}
       {/snippet}

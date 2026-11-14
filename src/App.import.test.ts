@@ -209,10 +209,10 @@ test('after an import, Undo undoes its Journal Transaction under “Working…�
   ]);
   undone.resolve();
   await waitFor(() =>
-    expect(screen.getByRole('status')).toHaveTextContent('The import of “⁨work.ics⁩” was undone.'),
+    expect(screen.getByRole('status')).toHaveTextContent('Undone: the import of “⁨work.ics⁩”.'),
   );
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(within(screen.getByRole('status')).queryByRole('button', { name: 'Undo' })).toBeNull();
+  expect(within(screen.getByRole('status')).getByRole('button', { name: 'Redo' })).toBeVisible();
 
   await user.click(within(screen.getByRole('status')).getByRole('button', { name: 'Dismiss' }));
   expect(screen.queryByRole('status')).not.toBeInTheDocument();

@@ -2,16 +2,17 @@ import type { CoreApi } from '../core/CoreApi';
 import type {
   Calendar,
   CalendarId,
+  DangerousUndo,
   EventDraft,
   EventId,
   ExceptionCounts,
   ExistingEvents,
   JournalTransactionId,
-  UndoTarget,
   When,
 } from '../core/types';
 import { errorText, t, tCount } from '../i18n';
 import { sameRepeat } from './repeat';
+import { SessionUndo, type SessionUndoResult, type UserAction } from './sessionUndo';
 import { skippedText } from './skippedEvents';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
 import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
@@ -49,10 +50,22 @@ interface ScopePrompt {
   counts?: ExceptionCounts;
 }
 
-/** The message at the bottom of the window, with its Undo if it has one. */
+/**
+ * The message at the bottom of the window, with its action, such as Undo,
+ * if it has one. A confirmation goes after a while; a toast reporting a
+ * problem `stays` until dismissed.
+ */
 interface Toast {
   message: string;
-  undo?: () => void;
+  action?: { label: string; run: () => void };
+  stays: boolean;
+}
+
+/** The question before a Dangerous Undo or redo of Session Undo. */
+interface UndoQuestion {
+  danger: DangerousUndo;
+  action: UserAction;
+  redo: boolean;
 }
 
 /**
@@ -76,6 +89,10 @@ export class WindowDialogs {
   #failure = $state<string>();
   #rescheduleFailure = $state<string>();
   #toast = $state<Toast>();
+  readonly #sessionUndo: SessionUndo;
+  #undoQuestion = $state<UndoQuestion>();
+  /** Answers the open Undo Question. */
+  #answerUndo: ((approved: boolean) => void) | undefined;
   /** Counts editor sessions, so that each one starts from its own draft. */
   #editorSession = $state(0);
   /** FreeCal's version, read when About first opens. */
@@ -101,17 +118,46 @@ export class WindowDialogs {
     this.#writableCalendars = $derived(
       model.directory?.calendars.filter((calendar) => canEdit(calendar, false)) ?? [],
     );
+    this.#sessionUndo = new SessionUndo(core, {
+      approve: (danger, action, redo) =>
+        new Promise((resolve) => {
+          this.#undoQuestion = { danger, action, redo };
+          this.#answerUndo = (approved) => {
+            this.#undoQuestion = undefined;
+            this.#answerUndo = undefined;
+            resolve(approved);
+          };
+        }),
+      // An import's undo can take a while; others are quick.
+      running: (action, redo, run) =>
+        action.kind === 'imported'
+          ? this.#whileWorking(
+              t(redo ? 'working.redoingImport' : 'working.undoingImport', { file: action.file }),
+              run,
+            )
+          : run(),
+    });
   }
 
   /** What is open over the grid, apart from the Scope Prompt. */
   get open() {
     return this.#open;
   }
-  /** Whether anything is open over the grid, the Scope Prompt and the quit dialog too. */
+  /**
+   * Whether anything is open over the grid, the Scope Prompt, the question
+   * before a Dangerous Undo and the quit dialog too.
+   */
   get isOpen() {
     return (
-      this.#open !== undefined || this.#scopePrompt !== undefined || this.#quitting !== undefined
+      this.#open !== undefined ||
+      this.#scopePrompt !== undefined ||
+      this.#undoQuestion !== undefined ||
+      this.#quitting !== undefined
     );
+  }
+  /** The question before a Dangerous Undo or redo, while it asks. */
+  get undoQuestion() {
+    return this.#undoQuestion;
   }
   get scopePrompt() {
     return this.#scopePrompt;
@@ -258,23 +304,26 @@ export class WindowDialogs {
    */
   async save(draft: EventDraft) {
     const editor = this.#open;
+    const title = draft.title;
     if (editor?.kind === 'creating') {
-      await this.#core.createEvent(draft);
+      const { journalTransaction } = await this.#core.createEvent(draft);
       this.close();
+      this.#recorded(journalTransaction, { kind: 'created', title }, t('undo.done.created'));
       return;
     }
     if (editor?.kind !== 'editing') return;
     const { id, recurrenceId } = editor;
     if (recurrenceId === null) {
-      const { value } = await this.#core.editEvent(id, draft);
+      const { journalTransaction, value } = await this.#core.editEvent(id, draft);
       this.openDetails(id, value.recurrenceId);
+      this.#recorded(journalTransaction, { kind: 'changed', title }, t('undo.done.changed'));
       return;
     }
     const change = sameRepeat(draft.repeat, editor.draft.repeat) ? 'edit' : 'editRepeat';
     const choice = await this.#askScope(change, id, recurrenceId);
     if (choice === null) return;
     const { scope, exceptionsToo } = choice;
-    const { value } = await this.#core.editOccurrence(
+    const { journalTransaction, value } = await this.#core.editOccurrence(
       id,
       recurrenceId,
       scope,
@@ -282,6 +331,7 @@ export class WindowDialogs {
       draft,
     );
     this.openDetails(value.eventId, value.recurrenceId);
+    this.#recorded(journalTransaction, { kind: 'changed', title }, t('undo.done.changed'));
   }
 
   /** Leaves the editor: back to the details of an existing Event, else closed. */
@@ -301,7 +351,8 @@ export class WindowDialogs {
    * core fails, and the grid puts the Occurrence back.
    */
   async reschedule(id: EventId, recurrenceId: string | null, when: When) {
-    let write: () => Promise<unknown>;
+    const title = this.#occurrence(id, recurrenceId)?.title ?? '';
+    let write: () => Promise<{ journalTransaction: JournalTransactionId | null }>;
     if (recurrenceId === null) {
       write = () => this.#core.rescheduleEvent(id, when);
     } else {
@@ -311,8 +362,9 @@ export class WindowDialogs {
       write = () => this.#core.rescheduleOccurrence(id, recurrenceId, scope, exceptionsToo, when);
     }
     try {
-      await write();
+      const { journalTransaction } = await write();
       this.#rescheduleFailure = undefined;
+      this.#recorded(journalTransaction, { kind: 'moved', title }, t('undo.done.moved'));
     } catch (error) {
       this.#rescheduleFailure = t('event.rescheduleFailed', { error: errorText(error) });
       throw error;
@@ -332,9 +384,12 @@ export class WindowDialogs {
     const title = dragged.title || t('event.untitled');
     const why = whyReadOnly(calendar, dragged.hasGuests);
     if (why === 'calendarReadOnly') {
-      this.#toast = { message: t('event.readOnlyDrag', { title, calendar: calendar.name }) };
+      this.#toast = {
+        message: t('event.readOnlyDrag', { title, calendar: calendar.name }),
+        stays: false,
+      };
     } else if (why === 'eventHasGuests') {
-      this.#toast = { message: t('event.hasGuestsDrag', { title }) };
+      this.#toast = { message: t('event.hasGuestsDrag', { title }), stays: false };
     }
   }
 
@@ -428,21 +483,15 @@ export class WindowDialogs {
       const outcome = await this.#whileWorking(t('working.importing', { file }), () =>
         this.#core.runImport(calendarId, existing),
       );
-      const { journalTransaction } = outcome;
       this.close();
-      this.#toast = {
-        message: t('import.done', {
-          file,
-          imported: String(outcome.imported),
-          updated: String(outcome.updated),
-          skipped: String(outcome.skipped),
-        }),
-        // An import that changed nothing has no Journal Transaction to undo.
-        undo:
-          journalTransaction === null
-            ? undefined
-            : () => void this.#undoImport(file, journalTransaction),
-      };
+      const message = t('import.done', {
+        file,
+        imported: String(outcome.imported),
+        updated: String(outcome.updated),
+        skipped: String(outcome.skipped),
+      });
+      // An import that changed nothing has no Journal Transaction to undo.
+      this.#recorded(outcome.journalTransaction, { kind: 'imported', file }, message);
     } catch (error) {
       this.#importFailure = t('import.failed', { error: errorText(error) });
     }
@@ -450,6 +499,27 @@ export class WindowDialogs {
 
   dismissToast() {
     this.#toast = undefined;
+  }
+
+  /**
+   * Ctrl+Z: undoes the user's latest change of this session not undone yet,
+   * or the change made as `journalTransaction`, asking first if it is a
+   * Dangerous Undo; the toast says what it did and offers Redo.
+   */
+  async undo(journalTransaction?: JournalTransactionId) {
+    this.dismissToast();
+    this.#reportUndo(await this.#sessionUndo.undo(journalTransaction), false);
+  }
+
+  /** Ctrl+Shift+Z: redoes the latest undo of Session Undo, or the undo made as `journalTransaction`. */
+  async redo(journalTransaction?: JournalTransactionId) {
+    this.dismissToast();
+    this.#reportUndo(await this.#sessionUndo.redo(journalTransaction), true);
+  }
+
+  /** The user approved the Dangerous Undo asked about, or not. */
+  answerUndo(approved: boolean) {
+    this.#answerUndo?.(approved);
   }
 
   /**
@@ -503,48 +573,66 @@ export class WindowDialogs {
   }
 
   /**
-   * Undoes an import, saying "Working…" meanwhile, and names the Events it
-   * skipped; a failed undo can be retried. Until ticket 70 asks before a
-   * Dangerous Undo, this Undo runs one that is dangerous only for how many
-   * Events it undoes, and refuses one that would undo later changes too.
+   * After the user's change `action`, made as `journalTransaction`, the
+   * toast says `message` and offers Undo; Ctrl+Z undoes it too. A change
+   * that changed nothing has neither; only an import's toast says what it
+   * changed then.
    */
-  async #undoImport(file: string, id: JournalTransactionId) {
-    this.dismissToast();
-    const target: UndoTarget = { kind: 'journalTransaction', id };
-    try {
-      const { journalTransaction, value } = await this.#whileWorking(
-        t('working.undoingImport', { file }),
-        async () => {
-          const asked = await this.#core.undo(target, null);
-          if (asked.value.kind !== 'dangerous') return asked;
-          const { danger } = asked.value;
-          const undoesMore = danger.laterJournalTransactions.length > 0 || danger.serverChanges > 0;
-          return undoesMore ? asked : this.#core.undo(target, danger);
-        },
-      );
-      if (value.kind === 'dangerous') {
-        this.#toast = {
-          message: t('import.undoFailed', {
-            file,
-            error: t('error.changedSinceJournalTransaction'),
-          }),
-        };
-        return;
-      }
-      const calendars = this.#model.directory?.calendars ?? [];
-      this.#toast = {
-        message: [
-          t(journalTransaction === null ? 'import.nothingUndone' : 'import.undone', { file }),
-          ...value.skipped.map((skipped) => skippedText(skipped, calendars)),
-        ].join(' '),
-      };
-    } catch (error) {
-      // Undo can succeed later, such as once the Calendar is writable again.
-      this.#toast = {
-        message: t('import.undoFailed', { file, error: errorText(error) }),
-        undo: () => void this.#undoImport(file, id),
-      };
+  #recorded(journalTransaction: JournalTransactionId | null, action: UserAction, message: string) {
+    if (journalTransaction === null) {
+      if (action.kind === 'imported') this.#toast = { message, stays: false };
+      return;
     }
+    this.#sessionUndo.recorded(journalTransaction, action);
+    this.#toast = {
+      message,
+      action: { label: t('toast.undo'), run: () => void this.undo(journalTransaction) },
+      stays: false,
+    };
+  }
+
+  /**
+   * Says in the toast what an undo or redo of Session Undo did, with the
+   * Events it skipped, and offers to take it back or try again.
+   */
+  #reportUndo(result: SessionUndoResult, redo: boolean) {
+    if (result.kind === 'cancelled' || result.kind === 'busy') return;
+    if (result.kind === 'nothing') {
+      this.#toast = {
+        message: t(redo ? 'undo.nothingToRedo' : 'undo.nothingToUndo'),
+        stays: false,
+      };
+      return;
+    }
+    const action = actionText(result.action);
+    const again = () => void (redo ? this.redo() : this.undo());
+    if (result.kind === 'failed') {
+      const error = errorText(result.error);
+      this.#toast = {
+        message: t(redo ? 'undo.redoFailed' : 'undo.undoFailed', { action, error }),
+        action: result.again
+          ? { label: t(redo ? 'toast.redo' : 'toast.undo'), run: again }
+          : undefined,
+        stays: true,
+      };
+      return;
+    }
+    const { changed, skipped } = result;
+    const calendars = this.#model.directory?.calendars ?? [];
+    const done = changed
+      ? t(redo ? 'undo.redone' : 'undo.undone', { action })
+      : t(redo ? 'undo.nothingRedone' : 'undo.nothingUndone', { action });
+    this.#toast = {
+      message: [done, ...skipped.map((event) => skippedText(event, calendars))].join(' '),
+      // Taking it back is the other one of the latest.
+      action: changed
+        ? {
+            label: t(redo ? 'toast.undo' : 'toast.redo'),
+            run: () => void (redo ? this.undo() : this.redo()),
+          }
+        : undefined,
+      stays: !changed || skipped.length > 0,
+    };
   }
 
   /** Runs `run`, saying `message` under "Working…" until it settles. */
@@ -564,10 +652,13 @@ export class WindowDialogs {
     this.#open = next;
   }
 
-  async #deleting(write: () => Promise<unknown>) {
+  /** Deletes as `write` does the Event whose details are open, then closes them. */
+  async #deleting(write: () => Promise<{ journalTransaction: JournalTransactionId | null }>) {
+    const title = this.#model.opened?.title ?? '';
     try {
-      await write();
+      const { journalTransaction } = await write();
       this.close();
+      this.#recorded(journalTransaction, { kind: 'deleted', title }, t('undo.done.deleted'));
     } catch (error) {
       this.#failure = t('event.deleteFailed', { error: errorText(error) });
     }
@@ -599,4 +690,11 @@ export class WindowDialogs {
       release?.();
     }
   }
+}
+
+/** How a toast or the question before a Dangerous Undo names the user's change `action`. */
+export function actionText(action: UserAction): string {
+  return action.kind === 'imported'
+    ? t('undo.action.imported', { file: action.file })
+    : t(`undo.action.${action.kind}`, { title: action.title || t('event.untitled') });
 }

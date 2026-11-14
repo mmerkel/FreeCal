@@ -1,6 +1,9 @@
 <!--
   A message at the bottom of the window about something that just happened,
-  with an optional action such as Undo. It stays until dismissed or replaced.
+  with an optional action such as Undo (spec: "Toasts"). A confirmation goes
+  after 5 seconds, counted again from the start once the pointer leaves it
+  and it loses the focus; one that `stays`, reporting a problem, stays until
+  dismissed. A new toast is a new component, so that its time starts anew.
 -->
 <script lang="ts">
   import X from '@lucide/svelte/icons/x';
@@ -10,13 +13,40 @@
     message: string;
     /** The action's button, if there is one. */
     action?: { label: string; run: () => void };
+    /** Whether it stays until dismissed, as one reporting a problem does. */
+    stays: boolean;
     ondismiss: () => void;
   }
 
-  let { message, action, ondismiss }: Props = $props();
+  let { message, action, stays, ondismiss }: Props = $props();
+
+  /** How long a confirmation shows, in milliseconds. */
+  const SHOWN_FOR = 5000;
+
+  let pointedAt = $state(false);
+  let focused = $state(false);
+
+  $effect(() => {
+    if (stays || pointedAt || focused) return;
+    const timer = setTimeout(ondismiss, SHOWN_FOR);
+    return () => clearTimeout(timer);
+  });
+
+  /** Whether the focus left for somewhere outside the toast. */
+  function focusLeft(event: FocusEvent) {
+    const to = event.relatedTarget;
+    focused = to instanceof Node && (event.currentTarget as Node).contains(to);
+  }
 </script>
 
-<div class="toast" role="status">
+<div
+  class="toast"
+  role="status"
+  onmouseenter={() => (pointedAt = true)}
+  onmouseleave={() => (pointedAt = false)}
+  onfocusin={() => (focused = true)}
+  onfocusout={focusLeft}
+>
   <p>{message}</p>
   {#if action}
     <button type="button" class="button outline" onclick={action.run}>{action.label}</button>
