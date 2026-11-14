@@ -265,3 +265,7 @@ _Avoid_: Modal manager, dialog stack, overlays
 **Scope Prompt**:
 The open question which Occurrences of a Recurring Event a change applies to (this one, this and following, or all of them), with the counts of the Exceptions it would change once read. Window Dialogs holds it; the Scope Dialog shows it.
 _Avoid_: Scope question, recurrence dialog
+
+**Window Shown**:
+Whether the window has been shown since FreeCal started. Once it has, the shell no longer shows the window by itself when the frontend is slow to start, since the user may have closed it to the tray.
+_Avoid_: Shown once, first show

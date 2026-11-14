@@ -81,6 +81,12 @@ struct StartupFailure(ErrorCode);
 #[derive(Default)]
 struct StartupFailed(AtomicBool);
 
+/// Whether the window has been shown since FreeCal started. Once it has,
+/// the fallback of [`show_main_window_later`] does nothing: the user may have
+/// closed the window to the tray since.
+#[derive(Default)]
+struct WindowShown(AtomicBool);
+
 /// The file the user picked to import, with its latest preview. It is held
 /// here, so that the window never handles paths or the parsed Events: it
 /// can't make the shell read any other file.
@@ -679,7 +685,9 @@ fn show_main_window_later(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(SHOW_WINDOW_FALLBACK);
-        let _ = show_main_window(&handle);
+        if !handle.state::<WindowShown>().0.load(Ordering::SeqCst) {
+            let _ = show_main_window(&handle);
+        }
     });
 }
 
@@ -695,8 +703,12 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Tells the Sync Scheduler that the window is shown or hidden, so that it
-/// polls less often while FreeCal runs in the background.
+/// polls less often while FreeCal runs in the background. Every path that
+/// shows the window comes through here, so it also records [`WindowShown`].
 fn set_window_open(app: &AppHandle, open: bool) {
+    if open {
+        app.state::<WindowShown>().0.store(true, Ordering::SeqCst);
+    }
     if let Some(core) = app.try_state::<Core>() {
         core.set_window_open(open);
     }
@@ -836,6 +848,7 @@ fn main() {
         .manage(PickedImport::default())
         .manage(SessionEnding::default())
         .manage(StartupFailed::default())
+        .manage(WindowShown::default())
         .setup(|app| {
             // The XDG data directory, e.g. ~/.local/share/io.github.mmerkel.FreeCal (ADR 0004, 0006).
             let data_dir = app.path().app_data_dir()?;
