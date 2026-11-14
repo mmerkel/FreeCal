@@ -138,9 +138,24 @@ async fn update_settings(app: AppHandle, update: SettingsUpdate) -> CommandResul
             // A panic there is a bug, as it would be in a command of its own.
             .expect("turning start at login on or off panicked")?;
     }
-    app.state::<Core>()
+    let settings = app
+        .state::<Core>()
         .update_settings(update)
-        .map_err(ErrorCode::from)
+        .map_err(ErrorCode::from)?;
+    show_tray_icon(&app, settings.run_in_background);
+    Ok(settings)
+}
+
+/// Puts FreeCal's icon in the tray while background running is on, and
+/// takes it out while it is off: the icon stands for keeping running.
+fn show_tray_icon(app: &AppHandle, on: bool) {
+    if !on {
+        app.remove_tray_by_id(tray::TRAY);
+    } else if app.tray_by_id(tray::TRAY).is_none()
+        && let Err(error) = tray::show(app, on_tray_choice)
+    {
+        eprintln!("FreeCal can't show its tray icon: {error}");
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -595,11 +610,8 @@ fn tray_present(app: &AppHandle) -> bool {
     // Other systems are for later.
     #[cfg(not(target_os = "linux"))]
     let desktop_tray = false;
-    if desktop_tray
-        && app.tray_by_id(tray::TRAY).is_none()
-        && let Err(error) = tray::show(app, on_tray_choice)
-    {
-        eprintln!("FreeCal can't show its tray icon: {error}");
+    if desktop_tray {
+        show_tray_icon(app, true);
     }
     desktop_tray && app.tray_by_id(tray::TRAY).is_some()
 }
@@ -824,10 +836,14 @@ fn main() {
                         }
                     });
                     run_scheduled_syncs(app.handle());
-                    // Without its icon, closing the window quits.
-                    if let Err(error) = tray::show(app.handle(), on_tray_choice) {
-                        eprintln!("FreeCal can't show its tray icon: {error}");
-                    }
+                    // Without its icon, closing the window quits. When the
+                    // settings can't be read, there is none, as closing
+                    // then quits anyway.
+                    let run_in_background = app
+                        .state::<Core>()
+                        .settings()
+                        .is_ok_and(|settings| settings.run_in_background);
+                    show_tray_icon(app.handle(), run_in_background);
                 }
                 Err(error) => {
                     eprintln!("FreeCal could not open its Local Store: {error}");

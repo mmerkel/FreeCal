@@ -211,7 +211,7 @@ test('Quit ends FreeCal', async () => {
   expect(core.callsOf('quit')).toEqual([[]]);
 });
 
-test('the Background section has both switches as stored, with the tray hint', async () => {
+test('the Background section has both switches as stored', async () => {
   const core = firstLaunch();
   core.answer('settings', { ...DEFAULT_SETTINGS, runInBackground: true, startAtLogin: false });
   const { user } = await showApp(core);
@@ -222,13 +222,10 @@ test('the Background section has both switches as stored, with the tray hint', a
   });
 
   const keepRunning = within(background).getByRole('switch', {
-    name: 'Keep running in the background',
+    name: 'Keep running in the system tray',
   });
   expect(keepRunning).toBeChecked();
   expect(keepRunning).toBeEnabled();
-  expect(keepRunning).toHaveAccessibleDescription(
-    'Needs a system tray; without one, closing quits',
-  );
   expect(within(background).getByRole('switch', { name: 'Start at login' })).not.toBeChecked();
 });
 
@@ -237,7 +234,7 @@ test('turning background running off writes only that setting', async () => {
   core.answer('updateSettings', { ...DEFAULT_SETTINGS, runInBackground: false });
 
   await user.keyboard('{Control>},{/Control}');
-  const keepRunning = screen.getByRole('switch', { name: 'Keep running in the background' });
+  const keepRunning = screen.getByRole('switch', { name: 'Keep running in the system tray' });
   await user.click(keepRunning);
 
   expect(keepRunning).not.toBeChecked();

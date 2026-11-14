@@ -49,24 +49,18 @@
       {/each}
     </div>
   </fieldset>
-  <!-- A tray is only looked for when the window closes, so the switch for
-       background running is always enabled and says what it needs. -->
   <fieldset class="setting">
     <legend>{t('settings.background')}</legend>
     <div class="switches">
-      <div>
-        <label class="check">
-          <input
-            type="checkbox"
-            role="switch"
-            checked={settings.runInBackground}
-            aria-describedby="{id}-tray-hint"
-            onchange={(event) => onchange({ runInBackground: event.currentTarget.checked })}
-          />
-          {t('settings.runInBackground')}
-        </label>
-        <p id="{id}-tray-hint" class="note hint">{t('settings.runInBackgroundHint')}</p>
-      </div>
+      <label class="check">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={settings.runInBackground}
+          onchange={(event) => onchange({ runInBackground: event.currentTarget.checked })}
+        />
+        {t('settings.runInBackground')}
+      </label>
       <!-- Disabled while the desktop is asked, which may show its own dialog. -->
       <label class="check">
         <input
@@ -156,12 +150,6 @@
 
   .switches input {
     margin: 0;
-  }
-
-  /* Under the switch's words, past the box (WebKitGTK's is 13px wide);
-     more specific than the dialog's paragraphs. */
-  .switches .hint {
-    margin: var(--space-1) 0 0 calc(13px + var(--space-3));
   }
 
   .failure {
