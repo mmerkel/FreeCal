@@ -269,6 +269,16 @@ export const en = {
   'import.undo': 'Undo',
   'import.undone': 'The import of “\u2068{file}\u2069” was undone.',
   'import.undoFailed': 'The import of “\u2068{file}\u2069” couldn’t be undone: {error}',
+  'import.nothingUndone': 'Nothing of the import of “\u2068{file}\u2069” was undone.',
+  'undo.skipped.readOnlyCalendar':
+    'Can’t undo “\u2068{title}\u2069”: “\u2068{calendar}\u2069” is read-only.',
+  'undo.skipped.readOnly': 'Can’t undo “\u2068{title}\u2069”: its calendar is read-only.',
+  'undo.skipped.hasGuests':
+    'Can’t undo “\u2068{title}\u2069”: it has guests, so it can’t be changed in FreeCal.',
+  'undo.skipped.changedTogetherWith':
+    'Can’t undo “\u2068{title}\u2069”: it was changed together with “\u2068{with}\u2069”, which can’t be undone.',
+  'undo.skipped.notInChangeJournal':
+    'Can’t undo “\u2068{title}\u2069”: its current version isn’t in the Change Journal of the Local Store.',
   'working.title': 'Working…',
   'working.sending.one': 'Sending {count} change…',
   'working.sending.other': 'Sending {count} changes…',
@@ -321,6 +331,7 @@ export const en = {
   'error.journalTransactionNotFound': 'the change is no longer in the Change Journal',
   'error.changedSinceJournalTransaction': 'events it changed were changed since',
   'error.alreadyUndone': 'it was undone already',
+  'error.undoneOnlyWhole': 'this change can only be undone whole',
   'error.notLocalAccount': 'this account’s calendars come from its server',
   'error.notLocalCalendar': 'this calendar comes from a server; remove it from FreeCal instead',
   'error.notServerCalendar': 'this calendar lives only on this computer; delete it instead',

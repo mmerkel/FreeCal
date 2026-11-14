@@ -198,13 +198,15 @@ test('after an import, Undo undoes its Journal Transaction under “Working…�
 
   const toast = await screen.findByRole('status');
   expect(toast).toHaveTextContent('Imported “⁨work.ics⁩”: 1 added, 1 updated, 0 skipped.');
-  const undone = core.pending('undoJournalTransaction');
+  const undone = core.pending('undo');
 
   await user.click(within(toast).getByRole('button', { name: 'Undo' }));
 
   const working = await screen.findByRole('dialog', { name: 'Working…' });
   expect(within(working).getByText('Undoing the import of “⁨work.ics⁩”…')).toBeInTheDocument();
-  expect(core.callsOf('undoJournalTransaction')).toEqual([[journalTransactionId(7)]]);
+  expect(core.callsOf('undo')).toEqual([
+    [{ kind: 'journalTransaction', id: journalTransactionId(7) }, null],
+  ]);
   undone.resolve();
   await waitFor(() =>
     expect(screen.getByRole('status')).toHaveTextContent('The import of “⁨work.ics⁩” was undone.'),

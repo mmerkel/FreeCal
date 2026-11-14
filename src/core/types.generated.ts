@@ -94,12 +94,36 @@ export type Changed<T> = { journalTransaction: JournalTransactionId | null, valu
 export type Colour = string;
 
 /**
+ * Why an undo is a Dangerous Undo, which runs only once the user approved
+ * it.
+ */
+export type DangerousUndo = {
+/**
+ * The later Journal Transactions it also undoes, oldest first.
+ */
+laterJournalTransactions: Array<LaterJournalTransaction>,
+/**
+ * How many of the Events it undoes have a change from a server among
+ * the changes undone.
+ */
+serverChanges: number,
+/**
+ * Whether it changes more Events of a Calendar than the Mass-Change
+ * Guard's thresholds allow.
+ */
+exceedsMassChangeGuard: boolean,
+/**
+ * How many Events it changes.
+ */
+events: number, };
+
+/**
  * A failure as it crosses the application interface: a code the frontend
  * translates through its i18n layer, with the names of files it is about.
  * Most codes stand for a [`CoreError`]; the last ones are failures of the
  * shell's own commands.
  */
-export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventHasGuests" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "unreadableServerObject" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "journalTransactionNotFound" } | { "code": "changedSinceJournalTransaction" } | { "code": "alreadyUndone" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "writesRefused" } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" } | { "code": "startAtLoginRefused" } | { "code": "startAtLoginFailed" };
+export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirectoryFailed" } | { "code": "localStoreInUse" } | { "code": "accountNotFound" } | { "code": "calendarNotFound" } | { "code": "calendarReadOnly" } | { "code": "eventHasGuests" } | { "code": "eventNotFound" } | { "code": "endBeforeStart" } | { "code": "invalidRepeat" } | { "code": "occurrenceNotFound" } | { "code": "unreadableEventTime" } | { "code": "unreadableServerObject" } | { "code": "emptyCalendarName" } | { "code": "invalidColour" } | { "code": "localAccountCannotBeRemoved" } | { "code": "newerLocalStore" } | { "code": "unknownProvider" } | { "code": "importUnreadable", file: string, } | { "code": "importNotCalendar", file: string, } | { "code": "importZipWithoutCalendars", file: string, } | { "code": "importTooLarge", file: string, } | { "code": "journalTransactionNotFound" } | { "code": "changedSinceJournalTransaction" } | { "code": "alreadyUndone" } | { "code": "undoneOnlyWhole" } | { "code": "notLocalAccount" } | { "code": "notLocalCalendar" } | { "code": "notServerCalendar" } | { "code": "calendarNotAvailable" } | { "code": "invalidServerUrl" } | { "code": "wrongCredentials" } | { "code": "serverUnreachable" } | { "code": "secureConnectionFailed" } | { "code": "notCalDavServer" } | { "code": "serverRefused", status: number, message: string, } | { "code": "writesRefused" } | { "code": "keyringUnavailable" } | { "code": "passwordNotInKeyring" } | { "code": "redirectedElsewhere", url: string, } | { "code": "noFileToImport" } | { "code": "linkNotAllowed" } | { "code": "linkNotOpened" } | { "code": "windowNotShown" } | { "code": "startAtLoginRefused" } | { "code": "startAtLoginFailed" };
 
 /**
  * An Event with everything its details and editor show.
@@ -208,6 +232,19 @@ export type ImportSummary = { calendarId: CalendarId, newEvents: number, existin
  * A Journal Transaction: what undoes a change, or changes made together.
  */
 export type JournalTransactionId = number & { readonly __brand: "JournalTransactionId" };
+
+/**
+ * A later Journal Transaction an undo also undoes, part or whole.
+ */
+export type LaterJournalTransaction = { id: JournalTransactionId,
+/**
+ * When it was made, in Unix seconds.
+ */
+madeAt: number,
+/**
+ * The titles of the Events it undoes of it.
+ */
+titles: Array<string>, };
 
 /**
  * One dated appearance of an Event in the grid. A single Event has exactly
@@ -349,6 +386,16 @@ export type SidebarState = { shown: boolean, width: number | null, };
 export type Signal = { "kind": "calendarsChanged" } | { "kind": "occurrencesChanged", calendarIds: Array<CalendarId>, } | { "kind": "dateChanged", date: string, } | { "kind": "accountSyncStatusChanged" } & AccountSyncStatus | { "kind": "calendarSyncStatusChanged" } & CalendarSyncStatus;
 
 /**
+ * Why an undo skips an Event.
+ */
+export type SkipReason = { "kind": "readOnlyCalendar", calendarId: CalendarId, } | { "kind": "hasGuests" } | { "kind": "notInChangeJournal" } | { "kind": "changedTogetherWith", title: string, };
+
+/**
+ * An Event an undo leaves as it is (new term: Skipped Event).
+ */
+export type SkippedEvent = { title: string, reason: SkipReason, };
+
+/**
  * An Event's description or location, ready to show and to edit.
  */
 export type StructuredText = {
@@ -392,6 +439,16 @@ unsentChanges: number, };
  * status, as the window reads them on starting.
  */
 export type SyncStatuses = { overall: OverallStatus, accounts: Array<AccountSyncStatus>, calendars: Array<CalendarSyncStatus>, };
+
+/**
+ * What an undo did.
+ */
+export type UndoOutcome = { "kind": "undone", skipped: Array<SkippedEvent>, } | { "kind": "dangerous", danger: DangerousUndo, skipped: Array<SkippedEvent>, };
+
+/**
+ * What an undo picks (new term: Undo Target).
+ */
+export type UndoTarget = { "kind": "journalTransaction", id: JournalTransactionId, } | { "kind": "event", journalTransaction: JournalTransactionId, eventId: EventId, };
 
 /**
  * The Unsent Change of an Event as the window gets it: since when it

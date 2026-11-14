@@ -6,6 +6,7 @@ import type {
   Calendar,
   CalendarId,
   Changed,
+  DangerousUndo,
   Event,
   ErrorCode,
   EventDraft,
@@ -21,7 +22,8 @@ import type {
   SidebarState,
   Signal,
   SyncStatuses,
-  JournalTransactionId,
+  UndoOutcome,
+  UndoTarget,
   View,
   When,
 } from './types';
@@ -199,11 +201,14 @@ export interface CoreApi {
   /** Lets go of the picked file without importing it. */
   discardImport(): Promise<void>;
   /**
-   * Undoes a Journal Transaction whole, refused while an Event it changed
-   * was changed since. A Journal Transaction is undone once; the undo is a
-   * Journal Transaction itself, which redoes it.
+   * Undoes a Journal Transaction, or one Event of an import's or a sync's,
+   * with the later changes of its Events first, newest first. Events it
+   * can't undo are skipped and named. A Dangerous Undo changes nothing and
+   * says why, unless `approved` is the danger it has. A Journal Event
+   * Modification is undone once; the undo is a Journal Transaction itself,
+   * which redoes it.
    */
-  undoJournalTransaction(id: JournalTransactionId): Promise<Changed<null>>;
+  undo(target: UndoTarget, approved: DangerousUndo | null): Promise<Changed<UndoOutcome>>;
   /** Opens an `http(s)://` or `mailto:` link in the system browser. */
   openLink(url: string): Promise<void>;
   /** FreeCal's version, such as `0.1.0`. */

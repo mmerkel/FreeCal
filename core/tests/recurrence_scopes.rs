@@ -3,6 +3,8 @@
 
 mod support;
 
+use support::UndoApproved;
+
 use freecal_core::{
     CalendarId, Core, CoreError, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
     ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
@@ -69,7 +71,7 @@ fn moving_this_event_changes_only_that_occurrence() {
         second.recurrence_id
     );
 
-    core.undo_journal_transaction(moved.journal_transaction.unwrap())
+    core.undo_approved(moved.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(on(&core, "2026-10-12"), second);
 }
@@ -294,7 +296,7 @@ fn moving_all_events_moves_every_occurrence_by_as_much_and_keeps_the_exceptions(
     );
     assert_eq!(moved.value, on(&core, "2026-10-06"));
 
-    core.undo_journal_transaction(moved.journal_transaction.unwrap())
+    core.undo_approved(moved.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(shown(&core)[0].1, first.when);
     assert_eq!(shown(&core).len(), 3);
@@ -510,7 +512,7 @@ fn moving_this_and_following_events_splits_the_recurring_event() {
         Some(RepeatEnd::Count { count: 3 })
     );
 
-    core.undo_journal_transaction(moved.journal_transaction.unwrap())
+    core.undo_approved(moved.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(on(&core, "2026-10-12"), second);
     assert_eq!(shown(&core).len(), 3);
@@ -1228,7 +1230,7 @@ fn exceptions_too_for_all_events_take_the_change_and_shift_by_as_much() {
         ]
     );
 
-    core.undo_journal_transaction(edited.journal_transaction.unwrap())
+    core.undo_approved(edited.journal_transaction.unwrap())
         .unwrap();
     let titles: Vec<_> = shown(&core).into_iter().map(|(title, _)| title).collect();
     assert_eq!(titles, ["Yoga", "Yoga outside", "Yoga"]);
@@ -1527,7 +1529,7 @@ fn an_event_moved_into_a_calendar_with_its_uid_gets_a_new_one() {
     assert_eq!(moved.value.calendar_id, work);
     assert_eq!(moved.value.title, "Dentist");
 
-    core.undo_journal_transaction(moved.journal_transaction.unwrap())
+    core.undo_approved(moved.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(titles(core, home), ["Dentist"]);
     assert_eq!(titles(core, work), ["Dentist at work"]);

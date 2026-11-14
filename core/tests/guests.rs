@@ -5,7 +5,10 @@
 
 mod support;
 
-use freecal_core::{Colour, CoreError, ExistingEvents, ImportFile, Scope, StartedBy};
+use freecal_core::{
+    Colour, CoreError, ExistingEvents, ImportFile, Scope, SkipReason, SkippedEvent, StartedBy,
+    UndoOutcome, UndoTarget,
+};
 use support::radicale::{NewCalendar, Radicale, User};
 use support::{OnServer, date, draft, ics, on, put_events, timed};
 
@@ -180,6 +183,54 @@ fn an_attendee_with_an_address_the_server_gives_for_the_user_is_no_guest() {
         user,
         &[("mine", meeting("mine", &user_attendees))],
     ));
+}
+
+/// The sync's other Events are undone.
+#[test]
+fn undoing_a_sync_skips_an_event_with_guests() {
+    let server = OnServer::writable_with(&[("meeting", meeting("meeting", ""))]);
+    let renamed = String::from_utf8(meeting("meeting", GUEST))
+        .unwrap()
+        .replace("SUMMARY:meeting", "SUMMARY:renamed")
+        .into_bytes();
+    server
+        .radicale
+        .put_event(&server.user, &server.url, "meeting", renamed);
+    server
+        .radicale
+        .put_event(&server.user, &server.url, "other", meeting("other", ""));
+    let synced = server
+        .core
+        .sync_account(server.account, StartedBy::FreeCal)
+        .unwrap();
+    let target = UndoTarget::JournalTransaction {
+        id: synced[0].journal_transaction.unwrap(),
+    };
+    let UndoOutcome::Dangerous { danger, .. } = server.core.undo(target, None).unwrap().value
+    else {
+        panic!("an undo of a sync is a Dangerous Undo");
+    };
+
+    let ran = server.core.undo(target, Some(&danger)).unwrap();
+
+    assert_eq!(
+        ran.value,
+        UndoOutcome::Undone {
+            skipped: vec![SkippedEvent {
+                title: "renamed".to_owned(),
+                reason: SkipReason::HasGuests,
+            }]
+        }
+    );
+    assert!(server.has_guests("renamed"));
+    let titles: Vec<_> = server
+        .core
+        .occurrences(date("2026-10-01"), date("2026-11-01"))
+        .unwrap()
+        .into_iter()
+        .map(|occurrence| occurrence.title)
+        .collect();
+    assert_eq!(titles, ["renamed"]);
 }
 
 #[test]

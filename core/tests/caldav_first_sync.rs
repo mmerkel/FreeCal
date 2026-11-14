@@ -1,5 +1,7 @@
 mod support;
 
+use support::UndoApproved;
+
 use std::sync::{Arc, Mutex, Weak};
 
 use freecal_core::{
@@ -209,7 +211,7 @@ mod original_server_data {
             )
             .unwrap();
         assert_eq!(core.original_server_data(moved.value.id).unwrap(), None);
-        core.undo_journal_transaction(moved.journal_transaction.unwrap())
+        core.undo_approved(moved.journal_transaction.unwrap())
             .unwrap();
 
         assert!(pulled.is_some());
@@ -223,7 +225,7 @@ mod original_server_data {
         let pulled = core.original_server_data(id).unwrap();
 
         let deleted = core.delete_event(id).unwrap();
-        core.undo_journal_transaction(deleted.journal_transaction.unwrap())
+        core.undo_approved(deleted.journal_transaction.unwrap())
             .unwrap();
 
         assert!(pulled.is_some());

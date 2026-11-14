@@ -193,15 +193,30 @@ impl DatabaseTransaction<'_> {
         Ok(())
     }
 
-    /// Marks every Journal Event Modification of `journal_transaction` undone.
-    pub(crate) fn mark_undone(
+    /// Marks the Journal Event Modification `id` undone.
+    pub(crate) fn mark_undone(&self, _: &JournalWritePermission, id: i64) -> Result<()> {
+        self.tx.execute(
+            "UPDATE journal_event_modification SET undone = 1 WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    /// Deletes the Journal Transactions made before `made_at` (Unix seconds),
+    /// with their Journal Event Modifications.
+    pub(crate) fn delete_journal_before(
         &self,
         _: &JournalWritePermission,
-        journal_transaction: JournalTransactionId,
+        made_at: i64,
     ) -> Result<()> {
         self.tx.execute(
-            "UPDATE journal_event_modification SET undone = 1 WHERE journal_transaction_id = ?1",
-            [journal_transaction.0],
+            "DELETE FROM journal_event_modification WHERE journal_transaction_id IN \
+             (SELECT id FROM journal_transaction WHERE made_at < ?1)",
+            [made_at],
+        )?;
+        self.tx.execute(
+            "DELETE FROM journal_transaction WHERE made_at < ?1",
+            [made_at],
         )?;
         Ok(())
     }

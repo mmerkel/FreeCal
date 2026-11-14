@@ -7,10 +7,12 @@ import type {
   ExceptionCounts,
   ExistingEvents,
   JournalTransactionId,
+  UndoTarget,
   When,
 } from '../core/types';
 import { errorText, t, tCount } from '../i18n';
 import { sameRepeat } from './repeat';
+import { skippedText } from './skippedEvents';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
 import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
 import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
@@ -500,14 +502,42 @@ export class WindowDialogs {
     this.#core.discardImport().catch(() => {});
   }
 
-  /** Undoes an import, saying "Working…" meanwhile; a failed undo can be retried. */
+  /**
+   * Undoes an import, saying "Working…" meanwhile, and names the Events it
+   * skipped; a failed undo can be retried. Until ticket 70 asks before a
+   * Dangerous Undo, this Undo runs one that is dangerous only for how many
+   * Events it undoes, and refuses one that would undo later changes too.
+   */
   async #undoImport(file: string, id: JournalTransactionId) {
     this.dismissToast();
+    const target: UndoTarget = { kind: 'journalTransaction', id };
     try {
-      await this.#whileWorking(t('working.undoingImport', { file }), () =>
-        this.#core.undoJournalTransaction(id),
+      const { journalTransaction, value } = await this.#whileWorking(
+        t('working.undoingImport', { file }),
+        async () => {
+          const asked = await this.#core.undo(target, null);
+          if (asked.value.kind !== 'dangerous') return asked;
+          const { danger } = asked.value;
+          const undoesMore = danger.laterJournalTransactions.length > 0 || danger.serverChanges > 0;
+          return undoesMore ? asked : this.#core.undo(target, danger);
+        },
       );
-      this.#toast = { message: t('import.undone', { file }) };
+      if (value.kind === 'dangerous') {
+        this.#toast = {
+          message: t('import.undoFailed', {
+            file,
+            error: t('error.changedSinceJournalTransaction'),
+          }),
+        };
+        return;
+      }
+      const calendars = this.#model.directory?.calendars ?? [];
+      this.#toast = {
+        message: [
+          t(journalTransaction === null ? 'import.nothingUndone' : 'import.undone', { file }),
+          ...value.skipped.map((skipped) => skippedText(skipped, calendars)),
+        ].join(' '),
+      };
     } catch (error) {
       // Undo can succeed later, such as once the Calendar is writable again.
       this.#toast = {

@@ -738,6 +738,97 @@ export const samples = {
       }
     }
   ],
+  UndoTarget: [
+    {
+      "kind": "journalTransaction",
+      "id": 4
+    },
+    {
+      "kind": "event",
+      "journalTransaction": 4,
+      "eventId": 3
+    }
+  ],
+  LaterJournalTransaction: [
+    {
+      "id": 5,
+      "madeAt": 1791100800,
+      "titles": [
+        "Dentist"
+      ]
+    }
+  ],
+  DangerousUndo: [
+    {
+      "laterJournalTransactions": [
+        {
+          "id": 5,
+          "madeAt": 1791100800,
+          "titles": [
+            "Dentist"
+          ]
+        }
+      ],
+      "serverChanges": 3,
+      "exceedsMassChangeGuard": true,
+      "events": 412
+    }
+  ],
+  SkipReason: [
+    {
+      "kind": "readOnlyCalendar",
+      "calendarId": 2
+    },
+    {
+      "kind": "hasGuests"
+    },
+    {
+      "kind": "notInChangeJournal"
+    },
+    {
+      "kind": "changedTogetherWith",
+      "title": "Yoga"
+    }
+  ],
+  SkippedEvent: [
+    {
+      "title": "Team meeting",
+      "reason": {
+        "kind": "notInChangeJournal"
+      }
+    }
+  ],
+  UndoOutcome: [
+    {
+      "kind": "undone",
+      "skipped": [
+        {
+          "title": "Team meeting",
+          "reason": {
+            "kind": "notInChangeJournal"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "dangerous",
+      "danger": {
+        "laterJournalTransactions": [
+          {
+            "id": 5,
+            "madeAt": 1791100800,
+            "titles": [
+              "Dentist"
+            ]
+          }
+        ],
+        "serverChanges": 3,
+        "exceedsMassChangeGuard": true,
+        "events": 412
+      },
+      "skipped": []
+    }
+  ],
   ErrorCode: [
     {
       "code": "localStoreFailed"
@@ -817,6 +908,9 @@ export const samples = {
     },
     {
       "code": "alreadyUndone"
+    },
+    {
+      "code": "undoneOnlyWhole"
     },
     {
       "code": "notLocalAccount"
@@ -929,5 +1023,11 @@ type Samples = {
   JournalTransactionId: Unbranded<T.JournalTransactionId>[];
   ImportOutcome: Unbranded<T.ImportOutcome>[];
   Changed: Unbranded<T.Changed<T.Event>>[];
+  UndoTarget: Unbranded<T.UndoTarget>[];
+  LaterJournalTransaction: Unbranded<T.LaterJournalTransaction>[];
+  DangerousUndo: Unbranded<T.DangerousUndo>[];
+  SkipReason: Unbranded<T.SkipReason>[];
+  SkippedEvent: Unbranded<T.SkippedEvent>[];
+  UndoOutcome: Unbranded<T.UndoOutcome>[];
   ErrorCode: Unbranded<T.ErrorCode>[];
 };

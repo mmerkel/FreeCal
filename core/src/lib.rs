@@ -13,6 +13,7 @@ mod guests;
 mod import;
 mod journal;
 mod keyring;
+mod mass_change_guard;
 mod read_only;
 mod remote;
 mod settings;
@@ -47,7 +48,10 @@ pub use import::{
     ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, ImportedEvent,
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
-pub use journal::{Changed, JournalTransactionId};
+pub use journal::{
+    Changed, DangerousUndo, JournalTransactionId, LaterJournalTransaction, SkipReason,
+    SkippedEvent, UndoOutcome, UndoTarget,
+};
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
 pub use settings::{Appearance, Settings, SettingsUpdate};
@@ -116,6 +120,7 @@ impl Core {
         std::fs::create_dir_all(data_dir)?;
         let lock = lock_local_store(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
+        journal::remove_expired(&store, clock.now().timestamp())?;
         let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
             _lock: lock,
@@ -993,13 +998,25 @@ impl Core {
         })
     }
 
-    /// Undoes a Journal Transaction whole: every Event it changed gets its
-    /// previous Event Version back under the same identity. Refused while an
-    /// Event changed since, and for a Journal Transaction undone already. The
-    /// undo is a Journal Transaction itself, and undoing it redoes the
-    /// change.
-    pub fn undo_journal_transaction(&self, id: JournalTransactionId) -> Result<Changed<()>> {
-        let undone = journal::undo(&self.store(), id, self.clock.now().timestamp())?;
+    /// Undoes `target` per Event (ADR 0009): every Event it picks gets its
+    /// previous Event Version back under the same identity, after the later
+    /// changes of that Event are undone. Events that can't be undone are
+    /// skipped and named in the outcome. A Dangerous Undo changes nothing
+    /// and says why, unless `approved` is that same danger, which the user
+    /// confirmed. Refused for one Event of a user action, and for a target
+    /// undone already. The undo is a Journal Transaction itself, and undoing
+    /// it redoes the change.
+    pub fn undo(
+        &self,
+        target: UndoTarget,
+        approved: Option<&DangerousUndo>,
+    ) -> Result<Changed<UndoOutcome>> {
+        let undone = journal::undo(
+            &self.store(),
+            target,
+            approved,
+            self.clock.now().timestamp(),
+        )?;
         Ok(self.signal(undone, TransactionOrigin::Undo))
     }
 

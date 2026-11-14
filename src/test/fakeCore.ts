@@ -1,6 +1,14 @@
 import type { CoreApi } from '../core/CoreApi';
 import { samples } from '../core/samples.generated';
-import type { Changed, Event, ErrorCode, Occurrence, Signal, Unbranded } from '../core/types';
+import type {
+  Changed,
+  Event,
+  ErrorCode,
+  Occurrence,
+  Signal,
+  UndoOutcome,
+  Unbranded,
+} from '../core/types';
 
 type Method = keyof CoreApi;
 type Args<M extends Method> = Parameters<CoreApi[M]>;
@@ -138,7 +146,7 @@ export class FakeCore {
     previewImport: () => first(samples.ImportSummary),
     runImport: () => first(samples.ImportOutcome),
     discardImport: () => undefined,
-    undoJournalTransaction: () => changed(null),
+    undo: () => changed<UndoOutcome>({ kind: 'undone', skipped: [] }),
     openLink: () => undefined,
     // A version is no type of the interface, so it has no sample.
     version: () => '0.0.0',

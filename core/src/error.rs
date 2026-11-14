@@ -61,6 +61,8 @@ pub enum CoreError {
     ChangedSinceJournalTransaction(JournalTransactionId),
     #[error("Journal Transaction {0:?} is undone already")]
     AlreadyUndone(JournalTransactionId),
+    #[error("Journal Transaction {0:?} is a user action's, undone only whole")]
+    UndoneOnlyWhole(JournalTransactionId),
     #[error("Account {0:?} gets its Calendars from its server")]
     NotLocalAccount(AccountId),
     #[error("Calendar {0:?} comes from a server and is removed, not deleted")]
@@ -136,6 +138,7 @@ impl CoreError {
                 ErrorCode::ChangedSinceJournalTransaction
             }
             CoreError::AlreadyUndone(_) => ErrorCode::AlreadyUndone,
+            CoreError::UndoneOnlyWhole(_) => ErrorCode::UndoneOnlyWhole,
             CoreError::NotLocalAccount(_) => ErrorCode::NotLocalAccount,
             CoreError::NotLocalCalendar(_) => ErrorCode::NotLocalCalendar,
             CoreError::NotServerCalendar(_) => ErrorCode::NotServerCalendar,
@@ -210,10 +213,14 @@ pub enum ErrorCode {
     /// A change to undo is no longer in the Change Journal, as when its
     /// Calendar was deleted.
     JournalTransactionNotFound,
-    /// A change to undo can't be: an Event it changed was changed since.
+    /// A change to undo can't be: an Event Version it puts back would join
+    /// another Event of its UID in its Calendar that came since.
     ChangedSinceJournalTransaction,
     /// A change to undo was undone already.
     AlreadyUndone,
+    /// One Event of a change was picked for undo, but the change is a user
+    /// action's, whose Events are undone only together.
+    UndoneOnlyWhole,
     /// Calendars can be created only in the Local Account; a server
     /// Account's come from its server.
     NotLocalAccount,
@@ -324,6 +331,7 @@ impl ErrorCode {
             ErrorCode::JournalTransactionNotFound,
             ErrorCode::ChangedSinceJournalTransaction,
             ErrorCode::AlreadyUndone,
+            ErrorCode::UndoneOnlyWhole,
             ErrorCode::NotLocalAccount,
             ErrorCode::NotLocalCalendar,
             ErrorCode::NotServerCalendar,

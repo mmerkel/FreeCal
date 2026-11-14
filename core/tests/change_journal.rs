@@ -1,8 +1,10 @@
 //! The Change Journal: every change to an Event is a Journal Transaction
 //! that undoes it exactly, and an undo is a Journal Transaction too, which
-//! redoes it.
+//! redoes it. Undo per Event is in `undo_per_event.rs`.
 
 mod support;
+
+use support::UndoApproved;
 
 use freecal_core::{
     Calendar, CalendarId, Core, CoreError, Event, ExistingEvents, ImportFile, JournalTransactionId,
@@ -32,13 +34,6 @@ fn changed(calendar_ids: &[CalendarId]) -> Vec<Signal> {
     vec![Signal::OccurrencesChanged {
         calendar_ids: calendar_ids.to_vec(),
     }]
-}
-
-fn make_read_only(harness: &Harness, calendar: &Calendar) {
-    harness.arrange_local_store(&format!(
-        "UPDATE calendar SET read_only = 1 WHERE id = {}",
-        calendar.id.0
-    ));
 }
 
 fn import(
@@ -86,7 +81,7 @@ fn undoes_exactly(
     assert_ne!(contents(core), before, "the change changed something");
     harness.signals.clear();
 
-    let undone = core.undo_journal_transaction(journal_transaction).unwrap();
+    let undone = core.undo_approved(journal_transaction).unwrap();
 
     assert!(undone.journal_transaction.is_some());
     assert_eq!(contents(core), before);
@@ -269,109 +264,26 @@ fn undoing_the_undo_redoes_and_an_undone_journal_transaction_is_undone_once() {
         .journal_transaction
         .unwrap();
     let undo = core
-        .undo_journal_transaction(deleted)
+        .undo_approved(deleted)
         .unwrap()
         .journal_transaction
         .unwrap();
     assert_eq!(contents(&core), std::slice::from_ref(&dentist));
     harness.signals.clear();
 
-    let again = core.undo_journal_transaction(deleted);
-    let redo = core.undo_journal_transaction(undo).unwrap();
+    let again = core.undo_approved(deleted);
+    let redo = core.undo_approved(undo).unwrap();
 
     assert!(matches!(again, Err(CoreError::AlreadyUndone(id)) if id == deleted));
     assert_eq!(contents(&core), []);
     assert_eq!(harness.signals.received(), changed(&[home.id]));
     assert!(matches!(
-        core.undo_journal_transaction(undo),
+        core.undo_approved(undo),
         Err(CoreError::AlreadyUndone(_))
     ));
-    core.undo_journal_transaction(redo.journal_transaction.unwrap())
+    core.undo_approved(redo.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(contents(&core), [dentist]);
-}
-
-#[test]
-fn undo_is_refused_in_a_calendar_now_read_only() {
-    let harness = Harness::new();
-    let core = harness.open_without_starting_calendars();
-    let home = calendar(&core, "Home");
-    let journal_transaction = import(
-        &core,
-        home.id,
-        ics(&event("new", MONDAY.0, MONDAY.1)),
-        ExistingEvents::Skip,
-    );
-    let imported = contents(&core);
-    make_read_only(&harness, &home);
-    harness.signals.clear();
-
-    let refused = core.undo_journal_transaction(journal_transaction);
-
-    assert!(matches!(refused, Err(CoreError::CalendarReadOnly(id)) if id == home.id));
-    assert_eq!(contents(&core), imported);
-    assert_eq!(harness.signals.received(), []);
-}
-
-/// Ticket 58's cases: an imported Event moved since, an updated one edited
-/// or deleted since. Undo per Event comes with ticket 72.
-mod an_event_changed_since_refuses_the_undo {
-    use super::*;
-
-    fn refused(change: impl FnOnce(&Core, &Calendar)) {
-        let harness = Harness::new();
-        let core = harness.open_without_starting_calendars();
-        let home = calendar(&core, "Home");
-        import(
-            &core,
-            home.id,
-            ics(&event("kept", MONDAY.0, MONDAY.1)),
-            ExistingEvents::Skip,
-        );
-        let file = ics(&[
-            event("kept", TUESDAY.0, TUESDAY.1),
-            event("new", MONDAY.0, MONDAY.1),
-        ]
-        .concat());
-        let journal_transaction = import(&core, home.id, file, ExistingEvents::Update);
-        change(&core, &home);
-        let since = contents(&core);
-        harness.signals.clear();
-
-        let refused = core.undo_journal_transaction(journal_transaction);
-
-        assert!(
-            matches!(refused, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == journal_transaction)
-        );
-        assert_eq!(contents(&core), since);
-        assert_eq!(harness.signals.received(), []);
-    }
-
-    #[test]
-    fn an_added_event_moved_to_another_calendar() {
-        refused(|core, _| {
-            let work = calendar(core, "Work");
-            let new = the_one(core, "new");
-            core.edit_event(new.id, draft(work.id, "new", new.when))
-                .unwrap();
-        });
-    }
-
-    #[test]
-    fn an_updated_event_edited() {
-        refused(|core, home| {
-            let kept = the_one(core, "kept");
-            core.edit_event(kept.id, draft(home.id, "Kept", kept.when))
-                .unwrap();
-        });
-    }
-
-    #[test]
-    fn an_updated_event_deleted() {
-        refused(|core, _| {
-            core.delete_event(the_one(core, "kept").id).unwrap();
-        });
-    }
 }
 
 /// Ticket 85: Exceptions share their Recurring Event's UID, so only an ID
@@ -413,7 +325,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
     assert_ne!(made_since.event_id, exception.id);
     let made_since = core.event(made_since.event_id).unwrap();
 
-    core.undo_journal_transaction(deleted).unwrap();
+    core.undo_approved(deleted).unwrap();
 
     assert_eq!(core.event(exception.id).unwrap(), exception);
     assert_eq!(core.event(made_since.id).unwrap(), made_since);
@@ -434,7 +346,7 @@ fn deleting_a_calendar_removes_the_journal_transactions_of_its_events() {
     core.delete_calendar(home.id).unwrap();
     harness.signals.clear();
 
-    let refused = core.undo_journal_transaction(journal_transaction);
+    let refused = core.undo_approved(journal_transaction);
 
     assert!(
         matches!(refused, Err(CoreError::JournalTransactionNotFound(id)) if id == journal_transaction)
@@ -480,13 +392,13 @@ fn deleting_a_calendar_removes_the_journal_event_modifications_putting_events_ba
     ]
     .map(Option::unwrap)
     {
-        let refused = core.undo_journal_transaction(journal_transaction);
+        let refused = core.undo_approved(journal_transaction);
         assert!(
             matches!(refused, Err(CoreError::JournalTransactionNotFound(id)) if id == journal_transaction)
         );
     }
     assert_eq!(harness.signals.received(), []);
-    core.undo_journal_transaction(renamed.journal_transaction.unwrap())
+    core.undo_approved(renamed.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(the_one(&core, "Dentist").calendar_id, work.id);
 }

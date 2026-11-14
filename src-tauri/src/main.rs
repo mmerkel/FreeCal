@@ -20,10 +20,10 @@ use std::time::Duration;
 use chrono::NaiveDate;
 use freecal_core::{
     Account, AccountId, AddedAccount, AvailableCalendar, CalDavLogin, Calendar, CalendarId,
-    Changed, Colour, Core, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents,
-    ImportFile, ImportOutcome, ImportPreview, ImportSummary, JournalTransactionId, Occurrence,
-    Scope, Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SyncTrigger,
-    SystemClock, View, When, link_allowed,
+    Changed, Colour, Core, DangerousUndo, ErrorCode, Event, EventDraft, EventId, ExceptionCounts,
+    ExistingEvents, ImportFile, ImportOutcome, ImportPreview, ImportSummary, Occurrence, Scope,
+    Settings, SettingsUpdate, SidebarState, Signal, SignalSink, SyncStatuses, SyncTrigger,
+    SystemClock, UndoOutcome, UndoTarget, View, When, link_allowed,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
@@ -511,12 +511,16 @@ fn discard_import(picked: State<PickedImport>) {
     *picked.0.lock().unwrap() = None;
 }
 
+/// Undoes a Journal Transaction or one Event of it; a Dangerous Undo runs
+/// only with the danger the user approved.
 #[tauri::command]
-async fn undo_journal_transaction(
+async fn undo(
     core: State<'_, Core>,
-    id: JournalTransactionId,
-) -> CommandResult<Changed<()>> {
-    core.undo_journal_transaction(id).map_err(ErrorCode::from)
+    target: UndoTarget,
+    approved: Option<DangerousUndo>,
+) -> CommandResult<Changed<UndoOutcome>> {
+    core.undo(target, approved.as_ref())
+        .map_err(ErrorCode::from)
 }
 
 /// Opens a link from a description or location in the system browser. The scheme
@@ -950,7 +954,7 @@ fn main() {
             preview_import,
             run_import,
             discard_import,
-            undo_journal_transaction,
+            undo,
             open_link,
             version,
             show_window,

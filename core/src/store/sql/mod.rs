@@ -33,7 +33,7 @@ use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 use super::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
-use crate::journal::{JournalEventModification, JournalTransactionId};
+use crate::journal::{JournalEventModification, JournalTransactionId, TransactionOrigin};
 use crate::read_only::ReadOnly;
 use crate::remote::SyncPoint;
 use crate::sync_status::SyncRecord;
@@ -643,30 +643,70 @@ impl Store {
         &self,
         id: JournalTransactionId,
     ) -> Result<Vec<JournalEventModification>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} \
-             FROM journal_event_modification WHERE journal_transaction_id = ?1 ORDER BY id"
-        ))?;
-        let modifications: Vec<JournalEventModification> = stmt
-            .query_map([id.0], |row| {
-                let created = row.get::<_, Option<i64>>(4)?.is_none();
-                Ok(JournalEventModification {
-                    event_id: EventId(row.get(0)?),
-                    uid: row.get(1)?,
-                    hash: row.get(2)?,
-                    undone: row.get(3)?,
-                    previous: if created {
-                        None
-                    } else {
-                        Some(stored_event(row, 4)?)
-                    },
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
+        let modifications =
+            self.read_journal_event_modifications("journal_transaction_id = ?1", params![id.0])?;
         if modifications.is_empty() {
             return Err(CoreError::JournalTransactionNotFound(id));
         }
         Ok(modifications)
+    }
+
+    /// The Journal Event Modifications of the Event `id` while it had the
+    /// UID `uid`, in the order they were made.
+    pub(crate) fn event_journal_event_modifications(
+        &self,
+        id: EventId,
+        uid: &str,
+    ) -> Result<Vec<JournalEventModification>> {
+        self.read_journal_event_modifications("event_id = ?1 AND uid = ?2", params![id.0, uid])
+    }
+
+    /// The Journal Event Modifications that match `condition`, in the order
+    /// they were made, each with its Journal Transaction's origin and time.
+    fn read_journal_event_modifications(
+        &self,
+        condition: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<Vec<JournalEventModification>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT journal_event_modification.id, journal_transaction.id, \
+               journal_transaction.origin, journal_transaction.made_at, \
+               event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} \
+             FROM journal_event_modification JOIN journal_transaction \
+               ON journal_transaction.id = journal_event_modification.journal_transaction_id \
+             WHERE {condition} ORDER BY journal_event_modification.id"
+        ))?;
+        let modifications = stmt
+            .query_map(params, |row| {
+                let created = row.get::<_, Option<i64>>(8)?.is_none();
+                Ok(JournalEventModification {
+                    id: row.get(0)?,
+                    journal_transaction: JournalTransactionId(row.get(1)?),
+                    origin: TransactionOrigin::recorded(&row.get::<_, String>(2)?),
+                    made_at: row.get(3)?,
+                    event_id: EventId(row.get(4)?),
+                    uid: row.get(5)?,
+                    hash: row.get(6)?,
+                    undone: row.get(7)?,
+                    previous: if created {
+                        None
+                    } else {
+                        Some(stored_event(row, 8)?)
+                    },
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(modifications)
+    }
+
+    /// How many Event Rows the Calendar `id` has.
+    pub(crate) fn calendar_event_row_count(&self, id: CalendarId) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM event WHERE calendar_id = ?1",
+            [id.0],
+            |row| row.get(0),
+        )?;
+        Ok(count.try_into().unwrap_or_default())
     }
 
     /// The Calendars of an Account.

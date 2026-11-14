@@ -1,6 +1,11 @@
 mod support;
 
-use freecal_core::{CalendarId, Changed, ErrorCode, Signal, StartedBy, SyncStatus};
+use support::UndoApproved;
+
+use freecal_core::{
+    CalendarId, Changed, DangerousUndo, ErrorCode, Signal, StartedBy, SyncStatus, UndoOutcome,
+    UndoTarget,
+};
 use support::radicale::{NewCalendar, Radicale, RewritingProxy};
 use support::{Harness, OnServer, date, event, ics, put_events, write_files};
 
@@ -552,10 +557,7 @@ mod undo {
             .radicale
             .get_event(&synced.user, &synced.url, "standup");
 
-        let undone = synced
-            .core
-            .undo_journal_transaction(journal_transaction)
-            .unwrap();
+        let undone = synced.core.undo_approved(journal_transaction).unwrap();
 
         assert!(undone.journal_transaction.is_some());
         assert_eq!(synced.titles(), ["Standup"]);
@@ -582,10 +584,7 @@ mod undo {
             synced.held_etag("Standup moved"),
             Some(synced.etag("standup"))
         );
-        synced
-            .core
-            .undo_journal_transaction(journal_transaction)
-            .unwrap();
+        synced.core.undo_approved(journal_transaction).unwrap();
 
         assert_eq!(synced.titles(), ["Standup"]);
     }
@@ -604,7 +603,7 @@ mod undo {
 
         synced
             .core
-            .undo_journal_transaction(deleted.journal_transaction.unwrap())
+            .undo_approved(deleted.journal_transaction.unwrap())
             .unwrap();
 
         let id = synced.event("Standup").id;
@@ -626,11 +625,79 @@ mod undo {
         let journal_transaction = synced.sync().unwrap();
         assert_eq!(synced.titles(), ["review"]);
 
-        synced
-            .core
-            .undo_journal_transaction(journal_transaction)
-            .unwrap();
+        synced.core.undo_approved(journal_transaction).unwrap();
 
+        assert_eq!(synced.titles(), ["Standup"]);
+    }
+
+    /// ADR 0009: it reverts changes made on the server, so it asks first.
+    #[test]
+    fn is_a_dangerous_undo_counting_the_server_changes_and_runs_once_approved() {
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
+        synced.put("standup", standup("Standup moved"));
+        synced.put(
+            "review",
+            ics(&event(
+                "review",
+                "DTSTART:20261006T070000Z",
+                "DTEND:20261006T080000Z",
+            )),
+        );
+        let journal_transaction = synced.sync().unwrap();
+        let target = UndoTarget::JournalTransaction {
+            id: journal_transaction,
+        };
+
+        let asked = synced.core.undo(target, None).unwrap();
+        let UndoOutcome::Dangerous { danger, skipped } = asked.value else {
+            panic!("expected a Dangerous Undo, got {:?}", asked.value);
+        };
+        assert_eq!((asked.journal_transaction, skipped), (None, vec![]));
+        assert_eq!(
+            danger,
+            DangerousUndo {
+                later_journal_transactions: vec![],
+                server_changes: 2,
+                exceeds_mass_change_guard: false,
+                events: 2,
+            }
+        );
+        assert_eq!(synced.titles(), ["Standup moved", "review"]);
+
+        let ran = synced.core.undo(target, Some(&danger)).unwrap();
+
+        assert_eq!(ran.value, UndoOutcome::Undone { skipped: vec![] });
+        assert_eq!(synced.titles(), ["Standup"]);
+    }
+
+    #[test]
+    fn of_one_event_of_a_sync_leaves_the_others() {
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
+        synced.delete("standup");
+        synced.put(
+            "review",
+            ics(&event(
+                "review",
+                "DTSTART:20261006T070000Z",
+                "DTEND:20261006T080000Z",
+            )),
+        );
+        let journal_transaction = synced.sync().unwrap();
+        let review = synced.event("review");
+        let target = UndoTarget::Event {
+            journal_transaction,
+            event_id: review.id,
+        };
+        let UndoOutcome::Dangerous { danger, .. } = synced.core.undo(target, None).unwrap().value
+        else {
+            panic!("an undo of a server change is a Dangerous Undo");
+        };
+        assert_eq!(danger.server_changes, 1);
+
+        synced.core.undo(target, Some(&danger)).unwrap();
+
+        assert_eq!(synced.titles(), Vec::<String>::new());
+        synced.core.undo_approved(journal_transaction).unwrap();
         assert_eq!(synced.titles(), ["Standup"]);
     }
 }
@@ -914,10 +981,7 @@ mod server_objects {
             assert_eq!(synced.titles(), ["Moved"], "tokens: {tokens}");
             assert!(synced.href("Moved").ends_with("/weekly-moved.ics"));
             assert_eq!(synced.sync(), None, "tokens: {tokens}");
-            synced
-                .core
-                .undo_journal_transaction(journal_transaction)
-                .unwrap();
+            synced.core.undo_approved(journal_transaction).unwrap();
             assert_eq!(synced.titles(), ["Weekly", "Weekly", "Weekly"]);
         }
     }
@@ -1383,10 +1447,7 @@ mod server_objects {
             );
             let journal_transaction = synced.sync().unwrap();
 
-            synced
-                .core
-                .undo_journal_transaction(journal_transaction)
-                .unwrap();
+            synced.core.undo_approved(journal_transaction).unwrap();
 
             assert_eq!(shown(&synced), alone("Moved"));
             assert_eq!(synced.event("Moved").id, id);

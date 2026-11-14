@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { samples } from '../core/samples.generated';
 import { tauriCore } from '../core/tauriCore';
-import type { Calendar, EventDraft, Signal } from '../core/types';
+import type { Calendar, Changed, EventDraft, Signal, UndoOutcome } from '../core/types';
 import { accountId, calendarId, eventId, journalTransactionId } from './ids';
 import { failure, FakeCore, first, settled } from './fakeCore';
 
@@ -93,17 +93,19 @@ describe('a scripted answer', () => {
 
   test('gives way to the next one', async () => {
     const core = new FakeCore();
-    core.answer('undoJournalTransaction', failure({ code: 'localStoreFailed' }));
-    await expect(core.undoJournalTransaction(journalTransactionId(1))).rejects.toEqual({
+    const target = { kind: 'journalTransaction', id: journalTransactionId(1) } as const;
+    core.answer('undo', failure({ code: 'localStoreFailed' }));
+    await expect(core.undo(target, null)).rejects.toEqual({
       code: 'localStoreFailed',
     });
 
-    core.answer('undoJournalTransaction', { journalTransaction: null, value: null });
-
-    expect(await core.undoJournalTransaction(journalTransactionId(1))).toEqual({
+    const undone: Changed<UndoOutcome> = {
       journalTransaction: null,
-      value: null,
-    });
+      value: { kind: 'undone', skipped: [] },
+    };
+    core.answer('undo', undone);
+
+    expect(await core.undo(target, null)).toEqual(undone);
   });
 });
 

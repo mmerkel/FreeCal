@@ -1,5 +1,7 @@
 mod support;
 
+use support::UndoApproved;
+
 use freecal_core::{AccountId, Calendar, Colour, Core, CoreError, ErrorCode, Signal};
 use support::radicale::{NewCalendar, Radicale, User};
 use support::{Harness, add_account, calendar, draft, timed};
@@ -417,12 +419,12 @@ fn removing_an_account_removes_its_calendars_their_events_and_their_history() {
     assert!(harness.keyring.secrets().is_empty());
     assert_eq!(harness.signals.received(), vec![Signal::CalendarsChanged]);
     let journal_transaction = created.journal_transaction.unwrap();
-    let refused = core.undo_journal_transaction(journal_transaction);
+    let refused = core.undo_approved(journal_transaction);
     assert!(
         matches!(refused, Err(CoreError::JournalTransactionNotFound(id)) if id == journal_transaction)
     );
     // The Local Calendar's history stays.
-    core.undo_journal_transaction(dentist.journal_transaction.unwrap())
+    core.undo_approved(dentist.journal_transaction.unwrap())
         .unwrap();
 }
 
@@ -467,7 +469,7 @@ fn several_accounts_side_by_side_each_keep_their_own_password_and_calendars() {
     assert_eq!(harness.keyring.secrets(), vec![bob.password.clone()]);
     assert_eq!(core.list_calendars().unwrap(), vec![bobs_calendar]);
     assert_eq!(core.event(stand_up.value.id).unwrap(), stand_up.value);
-    core.undo_journal_transaction(stand_up.journal_transaction.unwrap())
+    core.undo_approved(stand_up.journal_transaction.unwrap())
         .unwrap();
     // Bob's password still logs in.
     server_calendar(radicale, &bob, "Home");

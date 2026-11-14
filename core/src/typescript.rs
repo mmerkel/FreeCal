@@ -24,6 +24,9 @@ use crate::{
     AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, SyncOutcome,
     SyncStatus, SyncStatusReport, SyncStatuses,
 };
+use crate::{
+    DangerousUndo, LaterJournalTransaction, SkipReason, SkippedEvent, UndoOutcome, UndoTarget,
+};
 
 const TYPES: &str = "../src/core/types.generated.ts";
 const SAMPLES: &str = "../src/core/samples.generated.ts";
@@ -81,6 +84,8 @@ fn types() -> (String, Vec<String>) {
     types.visit::<ExistingEvents>();
     types.visit::<ImportOutcome>();
     types.visit::<Changed<Event>>();
+    types.visit::<UndoTarget>();
+    types.visit::<Changed<UndoOutcome>>();
     types.visit::<ErrorCode>();
     types.visit::<SyncStatuses>();
     let names = types.declarations.keys().cloned().collect();
@@ -208,6 +213,21 @@ fn samples_file() -> (String, Vec<String>) {
         name: "Work".to_owned(),
         colour: Some(Colour::parse("#3a86ff").unwrap()),
         read_only: false,
+    };
+    let later = LaterJournalTransaction {
+        id: JournalTransactionId(5),
+        made_at: 1_791_100_800,
+        titles: vec!["Dentist".to_owned()],
+    };
+    let danger = DangerousUndo {
+        later_journal_transactions: vec![later.clone()],
+        server_changes: 3,
+        exceeds_mass_change_guard: true,
+        events: 412,
+    };
+    let skipped = SkippedEvent {
+        title: "Team meeting".to_owned(),
+        reason: SkipReason::NotInChangeJournal,
     };
     let entries = [
         samples(&[AccountId(1)]),
@@ -410,6 +430,37 @@ fn samples_file() -> (String, Vec<String>) {
             ],
             "Event",
         ),
+        samples(&[
+            UndoTarget::JournalTransaction {
+                id: JournalTransactionId(4),
+            },
+            UndoTarget::Event {
+                journal_transaction: JournalTransactionId(4),
+                event_id: EventId(3),
+            },
+        ]),
+        samples(std::slice::from_ref(&later)),
+        samples(std::slice::from_ref(&danger)),
+        samples(&[
+            SkipReason::ReadOnlyCalendar {
+                calendar_id: CalendarId(2),
+            },
+            SkipReason::HasGuests,
+            SkipReason::NotInChangeJournal,
+            SkipReason::ChangedTogetherWith {
+                title: "Yoga".to_owned(),
+            },
+        ]),
+        samples(std::slice::from_ref(&skipped)),
+        samples(&[
+            UndoOutcome::Undone {
+                skipped: vec![skipped.clone()],
+            },
+            UndoOutcome::Dangerous {
+                danger,
+                skipped: Vec::new(),
+            },
+        ]),
         samples(&ErrorCode::all()),
     ];
     let mut names = Vec::new();

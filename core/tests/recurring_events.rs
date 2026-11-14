@@ -1,5 +1,7 @@
 mod support;
 
+use support::UndoApproved;
+
 use freecal_core::{
     CalendarId, Core, CoreError, EventDraft, EventId, ExistingEvents, Frequency, ImportFile,
     Occurrence, Repeat, RepeatEnd, Scope, Signal, When,
@@ -405,7 +407,7 @@ fn deleting_one_occurrence_cancels_it_and_leaves_the_rest_and_can_be_undone() {
         }]
     );
 
-    core.undo_journal_transaction(deleted.journal_transaction.unwrap())
+    core.undo_approved(deleted.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(starts(&core, "2026-10-01", "2026-11-01").len(), 3);
 }
@@ -585,7 +587,7 @@ fn an_import_update_replaces_the_changed_occurrences_and_the_undo_restores_them(
     );
     assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
 
-    core.undo_journal_transaction(outcome.journal_transaction.unwrap())
+    core.undo_approved(outcome.journal_transaction.unwrap())
         .unwrap();
     assert_eq!(
         occurrences(&core, "2026-10-26", "2026-10-27")[0].title,

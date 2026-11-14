@@ -10,7 +10,7 @@ import type {
   Signal,
 } from '../core/types';
 import { dateChanged } from '../test/answers';
-import { calendarId, eventId } from '../test/ids';
+import { calendarId, eventId, journalTransactionId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
 import { WindowDialogs } from './windowDialogs.svelte';
 import { WindowModel } from './windowModel.svelte';
@@ -25,6 +25,7 @@ const weekly = first<Repeat>(samples.Repeat);
 const when = branded<Event['when']>(samples.When[1]);
 const changedEvent = first<Changed<Event>>(samples.Changed);
 const file = '/home/user/a.ics';
+const wholeImport = { kind: 'journalTransaction', id: journalTransactionId(4) } as const;
 
 /** Window Dialogs on a started Window Model, which shows the sample Occurrences. */
 async function started(core = new FakeCore()) {
@@ -456,7 +457,7 @@ describe('the import flow', () => {
   test('Undo says "Working…", then that the import was undone', async () => {
     const { core, dialogs } = await importing();
     await dialogs.runImport(calendarId(2), 'update');
-    const undone = core.pending('undoJournalTransaction');
+    const undone = core.pending('undo');
 
     dialogs.toast?.undo?.();
     await settled();
@@ -467,7 +468,7 @@ describe('the import flow', () => {
     undone.resolve();
     await settled();
 
-    expect(core.callsOf('undoJournalTransaction')).toEqual([[4]]);
+    expect(core.callsOf('undo')).toEqual([[wholeImport, null]]);
     expect(dialogs.working).toBeUndefined();
     expect(dialogs.toast?.message).toContain('a.ics');
     expect(dialogs.toast?.undo).toBeUndefined();
@@ -476,7 +477,7 @@ describe('the import flow', () => {
   test('a failed Undo says why and can be retried', async () => {
     const { core, dialogs } = await importing();
     await dialogs.runImport(calendarId(2), 'update');
-    core.answer('undoJournalTransaction', failure({ code: 'localStoreFailed' }));
+    core.answer('undo', failure({ code: 'localStoreFailed' }));
 
     dialogs.toast?.undo?.();
     await settled();
@@ -485,11 +486,101 @@ describe('the import flow', () => {
     const retry = dialogs.toast?.undo;
     expect(retry).toBeDefined();
 
-    core.answer('undoJournalTransaction', { ...changedEvent, value: null });
+    core.answer('undo', { ...changedEvent, value: { kind: 'undone', skipped: [] } });
     retry?.();
     await settled();
 
-    expect(core.callsOf('undoJournalTransaction')).toEqual([[4], [4]]);
+    expect(core.callsOf('undo')).toEqual([
+      [wholeImport, null],
+      [wholeImport, null],
+    ]);
     expect(dialogs.toast?.undo).toBeUndefined();
+  });
+
+  test('Undo names the Events it skipped', async () => {
+    const { core, dialogs } = await importing();
+    await dialogs.runImport(calendarId(2), 'update');
+    core.answer('undo', {
+      ...changedEvent,
+      value: {
+        kind: 'undone',
+        skipped: [{ title: 'Standup', reason: { kind: 'notInChangeJournal' } }],
+      },
+    });
+
+    dialogs.toast?.undo?.();
+    await settled();
+
+    expect(dialogs.toast?.message).toBe(
+      'The import of “\u2068/home/user/a.ics\u2069” was undone. Can’t undo “\u2068Standup\u2069”: its current version isn’t in the Change Journal of the Local Store.',
+    );
+  });
+
+  test('Undo that skipped every Event says nothing was undone', async () => {
+    const { core, dialogs } = await importing();
+    await dialogs.runImport(calendarId(2), 'update');
+    core.answer('undo', {
+      journalTransaction: null,
+      value: { kind: 'undone', skipped: [{ title: 'Standup', reason: { kind: 'hasGuests' } }] },
+    });
+
+    dialogs.toast?.undo?.();
+    await settled();
+
+    expect(dialogs.toast?.message).toBe(
+      'Nothing of the import of “\u2068/home/user/a.ics\u2069” was undone. Can’t undo “\u2068Standup\u2069”: it has guests, so it can’t be changed in FreeCal.',
+    );
+  });
+
+  describe('a Dangerous Undo', () => {
+    const danger = {
+      laterJournalTransactions: [],
+      serverChanges: 0,
+      exceedsMassChangeGuard: true,
+      events: 11,
+    };
+
+    test('only for how many Events it undoes runs, as the user asked for it', async () => {
+      const { core, dialogs } = await importing();
+      await dialogs.runImport(calendarId(2), 'update');
+      const asked = core.pending('undo');
+      const ran = core.pending('undo');
+
+      dialogs.toast?.undo?.();
+      asked.resolve({
+        journalTransaction: null,
+        value: { kind: 'dangerous', danger, skipped: [] },
+      });
+      ran.resolve({ ...changedEvent, value: { kind: 'undone', skipped: [] } });
+      await settled();
+
+      expect(core.callsOf('undo')).toEqual([
+        [wholeImport, null],
+        [wholeImport, danger],
+      ]);
+      expect(dialogs.toast?.message).toBe(
+        'The import of “\u2068/home/user/a.ics\u2069” was undone.',
+      );
+    });
+
+    test('that would undo later changes is refused until ticket 70 asks', async () => {
+      const { core, dialogs } = await importing();
+      await dialogs.runImport(calendarId(2), 'update');
+      const later = {
+        ...danger,
+        laterJournalTransactions: [{ id: journalTransactionId(5), madeAt: 0, titles: ['Standup'] }],
+      };
+      core.answer('undo', {
+        journalTransaction: null,
+        value: { kind: 'dangerous', danger: later, skipped: [] },
+      });
+
+      dialogs.toast?.undo?.();
+      await settled();
+
+      expect(core.callsOf('undo')).toEqual([[wholeImport, null]]);
+      expect(dialogs.toast?.message).toContain('were changed since');
+      expect(dialogs.toast?.undo).toBeUndefined();
+    });
   });
 });

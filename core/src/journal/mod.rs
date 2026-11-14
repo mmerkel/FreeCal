@@ -23,6 +23,17 @@ use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Ui
 use crate::sync::SendFailure;
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
+mod undo;
+
+pub(crate) use undo::undo;
+pub use undo::{
+    DangerousUndo, LaterJournalTransaction, SkipReason, SkippedEvent, UndoOutcome, UndoTarget,
+};
+
+/// How long the Change Journal keeps a Journal Transaction, in seconds: 90
+/// days (ADR 0009).
+const KEPT_FOR: i64 = 90 * 24 * 60 * 60;
+
 /// The Change Journal's Write Permission (ADR 0015), which the writes of
 /// the tables it guards take. Its field is private to this module, so that
 /// nothing else can make one.
@@ -53,7 +64,7 @@ pub(crate) fn recompute_instants(database_transaction: &DatabaseTransaction) -> 
 }
 
 /// A Journal Transaction: what undoes a change, or changes made together.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     test,
     derive(ts_rs::TS),
@@ -102,6 +113,18 @@ impl TransactionOrigin {
         }
     }
 
+    /// The Transaction Origin a stored Journal Transaction records as
+    /// `recorded`. One FreeCal didn't write reads as a user action, whose
+    /// Journal Transactions are undone only whole.
+    pub(crate) fn recorded(recorded: &str) -> Self {
+        match recorded {
+            "import" => TransactionOrigin::Import,
+            "undo" => TransactionOrigin::Undo,
+            "incoming_sync" => TransactionOrigin::IncomingSync,
+            _ => TransactionOrigin::UserAction,
+        }
+    }
+
     /// Whether it is an Incoming Sync, whose changes come from the server
     /// and so aren't Unsent Changes.
     pub(crate) fn is_incoming_sync(self) -> bool {
@@ -123,15 +146,18 @@ pub(crate) struct Recorded<T> {
 
 /// Runs `change` in one Database Transaction as one Journal Transaction of
 /// `origin`, made at `made_at` (Unix seconds). If it fails, nothing it did is
-/// kept. A Journal Transaction that changed nothing isn't stored.
+/// kept. A Journal Transaction that changed nothing isn't stored. Journal
+/// Transactions older than 90 days by then go, as [`remove_expired`] says.
 pub(crate) fn record<T>(
     store: &Store,
     origin: TransactionOrigin,
     made_at: i64,
     change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
 ) -> Result<Recorded<T>> {
+    let database_transaction = store.begin()?;
+    database_transaction.delete_journal_before(WRITE_PERMISSION, made_at - KEPT_FOR)?;
     let mut journal_transaction = JournalTransaction {
-        database_transaction: store.begin()?,
+        database_transaction,
         origin,
         made_at,
         id: None,
@@ -152,44 +178,14 @@ pub(crate) fn record<T>(
     })
 }
 
-/// Undoes the Journal Transaction `id` whole, as a Journal Transaction with
-/// the Transaction Origin undo: every Event gets its previous Event Version
-/// back under the same identity. Refused while an Event changed since, while
-/// an Event Version that isn't an Exception would join another with its UID
-/// in its Calendar, such as one an Incoming Sync added since (ticket 104),
-/// and for a Journal Transaction undone already.
-pub(crate) fn undo(store: &Store, id: JournalTransactionId, made_at: i64) -> Result<Recorded<()>> {
-    record(
-        store,
-        TransactionOrigin::Undo,
-        made_at,
-        |journal_transaction| {
-            let modifications = store.journal_event_modifications(id)?;
-            if modifications.iter().any(|modification| modification.undone) {
-                return Err(CoreError::AlreadyUndone(id));
-            }
-            // Latest first, so that each Journal Event Modification finds the
-            // Event Version it made.
-            for modification in modifications.iter().rev() {
-                let current = store.current_event(modification.event_id, &modification.uid)?;
-                if current.map(|event| hash(&modification.uid, &event)) != modification.hash {
-                    return Err(CoreError::ChangedSinceJournalTransaction(id));
-                }
-                match &modification.previous {
-                    None => journal_transaction.delete(modification.event_id)?,
-                    Some(previous) => journal_transaction.put_back(
-                        id,
-                        modification.event_id,
-                        &modification.uid,
-                        previous,
-                    )?,
-                }
-            }
-            journal_transaction
-                .database_transaction
-                .mark_undone(WRITE_PERMISSION, id)
-        },
-    )
+/// Removes the Journal Transactions older than 90 days at `now` (Unix
+/// seconds) with their Journal Event Modifications (ADR 0009), as the Local
+/// Store opens; [`record`] removes them too, so that a FreeCal running for
+/// months keeps none longer.
+pub(crate) fn remove_expired(store: &Store, now: i64) -> Result<()> {
+    store.write(|database_transaction| {
+        database_transaction.delete_journal_before(WRITE_PERMISSION, now - KEPT_FOR)
+    })
 }
 
 /// Deletes a Calendar with its Events. This isn't recorded (ADR 0009): the
@@ -488,7 +484,15 @@ impl Source for JournalTransaction<'_> {
 }
 
 /// One Event's change in a Journal Transaction, as the Change Journal holds it.
+#[derive(Clone)]
 pub(crate) struct JournalEventModification {
+    /// Its own ID, in the order Journal Event Modifications are made.
+    pub id: i64,
+    pub journal_transaction: JournalTransactionId,
+    /// Its Journal Transaction's Transaction Origin.
+    pub origin: TransactionOrigin,
+    /// When its Journal Transaction was made, in Unix seconds.
+    pub made_at: i64,
     pub event_id: EventId,
     /// The Event's UID, which its hashes cover.
     pub uid: String,
@@ -553,6 +557,21 @@ mod tests {
     use crate::event::{EventFields, RecurrenceId, ServerObject, StoredWhen};
     use crate::store::UnsentChangeRow;
     use crate::sync;
+
+    /// Undoes the Journal Transaction `id` whole, approving it when it is a
+    /// Dangerous Undo.
+    fn undo_whole(
+        store: &Store,
+        id: JournalTransactionId,
+        made_at: i64,
+    ) -> Result<Recorded<UndoOutcome>> {
+        let target = UndoTarget::JournalTransaction { id };
+        let undone = undo(store, target, None, made_at)?;
+        match &undone.value {
+            UndoOutcome::Dangerous { danger, .. } => undo(store, target, Some(danger), made_at),
+            UndoOutcome::Undone { .. } => Ok(undone),
+        }
+    }
 
     fn dentist() -> StoredEvent {
         StoredEvent {
@@ -768,7 +787,7 @@ mod tests {
             .unwrap()
             .journal_transaction
             .unwrap();
-            undo(&pulled.store, journal_transaction, 0).unwrap();
+            undo_whole(&pulled.store, journal_transaction, 0).unwrap();
 
             assert_eq!(
                 pulled.store.server_object_of_event(pulled.id).unwrap(),
@@ -1048,7 +1067,7 @@ mod tests {
             on_server.unsent(),
             [on_server.unsent_change("dentist", None, 7)]
         );
-        undo(&on_server.store, journal_transaction, 9).unwrap();
+        undo_whole(&on_server.store, journal_transaction, 9).unwrap();
 
         assert_eq!(
             on_server.unsent(),
@@ -1188,7 +1207,7 @@ mod tests {
         .unwrap()
         .value;
 
-        let undone = undo(&on_server.store, deleted, 9);
+        let undone = undo_whole(&on_server.store, deleted, 9);
 
         assert!(
             matches!(undone, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == deleted),
@@ -1223,7 +1242,7 @@ mod tests {
         .unwrap()
         .value;
 
-        let undone = undo(&on_server.store, move_out, 9);
+        let undone = undo_whole(&on_server.store, move_out, 9);
 
         assert!(
             matches!(undone, Err(CoreError::ChangedSinceJournalTransaction(id)) if id == move_out),
@@ -1251,7 +1270,7 @@ mod tests {
         .journal_transaction
         .unwrap();
 
-        undo(&on_server.store, both, 9).unwrap();
+        undo_whole(&on_server.store, both, 9).unwrap();
 
         assert_eq!(dentist_ids(&on_server), [on_server.id]);
     }

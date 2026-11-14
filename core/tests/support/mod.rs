@@ -17,6 +17,7 @@ use freecal_core::{
     Colour, Core, CoreError, Event, EventDraft, EventId, Frequency, Keyring, KeyringError,
     Occurrence, Repeat, RepeatEnd, ServerObject, Signal, SignalSink, SyncStatus, When,
 };
+use freecal_core::{Changed, JournalTransactionId, UndoOutcome, UndoTarget};
 use tempfile::TempDir;
 
 use radicale::{NewCalendar, Radicale, RewritingProxy, User};
@@ -559,4 +560,22 @@ pub fn calendar_sync_status(core: &Core, id: CalendarId) -> CalendarSyncStatus {
         .into_iter()
         .find(|status| status.calendar_id == id)
         .unwrap()
+}
+
+/// Undo as a user who confirms every Dangerous Undo does it.
+pub trait UndoApproved {
+    /// Undoes the Journal Transaction `id` whole, approving it when it is
+    /// a Dangerous Undo.
+    fn undo_approved(&self, id: JournalTransactionId) -> Result<Changed<UndoOutcome>, CoreError>;
+}
+
+impl UndoApproved for Core {
+    fn undo_approved(&self, id: JournalTransactionId) -> Result<Changed<UndoOutcome>, CoreError> {
+        let target = UndoTarget::JournalTransaction { id };
+        let undone = self.undo(target, None)?;
+        match &undone.value {
+            UndoOutcome::Dangerous { danger, .. } => self.undo(target, Some(danger)),
+            UndoOutcome::Undone { .. } => Ok(undone),
+        }
+    }
 }

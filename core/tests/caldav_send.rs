@@ -6,6 +6,8 @@
 
 mod support;
 
+use support::UndoApproved;
+
 use freecal_core::{
     CalendarId, Changed, Core, ErrorCode, EventDraft, EventId, JournalTransactionId, Occurrence,
     RepeatEnd, Scope, Signal, StartedBy, SyncStatus, When,
@@ -199,7 +201,7 @@ impl OnServer {
     /// Undoes the Journal Transaction `id`, and returns the undo's.
     fn undo(&self, id: JournalTransactionId) -> JournalTransactionId {
         self.core
-            .undo_journal_transaction(id)
+            .undo_approved(id)
             .unwrap()
             .journal_transaction
             .expect("an undo is a Journal Transaction")
@@ -429,7 +431,7 @@ fn a_sent_change_is_in_the_change_journal_and_sending_records_nothing() {
     let href = on_server.held("Dentist").expect("sent").href;
     // The Change Journal holds the Event's previous Event Version, none,
     // so undoing the creation deletes it, and that is sent too.
-    on_server.core.undo_journal_transaction(creation).unwrap();
+    on_server.core.undo_approved(creation).unwrap();
     assert_eq!(on_server.sync(), []);
     let status = on_server.radicale.status_of(
         &on_server.user,
@@ -468,7 +470,7 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
             .contains("SUMMARY:Standup moved")
     );
 
-    on_server.core.undo_journal_transaction(edited).unwrap();
+    on_server.core.undo_approved(edited).unwrap();
     assert_eq!(on_server.sync(), []);
     assert!(
         on_server
@@ -483,7 +485,7 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
         .journal_transaction
         .unwrap();
     assert_eq!(on_server.sync(), []);
-    on_server.core.undo_journal_transaction(deleted).unwrap();
+    on_server.core.undo_approved(deleted).unwrap();
     assert_eq!(on_server.sync(), []);
 
     let held = on_server.held("Standup").expect("created again");

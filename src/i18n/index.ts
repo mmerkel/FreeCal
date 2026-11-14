@@ -51,6 +51,7 @@ const errorMessages: Record<ErrorCode['code'], MessageKey> = {
   journalTransactionNotFound: 'error.journalTransactionNotFound',
   changedSinceJournalTransaction: 'error.changedSinceJournalTransaction',
   alreadyUndone: 'error.alreadyUndone',
+  undoneOnlyWhole: 'error.undoneOnlyWhole',
   notLocalAccount: 'error.notLocalAccount',
   notLocalCalendar: 'error.notLocalCalendar',
   notServerCalendar: 'error.notServerCalendar',

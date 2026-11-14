@@ -8,7 +8,7 @@ use super::RecurrenceId;
 use crate::{CoreError, ImportedWhen, Result, StructuredText};
 
 /// Branded in TypeScript, so that it can't be mixed up with other IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     test,
     derive(ts_rs::TS),
