@@ -3,8 +3,23 @@ npx lint-staged
 for feature in $(git diff --cached --name-only | sed -n 's#^\(\.scratch/[^/]*\)/issues/[^/]*\.md$#\1#p' | sort -u); do
   python3 .claude/skills/tickets-pdf/tickets_pdf.py --check "$feature" || exit 1
 done
-# The checks below need code; a commit of only docs or tickets skips them.
-git diff --cached --name-only | grep -qE '\.(rs|ts|js|svelte|css|json|html|toml|lock)$' || exit 0
+# The checks below run for the side a commit changes: the Rust side (core,
+# shell) or the frontend, whose tests fake the core. A Rust interface change
+# regenerates src/core/*.generated.ts, so it counts as both. Shared fixtures,
+# and any other code file, count as both too; docs and tickets as neither.
+staged=$(git diff --cached --name-only)
+rust_re='^(core|src-tauri)/|^Cargo\.(toml|lock)$|^deny\.toml$'
+front_re='^src/|^(index\.html|package(-lock)?\.json|svelte\.config\.js|tsconfig\.json|vite\.config\.ts)$'
+both_re='^fixtures/|^src/core/[^/]*\.generated\.ts$'
+code_re='\.(rs|ts|js|svelte|css|json|html|toml|lock)$'
+rust=false
+front=false
+echo "$staged" | grep -qE "$rust_re|$both_re" && rust=true
+echo "$staged" | grep -qE "$front_re|$both_re" && front=true
+if echo "$staged" | grep -E "$code_re" | grep -qvE "$rust_re|$front_re"; then
+  rust=true
+  front=true
+fi
 
 # Runs a check silently; prints its whole output only if it fails.
 quiet() {
@@ -17,11 +32,15 @@ quiet() {
   fi
 }
 
-quiet npm run --silent lint
-quiet npm run --silent check
-quiet npm test
-if git diff --cached --name-only | grep -qE '(^|/)Cargo\.(toml|lock)$|^deny\.toml$'; then
-  quiet cargo deny --log-level error check licenses
+if $front; then
+  quiet npm run --silent lint
+  quiet npm run --silent check
+  quiet npm test
 fi
-quiet cargo clippy --all-targets -- -D warnings
-quiet cargo test
+if $rust; then
+  if echo "$staged" | grep -qE '(^|/)Cargo\.(toml|lock)$|^deny\.toml$'; then
+    quiet cargo deny --log-level error check licenses
+  fi
+  quiet cargo clippy --all-targets -- -D warnings
+  quiet cargo test
+fi
