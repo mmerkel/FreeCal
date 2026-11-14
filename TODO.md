@@ -1,9 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] long pre-commit hook
-- [ ] icon not showing (white on yellow W instead), same for inkscape
-- [ ] how does icon integration work?
 - [ ] ticket 19
 - [ ] simplify
 - [ ] ticket 20 parts
