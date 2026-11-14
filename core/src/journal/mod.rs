@@ -23,8 +23,14 @@ use crate::store::{CombinedEventKey, DatabaseTransaction, Store, StoredEvent, Ui
 use crate::sync::SendFailure;
 use crate::{AccountId, CalendarId, CoreError, EventId, Result};
 
+mod list;
 mod undo;
 
+pub use list::{
+    JournalEventModificationKind, ListedJournalEventModification, ListedJournalTransaction,
+    SessionUndo, SessionUndoStep,
+};
+pub(crate) use list::{Session, change_journal, event_history, journal_transaction_events};
 pub(crate) use undo::undo;
 pub use undo::{
     DangerousUndo, LaterJournalTransaction, SkipReason, SkippedEvent, UndoOutcome, UndoTarget,
@@ -86,8 +92,10 @@ pub struct Changed<T> {
 /// Where a Journal Transaction's changes came from, which decides where they
 /// may write.
 /// Snapshot restore and Conflict resolution come with their tickets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TransactionOrigin {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum TransactionOrigin {
     UserAction,
     Import,
     Undo,
@@ -160,6 +168,7 @@ pub(crate) fn record<T>(
         database_transaction,
         origin,
         made_at,
+        undoes: None,
         id: None,
         calendars: Vec::new(),
     };
@@ -287,6 +296,8 @@ pub(crate) struct JournalTransaction<'a> {
     database_transaction: DatabaseTransaction<'a>,
     origin: TransactionOrigin,
     made_at: i64,
+    /// For an undo, the Journal Transaction it was asked to undo.
+    undoes: Option<JournalTransactionId>,
     id: Option<JournalTransactionId>,
     calendars: Vec<CalendarId>,
 }
@@ -464,6 +475,7 @@ impl JournalTransaction<'_> {
                     WRITE_PERMISSION,
                     origin,
                     self.made_at,
+                    self.undoes,
                 )?),
         };
         self.database_transaction.insert_journal_event_modification(
@@ -472,6 +484,7 @@ impl JournalTransaction<'_> {
             id,
             uid,
             previous,
+            new,
             new.map(|event| hash(uid, event)),
         )
     }
@@ -501,6 +514,9 @@ pub(crate) struct JournalEventModification {
     /// The hash of its Event Version after the change; none when the change
     /// deleted it.
     pub hash: Option<Vec<u8>>,
+    /// The Calendar and title of its Event Version after the change; none
+    /// when the change deleted it.
+    pub made: Option<(CalendarId, String)>,
     pub undone: bool,
 }
 

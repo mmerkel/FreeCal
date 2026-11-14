@@ -49,8 +49,9 @@ pub use import::{
     ImportedWhen, MAX_IMPORT_ENTRIES, MAX_IMPORT_SIZE, PinnedZone,
 };
 pub use journal::{
-    Changed, DangerousUndo, JournalTransactionId, LaterJournalTransaction, SkipReason,
-    SkippedEvent, UndoOutcome, UndoTarget,
+    Changed, DangerousUndo, JournalEventModificationKind, JournalTransactionId,
+    LaterJournalTransaction, ListedJournalEventModification, ListedJournalTransaction, SessionUndo,
+    SessionUndoStep, SkipReason, SkippedEvent, TransactionOrigin, UndoOutcome, UndoTarget,
 };
 pub use keyring::{Keyring, KeyringError};
 pub use remote::FIRST_SYNC_PAGE;
@@ -68,7 +69,7 @@ pub use view::View;
 
 use calendar::calendar_name;
 use event::{Edit, Opened};
-use journal::{JournalTransaction, TransactionOrigin};
+use journal::JournalTransaction;
 use remote::Remote;
 use store::{CalendarToSync, Store};
 use sync_scheduler::SyncScheduler;
@@ -105,6 +106,9 @@ pub struct Core {
     sync_requested: Condvar,
     /// Wakes [`Core::send_before_quit`] when the syncs due finished running.
     syncs_ran: Condvar,
+    /// What Session Undo remembers of this session. Never locked together
+    /// with the Store lock.
+    session: Mutex<journal::Session>,
 }
 
 impl Core {
@@ -121,6 +125,7 @@ impl Core {
         let lock = lock_local_store(data_dir)?;
         let store = Store::open(&data_dir.join("freecal.sqlite3"))?;
         journal::remove_expired(&store, clock.now().timestamp())?;
+        let session = Mutex::new(journal::Session::now(&store)?);
         let date = Mutex::new(clock.now().date_naive());
         Ok(Self {
             _lock: lock,
@@ -133,6 +138,7 @@ impl Core {
             scheduler: Mutex::new(SyncScheduler::default()),
             sync_requested: Condvar::new(),
             syncs_ran: Condvar::new(),
+            session,
         })
     }
 
@@ -1003,9 +1009,11 @@ impl Core {
     /// changes of that Event are undone. Events that can't be undone are
     /// skipped and named in the outcome. A Dangerous Undo changes nothing
     /// and says why, unless `approved` is that same danger, which the user
-    /// confirmed. Refused for one Event of a user action, and for a target
-    /// undone already. The undo is a Journal Transaction itself, and undoing
-    /// it redoes the change.
+    /// confirmed. Refused for one Event of a user action, and for a
+    /// Journal Transaction or Event undone already; a Calendar with nothing
+    /// to undo since then changes nothing. The undo is a Journal Transaction
+    /// itself, and undoing it redoes the change. A whole Journal Transaction
+    /// whose undo changed nothing leaves Session Undo.
     pub fn undo(
         &self,
         target: UndoTarget,
@@ -1017,7 +1025,44 @@ impl Core {
             approved,
             self.clock.now().timestamp(),
         )?;
+        if let (UndoTarget::JournalTransaction { id }, None, UndoOutcome::Undone { .. }) =
+            (target, undone.journal_transaction, &undone.value)
+        {
+            self.session().pass_over(id);
+        }
         Ok(self.signal(undone, TransactionOrigin::Undo))
+    }
+
+    /// The Change Journal list: every Journal Transaction, newest first.
+    pub fn change_journal(&self) -> Result<Vec<ListedJournalTransaction>> {
+        journal::change_journal(&self.store())
+    }
+
+    /// The Events the Journal Transaction `id` changed, in the order it
+    /// changed them, each with what its Undo undoes.
+    pub fn journal_transaction_events(
+        &self,
+        id: JournalTransactionId,
+    ) -> Result<Vec<ListedJournalEventModification>> {
+        journal::journal_transaction_events(&self.store(), id)
+    }
+
+    /// The History of the Event `id`: the changes to it, a Recurring Event
+    /// with its Exceptions, newest first, each with what its Undo undoes.
+    pub fn event_history(&self, id: EventId) -> Result<Vec<ListedJournalEventModification>> {
+        journal::event_history(&self.store(), id)
+    }
+
+    /// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Change
+    /// Journal: the user's own changes since FreeCal started, and the undos
+    /// since their last change.
+    pub fn session_undo(&self) -> Result<SessionUndo> {
+        let listed = journal::change_journal(&self.store())?;
+        Ok(self.session().session_undo(&listed))
+    }
+
+    fn session(&self) -> std::sync::MutexGuard<'_, journal::Session> {
+        self.session.lock().unwrap()
     }
 
     /// Runs `change` as one Journal Transaction of `origin` and sends

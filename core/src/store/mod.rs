@@ -14,7 +14,7 @@ mod sql;
 
 #[cfg(test)]
 pub use sql::UnsentChangeRow;
-pub(crate) use sql::{CalendarToSync, ServerCalendarState};
+pub(crate) use sql::{CalendarToSync, ServerCalendarState, StoredJournalTransaction};
 
 use std::ops::Deref;
 use std::path::Path;

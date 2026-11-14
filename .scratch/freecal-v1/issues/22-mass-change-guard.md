@@ -16,3 +16,4 @@
 
 ## Comments
 - 2026-10-18 (from 82): a sync's changes for one Calendar are `remote::Changes` (changed Events, removed object addresses), applied in `sync::apply` as one Journal Transaction; the guard can count them there before it is recorded. A whole listing (no or refused sync token) counts every held object it doesn't list as removed.
+- 2026-11-14 (from 19): an undo's or redo's Unsent Changes skip the guard: a Dangerous Undo's confirmation (`Core::undo` with `approved`) is the guard's approval, so the next sync must not pause the Calendar for them (ADR 0009, spec "Change Journal").

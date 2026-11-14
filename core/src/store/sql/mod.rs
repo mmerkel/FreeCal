@@ -34,6 +34,26 @@ use super::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId, TransactionOrigin};
+
+/// A Journal Transaction as [`Store::journal_transactions`] reads
+/// it: its fields, and the Calendar and title before and after each of its
+/// Journal Event Modifications, in the order they were made.
+pub(crate) struct StoredJournalTransaction {
+    pub id: JournalTransactionId,
+    pub origin: TransactionOrigin,
+    pub made_at: i64,
+    pub undoes: Option<JournalTransactionId>,
+    pub modifications: Vec<StoredModificationOutline>,
+}
+
+/// What the Change Journal list shows of a Journal Event Modification:
+/// whether it is undone, and the Calendar and title of the Event Version
+/// before and after it, none where it created or deleted the Event.
+pub(crate) struct StoredModificationOutline {
+    pub undone: bool,
+    pub previous: Option<(CalendarId, Option<String>)>,
+    pub made: Option<(CalendarId, Option<String>)>,
+}
 use crate::read_only::ReadOnly;
 use crate::remote::SyncPoint;
 use crate::sync_status::SyncRecord;
@@ -661,6 +681,80 @@ impl Store {
         self.read_journal_event_modifications("event_id = ?1 AND uid = ?2", params![id.0, uid])
     }
 
+    /// The Journal Event Modifications of the Events with the UID `uid`, in
+    /// the order they were made.
+    pub(crate) fn uid_journal_event_modifications(
+        &self,
+        uid: &str,
+    ) -> Result<Vec<JournalEventModification>> {
+        self.read_journal_event_modifications("uid = ?1", params![uid])
+    }
+
+    /// The Journal Event Modifications made at `since` (Unix seconds) or
+    /// later that changed an Event in the Calendar `id` or put one into it,
+    /// in the order they were made.
+    pub(crate) fn calendar_journal_event_modifications(
+        &self,
+        id: CalendarId,
+        since: i64,
+    ) -> Result<Vec<JournalEventModification>> {
+        self.read_journal_event_modifications(
+            "journal_transaction.made_at >= ?1 AND (calendar_id = ?2 OR made_calendar_id = ?2)",
+            params![since, id.0],
+        )
+    }
+
+    /// Every Journal Transaction, newest first, each with what the Change
+    /// Journal list shows of its Journal Event Modifications.
+    pub(crate) fn journal_transactions(&self) -> Result<Vec<StoredJournalTransaction>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT journal_transaction.id, origin, made_at, undoes, undone, \
+               calendar_id, title, made_calendar_id, made_title \
+             FROM journal_transaction JOIN journal_event_modification \
+               ON journal_transaction.id = journal_event_modification.journal_transaction_id \
+             ORDER BY journal_transaction.id DESC, journal_event_modification.id",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut stored: Vec<StoredJournalTransaction> = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id = JournalTransactionId(row.get(0)?);
+            if stored.last().is_none_or(|last| last.id != id) {
+                stored.push(StoredJournalTransaction {
+                    id,
+                    origin: TransactionOrigin::recorded(&text(row, 1)?.unwrap_or_default()),
+                    made_at: integer(row, 2)?.unwrap_or_default(),
+                    undoes: integer(row, 3)?.map(JournalTransactionId),
+                    modifications: Vec::new(),
+                });
+            }
+            let version = |calendar, title| -> rusqlite::Result<_> {
+                Ok(integer(row, calendar)?
+                    .map(|calendar| (CalendarId(calendar), text(row, title).ok().flatten())))
+            };
+            let previous = version(5, 6)?;
+            let made = version(7, 8)?;
+            if let Some(last) = stored.last_mut() {
+                last.modifications.push(StoredModificationOutline {
+                    undone: integer(row, 4)?.unwrap_or_default() != 0,
+                    previous,
+                    made,
+                });
+            }
+        }
+        Ok(stored)
+    }
+
+    /// The newest Journal Transaction, none while the Change Journal is
+    /// empty.
+    pub(crate) fn latest_journal_transaction(&self) -> Result<Option<JournalTransactionId>> {
+        let latest: Option<i64> =
+            self.conn
+                .query_row("SELECT MAX(id) FROM journal_transaction", [], |row| {
+                    row.get(0)
+                })?;
+        Ok(latest.map(JournalTransactionId))
+    }
+
     /// The Journal Event Modifications that match `condition`, in the order
     /// they were made, each with its Journal Transaction's origin and time.
     fn read_journal_event_modifications(
@@ -671,14 +765,17 @@ impl Store {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT journal_event_modification.id, journal_transaction.id, \
                journal_transaction.origin, journal_transaction.made_at, \
-               event_id, uid, hash, undone, calendar_id, {EVENT_FIELDS} \
+               event_id, uid, hash, undone, made_calendar_id, made_title, \
+               calendar_id, {EVENT_FIELDS} \
              FROM journal_event_modification JOIN journal_transaction \
                ON journal_transaction.id = journal_event_modification.journal_transaction_id \
              WHERE {condition} ORDER BY journal_event_modification.id"
         ))?;
         let modifications = stmt
             .query_map(params, |row| {
-                let created = row.get::<_, Option<i64>>(8)?.is_none();
+                let created = row.get::<_, Option<i64>>(10)?.is_none();
+                let made_calendar = integer(row, 8)?;
+                let made_title = text(row, 9)?;
                 Ok(JournalEventModification {
                     id: row.get(0)?,
                     journal_transaction: JournalTransactionId(row.get(1)?),
@@ -688,10 +785,12 @@ impl Store {
                     uid: row.get(5)?,
                     hash: row.get(6)?,
                     undone: row.get(7)?,
+                    made: made_calendar
+                        .map(|calendar| (CalendarId(calendar), made_title.unwrap_or_default())),
                     previous: if created {
                         None
                     } else {
-                        Some(stored_event(row, 8)?)
+                        Some(stored_event(row, 10)?)
                     },
                 })
             })?

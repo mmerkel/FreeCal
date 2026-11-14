@@ -1,6 +1,6 @@
 //! Undo per Event (ADR 0009). An undo picks Journal Event Modifications,
-//! a Journal Transaction whole or one Event of an import's or an Incoming
-//! Sync's, and undoes them newest first, each Event back to its previous
+//! a Journal Transaction whole, one Event of an import's or an Incoming
+//! Sync's, or a Calendar's since a given time, and undoes them newest first, each Event back to its previous
 //! Event Version. An Event that changed since gets its later Journal Event
 //! Modifications undone first, and these bring the rest of their own
 //! Journal Transaction with them as picking it would. Events that can't be
@@ -36,6 +36,28 @@ pub enum UndoTarget {
         journal_transaction: JournalTransactionId,
         event_id: EventId,
     },
+    /// Every change made at `since` (Unix seconds) or later to an Event of
+    /// the Calendar `calendar_id`, or that put one into it, each with what
+    /// undoing it brings along: the rest of a user action's or an undo's
+    /// Journal Transaction, the Event Rows of its UID in an import's or an
+    /// Incoming Sync's.
+    #[serde(rename_all = "camelCase")]
+    CalendarSince { calendar_id: CalendarId, since: i64 },
+}
+
+impl UndoTarget {
+    /// The Journal Transaction it picks from, none for a Calendar since a
+    /// given time.
+    fn journal_transaction(self) -> Option<JournalTransactionId> {
+        match self {
+            UndoTarget::JournalTransaction { id } => Some(id),
+            UndoTarget::Event {
+                journal_transaction,
+                ..
+            } => Some(journal_transaction),
+            UndoTarget::CalendarSince { .. } => None,
+        }
+    }
 }
 
 /// Why an undo is a Dangerous Undo, which runs only once the user approved
@@ -129,6 +151,7 @@ pub(crate) fn undo(
         TransactionOrigin::Undo,
         made_at,
         |journal_transaction| {
+            journal_transaction.undoes = target.journal_transaction();
             let plan = Plan::make(journal_transaction, target)?;
             let skipped = plan.skipped_events();
             if let Some(danger) = plan.danger(journal_transaction)?
@@ -146,7 +169,7 @@ pub(crate) fn undo(
 /// time: an import's and an Incoming Sync's Events are independent, while
 /// a user action's or an undo's depend on each other, as when "this and
 /// following" splits a Recurring Event in two (ADR 0009).
-fn undone_per_event(origin: TransactionOrigin) -> bool {
+pub(super) fn undone_per_event(origin: TransactionOrigin) -> bool {
     matches!(
         origin,
         TransactionOrigin::Import | TransactionOrigin::IncomingSync
@@ -380,6 +403,21 @@ fn picked(
                 .collect();
             (id, of_uid)
         }
+        UndoTarget::CalendarSince { calendar_id, since } => {
+            let mut picked = BTreeMap::new();
+            for modification in journal_transaction
+                .database_transaction
+                .calendar_journal_event_modifications(calendar_id, since)?
+            {
+                if modification.undone || picked.contains_key(&modification.id) {
+                    continue;
+                }
+                for with in brought_along(journal_transaction, &modification)? {
+                    picked.entry(with.id).or_insert(with);
+                }
+            }
+            return Ok(picked.into_values().collect());
+        }
     };
     let picked: Vec<_> = modifications
         .into_iter()
@@ -389,6 +427,23 @@ fn picked(
         return Err(CoreError::AlreadyUndone(id));
     }
     Ok(picked)
+}
+
+/// The Journal Event Modifications that undoing `modification` brings
+/// along, itself included: those of its Journal Transaction not undone yet,
+/// of its UID only where [`undone_per_event`].
+fn brought_along(
+    journal_transaction: &JournalTransaction,
+    modification: &JournalEventModification,
+) -> Result<Vec<JournalEventModification>> {
+    Ok(journal_transaction
+        .database_transaction
+        .journal_event_modifications(modification.journal_transaction)?
+        .into_iter()
+        .filter(|with| {
+            !with.undone && (!undone_per_event(modification.origin) || with.uid == modification.uid)
+        })
+        .collect())
 }
 
 /// The later Journal Event Modifications of `event`, newest first and all
@@ -484,7 +539,7 @@ impl Planner<'_, '_> {
                 });
             }
             for modification in later {
-                for with in self.brought_along(&modification)? {
+                for with in brought_along(self.journal_transaction, &modification)? {
                     undone.entry(with.id).or_insert(with);
                 }
             }
@@ -568,25 +623,6 @@ impl Planner<'_, '_> {
                         )
                     })
             })
-    }
-
-    /// The Journal Event Modifications that undoing `modification` brings
-    /// along, itself included: those of its Journal Transaction not undone
-    /// yet, of its UID only where [`undone_per_event`].
-    fn brought_along(
-        &self,
-        modification: &JournalEventModification,
-    ) -> Result<Vec<JournalEventModification>> {
-        Ok(self
-            .journal_transaction
-            .database_transaction
-            .journal_event_modifications(modification.journal_transaction)?
-            .into_iter()
-            .filter(|with| {
-                !with.undone
-                    && (!undone_per_event(modification.origin) || with.uid == modification.uid)
-            })
-            .collect())
     }
 
     fn current(&mut self, event: &TrackedEvent) -> Result<&Option<StoredEvent>> {

@@ -547,6 +547,23 @@ mod privileges {
 mod undo {
     use super::*;
 
+    /// Ticket 19: "Changed on the server: 1 Event in Work", which Ctrl+Z
+    /// never undoes.
+    #[test]
+    fn an_incoming_sync_is_listed_in_the_change_journal_and_not_on_session_undo() {
+        let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
+        synced.put("standup", standup("Standup moved"));
+
+        let journal_transaction = synced.sync().unwrap();
+
+        let listed = synced.core.change_journal().unwrap().remove(0);
+        assert_eq!(listed.id, journal_transaction);
+        assert_eq!(listed.origin, freecal_core::TransactionOrigin::IncomingSync);
+        assert_eq!((listed.events, listed.calendar_ids), (1, vec![synced.work]));
+        assert!(listed.undone_per_event);
+        assert_eq!(synced.core.session_undo().unwrap().undo, None);
+    }
+
     /// ADR 0015: the next write is conditional on what the server has now.
     #[test]
     fn restores_the_previous_event_version_and_leaves_the_object_as_the_server_has_it() {

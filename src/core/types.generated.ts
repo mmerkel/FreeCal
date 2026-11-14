@@ -229,6 +229,11 @@ imported: number, updated: number, skipped: number, };
 export type ImportSummary = { calendarId: CalendarId, newEvents: number, existingEvents: number, pinned: Array<PinnedZone>, };
 
 /**
+ * What a Journal Event Modification did to its Event.
+ */
+export type JournalEventModificationKind = "created" | "edited" | "deleted";
+
+/**
  * A Journal Transaction: what undoes a change, or changes made together.
  */
 export type JournalTransactionId = number & { readonly __brand: "JournalTransactionId" };
@@ -245,6 +250,69 @@ madeAt: number,
  * The titles of the Events it undoes of it.
  */
 titles: Array<string>, };
+
+/**
+ * A Journal Event Modification as a Journal Transaction in the Change
+ * Journal list, or an Event's History, shows it.
+ */
+export type ListedJournalEventModification = { journalTransaction: JournalTransactionId, origin: TransactionOrigin,
+/**
+ * When its Journal Transaction was made, in Unix seconds.
+ */
+madeAt: number, eventId: EventId,
+/**
+ * The Event's title as the change left it, or as it was before the
+ * change deleted it.
+ */
+title: string,
+/**
+ * The Event's Calendar, likewise.
+ */
+calendarId: CalendarId, kind: JournalEventModificationKind, undone: boolean,
+/**
+ * What its Undo undoes, none once it is undone: the Event, with the
+ * Event Rows of its UID in the Journal Transaction, where the Journal
+ * Transaction is undone one Event at a time, else the whole Journal
+ * Transaction.
+ */
+undo: UndoTarget | null, };
+
+/**
+ * A Journal Transaction as the Change Journal list shows it.
+ */
+export type ListedJournalTransaction = { id: JournalTransactionId, origin: TransactionOrigin,
+/**
+ * When it was made, in Unix seconds.
+ */
+madeAt: number,
+/**
+ * For an undo, the Journal Transaction it was asked to undo; none for
+ * one of a Calendar since a given time.
+ */
+undoes: JournalTransactionId | null,
+/**
+ * How many Events it changed, counted as Event Rows.
+ */
+events: number,
+/**
+ * How many of those are undone.
+ */
+undoneEvents: number,
+/**
+ * The Calendars it changed Events in, in the order first changed.
+ */
+calendarIds: Array<CalendarId>,
+/**
+ * The first few different titles of its Events, as it left them, or as
+ * they were before it deleted them.
+ */
+titles: Array<string>,
+/**
+ * Whether its Events can be undone one at a time, as an import's and an
+ * Incoming Sync's; a user action's and an undo's are undone only whole
+ * (ADR 0009).
+ */
+undonePerEvent: boolean, };
 
 /**
  * One dated appearance of an Event in the grid. A single Event has exactly
@@ -349,6 +417,39 @@ export type SendFailure = { "kind": "serverChanged" } | { "kind": "addressTaken"
 export type ServerLogin = { url: string, username: string, };
 
 /**
+ * What Ctrl+Z and Ctrl+Shift+Z undo next (new term: Session Undo): the
+ * user's own changes of this session, newest first, and the undos made
+ * since their last change.
+ */
+export type SessionUndo = {
+/**
+ * What Ctrl+Z undoes: the newest Journal Transaction of this session
+ * that is a user action, an import or a redo and isn't wholly undone.
+ */
+undo: SessionUndoStep | null,
+/**
+ * What Ctrl+Shift+Z redoes, by undoing it: the newest undo made since
+ * the user's last change in this session, and since FreeCal started,
+ * that isn't a redo and isn't undone.
+ */
+redo: SessionUndoStep | null, };
+
+/**
+ * One step of Session Undo.
+ */
+export type SessionUndoStep = {
+/**
+ * The Journal Transaction to undo whole.
+ */
+journalTransaction: JournalTransactionId,
+/**
+ * The user action or import the step undoes or redoes, through the
+ * undos between; none for an undo of a Calendar since a given time, or
+ * of an Incoming Sync.
+ */
+userChange: JournalTransactionId | null, };
+
+/**
  * The settings of the Settings dialog, as the Local Store keeps them.
  */
 export type Settings = { appearance: Appearance,
@@ -441,6 +542,13 @@ unsentChanges: number, };
 export type SyncStatuses = { overall: OverallStatus, accounts: Array<AccountSyncStatus>, calendars: Array<CalendarSyncStatus>, };
 
 /**
+ * Where a Journal Transaction's changes came from, which decides where they
+ * may write.
+ * Snapshot restore and Conflict resolution come with their tickets.
+ */
+export type TransactionOrigin = "userAction" | "import" | "undo" | "firstSync" | "incomingSync";
+
+/**
  * What an undo did.
  */
 export type UndoOutcome = { "kind": "undone", skipped: Array<SkippedEvent>, } | { "kind": "dangerous", danger: DangerousUndo, skipped: Array<SkippedEvent>, };
@@ -448,7 +556,7 @@ export type UndoOutcome = { "kind": "undone", skipped: Array<SkippedEvent>, } | 
 /**
  * What an undo picks (new term: Undo Target).
  */
-export type UndoTarget = { "kind": "journalTransaction", id: JournalTransactionId, } | { "kind": "event", journalTransaction: JournalTransactionId, eventId: EventId, };
+export type UndoTarget = { "kind": "journalTransaction", id: JournalTransactionId, } | { "kind": "event", journalTransaction: JournalTransactionId, eventId: EventId, } | { "kind": "calendarSince", calendarId: CalendarId, since: number, };
 
 /**
  * The Unsent Change of an Event as the window gets it: since when it

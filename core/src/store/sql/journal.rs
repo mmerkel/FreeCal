@@ -132,23 +132,26 @@ impl DatabaseTransaction<'_> {
     }
 
     /// Stores a new Journal Transaction, as `origin` records it, made at
-    /// `made_at`.
+    /// `made_at`; for an undo, the Journal Transaction `undoes` it was asked
+    /// to undo.
     pub(crate) fn insert_journal_transaction(
         &self,
         _: &JournalWritePermission,
         origin: &str,
         made_at: i64,
+        undoes: Option<JournalTransactionId>,
     ) -> Result<JournalTransactionId> {
         self.tx.execute(
-            "INSERT INTO journal_transaction (origin, made_at) VALUES (?1, ?2)",
-            params![origin, made_at],
+            "INSERT INTO journal_transaction (origin, made_at, undoes) VALUES (?1, ?2, ?3)",
+            params![origin, made_at, undoes.map(|id| id.0)],
         )?;
         Ok(JournalTransactionId(self.tx.last_insert_rowid()))
     }
 
     /// Stores a Journal Event Modification of `journal_transaction`: the Event
     /// `id` with the UID `uid` went from `previous`, none when it was created,
-    /// to an Event Version with the hash `hash`, none when it was deleted.
+    /// to `made` with the hash `hash`, none when it was deleted.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn insert_journal_event_modification(
         &self,
         _: &JournalWritePermission,
@@ -156,6 +159,7 @@ impl DatabaseTransaction<'_> {
         id: EventId,
         uid: &str,
         previous: Option<&StoredEvent>,
+        made: Option<&StoredEvent>,
         hash: Option<Vec<u8>>,
     ) -> Result<()> {
         let fields = previous.map(|event| &event.fields);
@@ -163,15 +167,18 @@ impl DatabaseTransaction<'_> {
         self.tx.execute(
             &format!(
                 "INSERT INTO journal_event_modification \
-                 (journal_transaction_id, event_id, uid, hash, calendar_id, {EVENT_FIELDS}) \
+                 (journal_transaction_id, event_id, uid, hash, made_calendar_id, made_title, \
+                   calendar_id, {EVENT_FIELDS}) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                   ?16, ?17, ?18)"
+                   ?16, ?17, ?18, ?19, ?20)"
             ),
             params![
                 journal_transaction.0,
                 id.0,
                 uid,
                 hash,
+                made.map(|event| event.calendar_id.0),
+                made.map(|event| &event.fields.title),
                 previous.map(|event| event.calendar_id.0),
                 fields.map(|fields| &fields.title),
                 when.map(|when| when.all_day),

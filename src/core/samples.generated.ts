@@ -747,6 +747,108 @@ export const samples = {
       "kind": "event",
       "journalTransaction": 4,
       "eventId": 3
+    },
+    {
+      "kind": "calendarSince",
+      "calendarId": 2,
+      "since": 1791100800
+    }
+  ],
+  TransactionOrigin: [
+    "userAction",
+    "import",
+    "undo",
+    "firstSync",
+    "incomingSync"
+  ],
+  ListedJournalTransaction: [
+    {
+      "id": 6,
+      "origin": "undo",
+      "madeAt": 1791100860,
+      "undoes": 5,
+      "events": 1,
+      "undoneEvents": 0,
+      "calendarIds": [
+        2
+      ],
+      "titles": [
+        "Dentist"
+      ],
+      "undonePerEvent": false
+    },
+    {
+      "id": 5,
+      "origin": "incomingSync",
+      "madeAt": 1791100800,
+      "undoes": null,
+      "events": 3,
+      "undoneEvents": 1,
+      "calendarIds": [
+        2,
+        3
+      ],
+      "titles": [
+        "Standup",
+        "Yoga",
+        ""
+      ],
+      "undonePerEvent": true
+    }
+  ],
+  JournalEventModificationKind: [
+    "created",
+    "edited",
+    "deleted"
+  ],
+  ListedJournalEventModification: [
+    {
+      "journalTransaction": 5,
+      "origin": "incomingSync",
+      "madeAt": 1791100800,
+      "eventId": 3,
+      "title": "Standup",
+      "calendarId": 2,
+      "kind": "edited",
+      "undone": false,
+      "undo": {
+        "kind": "event",
+        "journalTransaction": 5,
+        "eventId": 3
+      }
+    },
+    {
+      "journalTransaction": 4,
+      "origin": "userAction",
+      "madeAt": 1791100700,
+      "eventId": 3,
+      "title": "Standup",
+      "calendarId": 2,
+      "kind": "deleted",
+      "undone": true,
+      "undo": null
+    }
+  ],
+  SessionUndo: [
+    {
+      "undo": {
+        "journalTransaction": 6,
+        "userChange": 4
+      },
+      "redo": {
+        "journalTransaction": 7,
+        "userChange": null
+      }
+    },
+    {
+      "undo": null,
+      "redo": null
+    }
+  ],
+  SessionUndoStep: [
+    {
+      "journalTransaction": 6,
+      "userChange": 4
     }
   ],
   LaterJournalTransaction: [
@@ -1024,6 +1126,12 @@ type Samples = {
   ImportOutcome: Unbranded<T.ImportOutcome>[];
   Changed: Unbranded<T.Changed<T.Event>>[];
   UndoTarget: Unbranded<T.UndoTarget>[];
+  TransactionOrigin: Unbranded<T.TransactionOrigin>[];
+  ListedJournalTransaction: Unbranded<T.ListedJournalTransaction>[];
+  JournalEventModificationKind: Unbranded<T.JournalEventModificationKind>[];
+  ListedJournalEventModification: Unbranded<T.ListedJournalEventModification>[];
+  SessionUndo: Unbranded<T.SessionUndo>[];
+  SessionUndoStep: Unbranded<T.SessionUndoStep>[];
   LaterJournalTransaction: Unbranded<T.LaterJournalTransaction>[];
   DangerousUndo: Unbranded<T.DangerousUndo>[];
   SkipReason: Unbranded<T.SkipReason>[];
