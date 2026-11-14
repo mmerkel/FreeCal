@@ -15,6 +15,9 @@ export default defineConfig({
     // Tauri loads the bundle from disk, so the 500 kB default (meant for
     // downloads) doesn't apply; the limit still flags a doubling in size.
     chunkSizeWarningLimit: 1000,
+    // The window's CSP allows no data: images, so SVGs stay files of their
+    // own, such as the Status Marks.
+    assetsInlineLimit: (file) => (file.endsWith('.svg') ? false : undefined),
   },
   test: {
     environment: 'jsdom',

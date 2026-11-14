@@ -130,6 +130,10 @@ _Avoid_: Backup, dump, export (an export is user-initiated)
 
 Terms for the code and the ADRs, never shown to the user. Each needs the user's agreement before it is used (see `CLAUDE.md`).
 
+**Status Mark**:
+The coloured badge showing the overall status (`src-tauri/icons/src/mark-<status>.svg`), the same in the window's status indicator and on the tray icon's calendar.
+_Avoid_: Badge, overlay, status icon
+
 **Event Row**:
 One stored Event in the `event` table: a single Event, a Recurring Event or one Exception. A Recurring Event with Exceptions is several Event Rows.
 _Avoid_: Row (on its own), event table row, record

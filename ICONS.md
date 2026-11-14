@@ -10,12 +10,13 @@ src-tauri/icons/
   generate-dev.sh         generate.sh, then installs the dev launcher's icon
   src/                    the hand-drawn SVGs, the only files to edit
     app.svg               the app icon: window, taskbar, bundles
-    tray-<status>.svg     a tray icon per overall status (ticket 67)
+    tray-base.svg         the tray icon's calendar, under every Status Mark
+    mark-<status>.svg     a Status Mark per overall status (ticket 67)
   app/                    generated: <size>x<size>.png, listed in bundle.icon
   tray/                   generated: <status>.png, built into the binary
 ```
 
-The tray icons are named after the overall status they show: `tray-synced.svg` (Online and synced), `tray-syncing.svg`, `tray-offline.svg`, `tray-sync-error.svg` and `tray-conflict.svg`. Each becomes `tray/<status>.png`, e.g. `tray/sync-error.png`.
+The Status Marks are named after the overall status they show: `mark-synced.svg` (Online and synced), `mark-syncing.svg`, `mark-offline.svg`, `mark-sync-error.svg` and `mark-conflict.svg`. Each is drawn on `tray-base.svg` and becomes `tray/<status>.png`, e.g. `tray/sync-error.png`. The window's status indicator shows the same mark files (`src/lib/Toolbar.svelte`), so the window and the tray can't drift apart.
 
 ## Generating the PNGs
 
@@ -28,7 +29,7 @@ src-tauri/icons/generate.sh
 and commit the SVG together with the PNGs. The script renders:
 
 - `src/app.svg` into `app/` at 32, 48, 64, 128, 256 and 512 pixels.
-- every `src/tray-*.svg` into `tray/` at 64×64. The tray takes one image per icon and the panel scales it down, to about 22px or 16px. If an icon doesn't read at those sizes, change the SVG; a smaller export doesn't help.
+- every `src/mark-*.svg` on `src/tray-base.svg` into `tray/` at 64×64. The mark takes the lower-right `MARK_FRACTION` of the icon, and a gap of `GAP_FRACTION` around its shape is cut out of the base, so the mark stands apart from the calendar. The tray takes one image per icon and the panel scales it down, to about 22px or 16px. If an icon doesn't read at those sizes, change the SVG; a smaller export doesn't help.
 
 It renders with `tauri icon` from `@tauri-apps/cli`, whose version `package-lock.json` pins, so the same SVG gives the same bytes on every machine. The pre-commit hook runs `generate.sh --check` when a commit changes `src-tauri/icons/`; it fails if a PNG doesn't match its SVG. The warnings `tauri icon` prints about fonts are hidden and don't matter, as long as the SVGs have no text (see below).
 
@@ -50,6 +51,8 @@ To change the app icon sizes, change `APP_SIZES` in `generate.sh` and the list i
 ## Drawing the SVGs
 
 - Use a square `viewBox` and a transparent background.
+- Give `tray-base.svg` and each mark a plain number as `width` on `<svg>` (e.g. `width="512"`, no unit): the script sizes the mark by it.
+- A mark's coloured shape holds a white (or, on amber, dark) glyph, so it reads on light and dark panels alike. Conflict is a triangle and Sync Error a disc, so they differ by shape and not only by colour.
 - Convert any text to paths. The renderer loads system fonts for `<text>`, so the result would depend on the machine that runs the script.
 - Check that the app icon still reads at 32×32, and the tray icons at 16×16. Fine detail disappears at small sizes.
 - Tray icons must work on light and dark panels (ticket 67).

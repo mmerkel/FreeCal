@@ -8,17 +8,20 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
-  import CircleAlert from '@lucide/svelte/icons/circle-alert';
-  import CloudCheck from '@lucide/svelte/icons/cloud-check';
-  import CloudOff from '@lucide/svelte/icons/cloud-off';
+  import Cloud from '@lucide/svelte/icons/cloud';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-  import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
   import ImportIcon from '@lucide/svelte/icons/import';
   import Info from '@lucide/svelte/icons/info';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
   import History from '@lucide/svelte/icons/history';
+  // The Status Marks, the same files the tray icons are made from (ICONS.md).
+  import conflictMark from '../../src-tauri/icons/src/mark-conflict.svg';
+  import offlineMark from '../../src-tauri/icons/src/mark-offline.svg';
+  import syncErrorMark from '../../src-tauri/icons/src/mark-sync-error.svg';
+  import syncedMark from '../../src-tauri/icons/src/mark-synced.svg';
+  import syncingMark from '../../src-tauri/icons/src/mark-syncing.svg';
   import type { OverallState, View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
   import Menu from './Menu.svelte';
@@ -84,16 +87,16 @@
   const previous = $derived(t(steps[view].previous));
   const next = $derived(t(steps[view].next));
 
-  /** Each overall state's icon in the status indicator. */
-  const syncIcons: Record<OverallState['kind'], typeof CloudCheck> = {
-    conflict: TriangleAlert,
-    syncError: CircleAlert,
-    offline: CloudOff,
-    syncing: RefreshCw,
-    synced: CloudCheck,
+  /** Each overall state's Status Mark, shown on the cloud of the status indicator. */
+  const statusMarks: Record<OverallState['kind'], string> = {
+    conflict: conflictMark,
+    syncError: syncErrorMark,
+    offline: offlineMark,
+    syncing: syncingMark,
+    synced: syncedMark,
   };
 
-  const SyncIcon = $derived(syncIcons[syncState?.kind ?? 'synced']);
+  const statusMark = $derived(statusMarks[syncState?.kind ?? 'synced']);
 
   /** Runs a menu item's action: the menu closes first, so focus returns to its button. */
   function choose(action: () => void) {
@@ -113,7 +116,14 @@
       title={overallText}
     >
       <span class="sync-icon" role="img" aria-label={overallText}>
-        <SyncIcon size={16} aria-hidden="true" />
+        <span class="sync-cloud"><Cloud size={18} aria-hidden="true" /></span>
+        <!-- A background, not an <img>: the hostile-text tests check that the
+             window has no <img> at all. -->
+        <span
+          class="status-mark"
+          class:spinning={syncState.kind === 'syncing'}
+          style:background-image="url({statusMark})"
+        ></span>
       </span>
     </div>
   {/if}
@@ -282,8 +292,45 @@
     margin-right: var(--space-2);
   }
 
+  /* The cloud with the Status Mark on its lower right. A circle around the
+     mark is cut out of the cloud, as on the tray icon, so the two stand apart. */
   .sync-icon {
+    position: relative;
     display: flex;
+    width: 22px;
+    height: 20px;
+  }
+
+  .sync-cloud {
+    display: flex;
+    mask: radial-gradient(circle at 17.5px 15.5px, transparent 5.5px, #000 6px);
+  }
+
+  .status-mark {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 9px;
+    height: 9px;
+    background-size: contain;
+  }
+
+  /* The syncing mark turns while the sync runs; its disc stays in place, so
+     only the arrows seem to move. */
+  .spinning {
+    animation: spin 1.2s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinning {
+      animation: none;
+    }
   }
 
   kbd {
