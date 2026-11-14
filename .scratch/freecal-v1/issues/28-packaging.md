@@ -13,7 +13,7 @@
 - [ ] Autostart, keyring, file dialogs and network status use portal-friendly APIs (checked as features land)
 - [ ] A manual release checklist against a real Google test account is documented
 - [ ] FreeCal's window reports the app ID `io.github.mmerkel.FreeCal` (Wayland app_id, X11 `WM_CLASS`), so the desktop finds its `.desktop` file and shows FreeCal's icon in the panel and the window decorations, not a generic one
-- [ ] The packages install `io.github.mmerkel.FreeCal.desktop` (with `MimeType=text/calendar;`, spec "Opening files") and the icon in the `hicolor` sizes under that name; the sizes are made from `src-tauri/icons/base.svg`
+- [ ] The packages install `io.github.mmerkel.FreeCal.desktop` (with `MimeType=text/calendar;`, spec "Opening files") and the icon in the `hicolor` sizes under that name; the sizes are made from `src-tauri/icons/src/app.svg` (`ICONS.md`)
 
 ## Comments
 

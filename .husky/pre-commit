@@ -37,6 +37,9 @@ if $front; then
   quiet npm run --silent check
   quiet npm test
 fi
+if echo "$staged" | grep -q '^src-tauri/icons/'; then
+  quiet src-tauri/icons/generate.sh --check
+fi
 if $rust; then
   if echo "$staged" | grep -qE '(^|/)Cargo\.(toml|lock)$|^deny\.toml$'; then
     quiet cargo deny --log-level error check licenses
