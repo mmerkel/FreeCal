@@ -585,13 +585,21 @@ fn close_main_window(app: &AppHandle) {
     }
 }
 
-/// Whether there is a tray with FreeCal's icon in it.
+/// Whether there is a tray with FreeCal's icon in it. When the tray came up
+/// after FreeCal, as at a start at login, the icon is created here: the tray
+/// crate gives up on it when no tray is up at startup and doesn't try again.
 fn tray_present(app: &AppHandle) -> bool {
     #[cfg(target_os = "linux")]
     let desktop_tray = desktop_watch::tray_present();
     // Other systems are for later.
     #[cfg(not(target_os = "linux"))]
     let desktop_tray = false;
+    if desktop_tray
+        && app.tray_by_id(tray::TRAY).is_none()
+        && let Err(error) = tray::show(app, on_tray_choice)
+    {
+        eprintln!("FreeCal can't show its tray icon: {error}");
+    }
     desktop_tray && app.tray_by_id(tray::TRAY).is_some()
 }
 

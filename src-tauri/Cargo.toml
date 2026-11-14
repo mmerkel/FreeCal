@@ -27,4 +27,10 @@ tempfile = "3"
 gdkwayland-sys = "0.18"
 gtk = "0.18"
 oo7 = "0.6"
+# The KSNI backend of Tauri's tray crate, in place of AppIndicator, which
+# gives the icon no clicks (ticket 13). With both on, the crate picks KSNI.
+# This works only while the version matches the one Tauri uses (Cargo.lock
+# must list one `tray-icon`); if Tauri moves on, move this along, or left
+# clicks silently open the menu again. Drop it once Tauri has `linux-ksni`.
+tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
 zbus = "5"
