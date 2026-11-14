@@ -4,7 +4,6 @@
 //! of Tauri's tray crate, which `Cargo.toml` turns on. The icon's status is
 //! ticket 23.
 
-use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
@@ -26,10 +25,7 @@ const QUIT: &str = "quit";
 
 /// Puts FreeCal's icon in the tray, with `on_choice` for its menu and its
 /// left click, which picks Open FreeCal.
-pub fn show(
-    app: &AppHandle,
-    on_choice: impl Fn(&AppHandle, TrayChoice) + Send + Sync + 'static,
-) -> tauri::Result<()> {
+pub fn show(app: &AppHandle, on_choice: fn(&AppHandle, TrayChoice)) -> tauri::Result<()> {
     // The shell has no translations yet; the labels hold no `_`, which the
     // menu would read as a shortcut marker.
     let menu = Menu::with_items(
@@ -40,8 +36,6 @@ pub fn show(
             &MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?,
         ],
     )?;
-    let on_choice = Arc::new(on_choice);
-    let on_click = Arc::clone(&on_choice);
     let mut tray = TrayIconBuilder::with_id(TRAY)
         .menu(&menu)
         .tooltip("FreeCal")
@@ -60,7 +54,7 @@ pub fn show(
                 ..
             } = event
             {
-                on_click(icon.app_handle(), TrayChoice::OpenFreeCal);
+                on_choice(icon.app_handle(), TrayChoice::OpenFreeCal);
             }
         });
     // FreeCal's own icon until the status icons of ticket 23.

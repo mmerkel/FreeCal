@@ -148,14 +148,30 @@ async fn update_settings(app: AppHandle, update: SettingsUpdate) -> CommandResul
 
 /// Puts FreeCal's icon in the tray while background running is on, and
 /// takes it out while it is off: the icon stands for keeping running.
-fn show_tray_icon(app: &AppHandle, on: bool) {
+/// Returns whether the icon is in the tray.
+fn show_tray_icon(app: &AppHandle, on: bool) -> bool {
     if !on {
         app.remove_tray_by_id(tray::TRAY);
-    } else if app.tray_by_id(tray::TRAY).is_none()
-        && let Err(error) = tray::show(app, on_tray_choice)
-    {
-        eprintln!("FreeCal can't show its tray icon: {error}");
+        return false;
     }
+    if app.tray_by_id(tray::TRAY).is_some() {
+        return true;
+    }
+    match tray::show(app, on_tray_choice) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("FreeCal can't show its tray icon: {error}");
+            false
+        }
+    }
+}
+
+/// Whether closing the window keeps FreeCal running in the background.
+/// When the settings can't be read, it doesn't: closing quits rather than
+/// risk FreeCal running on unseen, and there is no tray icon.
+fn runs_in_background(core: &Core) -> bool {
+    core.settings()
+        .is_ok_and(|settings| settings.run_in_background)
 }
 
 #[cfg(target_os = "linux")]
@@ -578,10 +594,7 @@ fn close_main_window(app: &AppHandle) {
     };
     let closed = closing(
         app.state::<SessionEnding>().0.load(Ordering::SeqCst),
-        // When the settings can't be read, closing quits rather than risk
-        // FreeCal running on unseen.
-        core.settings()
-            .is_ok_and(|settings| settings.run_in_background),
+        runs_in_background(&core),
         || tray_present(app),
         || unsent_changes_wait(&core),
     );
@@ -592,7 +605,7 @@ fn close_main_window(app: &AppHandle) {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 let _ = window.hide();
             }
-            core.set_window_open(false);
+            set_window_open(app, false);
         }
         Closing::AskToQuit => {
             let _ = app.emit_to(MAIN_WINDOW, QUIT_ASKED_EVENT, ());
@@ -610,10 +623,7 @@ fn tray_present(app: &AppHandle) -> bool {
     // Other systems are for later.
     #[cfg(not(target_os = "linux"))]
     let desktop_tray = false;
-    if desktop_tray {
-        show_tray_icon(app, true);
-    }
-    desktop_tray && app.tray_by_id(tray::TRAY).is_some()
+    desktop_tray && show_tray_icon(app, true)
 }
 
 /// Whether some Unsent Changes wait. When they can't be counted, none do.
@@ -630,13 +640,9 @@ fn unsent_changes_wait(core: &Core) -> bool {
 fn on_tray_choice(app: &AppHandle, choice: tray::TrayChoice) {
     match choice {
         tray::TrayChoice::OpenFreeCal => open_main_window(app),
-        // As the window's Sync now for all; without a Core (a failed start)
-        // there is nothing to sync.
-        tray::TrayChoice::SyncNow => {
-            if let Some(core) = app.try_state::<Core>() {
-                core.sync_now(None);
-            }
-        }
+        // As the window's Sync now for all. The icon is only there with a
+        // Core: a failed start shows none.
+        tray::TrayChoice::SyncNow => app.state::<Core>().sync_now(None),
         // As Quit in the main menu, in the window, which comes to the front
         // for it; with the window hidden in the background, FreeCal quits at
         // once and the Unsent Changes stay in the Local Store.
@@ -677,17 +683,18 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     match app.get_webview_window(MAIN_WINDOW) {
         Some(window) if !window.is_visible()? => {
             window.show()?;
-            window_opened(app);
+            set_window_open(app, true);
             window.set_focus()
         }
         _ => Ok(()),
     }
 }
 
-/// The Sync Scheduler polls as often as with the window open again.
-fn window_opened(app: &AppHandle) {
+/// Tells the Sync Scheduler that the window is shown or hidden, so that it
+/// polls less often while FreeCal runs in the background.
+fn set_window_open(app: &AppHandle, open: bool) {
     if let Some(core) = app.try_state::<Core>() {
-        core.set_window_open(true);
+        core.set_window_open(open);
     }
 }
 
@@ -702,7 +709,7 @@ fn bring_to_front(app: &AppHandle, activation_token: Option<String>) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
-    window_opened(app);
+    set_window_open(app, true);
     // GTK only works on the main thread.
     let _ = app.run_on_main_thread(move || {
         let Ok(window) = window.gtk_window() else {
@@ -843,14 +850,8 @@ fn main() {
                         }
                     });
                     run_scheduled_syncs(app.handle());
-                    // Without its icon, closing the window quits. When the
-                    // settings can't be read, there is none, as closing
-                    // then quits anyway.
-                    let run_in_background = app
-                        .state::<Core>()
-                        .settings()
-                        .is_ok_and(|settings| settings.run_in_background);
-                    show_tray_icon(app.handle(), run_in_background);
+                    // Without its icon, closing the window quits.
+                    show_tray_icon(app.handle(), runs_in_background(&app.state::<Core>()));
                 }
                 Err(error) => {
                     eprintln!("FreeCal could not open its Local Store: {error}");
