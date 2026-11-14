@@ -571,12 +571,13 @@ fn close_main_window(app: &AppHandle) {
         || unsent_changes_wait(&core),
     );
     match closed {
-        // The window is gone rather than hidden, so that it holds no memory
-        // in the background; Open FreeCal creates it again.
+        // The window is hidden rather than destroyed, so that it opens again
+        // at once and as it was, open dialogs included (ADR 0016).
         Closing::ToBackground => {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-                let _ = window.destroy();
+                let _ = window.hide();
             }
+            core.set_window_open(false);
         }
         Closing::AskToQuit => {
             let _ = app.emit_to(MAIN_WINDOW, QUIT_ASKED_EVENT, ());
@@ -618,11 +619,13 @@ fn on_tray_choice(app: &AppHandle, choice: tray::TrayChoice) {
     match choice {
         tray::TrayChoice::OpenFreeCal => open_main_window(app),
         // As Quit in the main menu, in the window, which comes to the front
-        // for it; with no window there to ask, FreeCal quits at once and
-        // the Unsent Changes stay in the Local Store.
+        // for it; with the window hidden in the background, FreeCal quits at
+        // once and the Unsent Changes stay in the Local Store.
         tray::TrayChoice::Quit => {
-            let window_there = app.get_webview_window(MAIN_WINDOW).is_some();
-            if window_there && !app.state::<StartupFailed>().0.load(Ordering::SeqCst) {
+            let window_shown = app
+                .get_webview_window(MAIN_WINDOW)
+                .is_some_and(|window| window.is_visible().unwrap_or(false));
+            if window_shown && !app.state::<StartupFailed>().0.load(Ordering::SeqCst) {
                 open_main_window(app);
                 let _ = app.emit_to(MAIN_WINDOW, QUIT_ASKED_EVENT, ());
             } else {
@@ -632,43 +635,13 @@ fn on_tray_choice(app: &AppHandle, choice: tray::TrayChoice) {
     }
 }
 
-/// Brings the window to the front, creating it again when FreeCal runs in
+/// Brings the window to the front, showing it again when FreeCal runs in
 /// the background.
 fn open_main_window(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     bring_to_front(app, None);
     #[cfg(not(target_os = "linux"))]
-    if app.get_webview_window(MAIN_WINDOW).is_some() {
-        let _ = show_main_window(app);
-    } else {
-        reopen_main_window(app);
-    }
-}
-
-/// Creates the window again after it closed for background running. Like
-/// the first, it starts hidden and the frontend shows it, after subscribing
-/// to the Signals and reading the current state.
-fn reopen_main_window(app: &AppHandle) {
-    let Some(config) = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == MAIN_WINDOW)
-    else {
-        return;
-    };
-    let created =
-        tauri::WebviewWindowBuilder::from_config(app, config).and_then(|window| window.build());
-    match created {
-        Ok(_) => {
-            if let Some(core) = app.try_state::<Core>() {
-                core.set_window_open(true);
-            }
-            show_main_window_later(app);
-        }
-        Err(error) => eprintln!("FreeCal can't open its window again: {error}"),
-    }
+    let _ = show_main_window(app);
 }
 
 /// Shows the window after [`SHOW_WINDOW_FALLBACK`], should the frontend
@@ -685,24 +658,32 @@ fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
     match app.get_webview_window(MAIN_WINDOW) {
         Some(window) if !window.is_visible()? => {
             window.show()?;
+            window_opened(app);
             window.set_focus()
         }
         _ => Ok(()),
     }
 }
 
+/// The Sync Scheduler polls as often as with the window open again.
+fn window_opened(app: &AppHandle) {
+    if let Some(core) = app.try_state::<Core>() {
+        core.set_window_open(true);
+    }
+}
+
 /// Brings the window to the front, for a second launch or the tray, and
-/// creates it again when FreeCal runs in the background. A second launch's
+/// shows it again when FreeCal runs in the background. A second launch's
 /// activation token is what lets the compositor raise the window; without
-/// it KWin on Wayland only marks FreeCal in the taskbar. A window created
-/// again doesn't use it.
+/// it KWin on Wayland only marks FreeCal in the taskbar.
 #[cfg(target_os = "linux")]
 fn bring_to_front(app: &AppHandle, activation_token: Option<String>) {
     use gtk::prelude::*;
 
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
-        return reopen_main_window(app);
+        return;
     };
+    window_opened(app);
     // GTK only works on the main thread.
     let _ = app.run_on_main_thread(move || {
         let Ok(window) = window.gtk_window() else {
@@ -871,20 +852,6 @@ fn main() {
                 api.prevent_close();
                 let app = window.app_handle().clone();
                 std::thread::spawn(move || close_main_window(&app));
-            }
-            // The Sync Scheduler polls less often in the background.
-            WindowEvent::Destroyed => {
-                if let Some(core) = window.try_state::<Core>() {
-                    core.set_window_open(false);
-                }
-                // Closing the window cancels whatever dialog it showed, the
-                // import dialog too, so the picked file goes. A preview or an
-                // import still running holds it, which this thread mustn't
-                // wait for, and a file dialog may still pick one after this;
-                // a file left over is replaced by the next pick.
-                if let Ok(mut picked) = window.state::<PickedImport>().0.try_lock() {
-                    *picked = None;
-                }
             }
             WindowEvent::Focused(true) => {
                 if let Some(core) = window.try_state::<Core>() {

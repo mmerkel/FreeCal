@@ -1,0 +1,9 @@
+# Background running hides the window
+
+When closing the window keeps FreeCal running in the background (US-103), the shell hides the window; it doesn't destroy it. Open FreeCal, a left click on the tray icon and a second launch show it again and bring it to the front. The frontend keeps running while hidden: it still receives the Signals, re-reads what they change, and keeps whatever it showed, open dialogs and unsaved changes in the event editor included. Hiding and showing tell the Sync Scheduler that the window is closed or open, so that it polls every 15 minutes in the background. Tray Quit with the window hidden quits at once, as it did with no window.
+
+This replaces the decision of ticket 13 (2026-11-10), accepted then for now, to destroy the window and create it again from `tauri.conf.json`. Re-creating took a second or more, as WebKitGTK started a web process, loaded the frontend and read the settings before the window could show, and it lost the open dialogs, the scroll position and unsaved edits. Hiding makes reopening immediate and settles ticket 139's question of whether closing should ask "Discard changes?": nothing is discarded.
+
+**Considered options.** Showing the re-created window from the shell at once, in the stored appearance, would have kept the memory free but still waited for the webview and still lost the window's state. Hiding for a while and destroying later would have reopened quickly in the common case at the price of two background states.
+
+**Consequences.** The hidden window keeps its memory in the background, roughly that of a WebKitGTK window with FreeCal loaded (not yet measured), and spends some CPU on each Signal, at most once per background sync. A dialog left open is still open days later; an Event changed meanwhile meets the event editor as any change made while it is open does. A picked import file stays held while its dialog stays open.
