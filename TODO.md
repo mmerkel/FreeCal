@@ -1,8 +1,6 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] warning message js part
-- [ ] delay opening the window
 - [ ] finish ticket 16
 - [ ] simplify
 - [ ] ticket 19
