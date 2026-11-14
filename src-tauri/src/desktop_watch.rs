@@ -7,7 +7,8 @@
 //! long as FreeCal runs. Without a portal or logind, nothing is reported:
 //! the network is then taken as available, and Offline is decided by each
 //! Account's requests. It also tells whether the desktop has a system tray,
-//! which decides what closing the window does (US-103, US-104).
+//! which decides what closing the window does (US-103, US-104), and when
+//! one comes up, so that FreeCal's icon can go in it.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -74,6 +75,9 @@ trait Inhibit {
     ) -> zbus::Result<()>;
 }
 
+/// The D-Bus name of a desktop's tray service.
+const TRAY_SERVICE: &str = "org.kde.StatusNotifierWatcher";
+
 #[zbus::proxy(
     interface = "org.kde.StatusNotifierWatcher",
     default_service = "org.kde.StatusNotifierWatcher",
@@ -106,6 +110,37 @@ fn tray_host_registered(connection: &Connection) -> zbus::Result<bool> {
         .cache_properties(zbus::proxy::CacheProperties::No)
         .build()?
         .is_status_notifier_host_registered()
+}
+
+/// Calls `on_appear` when the desktop's tray service is up: once now if it
+/// is, and again each time it comes up, as when Plasma's tray starts after
+/// FreeCal at a start at login. The tray crate can only make FreeCal's icon
+/// with the service up; once made, the icon follows it on its own, through
+/// restarts too. Plasma never reports a host registering, so the service
+/// coming up is what counts.
+pub fn watch_tray(on_appear: impl Fn() + Send + 'static) {
+    std::thread::spawn(move || {
+        let appearances =
+            Connection::session().and_then(|connection| tray_appearances(&connection, &on_appear));
+        if let Err(error) = appearances {
+            eprintln!("FreeCal can't tell when a tray comes up: {error}");
+        }
+    });
+}
+
+fn tray_appearances(connection: &Connection, on_appear: &impl Fn()) -> zbus::Result<()> {
+    let bus = zbus::blocking::fdo::DBusProxy::new(connection)?;
+    // Subscribed before the first look, so that no tray comes up in the gap.
+    let changes = bus.receive_name_owner_changed_with_args(&[(0, TRAY_SERVICE)])?;
+    if bus.name_has_owner(TRAY_SERVICE.try_into()?)? {
+        on_appear();
+    }
+    for change in changes {
+        if change.args()?.new_owner.is_some() {
+            on_appear();
+        }
+    }
+    Ok(())
 }
 
 /// The Inhibit portal's `session-state` once the session's end is asked
@@ -390,6 +425,54 @@ mod tests {
                 .unwrap()
         });
         tray_host_registered(&bus.connect().build().unwrap()).unwrap_or(false)
+    }
+
+    /// Watches for a tray on `bus`; the receiver gets a `()` per report.
+    fn watch_tray_on(bus: &PrivateBus) -> mpsc::Receiver<()> {
+        let freecal = bus.connect().build().unwrap();
+        let (sender, appearances) = mpsc::channel();
+        std::thread::spawn(move || {
+            tray_appearances(&freecal, &|| sender.send(()).unwrap()).unwrap()
+        });
+        appearances
+    }
+
+    fn start_tray(bus: &PrivateBus) -> zbus::blocking::Connection {
+        bus.connect()
+            .name(TRAY_SERVICE)
+            .unwrap()
+            .serve_at("/StatusNotifierWatcher", FakeWatcher { host: true })
+            .unwrap()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_tray_up_at_the_start_is_reported() {
+        let bus = PrivateBus::start();
+        let _tray = start_tray(&bus);
+
+        let appearances = watch_tray_on(&bus);
+
+        assert!(appearances.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    #[test]
+    fn a_tray_coming_up_later_is_reported_each_time() {
+        let bus = PrivateBus::start();
+        let appearances = watch_tray_on(&bus);
+        assert!(
+            appearances
+                .recv_timeout(Duration::from_millis(200))
+                .is_err()
+        );
+
+        let tray = start_tray(&bus);
+        assert!(appearances.recv_timeout(Duration::from_secs(5)).is_ok());
+        drop(tray);
+        let _tray = start_tray(&bus);
+
+        assert!(appearances.recv_timeout(Duration::from_secs(5)).is_ok());
     }
 
     #[test]

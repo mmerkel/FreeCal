@@ -148,8 +148,14 @@ async fn update_settings(app: AppHandle, update: SettingsUpdate) -> CommandResul
 
 /// Puts FreeCal's icon in the tray while background running is on, and
 /// takes it out while it is off: the icon stands for keeping running.
-/// Returns whether the icon is in the tray.
+/// Returns whether the icon is in the tray. Startup, a settings change and
+/// a tray coming up may call it at once, so one call runs at a time, lest
+/// two of them make an icon each.
 fn show_tray_icon(app: &AppHandle, on: bool) -> bool {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let _turn = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !on {
         app.remove_tray_by_id(tray::TRAY);
         return false;
@@ -614,16 +620,14 @@ fn close_main_window(app: &AppHandle) {
     }
 }
 
-/// Whether there is a tray with FreeCal's icon in it. When the tray came up
-/// after FreeCal, as at a start at login, the icon is created here: the tray
-/// crate gives up on it when no tray is up at startup and doesn't try again.
+/// Whether there is a tray with FreeCal's icon in it.
 fn tray_present(app: &AppHandle) -> bool {
     #[cfg(target_os = "linux")]
     let desktop_tray = desktop_watch::tray_present();
     // Other systems are for later.
     #[cfg(not(target_os = "linux"))]
     let desktop_tray = false;
-    desktop_tray && show_tray_icon(app, true)
+    desktop_tray && app.tray_by_id(tray::TRAY).is_some()
 }
 
 /// Whether some Unsent Changes wait. When they can't be counted, none do.
@@ -852,6 +856,15 @@ fn main() {
                     run_scheduled_syncs(app.handle());
                     // Without its icon, closing the window quits.
                     show_tray_icon(app.handle(), runs_in_background(&app.state::<Core>()));
+                    // A tray that comes up later, as at a start at login,
+                    // gets the icon then.
+                    #[cfg(target_os = "linux")]
+                    {
+                        let handle = app.handle().clone();
+                        desktop_watch::watch_tray(move || {
+                            show_tray_icon(&handle, runs_in_background(&handle.state::<Core>()));
+                        });
+                    }
                 }
                 Err(error) => {
                     eprintln!("FreeCal could not open its Local Store: {error}");

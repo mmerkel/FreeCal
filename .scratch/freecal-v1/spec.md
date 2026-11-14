@@ -318,7 +318,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - **Keyring**: Secret Service via libsecret; report an error if it's unavailable.
   - **Notifications**: reminders with snooze and dismiss; one notification per new Conflict or Sync Error while the window is closed.
   - **Tray**: StatusNotifierItem through Tauri, on its tray crate's KSNI backend (AppIndicator gives no click events). A left click opens the window; a right click opens the menu. One icon showing the overall status (see Sync engine). The menu offers Open FreeCal, Sync now, problem lines and Quit.
-  - **Tray detection**: a D-Bus check for a StatusNotifierWatcher with a registered host, made at every window close.
+  - **Tray detection**: a D-Bus check for a StatusNotifierWatcher with a registered host, made at every window close. A StatusNotifierWatcher that comes up while FreeCal runs, as at a start at login, gets the tray icon then.
   - **Autostart**: through the Background portal where available; off by default.
   - **File hand-off**: forwarded arguments from a second launch, and open-file events on macOS, both feed the same "add waiting imports" core operation.
   - **Network status**: the NetworkMonitor portal (it also works outside Flatpak).
