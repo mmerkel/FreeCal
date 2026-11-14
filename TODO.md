@@ -27,7 +27,8 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
   - [ ] once time zone stuff is done (or before) have a discussion about all the places where they appear
 - [ ] after architecture stuff: simplify code layout into files and directories, can all the frontent stuff be moved into src?
 - [ ] frontend:
-  - [ ] syncing text next to calendars and account:  all this text should become just a symbol (like the read-only symbol), e.g. syncing -> rotating thing; or warning sign for an error, or some symbol for offline
+  - [ ] syncing text next to calendars and account:  all this text should become just a symbol (the spinning syncing mark); or one of the other marks depending on what is going on 
+  - [ ] event not yet synced mark: instead of frame around event rectangle: little symbol, right aligned in event rectangle, something that would suggest it's not yet synced.  I don't like the cloud+arrow symbol for it, which suggests upload, rather than not yet synced.  Same symbol everywhere, of course.
 - [ ] caldav sync:
     - [ ] I would like to understand the different authentication methods, and what was built in and why
 - [ ] journal::recompute_instants is weird - check again once the time zone stuff has been implemented
