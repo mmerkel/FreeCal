@@ -1,6 +1,7 @@
 <!--
   An Event's details: its title, time, repeat, location, description and
-  Calendar, with Edit and Delete icons for Events of writable Calendars
+  Calendar, with a History icon that lists the Event's Journal Event
+  Modifications, each with Undo, and Edit and Delete icons for Events of writable Calendars
   without guests; the others say they are read-only and why: a Read-only
   Calendar, or guests, with where to edit it instead. An Event with an
   Unsent Change says "Not yet synced", and why. Delete deletes at once, as it
@@ -11,6 +12,7 @@
 <script lang="ts">
   import Calendar from '@lucide/svelte/icons/calendar';
   import Clock from '@lucide/svelte/icons/clock';
+  import History from '@lucide/svelte/icons/history';
   import CloudUpload from '@lucide/svelte/icons/cloud-upload';
   import Lock from '@lucide/svelte/icons/lock';
   import MapPin from '@lucide/svelte/icons/map-pin';
@@ -19,11 +21,19 @@
   import Text from '@lucide/svelte/icons/text';
   import Trash from '@lucide/svelte/icons/trash-2';
   import Users from '@lucide/svelte/icons/users';
-  import type { Calendar as CalendarType, Event, SyncStatuses, When } from '../core/types';
-  import { t } from '../i18n';
+  import type {
+    Calendar as CalendarType,
+    Event,
+    ListedJournalEventModification,
+    SyncStatuses,
+    When,
+  } from '../core/types';
+  import { errorText, t } from '../i18n';
   import Dialog from './Dialog.svelte';
+  import JournalEventList from './JournalEventList.svelte';
   import { describeRepeat } from './repeat';
   import StructuredTextView from './StructuredTextView.svelte';
+  import type { Undoing } from './undo';
   import { notYetSyncedText } from './unsent';
   import { describeWhen } from './when';
   import { canEdit } from './windowModel.svelte';
@@ -32,6 +42,8 @@
     event: Event;
     /** The Event's Calendar, if it is still there. */
     calendar: CalendarType | undefined;
+    /** Every Calendar, to name those of the Event's History. */
+    calendars: CalendarType[];
     /** For why an Unsent Change of the Event waits, once read. */
     syncStatuses?: SyncStatuses;
     /** When the Occurrence that was opened takes place, if it isn't the Event's first. */
@@ -45,11 +57,16 @@
     ondeleteoccurrence?: () => void;
     onclose: () => void;
     onopenlink: (url: string) => void;
+    /** Reads the Event's History. */
+    onhistory: () => Promise<ListedJournalEventModification[]>;
+    /** Runs an undo from the History, asking first if it is a Dangerous Undo; resolves once it is done. */
+    onundo: (undoing: Undoing) => Promise<void>;
   }
 
   let {
     event,
     calendar,
+    calendars,
     syncStatuses,
     when = event.when,
     failure,
@@ -58,6 +75,8 @@
     ondeleteoccurrence,
     onclose,
     onopenlink,
+    onhistory,
+    onundo,
   }: Props = $props();
 
   const writable = $derived(canEdit(calendar, event.hasGuests));
@@ -70,6 +89,31 @@
   /** Whether Delete is asking which Occurrences to delete. */
   let asking = $state(false);
 
+  /** The Event's History while it is shown: `null` while it is read, or why reading failed. */
+  let history = $state<ListedJournalEventModification[] | { failure: string } | null>();
+
+  async function readHistory() {
+    try {
+      history = await onhistory();
+    } catch (error) {
+      history = { failure: t('journal.readFailed', { error: errorText(error) }) };
+    }
+  }
+
+  function toggleHistory() {
+    if (history !== undefined) {
+      history = undefined;
+      return;
+    }
+    history = null;
+    void readHistory();
+  }
+
+  async function undo(undoing: Undoing) {
+    await onundo(undoing);
+    if (history !== undefined) await readHistory();
+  }
+
   /** Closes the question, then deletes as answered. */
   function answer(deleting: () => void) {
     asking = false;
@@ -79,6 +123,16 @@
 
 <Dialog {title} {onclose} backdropCloses>
   {#snippet tools()}
+    <button
+      type="button"
+      class="icon-button"
+      aria-label={t('journal.history')}
+      aria-expanded={history !== undefined}
+      title={t('journal.history')}
+      onclick={toggleHistory}
+    >
+      <History size={16} aria-hidden="true" />
+    </button>
     {#if writable}
       <button
         type="button"
@@ -161,6 +215,27 @@
     <p class="failure" role="alert">{failure}</p>
   {/if}
 
+  {#if history !== undefined}
+    <div class="history">
+      {#if history === null}
+        <p class="note" aria-busy="true">{t('journal.reading')}</p>
+      {:else if history && 'failure' in history}
+        <p class="failure" role="alert">{history.failure}</p>
+      {:else if history?.length === 0}
+        <p class="note">{t('journal.historyEmpty')}</p>
+      {:else if history}
+        <JournalEventList
+          modifications={history}
+          {calendars}
+          history={true}
+          undoEach={true}
+          label={t('journal.historyOf', { title })}
+          onundo={(undoing) => void undo(undoing)}
+        />
+      {/if}
+    </div>
+  {/if}
+
   {#if asking}
     <Dialog role="alertdialog" title={t('event.deleteTitle')} onclose={() => (asking = false)}>
       <p>{t('event.deleteRecurring', { title })}</p>
@@ -189,6 +264,12 @@
 </Dialog>
 
 <style>
+  .history {
+    margin-top: var(--space-6);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--border);
+  }
+
   .details {
     display: grid;
     gap: var(--space-5);

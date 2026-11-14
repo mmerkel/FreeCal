@@ -6,6 +6,7 @@ import type {
   DangerousUndo,
   Event,
   EventDraft,
+  ListedJournalTransaction,
   Occurrence,
   Repeat,
   Signal,
@@ -572,7 +573,7 @@ describe('the import flow', () => {
   });
 });
 
-describe('Session Undo', () => {
+describe('the Undo History', () => {
   /** The answer of a write or undo made as Journal Transaction `id`. */
   const madeAs = <T>(id: number, value: T): Changed<T> => ({
     journalTransaction: journalTransactionId(id),
@@ -583,6 +584,26 @@ describe('Session Undo', () => {
     value: { kind: 'undone', skipped },
   });
   const whole = (id: number) => ({ kind: 'journalTransaction', id: journalTransactionId(id) });
+  const title = sampleEvent.title;
+
+  /** The user's delete of the sample Event as Journal Transaction `id`, as the Change Journal lists it. */
+  const deletion = (id: number): ListedJournalTransaction => ({
+    id: journalTransactionId(id),
+    origin: { kind: 'userAction', action: 'deleted' },
+    madeAt: 0,
+    undoes: null,
+    events: 1,
+    undoneEvents: 0,
+    calendarIds: [calendarId(2)],
+    titles: [title],
+    undonePerEvent: false,
+    undoChangedNothing: false,
+  });
+  /** The Undo History Step that undoes Journal Transaction `id`, about `userChange`. */
+  const step = (id: number, userChange: ListedJournalTransaction | null = deletion(1)) => ({
+    journalTransaction: journalTransactionId(id),
+    userChange,
+  });
 
   /** The user deletes the sample Event as Journal Transaction `id`. */
   async function deleteAs(
@@ -596,14 +617,13 @@ describe('Session Undo', () => {
     core.calls.splice(0);
   }
 
-  /** Window Dialogs after the user deleted the sample Event as Journal Transaction `id`. */
+  /** Window Dialogs after the user deleted the sample Event as Journal Transaction `id`, which Ctrl+Z undoes next. */
   async function deleted(id = 1) {
     const opened = await started();
     await deleteAs(opened, id);
+    opened.core.answer('undoHistory', { undo: step(id, deletion(id)), redo: null });
     return opened;
   }
-
-  const title = sampleEvent.title;
 
   test('a delete says so in a toast with Undo, which goes after a while', async () => {
     const { dialogs } = await deleted();
@@ -612,7 +632,7 @@ describe('Session Undo', () => {
     expect(dialogs.toast?.action?.label).toBe('Undo');
   });
 
-  test('the toast’s Undo undoes the delete and offers Redo', async () => {
+  test('the toast’s Undo undoes the delete, and its Redo the Undo History’s redo', async () => {
     const { core, dialogs } = await deleted(1);
     core.answer('undo', undone(2));
 
@@ -626,6 +646,7 @@ describe('Session Undo', () => {
     });
     expect(dialogs.toast?.action?.label).toBe('Redo');
 
+    core.answer('undoHistory', { undo: null, redo: step(2) });
     dialogs.toast?.action?.run();
     await settled();
 
@@ -637,77 +658,79 @@ describe('Session Undo', () => {
     expect(dialogs.toast?.action?.label).toBe('Undo');
   });
 
-  test('Ctrl+Z undoes newest first, and redo goes back to front', async () => {
-    const opened = await deleted(1);
-    const { core, dialogs } = opened;
-    await deleteAs(opened, 2);
-    const answers = [undone(11), undone(12), undone(13), undone(14)];
-    const pending = answers.map(() => core.pending('undo'));
+  test('Ctrl+Z undoes the Undo History’s next step, named after its user change', async () => {
+    const { core, dialogs } = await started();
+    const moved: ListedJournalTransaction = {
+      ...deletion(4),
+      origin: { kind: 'userAction', action: 'moved' },
+      titles: ['Dentist'],
+    };
+    core.answer('undoHistory', { undo: step(6, moved), redo: step(7) });
 
-    for (const step of [() => dialogs.undo(), () => dialogs.undo()]) {
-      const run = step();
-      pending.shift()?.resolve(answers.shift());
-      await run;
-    }
-    for (const step of [() => dialogs.redo(), () => dialogs.redo()]) {
-      const run = step();
-      pending.shift()?.resolve(answers.shift());
-      await run;
-    }
+    await dialogs.undo();
 
-    expect(core.callsOf('undo').map(([target]) => target)).toEqual([
-      whole(2),
-      whole(1),
-      whole(12),
-      whole(11),
-    ]);
+    expect(core.callsOf('undo')).toEqual([[whole(6), null]]);
+    expect(dialogs.toast?.message).toBe('Undone: moving “⁨Dentist⁩”.');
+    expect(dialogs.working).toBeUndefined();
   });
 
-  test('a redo is undone again by Ctrl+Z', async () => {
-    const { core, dialogs } = await deleted(1);
-    core.answer('undo', undone(2));
-    await dialogs.undo();
-    core.answer('undo', undone(3));
-    await dialogs.redo();
-
-    await dialogs.undo();
-
-    expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(1), whole(2), whole(3)]);
-  });
-
-  test('the user’s next change ends redo', async () => {
-    const opened = await deleted(1);
-    const { core, dialogs } = opened;
-    core.answer('undo', undone(2));
-    await dialogs.undo();
-    await deleteAs(opened, 3);
+  test('Ctrl+Shift+Z redoes the Undo History’s redo step', async () => {
+    const { core, dialogs } = await started();
+    core.answer('undoHistory', { undo: step(1), redo: step(7) });
 
     await dialogs.redo();
 
-    expect(core.callsOf('undo')).toEqual([]);
-    expect(dialogs.toast?.message).toBe('Nothing to redo.');
+    expect(core.callsOf('undo')).toEqual([[whole(7), null]]);
+    expect(dialogs.toast?.message).toBe(`Redone: deleting “⁨${title}⁩”.`);
+    expect(dialogs.toast?.action?.label).toBe('Undo');
   });
 
-  test('with nothing to undo, the toast says so', async () => {
+  test('a step about no user change, or an import, runs under “Working…”', async () => {
+    const { core, dialogs } = await started();
+    const imported: ListedJournalTransaction = {
+      ...deletion(4),
+      origin: { kind: 'import' },
+      events: 12,
+    };
+    core.answer('undoHistory', { undo: step(4, imported), redo: step(7, null) });
+    const undoing = core.pending('undo');
+    const redoing = core.pending('undo');
+
+    const undo = dialogs.undo();
+    await settled();
+    expect(dialogs.working).toBe('Undoing the import of 12 events…');
+    undoing.resolve();
+    await undo;
+    expect(dialogs.toast?.message).toBe('Undone: the import of 12 events.');
+
+    const redo = dialogs.redo();
+    await settled();
+    expect(dialogs.working).toBe('Redoing a change from the Change Journal…');
+    redoing.resolve();
+    await redo;
+    expect(dialogs.toast?.message).toBe('Redone: a change from the Change Journal.');
+  });
+
+  test('with nothing to undo or redo, the toast says so', async () => {
     const { core, dialogs } = await started();
 
     await dialogs.undo();
+    expect(dialogs.toast?.message).toBe('Nothing to undo.');
+    await dialogs.redo();
+    expect(dialogs.toast?.message).toBe('Nothing to redo.');
 
     expect(core.callsOf('undo')).toEqual([]);
-    expect(dialogs.toast?.message).toBe('Nothing to undo.');
   });
 
-  test('a change undone already elsewhere is skipped for the one before', async () => {
-    const opened = await deleted(1);
-    const { core, dialogs } = opened;
-    await deleteAs(opened, 2);
-    core.pending('undo').fail({ code: 'alreadyUndone' });
-    core.answer('undo', undone(3));
+  test('when the Undo History can’t be read, the toast says why and stays', async () => {
+    const { core, dialogs } = await started();
+    core.answer('undoHistory', failure({ code: 'localStoreFailed' }));
 
     await dialogs.undo();
 
-    expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(2), whole(1)]);
-    expect(dialogs.toast?.message).toContain('Undone');
+    expect(dialogs.toast?.message).toMatch(/^Couldn’t read the Undo History: /);
+    expect(dialogs.toast?.stays).toBe(true);
+    expect(core.callsOf('undo')).toEqual([]);
   });
 
   test('an undo that skipped Events names them in a toast that stays', async () => {
@@ -750,6 +773,17 @@ describe('Session Undo', () => {
     await settled();
 
     expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(1), whole(1)]);
+    expect(dialogs.toast?.message).toContain('Undone');
+  });
+
+  test('an undo undone already elsewhere says so, without trying again', async () => {
+    const { core, dialogs } = await deleted(1);
+    core.answer('undo', failure({ code: 'alreadyUndone' }));
+
+    await dialogs.undo();
+
+    expect(dialogs.toast?.message).toMatch(/^Couldn’t undo deleting/);
+    expect(dialogs.toast?.action).toBeUndefined();
   });
 
   describe('a Dangerous Undo', () => {
@@ -772,7 +806,11 @@ describe('Session Undo', () => {
       const run = dialogs.undo();
       await settled();
 
-      expect(dialogs.undoQuestion).toMatchObject({ danger, redo: false });
+      expect(dialogs.undoQuestion).toMatchObject({
+        danger,
+        change: `deleting “⁨${title}⁩”`,
+        redo: false,
+      });
       expect(dialogs.isOpen).toBe(true);
 
       dialogs.answerUndo(true);
@@ -801,7 +839,7 @@ describe('Session Undo', () => {
       expect(dialogs.toast?.message).toContain('Undone');
     });
 
-    test('cancelled, it changes nothing and stays to undo', async () => {
+    test('cancelled, it changes nothing and says nothing', async () => {
       const { core, dialogs } = await deleted(1);
       core.answer('undo', dangerous);
 
@@ -812,15 +850,11 @@ describe('Session Undo', () => {
 
       expect(core.callsOf('undo')).toEqual([[whole(1), null]]);
       expect(dialogs.undoQuestion).toBeUndefined();
-
-      core.answer('undo', undone(2));
-      await dialogs.undo();
-
-      expect(core.callsOf('undo').at(-1)).toEqual([whole(1), null]);
+      expect(dialogs.toast).toBeUndefined();
     });
   });
 
-  test('an edit, a move and a new Event each offer Undo', async () => {
+  test('an edit, a move and a new Event each offer Undo, named after the change', async () => {
     const { core, dialogs, model } = await started();
     core.answer('rescheduleEvent', madeAs(1, sampleEvent));
     const [occurrence] = model.occurrences;
@@ -840,8 +874,10 @@ describe('Session Undo', () => {
     expect(dialogs.toast?.message).toBe('Event changed');
 
     core.calls.splice(0);
-    await dialogs.undo();
+    dialogs.toast?.action?.run();
+    await settled();
     expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(3)]);
+    expect(dialogs.toast?.message).toBe(`Undone: the changes to “⁨${sampleEvent.title}⁩”.`);
   });
 
   test('a second Ctrl+Z while an undo runs does nothing, and keeps the toast', async () => {
@@ -871,22 +907,6 @@ describe('Session Undo', () => {
 
     expect(dialogs.toast?.message).toContain('Undone');
     expect(dialogs.toast?.action).toBeUndefined();
-    await dialogs.redo();
-    expect(dialogs.toast?.message).toBe('Nothing to redo.');
-  });
-
-  test('a failed toast Undo tries the same change again', async () => {
-    const opened = await deleted(1);
-    const { core, dialogs } = opened;
-    await deleteAs(opened, 2);
-    core.answer('undo', failure({ code: 'localStoreFailed' }));
-    await dialogs.undo(journalTransactionId(1));
-
-    core.answer('undo', undone(3));
-    dialogs.toast?.action?.run();
-    await settled();
-
-    expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(1), whole(1)]);
   });
 
   test('undoing an import names a hostile file as text', async () => {

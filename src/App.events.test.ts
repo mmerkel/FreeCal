@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import hostile from '../fixtures/hostile-event.json';
-import type { Event, Repeat, StructuredText, When } from './core/types';
+import type { Event, Repeat, StructuredText, UndoHistoryStep, When } from './core/types';
 import {
   caldavAccount,
   calendar,
@@ -234,7 +234,7 @@ test('the details of an Event with an Unsent Change say it isn’t synced yet, a
   expect(await openOccurrence(user, core, sent)).not.toHaveTextContent('Not yet synced');
 });
 
-test('an Event of a Read-only Calendar can’t be edited or deleted', async () => {
+test('an Event of a Read-only Calendar can’t be edited or deleted, but has its History', async () => {
   const user = userEvent.setup();
   const fixed = event({ calendarId: locked.id, title: 'Fixed', when: monday });
   const core = firstLaunch({ calendars: [locked], events: [fixed] });
@@ -246,11 +246,11 @@ test('an Event of a Read-only Calendar can’t be edited or deleted', async () =
     within(details)
       .getAllByRole('button')
       .map((button) => button.getAttribute('aria-label')),
-  ).toEqual(['Close']);
+  ).toEqual(['History', 'Close']);
   expect(within(details).getByText('Can’t be changed: its calendar is read-only.')).toBeVisible();
 });
 
-test('an Event with guests can’t be edited or deleted, and says where to edit it', async () => {
+test('an Event with guests can’t be edited or deleted, says where to edit it, and has its History', async () => {
   const user = userEvent.setup();
   const meeting = event({ calendarId: home.id, title: 'Meeting', when: monday, hasGuests: true });
   const core = firstLaunch({ calendars: [home], events: [meeting] });
@@ -262,7 +262,7 @@ test('an Event with guests can’t be edited or deleted, and says where to edit 
     within(details)
       .getAllByRole('button')
       .map((button) => button.getAttribute('aria-label')),
-  ).toEqual(['Close']);
+  ).toEqual(['History', 'Close']);
   expect(
     within(details).getByText(
       'Has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
@@ -271,7 +271,7 @@ test('an Event with guests can’t be edited or deleted, and says where to edit 
   expect(within(details).queryByText(/calendar is read-only/)).toBeNull();
 });
 
-test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
+test('the details offer History, Edit, Delete and Close as icons with tooltips, ✕ focused', async () => {
   const user = userEvent.setup();
   const dentist = event({ calendarId: home.id, title: 'Dentist', when: monday });
   const core = firstLaunch({ calendars: [home], events: [dentist] });
@@ -281,6 +281,7 @@ test('the details offer Edit, Delete and Close as icons with tooltips, ✕ focus
 
   const buttons = within(details).getAllByRole('button');
   expect(buttons.map((button) => [button.getAttribute('aria-label'), button.title])).toEqual([
+    ['History', 'History'],
     ['Edit', 'Edit'],
     ['Delete', 'Delete'],
     ['Close', 'Close'],
@@ -391,6 +392,28 @@ test('deleting an Event deletes it at once, and the toast’s Undo brings it bac
   ).toBeInTheDocument();
 });
 
+/**
+ * The Undo History Step that undoes Journal Transaction `id`, about the
+ * user's delete of `deleted`.
+ */
+function deletedAs(deleted: Event, id: number): UndoHistoryStep {
+  return {
+    journalTransaction: journalTransactionId(id),
+    userChange: {
+      id: journalTransactionId(1),
+      origin: { kind: 'userAction', action: 'deleted' },
+      madeAt: 0,
+      undoes: null,
+      events: 1,
+      undoneEvents: 0,
+      calendarIds: [deleted.calendarId],
+      titles: [deleted.title],
+      undonePerEvent: false,
+      undoChangedNothing: false,
+    },
+  };
+}
+
 test('Ctrl+Z and Ctrl+Shift+Z undo and redo, but not while a dialog is open', async () => {
   const user = userEvent.setup();
   const doomed = event({ calendarId: home.id, title: 'Doomed', when: monday });
@@ -400,8 +423,11 @@ test('Ctrl+Z and Ctrl+Shift+Z undo and redo, but not while a dialog is open', as
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
+  core.answer('undoHistory', { undo: deletedAs(doomed, 1), redo: null });
+
   await user.keyboard('{Control>}z{/Control}');
   await waitFor(() => expect(core.callsOf('undo')).toHaveLength(1));
+  core.answer('undoHistory', { undo: null, redo: deletedAs(doomed, 2) });
   await user.keyboard('{Control>}{Shift>}Z{/Shift}{/Control}');
   await waitFor(() => expect(core.callsOf('undo')).toHaveLength(2));
   expect(screen.getByRole('status')).toHaveTextContent('Redone: deleting “⁨Doomed⁩”.');
@@ -717,6 +743,7 @@ test('the toast after undoing a delete names a hostile Event as text', async () 
   );
   await user.click(within(details).getByRole('button', { name: 'Delete' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  core.answer('undoHistory', { undo: deletedAs(hostileTitle, 1), redo: null });
 
   await user.keyboard('{Control>}z{/Control}');
 

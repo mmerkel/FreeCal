@@ -4,6 +4,7 @@
   import { t } from './i18n';
   import AboutDialog from './lib/AboutDialog.svelte';
   import CalendarGrid from './lib/CalendarGrid.svelte';
+  import ChangeJournalDialog from './lib/ChangeJournalDialog.svelte';
   import { followAppearance } from './lib/colourScheme';
   import Dialog from './lib/Dialog.svelte';
   import EventDetails from './lib/EventDetails.svelte';
@@ -29,7 +30,6 @@
   import Toolbar from './lib/Toolbar.svelte';
   import UndoDialog from './lib/UndoDialog.svelte';
   import { whenForShortcut } from './lib/when';
-  import { actionText } from './lib/sessionUndo';
   import { WindowDialogs } from './lib/windowDialogs.svelte';
   import { WindowModel } from './lib/windowModel.svelte';
   import WorkingDialog from './lib/WorkingDialog.svelte';
@@ -195,6 +195,7 @@
         onsyncnow={syncNow}
         onimport={() => dialogs.startImport()}
         onsettings={() => dialogs.openSettings()}
+        onchangejournal={() => dialogs.openChangeJournal()}
         onabout={() => dialogs.openAbout()}
         onquit={() => void dialogs.quit()}
       />
@@ -239,6 +240,7 @@
     <EventDetails
       {event}
       calendar={directory.calendars.find((calendar) => calendar.id === event.calendarId)}
+      calendars={directory.calendars}
       syncStatuses={model.syncStatuses}
       when={dialogs.openedOccurrence?.when}
       failure={dialogs.failure}
@@ -249,6 +251,8 @@
         : () => dialogs.removeOccurrence()}
       onclose={() => dialogs.close()}
       onopenlink={(url) => dialogs.openLink(url)}
+      onhistory={() => core.eventHistory(event.id)}
+      onundo={(undoing) => dialogs.undoChange(undoing)}
     />
   {:else if dialogs.open?.kind === 'creating' || dialogs.open?.kind === 'editing'}
     {@const editing = dialogs.open}
@@ -289,6 +293,14 @@
       onimport={(calendarId, existing) => dialogs.runImport(calendarId, existing)}
       oncancel={() => dialogs.cancelImport()}
     />
+  {:else if dialogs.open?.kind === 'changeJournal'}
+    <ChangeJournalDialog
+      {core}
+      calendars={directory.calendars}
+      writableCalendars={dialogs.writableCalendars}
+      onundo={(undoing) => dialogs.undoChange(undoing)}
+      onclose={() => dialogs.close()}
+    />
   {:else if dialogs.open?.kind === 'notice'}
     <Dialog title={dialogs.open.title} onclose={() => dialogs.close()}>
       <p>{dialogs.open.body}</p>
@@ -317,7 +329,7 @@
     {@const question = dialogs.undoQuestion}
     <UndoDialog
       danger={question.danger}
-      action={actionText(question.action)}
+      action={question.change}
       redo={question.redo}
       onanswer={(approved) => dialogs.answerUndo(approved)}
     />

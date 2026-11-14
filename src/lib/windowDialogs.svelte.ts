@@ -12,7 +12,7 @@ import type {
 } from '../core/types';
 import { errorText, t, tCount } from '../i18n';
 import { sameRepeat } from './repeat';
-import { actionText, SessionUndo, type SessionUndoResult, type UserAction } from './sessionUndo';
+import { actionText, runUndo, stepUndoing, type Undoing, type UndoResult } from './undo';
 import { skippedText } from './skippedEvents';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
 import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
@@ -37,7 +37,8 @@ type Open =
   | { kind: 'importing'; file: string; calendarId: CalendarId }
   | { kind: 'notice'; title: string; body: string }
   | { kind: 'settings' }
-  | { kind: 'about' };
+  | { kind: 'about' }
+  | { kind: 'changeJournal' };
 
 /**
  * The open question which Occurrences of a Recurring Event a change
@@ -61,10 +62,11 @@ interface Toast {
   stays: boolean;
 }
 
-/** The question before a Dangerous Undo or redo of Session Undo, with how to answer it. */
+/** The question before a Dangerous Undo or redo, with how to answer it. */
 interface UndoQuestion {
   danger: DangerousUndo;
-  action: UserAction;
+  /** The change it undoes or redoes, as `Undoing` names it. */
+  change: string;
   redo: boolean;
   answer: (approved: boolean) => void;
 }
@@ -90,7 +92,10 @@ export class WindowDialogs {
   #failure = $state<string>();
   #rescheduleFailure = $state<string>();
   #toast = $state<Toast>();
-  readonly #sessionUndo: SessionUndo;
+  /** Whether an undo or redo runs, during which another does nothing. */
+  #undoing = false;
+  /** Counts the user's changes, so that an undo knows whether one came while it ran. */
+  #changes = 0;
   #undoQuestion = $state<UndoQuestion>();
   /** Counts editor sessions, so that each one starts from its own draft. */
   #editorSession = $state(0);
@@ -117,28 +122,6 @@ export class WindowDialogs {
     this.#writableCalendars = $derived(
       model.directory?.calendars.filter((calendar) => canEdit(calendar, false)) ?? [],
     );
-    this.#sessionUndo = new SessionUndo(core, {
-      approve: (danger, action, redo) =>
-        new Promise((resolve) => {
-          this.#undoQuestion = {
-            danger,
-            action,
-            redo,
-            answer: (approved) => {
-              this.#undoQuestion = undefined;
-              resolve(approved);
-            },
-          };
-        }),
-      // An import's undo can take a while; others are quick.
-      running: (action, redo, run) =>
-        action.kind === 'imported'
-          ? this.#whileWorking(
-              t(redo ? 'working.redoingImport' : 'working.undoingImport', { file: action.file }),
-              run,
-            )
-          : run(),
-    });
   }
 
   /** What is open over the grid, apart from the Scope Prompt. */
@@ -310,7 +293,7 @@ export class WindowDialogs {
     if (editor?.kind === 'creating') {
       const { journalTransaction } = await this.#core.createEvent(draft);
       this.close();
-      this.#recorded(journalTransaction, { kind: 'created', title }, t('undo.done.created'));
+      this.#recorded(journalTransaction, t('undo.done.created'), actionText('created', title));
       return;
     }
     if (editor?.kind !== 'editing') return;
@@ -318,7 +301,7 @@ export class WindowDialogs {
     if (recurrenceId === null) {
       const { journalTransaction, value } = await this.#core.editEvent(id, draft);
       this.openDetails(id, value.recurrenceId);
-      this.#recorded(journalTransaction, { kind: 'changed', title }, t('undo.done.changed'));
+      this.#recorded(journalTransaction, t('undo.done.edited'), actionText('edited', title));
       return;
     }
     const change = sameRepeat(draft.repeat, editor.draft.repeat) ? 'edit' : 'editRepeat';
@@ -333,7 +316,7 @@ export class WindowDialogs {
       draft,
     );
     this.openDetails(value.eventId, value.recurrenceId);
-    this.#recorded(journalTransaction, { kind: 'changed', title }, t('undo.done.changed'));
+    this.#recorded(journalTransaction, t('undo.done.edited'), actionText('edited', title));
   }
 
   /** Leaves the editor: back to the details of an existing Event, else closed. */
@@ -366,7 +349,7 @@ export class WindowDialogs {
     try {
       const { journalTransaction } = await write();
       this.#rescheduleFailure = undefined;
-      this.#recorded(journalTransaction, { kind: 'moved', title }, t('undo.done.moved'));
+      this.#recorded(journalTransaction, t('undo.done.moved'), actionText('moved', title));
     } catch (error) {
       this.#rescheduleFailure = t('event.rescheduleFailed', { error: errorText(error) });
       throw error;
@@ -421,6 +404,11 @@ export class WindowDialogs {
   openSettings() {
     this.#model.forgetSettingsFailure();
     this.#show({ kind: 'settings' });
+  }
+
+  /** Opens the Change Journal list. */
+  openChangeJournal() {
+    this.#show({ kind: 'changeJournal' });
   }
 
   openAbout() {
@@ -492,8 +480,11 @@ export class WindowDialogs {
         updated: String(outcome.updated),
         skipped: String(outcome.skipped),
       });
-      // An import that changed nothing has no Journal Transaction to undo.
-      this.#recorded(outcome.journalTransaction, { kind: 'imported', file }, message);
+      // An import that changed nothing has no Journal Transaction to undo,
+      // yet its toast says what it skipped.
+      if (outcome.journalTransaction === null) this.#toast = { message, stays: false };
+      const change = t('undo.action.importedFile', { file });
+      this.#recorded(outcome.journalTransaction, message, change, true);
     } catch (error) {
       this.#importFailure = t('import.failed', { error: errorText(error) });
     }
@@ -504,21 +495,25 @@ export class WindowDialogs {
   }
 
   /**
-   * Ctrl+Z: undoes the user's latest change of this session not undone yet,
-   * or the change made as `journalTransaction`, asking first if it is a
-   * Dangerous Undo; the toast says what it did and offers Redo.
+   * Ctrl+Z: undoes the next step of the Undo History, asking first if it is
+   * a Dangerous Undo; the toast says what it did and offers Redo.
    */
-  async undo(journalTransaction?: JournalTransactionId) {
-    if (this.#sessionUndo.running) return;
-    this.dismissToast();
-    this.#reportUndo(await this.#sessionUndo.undo(journalTransaction), false);
+  undo() {
+    return this.#undoStep(false);
   }
 
-  /** Ctrl+Shift+Z: redoes the latest undo of Session Undo, or the undo made as `journalTransaction`. */
-  async redo(journalTransaction?: JournalTransactionId) {
-    if (this.#sessionUndo.running) return;
-    this.dismissToast();
-    this.#reportUndo(await this.#sessionUndo.redo(journalTransaction), true);
+  /** Ctrl+Shift+Z: redoes the next step of the Undo History, by undoing an undo. */
+  redo() {
+    return this.#undoStep(true);
+  }
+
+  /**
+   * Undoes `undoing`, from a toast, the Change Journal list or an Event's
+   * History, asking first if it is a Dangerous Undo; the toast says what it
+   * did and offers Redo. Resolves once it is done or failed.
+   */
+  undoChange(undoing: Undoing) {
+    return this.#runUndo(undoing, false);
   }
 
   /** The user approved the Dangerous Undo asked about, or not. */
@@ -578,68 +573,125 @@ export class WindowDialogs {
   }
 
   /**
-   * After the user's change `action`, made as `journalTransaction`, the
-   * toast says `message` and offers Undo; Ctrl+Z undoes it too. A change
-   * that changed nothing has neither; only an import's toast says what it
-   * changed then.
+   * After the user's change made as `journalTransaction`, the toast says
+   * `message` and offers Undo, which names it `change` and runs under
+   * "Working…" if `slow`. A change that changed nothing has no Undo; a
+   * change of the user's ends what Ctrl+Shift+Z redoes.
    */
-  #recorded(journalTransaction: JournalTransactionId | null, action: UserAction, message: string) {
-    if (journalTransaction === null) {
-      if (action.kind === 'imported') this.#toast = { message, stays: false };
-      return;
-    }
-    this.#sessionUndo.recorded(journalTransaction, action);
+  #recorded(
+    journalTransaction: JournalTransactionId | null,
+    message: string,
+    change: string,
+    slow = false,
+  ) {
+    if (journalTransaction === null) return;
+    this.#changes += 1;
+    const target = { kind: 'journalTransaction', id: journalTransaction } as const;
     this.#toast = {
       message,
-      action: { label: t('common.undo'), run: () => void this.undo(journalTransaction) },
+      action: {
+        label: t('common.undo'),
+        run: () => void this.undoChange({ target, change, slow }),
+      },
       stays: false,
     };
   }
 
-  /**
-   * Says in the toast what an undo or redo of Session Undo did, with the
-   * Events it skipped, and offers to take it back or try again.
-   */
-  #reportUndo(result: SessionUndoResult, redo: boolean) {
-    if (result.kind === 'cancelled' || result.kind === 'busy') return;
-    if (result.kind === 'nothing') {
+  /** Undoes or redoes the next step of the Undo History, read from the core. */
+  async #undoStep(redo: boolean) {
+    if (this.#undoing) return;
+    this.dismissToast();
+    let step;
+    try {
+      const history = await this.#core.undoHistory();
+      step = redo ? history.redo : history.undo;
+    } catch (error) {
+      this.#toast = { message: t('undo.historyFailed', { error: errorText(error) }), stays: true };
+      return;
+    }
+    if (!step) {
       this.#toast = {
         message: t(redo ? 'undo.nothingToRedo' : 'undo.nothingToUndo'),
         stays: false,
       };
       return;
     }
-    const action = actionText(result.action);
+    await this.#runUndo(stepUndoing(step), redo);
+  }
+
+  /**
+   * Runs `undoing`, an undo or a redo, asking first if it is a Dangerous
+   * Undo, under "Working…" if it is slow; another one meanwhile does nothing.
+   */
+  async #runUndo(undoing: Undoing, redo: boolean) {
+    if (this.#undoing) return;
+    this.#undoing = true;
+    this.dismissToast();
+    const changes = this.#changes;
+    try {
+      const { change } = undoing;
+      const result = await runUndo(this.#core, undoing.target, {
+        approve: (danger) =>
+          new Promise((resolve) => {
+            this.#undoQuestion = {
+              danger,
+              change,
+              redo,
+              answer: (approved) => {
+                this.#undoQuestion = undefined;
+                resolve(approved);
+              },
+            };
+          }),
+        running: (run) =>
+          undoing.slow
+            ? this.#whileWorking(t(redo ? 'working.redoing' : 'working.undoing', { change }), run)
+            : run(),
+      });
+      // A change of the user's while it ran ends redo.
+      this.#reportUndo(undoing, redo, result, redo || this.#changes === changes);
+    } finally {
+      this.#undoing = false;
+    }
+  }
+
+  /**
+   * Says in the toast what the undo or redo `undoing` did, with the Events
+   * it skipped, and offers to take it back, if `reversible` and it changed
+   * something, or to try again.
+   */
+  #reportUndo(undoing: Undoing, redo: boolean, result: UndoResult, reversible: boolean) {
+    if (result.kind === 'cancelled') return;
+    const action = undoing.change;
     if (result.kind === 'failed') {
-      const { journalTransaction } = result;
       const error = errorText(result.error);
       this.#toast = {
         message: t(redo ? 'undo.redoFailed' : 'undo.undoFailed', { action, error }),
         action: result.retryable
           ? {
               label: t(redo ? 'common.redo' : 'common.undo'),
-              run: () =>
-                void (redo ? this.redo(journalTransaction) : this.undo(journalTransaction)),
+              run: () => void this.#runUndo(undoing, redo),
             }
           : undefined,
         stays: true,
       };
       return;
     }
-    const { changed, reversible, skipped } = result;
+    const { changed, skipped } = result;
     const calendars = this.#model.directory?.calendars ?? [];
     const done = changed
       ? t(redo ? 'undo.redone' : 'undo.undone', { action })
       : t(redo ? 'undo.nothingRedone' : 'undo.nothingUndone', { action });
     this.#toast = {
       message: [done, ...skipped.map((event) => skippedText(event, calendars))].join(' '),
-      // Taking it back is the other one of the latest.
-      action: reversible
-        ? {
-            label: t(redo ? 'common.undo' : 'common.redo'),
-            run: () => void (redo ? this.undo() : this.redo()),
-          }
-        : undefined,
+      // Taking it back is the next step of the Undo History the other way.
+      action:
+        changed && reversible
+          ? {
+              label: t(redo ? 'common.undo' : 'common.redo'),
+              run: () => void (redo ? this.undo() : this.redo()),
+            }
+          : undefined,
       stays: !changed || skipped.length > 0,
     };
   }
@@ -667,7 +719,7 @@ export class WindowDialogs {
     try {
       const { journalTransaction } = await write();
       this.close();
-      this.#recorded(journalTransaction, { kind: 'deleted', title }, t('undo.done.deleted'));
+      this.#recorded(journalTransaction, t('undo.done.deleted'), actionText('deleted', title));
     } catch (error) {
       this.#failure = t('event.deleteFailed', { error: errorText(error) });
     }

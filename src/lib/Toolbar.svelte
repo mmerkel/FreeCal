@@ -18,6 +18,7 @@
   import Info from '@lucide/svelte/icons/info';
   import Power from '@lucide/svelte/icons/power';
   import SettingsIcon from '@lucide/svelte/icons/settings';
+  import History from '@lucide/svelte/icons/history';
   import type { OverallState, View } from '../core/types';
   import { t, type MessageKey } from '../i18n';
   import Menu from './Menu.svelte';
@@ -41,6 +42,7 @@
     onsyncnow: () => void;
     onimport: () => void;
     onsettings: () => void;
+    onchangejournal: () => void;
     onabout: () => void;
     onquit: () => void;
   }
@@ -58,6 +60,7 @@
     onsyncnow,
     onimport,
     onsettings,
+    onchangejournal,
     onabout,
     onquit,
   }: Props = $props();
@@ -193,6 +196,15 @@
         <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onimport)}>
           <ImportIcon size={14} aria-hidden="true" />
           {t('menu.import')}
+        </button>
+        <button
+          type="button"
+          class="menu-item"
+          role="menuitem"
+          onclick={() => choose(onchangejournal)}
+        >
+          <History size={14} aria-hidden="true" />
+          {t('menu.changeJournal')}
         </button>
         <button type="button" class="menu-item" role="menuitem" onclick={() => choose(onsettings)}>
           <SettingsIcon size={14} aria-hidden="true" />
