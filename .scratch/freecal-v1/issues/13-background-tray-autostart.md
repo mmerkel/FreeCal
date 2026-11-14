@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 33
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
@@ -13,7 +13,7 @@
 - [x] Start at login is off by default and uses the Background portal where available
 - [x] A StatusNotifierItem tray icon (works natively on KDE Plasma) with a menu: Open FreeCal, Quit
 - [x] When the window is re-created, the frontend subscribes to Signals first and then reads current state
-- [ ] Tray detection, tray and autostart are behind fakeable desktop interfaces with tests
+- [x] Tray detection, tray and autostart are behind fakeable desktop interfaces with tests
 - [x] The Background section of Settings has "Keep running in the background" and "Start at login" switches. The background switch is always enabled, with the hint "Needs a system tray; without one, closing quits", because a tray is only checked for at window close
 - [x] Turning on start at login goes through the Background portal at the moment the switch is flipped (the portal may ask the user); if it is refused, the switch goes back off with a translated message
 
@@ -56,3 +56,4 @@
   - `update_settings` waits on a thread of its own only for the desktop step, so other settings are written as before.
   - The sidebar's doc comment, split off by `stored_switch`, is back on `sidebar_state`.
   - Left open, for the user: (1) the tray icon and its menu's actions have no fake or test; they were checked by hand on Xvfb only, so the box on fakeable interfaces stays open. (2) A quit asked of a window that was just created again (Open FreeCal, then Quit at once) can arrive before the window listens, and nothing happens. (3) Closing twice quickly can ask the window to quit twice.
+- 2026-11-14 (ticket 139): the user accepted the hand check of the tray icon and its menu in place of a fake, and checked it themselves: it works. The box on fakeable desktop interfaces is ticked on that basis; no test covers the tray's actions.
