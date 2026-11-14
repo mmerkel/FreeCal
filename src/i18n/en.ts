@@ -324,8 +324,6 @@ export const en = {
   'quit.later': 'They’ll be sent the next time FreeCal starts.',
   'quit.anyway': 'Quit anyway',
   'toast.dismiss': 'Dismiss',
-  'toast.undo': 'Undo',
-  'toast.redo': 'Redo',
   'link.openTitle': 'Open this link?',
   'link.openBody': 'Open {url} in your browser?',
   'link.open': 'Open',
@@ -382,6 +380,8 @@ export const en = {
   'error.startAtLoginRefused': 'the desktop refused to change whether FreeCal starts at login',
   'error.startAtLoginFailed': 'the desktop couldn’t change whether FreeCal starts at login',
   'common.ok': 'OK',
+  'common.undo': 'Undo',
+  'common.redo': 'Redo',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
 } as const;

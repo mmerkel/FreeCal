@@ -29,7 +29,8 @@
   import Toolbar from './lib/Toolbar.svelte';
   import UndoDialog from './lib/UndoDialog.svelte';
   import { whenForShortcut } from './lib/when';
-  import { actionText, WindowDialogs } from './lib/windowDialogs.svelte';
+  import { actionText } from './lib/sessionUndo';
+  import { WindowDialogs } from './lib/windowDialogs.svelte';
   import { WindowModel } from './lib/windowModel.svelte';
   import WorkingDialog from './lib/WorkingDialog.svelte';
   import QuitDialog from './lib/QuitDialog.svelte';

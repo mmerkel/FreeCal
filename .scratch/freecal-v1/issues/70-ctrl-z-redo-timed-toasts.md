@@ -4,17 +4,17 @@
 
 **Blocked by:** 72
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] Ctrl+Z undoes the user's own actions of this session (since FreeCal started), newest first, skipping undos and never undoing a sync
-- [ ] Ctrl+Shift+Z and Ctrl+Y redo the most recent undo, back to front, until the user's next change
-- [ ] After an edit, move, delete or import, a toast says what happened with Undo ("Event deleted · Undo"); after an undo, "Undone: … · Redo". Delete no longer asks "Delete this Event?" first
-- [ ] A confirmation toast disappears after 5 seconds, paused while hovered or focused; a toast reporting a problem (skipped Events, a refused undo) stays until dismissed. Changes ticket 59's `Toast.svelte`, which stays until dismissed
-- [ ] A dangerous undo or redo (ticket 72's classification) asks first and names why: "This also undoes 2 later changes: …", "3 of these were changed on the server", "This removes 412 Events"; a benign one runs at once
-- [ ] Shortcuts and toasts work while no dialog is open; every string goes through `t()`, Event titles as text in bidi isolates
-- [ ] Component tests against the fake core
+- [x] Ctrl+Z undoes the user's own actions of this session (since FreeCal started), newest first, skipping undos and never undoing a sync
+- [x] Ctrl+Shift+Z and Ctrl+Y redo the most recent undo, back to front, until the user's next change
+- [x] After an edit, move, delete or import, a toast says what happened with Undo ("Event deleted · Undo"); after an undo, "Undone: … · Redo". Delete no longer asks "Delete this Event?" first
+- [x] A confirmation toast disappears after 5 seconds, paused while hovered or focused; a toast reporting a problem (skipped Events, a refused undo) stays until dismissed. Changes ticket 59's `Toast.svelte`, which stays until dismissed
+- [x] A dangerous undo or redo (ticket 72's classification) asks first and names why: "This also undoes 2 later changes: …", "3 of these were changed on the server", "This removes 412 Events"; a benign one runs at once
+- [x] Shortcuts and toasts work while no dialog is open; every string goes through `t()`, Event titles as text in bidi isolates
+- [x] Component tests against the fake core
 
 ## Comments
 
@@ -36,3 +36,5 @@
   - **Decision, for review:** an undo of an import still shows "Working…" (and a redo "Redoing the import …"); other undos run without it.
   - New terms: **Session Undo** (new term): the user's own changes of this session, which Ctrl+Z undoes newest first, and the undos of them, which Ctrl+Shift+Z redoes until the user's next change (`SessionUndo`). `UserAction` names a change as the toasts do, after the Transaction Origin "user action". The hostile fixture's `deleteQuestion` became `undoneDelete`.
   - Tests: `src/lib/windowDialogs.test.ts` (`describe('Session Undo')`, the import flow), `src/lib/Toast.test.ts`, `src/lib/UndoDialog.test.ts`, `src/lib/shortcuts.test.ts`, `src/App.events.test.ts` (delete, Ctrl+Z, the hostile title), `src/App.import.test.ts`.
+
+**2026-11-14, after /code-review:** fixed the review's findings. Refused drags now stay as problem toasts. A second Ctrl+Z while an undo runs keeps the toast. A change made during an undo leaves that undo's toast without Redo. Closing what is open cancels an unanswered Dangerous Undo question. A failed undo's retry targets the same change. A toast that appears under a resting pointer waits. The hostile fixture covers the question's later-change titles and the toast after undoing an import. Boxes 3 and 5 are ticked with the decisions above, for review: a repeating Event still asks which Occurrences (not "Delete this Event?"), and the question says "This changes 412 events".

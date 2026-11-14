@@ -2,6 +2,7 @@
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
+import hostile from '../../fixtures/hostile-event.json';
 import type { DangerousUndo } from '../core/types';
 import { journalTransactionId } from '../test/ids';
 import UndoDialog from './UndoDialog.svelte';
@@ -60,4 +61,14 @@ test('Cancel has the focus; Escape and Cancel decline, Redo approves a redo', as
 
   await user.click(screen.getByRole('button', { name: 'Redo' }));
   expect(onanswer).toHaveBeenLastCalledWith(true);
+});
+
+test('a hostile title among the later changes stays text', () => {
+  show({
+    ...harmless,
+    laterJournalTransactions: [{ id: journalTransactionId(5), madeAt: 0, titles: [hostile.title] }],
+  });
+
+  expect(screen.getByRole('listitem').textContent).toBe(hostile.expected.undoLaterTitle);
+  expect(document.querySelector('img, script')).toBeNull();
 });

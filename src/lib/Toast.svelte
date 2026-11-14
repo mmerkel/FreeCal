@@ -23,7 +23,12 @@
   /** How long a confirmation shows, in milliseconds. */
   const SHOWN_FOR = 5000;
 
+  let toast: HTMLElement;
+  /** Whether the pointer is over the toast, also when it rested there as the toast appeared. */
   let pointedAt = $state(false);
+  $effect(() => {
+    if (toast.matches(':hover')) pointedAt = true;
+  });
   let focused = $state(false);
 
   $effect(() => {
@@ -40,6 +45,7 @@
 </script>
 
 <div
+  bind:this={toast}
   class="toast"
   role="status"
   onmouseenter={() => (pointedAt = true)}

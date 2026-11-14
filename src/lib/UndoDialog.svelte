@@ -54,7 +54,7 @@
       {t('common.cancel')}
     </button>
     <button type="button" class="button solid" onclick={() => onanswer(true)}>
-      {t(redo ? 'toast.redo' : 'toast.undo')}
+      {t(redo ? 'common.redo' : 'common.undo')}
     </button>
   {/snippet}
 </Dialog>

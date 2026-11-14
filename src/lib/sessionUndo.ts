@@ -6,6 +6,7 @@ import type {
   SkippedEvent,
   UndoOutcome,
 } from '../core/types';
+import { t } from '../i18n';
 
 /** A change the user made, as the toasts name it. */
 export type UserAction =
@@ -27,12 +28,28 @@ export type SessionUndoResult =
   /** The user didn't approve a Dangerous Undo; it stays to undo or redo. */
   | { kind: 'cancelled' }
   /**
-   * It ran. `changed` says whether it changed anything; when it did, it can
-   * be redone, or undone again after a redo.
+   * It ran. `changed` says whether it changed anything, and `reversible`
+   * whether it can be redone, or undone again after a redo: it changed
+   * something, and no change of the user's came in between to end redo.
    */
-  | { kind: 'done'; action: UserAction; changed: boolean; skipped: SkippedEvent[] }
-  /** The core refused; it stays to try again, unless it was undone already. */
-  | { kind: 'failed'; action: UserAction; error: unknown; again: boolean };
+  | {
+      kind: 'done';
+      action: UserAction;
+      changed: boolean;
+      reversible: boolean;
+      skipped: SkippedEvent[];
+    }
+  /**
+   * The core refused to undo `journalTransaction`; it stays to try again,
+   * unless it was undone already.
+   */
+  | {
+      kind: 'failed';
+      action: UserAction;
+      journalTransaction: JournalTransactionId;
+      error: unknown;
+      retryable: boolean;
+    };
 
 /** How Session Undo asks the user before a Dangerous Undo, and runs a core undo. */
 export interface SessionUndoHooks {
@@ -56,7 +73,9 @@ export class SessionUndo {
   /** The changes Ctrl+Z undoes, oldest first. */
   readonly #undoable: Entry[] = [];
   /** The undos Ctrl+Shift+Z redoes, oldest first. */
-  #redoable: Entry[] = [];
+  readonly #redoable: Entry[] = [];
+  /** Counts the user's changes, so that an undo knows whether one came while it ran. */
+  #changes = 0;
   /** Whether an undo or redo runs, during which another does nothing. */
   #running = false;
 
@@ -68,7 +87,13 @@ export class SessionUndo {
   /** The user made `action` as `journalTransaction`; nothing undone before can be redone now. */
   recorded(journalTransaction: JournalTransactionId, action: UserAction) {
     this.#undoable.push({ journalTransaction, action });
-    this.#redoable = [];
+    this.#redoable.length = 0;
+    this.#changes += 1;
+  }
+
+  /** Whether an undo or redo runs, during which another does nothing. */
+  get running() {
+    return this.#running;
   }
 
   /** Undoes the user's latest change of this session, or the change made as `journalTransaction`. */
@@ -83,8 +108,8 @@ export class SessionUndo {
 
   /**
    * Undoes the newest Entry of `from`, or the one of `picked`, and puts its
-   * undo onto `to`. Without `picked`, an Entry undone already is dropped and
-   * the next one tried.
+   * undo onto `to`, unless an undo's redo ended while it ran. Without
+   * `picked`, an Entry undone already is dropped and the next one tried.
    */
   async #run(
     from: Entry[],
@@ -94,6 +119,7 @@ export class SessionUndo {
   ): Promise<SessionUndoResult> {
     if (this.#running) return { kind: 'busy' };
     this.#running = true;
+    const changes = this.#changes;
     try {
       for (;;) {
         const entry =
@@ -103,16 +129,17 @@ export class SessionUndo {
         if (!entry) return { kind: 'nothing' };
         const result = await this.#undoEntry(entry, redo);
         if (result.kind === 'cancelled') return result;
-        if (result.kind === 'failed' && result.again) return result;
+        if (result.kind === 'failed' && result.retryable) return result;
         from.splice(from.indexOf(entry), 1);
         if (result.kind === 'done') {
-          if (result.undoneAs !== null) {
-            to.push({ journalTransaction: result.undoneAs, action: entry.action });
-          }
+          const { undoneAs } = result;
+          const reversible = undoneAs !== null && (redo || this.#changes === changes);
+          if (reversible) to.push({ journalTransaction: undoneAs, action: entry.action });
           return {
             kind: 'done',
             action: entry.action,
-            changed: result.undoneAs !== null,
+            changed: undoneAs !== null,
+            reversible,
             skipped: result.skipped,
           };
         }
@@ -151,7 +178,13 @@ export class SessionUndo {
         approved = value.danger;
       }
     } catch (error) {
-      return { kind: 'failed', action, error, again: !undoneAlready(error) };
+      return {
+        kind: 'failed',
+        action,
+        journalTransaction: entry.journalTransaction,
+        error,
+        retryable: !undoneAlready(error),
+      };
     }
   }
 }
@@ -161,4 +194,11 @@ function undoneAlready(error: unknown): boolean {
   return (
     typeof error === 'object' && error !== null && 'code' in error && error.code === 'alreadyUndone'
   );
+}
+
+/** How a toast or the question before a Dangerous Undo names the user's change `action`. */
+export function actionText(action: UserAction): string {
+  return action.kind === 'imported'
+    ? t('undo.action.imported', { file: action.file })
+    : t(`undo.action.${action.kind}`, { title: action.title || t('event.untitled') });
 }

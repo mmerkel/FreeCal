@@ -12,7 +12,7 @@ import type {
 } from '../core/types';
 import { errorText, t, tCount } from '../i18n';
 import { sameRepeat } from './repeat';
-import { SessionUndo, type SessionUndoResult, type UserAction } from './sessionUndo';
+import { actionText, SessionUndo, type SessionUndoResult, type UserAction } from './sessionUndo';
 import { skippedText } from './skippedEvents';
 import type { ScopeChange, ScopeChoice } from './ScopeDialog.svelte';
 import { unsentAtQuit, unsentCount, type UnsentAtQuit } from './unsent';
@@ -61,11 +61,12 @@ interface Toast {
   stays: boolean;
 }
 
-/** The question before a Dangerous Undo or redo of Session Undo. */
+/** The question before a Dangerous Undo or redo of Session Undo, with how to answer it. */
 interface UndoQuestion {
   danger: DangerousUndo;
   action: UserAction;
   redo: boolean;
+  answer: (approved: boolean) => void;
 }
 
 /**
@@ -91,8 +92,6 @@ export class WindowDialogs {
   #toast = $state<Toast>();
   readonly #sessionUndo: SessionUndo;
   #undoQuestion = $state<UndoQuestion>();
-  /** Answers the open Undo Question. */
-  #answerUndo: ((approved: boolean) => void) | undefined;
   /** Counts editor sessions, so that each one starts from its own draft. */
   #editorSession = $state(0);
   /** FreeCal's version, read when About first opens. */
@@ -121,11 +120,14 @@ export class WindowDialogs {
     this.#sessionUndo = new SessionUndo(core, {
       approve: (danger, action, redo) =>
         new Promise((resolve) => {
-          this.#undoQuestion = { danger, action, redo };
-          this.#answerUndo = (approved) => {
-            this.#undoQuestion = undefined;
-            this.#answerUndo = undefined;
-            resolve(approved);
+          this.#undoQuestion = {
+            danger,
+            action,
+            redo,
+            answer: (approved) => {
+              this.#undoQuestion = undefined;
+              resolve(approved);
+            },
           };
         }),
       // An import's undo can take a while; others are quick.
@@ -386,10 +388,10 @@ export class WindowDialogs {
     if (why === 'calendarReadOnly') {
       this.#toast = {
         message: t('event.readOnlyDrag', { title, calendar: calendar.name }),
-        stays: false,
+        stays: true,
       };
     } else if (why === 'eventHasGuests') {
-      this.#toast = { message: t('event.hasGuestsDrag', { title }), stays: false };
+      this.#toast = { message: t('event.hasGuestsDrag', { title }), stays: true };
     }
   }
 
@@ -507,19 +509,21 @@ export class WindowDialogs {
    * Dangerous Undo; the toast says what it did and offers Redo.
    */
   async undo(journalTransaction?: JournalTransactionId) {
+    if (this.#sessionUndo.running) return;
     this.dismissToast();
     this.#reportUndo(await this.#sessionUndo.undo(journalTransaction), false);
   }
 
   /** Ctrl+Shift+Z: redoes the latest undo of Session Undo, or the undo made as `journalTransaction`. */
   async redo(journalTransaction?: JournalTransactionId) {
+    if (this.#sessionUndo.running) return;
     this.dismissToast();
     this.#reportUndo(await this.#sessionUndo.redo(journalTransaction), true);
   }
 
   /** The user approved the Dangerous Undo asked about, or not. */
   answerUndo(approved: boolean) {
-    this.#answerUndo?.(approved);
+    this.#undoQuestion?.answer(approved);
   }
 
   /**
@@ -560,6 +564,7 @@ export class WindowDialogs {
 
   /** Closes what is open over the grid. */
   close() {
+    this.#undoQuestion?.answer(false);
     this.#show(undefined);
     this.#failure = undefined;
   }
@@ -586,7 +591,7 @@ export class WindowDialogs {
     this.#sessionUndo.recorded(journalTransaction, action);
     this.#toast = {
       message,
-      action: { label: t('toast.undo'), run: () => void this.undo(journalTransaction) },
+      action: { label: t('common.undo'), run: () => void this.undo(journalTransaction) },
       stays: false,
     };
   }
@@ -605,19 +610,23 @@ export class WindowDialogs {
       return;
     }
     const action = actionText(result.action);
-    const again = () => void (redo ? this.redo() : this.undo());
     if (result.kind === 'failed') {
+      const { journalTransaction } = result;
       const error = errorText(result.error);
       this.#toast = {
         message: t(redo ? 'undo.redoFailed' : 'undo.undoFailed', { action, error }),
-        action: result.again
-          ? { label: t(redo ? 'toast.redo' : 'toast.undo'), run: again }
+        action: result.retryable
+          ? {
+              label: t(redo ? 'common.redo' : 'common.undo'),
+              run: () =>
+                void (redo ? this.redo(journalTransaction) : this.undo(journalTransaction)),
+            }
           : undefined,
         stays: true,
       };
       return;
     }
-    const { changed, skipped } = result;
+    const { changed, reversible, skipped } = result;
     const calendars = this.#model.directory?.calendars ?? [];
     const done = changed
       ? t(redo ? 'undo.redone' : 'undo.undone', { action })
@@ -625,9 +634,9 @@ export class WindowDialogs {
     this.#toast = {
       message: [done, ...skipped.map((event) => skippedText(event, calendars))].join(' '),
       // Taking it back is the other one of the latest.
-      action: changed
+      action: reversible
         ? {
-            label: t(redo ? 'toast.undo' : 'toast.redo'),
+            label: t(redo ? 'common.undo' : 'common.redo'),
             run: () => void (redo ? this.undo() : this.redo()),
           }
         : undefined,
@@ -690,11 +699,4 @@ export class WindowDialogs {
       release?.();
     }
   }
-}
-
-/** How a toast or the question before a Dangerous Undo names the user's change `action`. */
-export function actionText(action: UserAction): string {
-  return action.kind === 'imported'
-    ? t('undo.action.imported', { file: action.file })
-    : t(`undo.action.${action.kind}`, { title: action.title || t('event.untitled') });
 }

@@ -12,6 +12,7 @@ import type {
   SkippedEvent,
   UndoOutcome,
 } from '../core/types';
+import hostile from '../../fixtures/hostile-event.json';
 import { dateChanged } from '../test/answers';
 import { calendarId, eventId, journalTransactionId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
@@ -340,6 +341,7 @@ describe('writes', () => {
     dialogs.refuseDrag(recurring.eventId, recurrenceId);
 
     expect(dialogs.toast?.message).toContain(`its calendar “⁨${calendar.name}⁩” is read-only`);
+    expect(dialogs.toast?.stays).toBe(true);
     dialogs.dismissToast();
     expect(dialogs.toast).toBeUndefined();
   });
@@ -784,6 +786,21 @@ describe('Session Undo', () => {
       expect(dialogs.toast?.message).toContain('Undone');
     });
 
+    test('closing what is open cancels the question, and undo still works', async () => {
+      const { core, dialogs } = await deleted(1);
+      core.answer('undo', dangerous);
+      const run = dialogs.undo();
+      await settled();
+
+      dialogs.close();
+      await run;
+      expect(dialogs.undoQuestion).toBeUndefined();
+
+      core.answer('undo', undone(2));
+      await dialogs.undo();
+      expect(dialogs.toast?.message).toContain('Undone');
+    });
+
     test('cancelled, it changes nothing and stays to undo', async () => {
       const { core, dialogs } = await deleted(1);
       core.answer('undo', dangerous);
@@ -825,6 +842,63 @@ describe('Session Undo', () => {
     core.calls.splice(0);
     await dialogs.undo();
     expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(3)]);
+  });
+
+  test('a second Ctrl+Z while an undo runs does nothing, and keeps the toast', async () => {
+    const { core, dialogs } = await deleted(1);
+    const running = core.pending('undo');
+    const first = dialogs.undo();
+    await settled();
+
+    await dialogs.undo();
+    running.resolve(undone(2));
+    await first;
+
+    expect(core.callsOf('undo')).toHaveLength(1);
+    expect(dialogs.toast?.message).toContain('Undone');
+  });
+
+  test('a change made while an undo runs leaves its toast no Redo', async () => {
+    const opened = await deleted(1);
+    const { core, dialogs } = opened;
+    const running = core.pending('undo');
+    const undoing = dialogs.undo();
+    await settled();
+
+    await deleteAs(opened, 3);
+    running.resolve(undone(2));
+    await undoing;
+
+    expect(dialogs.toast?.message).toContain('Undone');
+    expect(dialogs.toast?.action).toBeUndefined();
+    await dialogs.redo();
+    expect(dialogs.toast?.message).toBe('Nothing to redo.');
+  });
+
+  test('a failed toast Undo tries the same change again', async () => {
+    const opened = await deleted(1);
+    const { core, dialogs } = opened;
+    await deleteAs(opened, 2);
+    core.answer('undo', failure({ code: 'localStoreFailed' }));
+    await dialogs.undo(journalTransactionId(1));
+
+    core.answer('undo', undone(3));
+    dialogs.toast?.action?.run();
+    await settled();
+
+    expect(core.callsOf('undo').map(([target]) => target)).toEqual([whole(1), whole(1)]);
+  });
+
+  test('undoing an import names a hostile file as text', async () => {
+    const { core, dialogs } = await started();
+    core.answer('pickImportFile', hostile.fileName);
+    await dialogs.startImport();
+    await dialogs.runImport(calendarId(2), 'update');
+
+    dialogs.toast?.action?.run();
+    await settled();
+
+    expect(dialogs.toast?.message).toBe(hostile.expected.undoneImport);
   });
 
   test('a write that changed nothing offers no Undo', async () => {
