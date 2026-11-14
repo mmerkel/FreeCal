@@ -1,11 +1,9 @@
 //! The hand-off from a second launch to the running FreeCal (ADR 0005), over
-//! the D-Bus session bus. The first launch owns a bus name that stands for
-//! its Local Store. A second launch finds it taken, passes on its arguments,
+//! the D-Bus session bus. The first launch in a session owns the app ID as
+//! its bus name. A second launch finds it taken, passes on its arguments,
 //! working directory and activation token, and exits. The token is what lets
 //! the running FreeCal come to the front on Wayland, where the compositor
 //! raises a window only for the launch the user just made.
-
-use std::path::Path;
 
 use zbus::blocking::Connection;
 use zbus::blocking::connection::Builder;
@@ -50,8 +48,7 @@ pub enum Claim {
     HandedOff,
 }
 
-/// Makes this the FreeCal that later launches on the same Local Store hand
-/// off to, calling `on_launch` for each, or hands `launch` to the one that
+/// Makes this the FreeCal that later launches in the session hand off to, calling `on_launch` for each, or hands `launch` to the one that
 /// already is.
 pub fn claim(
     name: &str,
@@ -83,22 +80,6 @@ pub fn claim(
         }
         Err(error) => Err(error),
     }
-}
-
-/// The bus name that stands for the Local Store in `data_dir`, so that
-/// FreeCals on separate data directories run side by side (ADR 0005). The
-/// hash is FNV-1a, which unlike `std`'s hasher stays the same across builds,
-/// so an updated FreeCal still reaches one started before the update.
-pub fn local_store_name(identifier: &str, data_dir: &Path) -> String {
-    let hash = data_dir
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
-    // A bus name element can't start with a digit.
-    format!("{identifier}.Store{hash:016x}")
 }
 
 struct Receiver(Box<dyn Fn(Launch) + Send + Sync>);

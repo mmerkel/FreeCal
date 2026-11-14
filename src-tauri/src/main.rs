@@ -755,18 +755,19 @@ fn set_activation_token(window: &gtk::ApplicationWindow, token: &str) {
     }
 }
 
-/// Hands this launch to the running FreeCal on the same Local Store and exits,
+/// Hands this launch to the FreeCal running in the session and exits,
 /// or becomes the one later launches hand off to. Without a session bus
-/// FreeCal still starts: the core's lock keeps a second launch from opening
-/// the Local Store anyway.
+/// FreeCal still starts: the core's lock still keeps two FreeCals from
+/// opening one Local Store.
 #[cfg(target_os = "linux")]
-fn hand_off_or_serve(app: &tauri::App, data_dir: &std::path::Path) {
+fn hand_off_or_serve(app: &tauri::App) {
     let handle = app.handle().clone();
-    let name = handoff::local_store_name(&app.config().identifier, data_dir);
     // Files to open among the arguments are ticket 30's.
-    let claimed = handoff::claim(&name, &handoff::Launch::current(), move |launch| {
-        bring_to_front(&handle, launch.activation_token)
-    });
+    let claimed = handoff::claim(
+        &app.config().identifier,
+        &handoff::Launch::current(),
+        move |launch| bring_to_front(&handle, launch.activation_token),
+    );
     match claimed {
         Ok(handoff::Claim::Running(connection)) => {
             app.manage(connection);
@@ -841,7 +842,7 @@ fn main() {
             // Before the core opens, so that a second launch hands off
             // rather than failing with `LocalStoreInUse`.
             #[cfg(target_os = "linux")]
-            hand_off_or_serve(app, &data_dir);
+            hand_off_or_serve(app);
             let signals = Arc::new(ForwardToFrontend(app.handle().clone()));
             match Core::open(&data_dir, Arc::new(SystemClock), signals, keyring::system()) {
                 Ok(core) => {
