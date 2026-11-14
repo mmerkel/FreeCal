@@ -1,7 +1,7 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] ticket 19
+- [ ] tickets 72, 70, 19
 - [ ] simplify
 - [ ] ticket 20 parts
 - [ ] simplify
