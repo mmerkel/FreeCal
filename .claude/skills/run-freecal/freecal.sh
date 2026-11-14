@@ -15,6 +15,10 @@ export DISPLAY="$DISPLAY_NUMBER"
 # the user's desktop instead of Xvfb.
 unset WAYLAND_DISPLAY
 export GDK_BACKEND=x11
+# No accessibility bridge: when an agent runs FreeCal on its own D-Bus session,
+# GTK would make that bus start a second at-spi-bus-launcher, which can take
+# and later delete the socket of the user's desktop accessibility bus.
+export NO_AT_BRIDGE=1 GTK_A11Y=none
 mkdir -p "$RUN_DIR/shots" "$RUN_DIR/data"
 
 usage() {
