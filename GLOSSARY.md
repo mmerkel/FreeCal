@@ -166,6 +166,10 @@ _Avoid_: Remote pointer, synced pointer
 One of two marks on an Event Version, the user's and the server's, saying that it is the current version of its Event on that side: in the Snapshot the User's Pointer or the Server's Pointer names. An Event Version that both sides agree on has both.
 _Avoid_: Mark (on its own: a Status Mark is a badge), current flag, head
 
+**Store Check**:
+The function that asks a Local Store whether its stored invariants hold, each as a named query, and reports every violation. The tests run it; it is where those invariants are recorded.
+_Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
+
 **Tracking**:
 The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Conflict turns it off, in both directions, and so can the user; the Calendar's Events then stay as each side has them until a merge.
 _Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)

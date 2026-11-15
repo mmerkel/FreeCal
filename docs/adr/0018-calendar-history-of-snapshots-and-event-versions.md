@@ -16,11 +16,13 @@ The Change Journal recorded each change beside the Event Rows: the previous Even
 
 - An Event Version never changes: a trigger refuses updates to every column but the two Current-Version Marks.
 - One current Event Version per Calendar, UID and recurrence ID on each side: the unique indexes. Snapshots, links and pointers refer to rows that exist: foreign keys.
-- The Current-Version Marks agree with the pointers: one function moves a pointer and rewrites the marks, and nothing else writes either. A check run by the tests compares them.
+- The Current-Version Marks agree with the pointers: one function moves a pointer and rewrites the marks, and nothing else writes either.
 - ADR 0019's invariant on the Server's Pointer: the interface has no operation that moves the Server's Pointer alone, only one that records what the server now holds, and follows or merges inside.
 - A stored ETag belongs to the Event Versions with the server's Current-Version Mark: one Database Transaction writes both. Every write runs in a Database Transaction, by its type, as before.
 
 The functions that write Event Versions, Snapshots, links, pointers and marks are visible only to the Calendar History's module, and those of the CalDAV table and the Ignored Resources only to the Sync Engine's. Rust's visibility replaces the permission value.
+
+**Where the invariants are recorded.** The invariants of the Local Store that can be asked of a stored state are recorded as the Store Check, beside the schema: a function in which each invariant is a named query, with one line stating the rule and its ADR, that reports every violation it finds. The tests run it after each scenario, so a rule that is wrong or no longer kept fails a test. It covers what the schema can't enforce (the Current-Version Marks against the pointers, every Event Version being referred to by a kept Snapshot or having a mark, a stored ETag against the server's Current-Version Marks); a constraint in the schema carries a comment naming the rule it enforces. The ADRs keep the reasons and don't repeat the list. An invariant about how a state was reached, such as ADR 0019's on the Server's Pointer, can't be a query: it stays a rule of the interface, stated in its ADR, and the Store Check says that it doesn't cover it.
 
 **An Event's History** is a view of that Event's versions through the Calendar History, without an undo of its own.
 
@@ -32,6 +34,7 @@ The functions that write Event Versions, Snapshots, links, pointers and marks ar
 - **Two straight lines per Calendar, with pointers that only move forwards** and undo writing new Snapshots: every undo would have to build its reverse, where moving a pointer is one write. Undos are rare, so walking the graph is affordable.
 - **One Snapshot per Calendar for a move**, linked: two things to keep together where one Snapshot spanning both says it.
 - **Keeping a Write Permission for the Calendar History's tables**: a value passed into every write shows a reviewer each call, where visibility lets any function inside the owning module call a low-level write, such as setting a mark, without moving a pointer. Rejected because no invariant is left that the value would guard and the schema or the interface doesn't; the owning module has to stay small enough for such a call to be obvious.
+- **The invariants as comments on the schema, or in the ADRs only**: nothing to maintain beyond prose, but prose drifts from the code unnoticed, and no list says whether it is complete.
 - **Recording the First Sync as undoable**: undoing it would delete the Calendar on the server (ADR 0009, unchanged).
 
 ## Consequences
@@ -39,6 +42,7 @@ The functions that write Event Versions, Snapshots, links, pointers and marks ar
 - An Event's row ID changes with every edit. The window and every caller identify an Event by its Combined Event Key (Calendar, UID, recurrence ID), never by row ID.
 - A query that bypasses the `event` view sees old versions. Only the Calendar History's own code reads the table directly.
 - The Current-Version Marks are derived state. Only the code that moves a pointer writes them, in the same Database Transaction, and a check compares them with the pointers.
+- A change to the schema touches three places: the schema, the Store Check and an ADR.
 - Dropping old Snapshots must spare every row that has a Current-Version Mark or that a kept Snapshot refers to.
 - "Since when has this Event looked like this" is a walk through the link table, not a column.
 - The journal modules, the Conflict storage, the Unsent Changes, the Mirror and their tests are replaced; the spec's Change Journal section and ticket 19's list are rewritten. In `GLOSSARY.md`, Event Version now means a row of this table; the entries for the Change Journal, Journal Transaction, Journal Event Modification, Event Row, Mirror and those built on them are revised as the code changes.
