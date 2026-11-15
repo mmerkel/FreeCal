@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0019
+---
+
 # Conflicts are found in the Provider-neutral core, per Occurrence
 
 A Conflict is the state of an Event, so it is found, held and resolved by Provider-neutral code next to the Change Journal, not by the Sync Engine. For each Calendar and UID a server changed, the Sync Engine reads the Server Version, and the previous Server Version from the Mirror's data before it is overwritten. A neutral step then goes through the Occurrences: one with no Unsent Change is propagated to the Event Rows; one with an Unsent Change that the server didn't change keeps the User's Version, to be sent later; one changed on both sides is a Conflict. A change to the Recurring Event itself, on either side, counts as a change to every Occurrence. Without a readable previous Server Version, every Occurrence counts as changed by the server. Once any Occurrence is in Conflict, the Conflict covers the whole Event, so holding, showing and resolving it stay per Event.

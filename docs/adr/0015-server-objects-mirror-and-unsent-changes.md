@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0019
+---
+
 # Server Objects, the Mirror and Unsent Changes
 
 This ADR consolidates ADRs 0010, 0011 and 0013, which it supersedes, with the decision of 2026-11-06 on CalDAV resources sharing a UID. ADRs 0012 (recurrence IDs) and 0014 (Conflicts) stay as they are. Tickets 102, 103, 106 and 107 bring the code to the CalDAV rules below; until then it keeps ADR 0011's handover between two Server Objects with one UID.

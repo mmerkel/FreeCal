@@ -111,8 +111,8 @@ One change to one Event inside a Journal Transaction, holding the Event's previo
 _Avoid_: Modification (on its own), entry, journal entry, change (on its own: Unsent Change and Change Journal use it)
 
 **Event Version**:
-The fields FreeCal manages of one Event at one moment, as a Journal Event Modification stores it. Server data is not part of it.
-_Avoid_: Version (on its own), revision, snapshot (a Snapshot is a backup file)
+One Event at one moment: the fields FreeCal manages and its Unimplemented Fields, for a single Event, a Recurring Event or one Exception. Once stored it never changes; a change to the Event makes a new one. Until the code follows ADR 0018, the Change Journal's stored Event Versions hold the managed fields only.
+_Avoid_: Version (on its own), revision, snapshot (a Snapshot is a whole Calendar's state)
 
 **Undo History**:
 What Ctrl+Z and Ctrl+Shift+Z step through, read from the Change Journal: the user's own changes and imports not yet undone, newest first, and the undos made since the user's last change, which redo brings back. A restart doesn't reset it.
@@ -122,9 +122,17 @@ _Avoid_: Session Undo, undo stack, History (on its own: an Event's History)
 The safeguard that pauses a Calendar's sync and asks the user before one sync deletes or changes an unusually large number of its Events.
 _Avoid_: Circuit breaker, sync limit
 
+**Backup**:
+A periodic full `.ics` copy of a Calendar, kept locally as a last resort.
+_Avoid_: Snapshot (a Snapshot is a state in the Calendar History), dump, export (an export is user-initiated)
+
 **Snapshot**:
-A periodic full `.ics` copy of a Calendar, kept locally as a last-resort backup.
-_Avoid_: Backup, dump, export (an export is user-initiated)
+The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones.
+_Avoid_: Commit, version (on its own), backup (a Backup is a file)
+
+**Calendar History**:
+The record of a Calendar's Snapshots and of how each arose from earlier ones, on the user's side and on the server's.
+_Avoid_: History (on its own: an Event's History), undo history (the Undo History is what Ctrl+Z steps through), log
 
 ## Internals
 
@@ -141,6 +149,26 @@ _Avoid_: Row (on its own), event table row, record
 **Loaded Event**:
 An Event read from the Local Store as one value, a Recurring Event together with its rule and Exceptions (`event::Loaded`).
 _Avoid_: Opened event, full event
+
+**Unimplemented Fields**:
+What a server holds about one Event beyond the fields FreeCal manages, such as alarms, attachments, custom properties and unknown parameters. FreeCal keeps them without showing them.
+_Avoid_: Unknown fields, unmanaged fields, not-yet-implemented fields, server data (on its own)
+
+**User's Pointer**:
+The Snapshot holding a Calendar's Events as the user has them, which is what FreeCal shows.
+_Avoid_: Local pointer (Local is for Local Accounts and Calendars), HEAD, current snapshot
+
+**Server's Pointer**:
+The Snapshot holding a Calendar's Events as its server last had them.
+_Avoid_: Remote pointer, synced pointer
+
+**Current-Version Mark**:
+One of two marks on an Event Version, the user's and the server's, saying that it is the current version of its Event on that side: in the Snapshot the User's Pointer or the Server's Pointer names. An Event Version that both sides agree on has both.
+_Avoid_: Mark (on its own: a Status Mark is a badge), current flag, head
+
+**Tracking**:
+The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Conflict turns it off, in both directions, and so can the user; the Calendar's Events then stay as each side has them until a merge.
+_Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)
 
 **Server Object**:
 What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
@@ -232,7 +260,7 @@ _Avoid_: Uploader, pusher, outbox
 
 **Sent Event Rows**:
 The Event Rows of one Calendar and UID as the Sender read them to send them, each Event Version by its hash. A send that succeeds removes the UID's Unsent Changes only while its Event Rows still are the Sent Event Rows, so that a change made while it ran is sent next time.
-_Avoid_: Snapshot (a Snapshot is a backup file), sent version
+_Avoid_: Snapshot (a Snapshot is a state in the Calendar History), sent version
 
 **Sync Scheduler**:
 The code that decides when FreeCal syncs: Polls, syncs on window focus, on waking from sleep and after local edits, sync now, and the system's network status. It only decides; the syncs run one Account after another on one thread.

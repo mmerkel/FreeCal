@@ -1,0 +1,45 @@
+# The Calendar History: Event Versions that never change, Snapshots and two pointers per Calendar
+
+With ADR 0020 this supersedes ADR 0009. It comes from the grilling of 2026-11-15 (see ADR 0017); the code follows with later tickets, after a prototype.
+
+The Change Journal recorded each change beside the Event Rows: the previous Event Version and a hash of the new one, in tables of their own, with Unsent Changes, the Mirror and the Conflict tables each holding a further view of the same Events. We replace all of them with one structure, built like a version control system's history. A Calendar's Events at one moment are a Snapshot; Snapshots point to the ones they arose from; and each Calendar has two pointers, the User's Pointer and the Server's Pointer. What FreeCal shows, what it has to send, what the server last had, what a Conflict is about and what undo goes back to are all read from that one structure, so they can't disagree.
+
+**Event Versions.** One table holds every Event Version: the fields FreeCal manages and the Unimplemented Fields (ADR 0017) of one single Event, Recurring Event or Exception, with its Calendar, UID and recurrence ID as obtained (ADR 0012). A row never changes once written. An edit writes a new row; content that the user and the server agree on is stored once. Two Current-Version Marks say which rows are current: the user's, and the server's. For each of the two the Local Store allows one row per Calendar, UID and recurrence ID, by a unique index. The `event` table goes: `event` is a view over the rows with the user's Current-Version Mark, with a partial index over Calendar and start time, so reading the Occurrences of a window costs what it did. Two Event Versions are equal when their canonical forms are; the hash of an Event Version goes, and with it the hash format and its re-hashing migrations.
+
+**Snapshots.** A Snapshot is made by an action of the user, an import, the restore of a Backup, an Incoming Sync, a send whose result differs from what was sent, or a merge (ADR 0019), and records which. In a Calendar it has one parent, or two when it is a merge: the user's side and the server's. A link table says, for each step from a parent to a Snapshot, which Event Versions begin and which end with it; a merge has one such difference per parent. An end is a link and not a column of the Event Version, as one version can end on the user's side and live on on the server's. A step that changes several Calendars together (a move, an import into several Calendars) is one Snapshot spanning them, with a parent in each.
+
+**The pointers.** The User's Pointer is the Snapshot holding a Calendar's Events as the user has them; the Server's Pointer the one holding them as the server last had them. The Current-Version Marks are derived from them and written in the same Database Transaction. A Calendar's First Sync makes its first Snapshot. A Local Calendar starts with an empty Snapshot and has no Server's Pointer. A read-only feed's User's Pointer always follows its Server's Pointer.
+
+**Keeping and dropping.** Snapshots older than 90 days are dropped, except the last common ancestor of any Snapshot younger than 90 days that only one side has reached. Snapshots that no pointer can reach any more go when a redo path ends (ADR 0020). An Event Version goes when no kept Snapshot refers to it and it has no Current-Version Mark.
+
+**Who may write.** The Write Permissions (ADR 0015) go. The Change Journal's made sure that no Event Row changed without its Journal Event Modification, its Unsent Change and the check for a Conflict; here a change is a new Event Version and a pointer moved, with no second table to forget. What remains is kept by the Local Store and by the shape of the interface:
+
+- An Event Version never changes: a trigger refuses updates to every column but the two Current-Version Marks.
+- One current Event Version per Calendar, UID and recurrence ID on each side: the unique indexes. Snapshots, links and pointers refer to rows that exist: foreign keys.
+- The Current-Version Marks agree with the pointers: one function moves a pointer and rewrites the marks, and nothing else writes either. A check run by the tests compares them.
+- ADR 0019's invariant on the Server's Pointer: the interface has no operation that moves the Server's Pointer alone, only one that records what the server now holds, and follows or merges inside.
+- A stored ETag belongs to the Event Versions with the server's Current-Version Mark: one Database Transaction writes both. Every write runs in a Database Transaction, by its type, as before.
+
+The functions that write Event Versions, Snapshots, links, pointers and marks are visible only to the Calendar History's module, and those of the CalDAV table and the Ignored Resources only to the Sync Engine's. Rust's visibility replaces the permission value.
+
+**An Event's History** is a view of that Event's versions through the Calendar History, without an undo of its own.
+
+## Considered Options
+
+- **The Change Journal** (ADR 0009): proven and in use, but the Event Rows, the previous versions, the Unsent Changes, the Mirror's text and the Conflict's copies are five stores that every write must keep in step, and each new field has to be added to each.
+- **A history table beside the `event` table**, as first proposed: reads of current Events stay trivial, but the current row and its copy in the history are two stores kept in step by an invariant, and content the server and the user agree on is stored twice or three times.
+- **"Since" and "until" Snapshots as columns of the Event Version**: one row per version without a link table, but the history is a graph, and a version can end at different Snapshots on its two sides.
+- **Two straight lines per Calendar, with pointers that only move forwards** and undo writing new Snapshots: every undo would have to build its reverse, where moving a pointer is one write. Undos are rare, so walking the graph is affordable.
+- **One Snapshot per Calendar for a move**, linked: two things to keep together where one Snapshot spanning both says it.
+- **Keeping a Write Permission for the Calendar History's tables**: a value passed into every write shows a reviewer each call, where visibility lets any function inside the owning module call a low-level write, such as setting a mark, without moving a pointer. Rejected because no invariant is left that the value would guard and the schema or the interface doesn't; the owning module has to stay small enough for such a call to be obvious.
+- **Recording the First Sync as undoable**: undoing it would delete the Calendar on the server (ADR 0009, unchanged).
+
+## Consequences
+
+- An Event's row ID changes with every edit. The window and every caller identify an Event by its Combined Event Key (Calendar, UID, recurrence ID), never by row ID.
+- A query that bypasses the `event` view sees old versions. Only the Calendar History's own code reads the table directly.
+- The Current-Version Marks are derived state. Only the code that moves a pointer writes them, in the same Database Transaction, and a check compares them with the pointers.
+- Dropping old Snapshots must spare every row that has a Current-Version Mark or that a kept Snapshot refers to.
+- "Since when has this Event looked like this" is a walk through the link table, not a column.
+- The journal modules, the Conflict storage, the Unsent Changes, the Mirror and their tests are replaced; the spec's Change Journal section and ticket 19's list are rewritten. In `GLOSSARY.md`, Event Version now means a row of this table; the entries for the Change Journal, Journal Transaction, Journal Event Modification, Event Row, Mirror and those built on them are revised as the code changes.
+- Write Permissions, Guards and Unguarded Writes go from the code, `CODING_STANDARDS.md` and `GLOSSARY.md` as the code changes (see "Who may write").

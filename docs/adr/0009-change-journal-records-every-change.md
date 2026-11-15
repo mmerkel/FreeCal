@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0018 and ADR-0020
+---
+
 # The Change Journal records every change to an Event, and undo goes per Event
 
 The Change Journal records every change to the local copy of an Event, whatever its source: the user's edits, moves and deletes in any Calendar (Local Calendars too), imports, Conflict resolutions, Snapshot restores, undos, and the changes an incremental sync pulls from a server. Each Journal Event Modification holds the Event's previous Event Version and a hash of its new one. A change can then be undone exactly when the Event still matches that hash. If it doesn't, the Journal says which later changes came between, and those are undone first. There is no gap to guess about, so undo never has to match Events by ID and hope, as ticket 58's first version did. The same Journal Event Modifications give Conflicts the common Event Version both sides started from.
