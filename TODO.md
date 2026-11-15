@@ -1,10 +1,11 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
+- [ ] work on new branch
+  - [ ] prototype
+  - [ ] change specs accordingly
+  - [ ] change tickets accordingly
 - [ ] simplify work for tickets 72, 70, 19, and related.
-- [ ] discuss:
-  - [ ] additional fields stored in 
-  - [ ] new way to organize change journal?
 - [ ] ticket 20 parts
 - [ ] simplify
 - [ ] code base architecture
