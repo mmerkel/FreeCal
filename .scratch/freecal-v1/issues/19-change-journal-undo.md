@@ -10,12 +10,12 @@
 
 - [ ] The Change Journal list: one timeline, newest first, of every Journal Transaction (the user's changes, imports including those into Local Calendars, syncs as "Changed on the server: 3 Events in Work", Conflict resolutions, Snapshot restores, undos)
 - [ ] A Journal Transaction expands into its Events, each with Undo; the Journal Transaction has "Undo all" for the Events still not undone
-- [ ] Undo one Journal Event Modification: the previous Event Version is written back under the same identity (original ID, all details), later changes to the same Events with it
+- [x] Undo one Journal Event Modification: the previous Event Version is written back under the same identity (original ID, all details), later changes to the same Events with it
 - [ ] Undo everything for a Calendar since a given time
-- [ ] A History button in the Event's details lists the Event's Journal Event Modifications, each with Undo
+- [x] A History button in the Event's details lists the Event's Journal Event Modifications, each with Undo
 - [ ] Dangerous Undos ask first as in ticket 70; the confirmation is the Mass-Change Guard's approval, so the next sync doesn't pause the Calendar
-- [ ] Undo sends "Occurrences changed"
-- [ ] What Ctrl+Z undoes and Ctrl+Shift+Z redoes comes from the core, worked out from the Change Journal (the Undo History: the user's own Journal Transactions, not undone, newest first, across restarts; redo: the undos made since the user's last change), instead of the list the frontend keeps (`SessionUndo`, `src/lib/sessionUndo.ts`), so that an undo from the timeline or an Event's History counts at once
+- [x] Undo sends "Occurrences changed"
+- [x] What Ctrl+Z undoes and Ctrl+Shift+Z redoes comes from the core, worked out from the Change Journal (the Undo History: the user's own Journal Transactions, not undone, newest first, across restarts; redo: the undos made since the user's last change), instead of the list the frontend keeps (`SessionUndo`, `src/lib/sessionUndo.ts`), so that an undo from the timeline or an Event's History counts at once
 
 ## Comments
 - 2026-10-18: Change Journal decisions from grilling tickets 58 and 59 (ADR 0009). The 90-day removal moved to ticket 69.
@@ -59,3 +59,14 @@
   - Found in the real window, open: undoing a Calendar since a given time also undoes the undos made since then, so it can bring back an Event deleted by an undo and skip one whose undo it can't follow ("its current version isn't in the Change Journal"), instead of putting the Calendar back as it was at that time (US-83). The core's rule (`pick` for `UndoTarget::CalendarSince`, `core/src/journal/undo.rs`) needs changing.
   - New terms: `Undoing` (new term): an undo to run, with its Undo Target, how the toast names it and whether it runs under "Working…". `ChangeJournalDialog` and `JournalEventList` are named after existing terms.
   - Tests: `src/App.journal.test.ts`, and the Undo History block in `src/lib/windowDialogs.test.ts`.
+- 2026-11-15: `/code-review` from `af4414d` to `e97624e`. Fixed: the Change Journal's list and row styles live once in `src/app.css` (`.journal-list`, `.journal-row`, `.journal-row-text`); `UndoDialog.svelte` no longer says Session Undo; a SQLite error reading a title in the list is raised as one reading a Calendar is; the stored-row structs sit below the `use` lines; tests record an edit as `TransactionOrigin::EDITED`. Kept: `journal.event.*` and `journal.action.*` have the same English words but different meanings, which a translation may tell apart. Open, each needing a decision:
+  - Ctrl+Z can undo a sync again: undo an Incoming Sync from the list, redo it with Ctrl+Shift+Z, and Ctrl+Z picks that redo ("Ctrl+Z never undoes a sync").
+  - A Transaction Origin FreeCal didn't write reads as a user action (`TransactionOrigin::recorded`), so a tampered row joins the Undo History.
+  - After undoing one Event of an import from the list and redoing it, the Undo History Step names the whole import, though Ctrl+Z undoes that one Event.
+  - In the list, only an import's or an Incoming Sync's Events have their own Undo (ADR 0009); the History has Undo on every row. The second box is reworded or the two made to agree.
+  - A sync's headline doesn't name its Calendar ("in Work"); the Calendar is on the line below.
+  - Nothing sends a Signal when the list or the Undo History changes, such as after an Incoming Sync; an open list is read again only after its own undo.
+  - "Undo since…" reads the typed time in the system time zone, not the Display Time Zone (US-127).
+  - Undoing a Calendar since a time (see above).
+  - Boxes left open: the list (Conflict resolutions and Snapshot restores wait on their tickets), Events each with Undo (above), undo since (above), Dangerous Undos (ticket 22 owns the Mass-Change Guard's approval).
+  - New terms from the review, for the user to approve or rename: User Action, Listed Journal Transaction, Listed Journal Event Modification, Journal Event Modification Kind, Undo History Step, User Change, Redo, Undo Chain, Undo Changed Nothing, Stored Journal Transaction, Stored Modification Outline, Calendar Since, Brought Along, Undoing (with UndoResult and UndoHooks), made calendar and made title.

@@ -29,11 +29,11 @@
     calendars.find((calendar) => calendar.id === id)?.name ?? t('journal.calendarGone');
 </script>
 
-<ul class="modifications" aria-label={label}>
+<ul class="journal-list" aria-label={label}>
   {#each modifications as modification, index (index)}
     {@const undoing = undoEach ? modificationUndoing(modification) : null}
-    <li class="modification">
-      <div class="text">
+    <li class="journal-row">
+      <div class="journal-row-text">
         <span>
           {t(`journal.event.${modification.kind}`, {
             title: modification.title || t('event.untitled'),
@@ -58,27 +58,3 @@
     </li>
   {/each}
 </ul>
-
-<style>
-  .modifications {
-    display: grid;
-    gap: var(--space-4);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .modification {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-6);
-  }
-
-  .text {
-    display: grid;
-    gap: var(--space-1);
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-</style>

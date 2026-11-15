@@ -408,3 +408,27 @@ input[type='radio'] {
   border: none;
   border-top: 1px solid var(--border);
 }
+
+/* The Change Journal's lists (see ChangeJournalDialog.svelte and
+   JournalEventList.svelte): rows of words beside their buttons. */
+.journal-list {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.journal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.journal-row-text {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

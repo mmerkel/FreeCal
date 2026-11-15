@@ -135,6 +135,14 @@ impl UserAction {
     }
 }
 
+#[cfg(test)]
+impl TransactionOrigin {
+    /// An edit by the user, the Transaction Origin most tests record.
+    pub(crate) const EDITED: Self = TransactionOrigin::UserAction {
+        action: UserAction::Edited,
+    };
+}
+
 impl TransactionOrigin {
     /// How a stored Journal Transaction records it, with the kind of a user
     /// action; none for a Transaction Origin that isn't recorded.
@@ -827,9 +835,7 @@ mod tests {
     #[test]
     fn event_rows_find_their_server_object_by_their_uid_whatever_changed_them() {
         for origin in [
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             TransactionOrigin::Import,
             TransactionOrigin::IncomingSync,
         ] {
@@ -859,9 +865,7 @@ mod tests {
 
         record(
             &pulled.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             0,
             |journal_transaction| journal_transaction.replace(pulled.id, &moved),
         )
@@ -881,9 +885,7 @@ mod tests {
 
         let (joined, other) = record(
             &pulled.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             0,
             |journal_transaction| {
                 Ok((
@@ -1022,16 +1024,9 @@ mod tests {
             made_at: i64,
             change: impl FnOnce(&mut JournalTransaction) -> Result<T>,
         ) -> T {
-            record(
-                &self.store,
-                TransactionOrigin::UserAction {
-                    action: crate::journal::UserAction::Edited,
-                },
-                made_at,
-                change,
-            )
-            .unwrap()
-            .value
+            record(&self.store, TransactionOrigin::EDITED, made_at, change)
+                .unwrap()
+                .value
         }
 
         fn unsent(&self) -> Vec<UnsentChangeRow> {
@@ -1121,9 +1116,7 @@ mod tests {
 
         let journal_transaction = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             7,
             |journal_transaction| journal_transaction.delete(on_server.id),
         )
@@ -1215,9 +1208,7 @@ mod tests {
 
         let second = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             7,
             |journal_transaction| journal_transaction.create("dentist", &on_server.event),
         );
@@ -1226,9 +1217,7 @@ mod tests {
         });
         let moved_in = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             9,
             |journal_transaction| journal_transaction.replace(other, &on_server.event),
         );
@@ -1262,9 +1251,7 @@ mod tests {
         let on_server = OnServer::new();
         let deleted = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             7,
             |journal_transaction| journal_transaction.delete(on_server.id),
         )
@@ -1299,9 +1286,7 @@ mod tests {
         moved.calendar_id = on_server.local;
         let move_out = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             7,
             |journal_transaction| journal_transaction.replace(on_server.id, &moved),
         )
@@ -1334,9 +1319,7 @@ mod tests {
         let on_server = OnServer::new();
         let both = record(
             &on_server.store,
-            TransactionOrigin::UserAction {
-                action: crate::journal::UserAction::Edited,
-            },
+            TransactionOrigin::EDITED,
             7,
             |journal_transaction| {
                 journal_transaction.delete(on_server.id)?;

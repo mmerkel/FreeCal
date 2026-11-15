@@ -34,6 +34,13 @@ use super::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId, TransactionOrigin};
+use crate::read_only::ReadOnly;
+use crate::remote::SyncPoint;
+use crate::sync_status::SyncRecord;
+use crate::{
+    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
+    Result, ServerLogin, Settings, SidebarState, View,
+};
 
 /// A Journal Transaction as [`Store::journal_transactions`] reads
 /// it: its fields, and the Calendar and title before and after each of its
@@ -56,13 +63,6 @@ pub(crate) struct StoredModificationOutline {
     pub previous: Option<(CalendarId, Option<String>)>,
     pub made: Option<(CalendarId, Option<String>)>,
 }
-use crate::read_only::ReadOnly;
-use crate::remote::SyncPoint;
-use crate::sync_status::SyncRecord;
-use crate::{
-    Account, AccountId, Appearance, Calendar, CalendarId, Colour, CoreError, EventId, Provider,
-    Result, ServerLogin, Settings, SidebarState, View,
-};
 
 /// The integer in column `index` of `row`, untrusted: none for a value of
 /// another type, as one that can't be read.
@@ -735,8 +735,8 @@ impl Store {
                 });
             }
             let version = |calendar, title| -> rusqlite::Result<_> {
-                Ok(integer(row, calendar)?
-                    .map(|calendar| (CalendarId(calendar), text(row, title).ok().flatten())))
+                let title = text(row, title)?;
+                Ok(integer(row, calendar)?.map(|calendar| (CalendarId(calendar), title)))
             };
             let previous = version(5, 6)?;
             let made = version(7, 8)?;

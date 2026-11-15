@@ -183,14 +183,14 @@
     {:else if listed.length === 0 && !readFailure}
       <p>{t('journal.empty')}</p>
     {:else}
-      <ul class="transactions" aria-label={t('journal.list')}>
+      <ul class="journal-list transactions" aria-label={t('journal.list')}>
         {#each listed as transaction (transaction.id)}
           {@const title = headline(transaction)}
           {@const events = expanded.get(transaction.id)}
           {@const undone = undoneText(transaction)}
           <li class="transaction" aria-label={title}>
-            <div class="summary">
-              <div class="text">
+            <div class="journal-row">
+              <div class="journal-row-text">
                 <span>{title}</span>
                 <span class="note">
                   {journalTimeText(transaction.madeAt)}
@@ -261,11 +261,7 @@
   }
 
   .transactions {
-    display: grid;
     gap: var(--space-6);
-    margin: 0;
-    padding: 0;
-    list-style: none;
   }
 
   .transaction {
@@ -273,20 +269,6 @@
     gap: var(--space-4);
     padding-bottom: var(--space-6);
     border-bottom: 1px solid var(--border);
-  }
-
-  .summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-6);
-  }
-
-  .text {
-    display: grid;
-    gap: var(--space-1);
-    min-width: 0;
-    overflow-wrap: anywhere;
   }
 
   .events {

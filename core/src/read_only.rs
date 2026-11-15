@@ -80,9 +80,7 @@ mod tests {
     const ID: CalendarId = CalendarId(7);
 
     const EDITS: [TransactionOrigin; 3] = [
-        TransactionOrigin::UserAction {
-            action: crate::journal::UserAction::Edited,
-        },
+        TransactionOrigin::EDITED,
         TransactionOrigin::Import,
         TransactionOrigin::Undo,
     ];
@@ -153,9 +151,7 @@ mod tests {
         for (marked, server_read_only) in READ_ONLY {
             let refused = ReadOnly::calendar(marked, server_read_only).may_edit_event(
                 ID,
-                TransactionOrigin::UserAction {
-                    action: crate::journal::UserAction::Edited,
-                },
+                TransactionOrigin::EDITED,
                 no_guests_read,
             );
             assert!(matches!(refused, Err(CoreError::CalendarReadOnly(ID))));

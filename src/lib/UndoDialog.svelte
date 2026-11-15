@@ -1,5 +1,5 @@
 <!--
-  Asks before a Dangerous Undo or redo of Session Undo, naming why it is
+  Asks before a Dangerous Undo or redo from the Undo History, naming why it is
   dangerous (spec: "Change Journal"): the later changes it also undoes, with
   the titles of their Events, how many of its Events were changed on the
   server, and how many Events it changes when that is more than the
