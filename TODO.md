@@ -1,17 +1,9 @@
 Human adds items here. Remove when a ticket was created or otherwise the work is finished.
 
 # Global
-- [ ] tickets 72, 70, 19
-- [ ] simplify
+- [ ] simplify work for tickets 72, 70, 19, and related.
 - [ ] discuss:
-  - [ ] additional fields
-    - [ ] difference lats modified, dtstamp?
-    - [ ] overview over all caldav fields, including X-..., into file
-      - [ ] meaning
-      - [ ] implemented and to what degree (edit/read)
-      - [ ] importance, sorted by
-    - [ ] ALARM - also edits in ticket 12
-    - [ ] stored in events table?, then caldav table can remove it, right?
+  - [ ] additional fields stored in 
   - [ ] new way to organize change journal?
 - [ ] ticket 20 parts
 - [ ] simplify
