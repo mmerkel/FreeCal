@@ -119,7 +119,7 @@ What Ctrl+Z and Ctrl+Shift+Z step through, read from the Change Journal: the use
 _Avoid_: Session Undo, undo stack, History (on its own: an Event's History)
 
 **Mass-Change Guard**:
-The safeguard that pauses a Calendar's sync and asks the user before one sync deletes or changes an unusually large number of its Events.
+The safeguard that pauses a Calendar and asks the user before one Outgoing Sync deletes or changes an unusually large number of its Events on the server.
 _Avoid_: Circuit breaker, sync limit
 
 **Backup**:
@@ -139,8 +139,12 @@ _Avoid_: History (on its own: an Event's History), undo history (the Undo Histor
 Terms for the code and the ADRs, never shown to the user. Each needs the user's agreement before it is used (see `CLAUDE.md`).
 
 **Status Mark**:
-The coloured badge showing the overall status (`src-tauri/icons/src/mark-<status>.svg`), the same in the window's status indicator and on the tray icon's calendar.
+The coloured badge showing a status (`src-tauri/icons/src/mark-<status>.svg`): the overall one in the window's status indicator and on the tray icon's calendar, and an Account's or a Calendar's own on its line in the sidebar.
 _Avoid_: Badge, overlay, status icon
+
+**Unsent Mark**:
+The hourglass on an Event, and on its Calendar's line in the sidebar, while the user's version of the Event differs from the server's.
+_Avoid_: Pending icon, dashed outline, unsent count
 
 **Event Row**:
 One stored Event in the `event` table: a single Event, a Recurring Event or one Exception. A Recurring Event with Exceptions is several Event Rows.
@@ -164,7 +168,7 @@ _Avoid_: Remote pointer, synced pointer
 
 **Current-Version Mark**:
 One of two marks on an Event Version, the user's and the server's, saying that it is the current version of its Event on that side: in the Snapshot the User's Pointer or the Server's Pointer names. An Event Version that both sides agree on has both.
-_Avoid_: Mark (on its own: a Status Mark is a badge), current flag, head
+_Avoid_: Mark (on its own: a Status Mark is a badge, an Unsent Mark an hourglass), current flag, head
 
 **Store Check**:
 The function that asks a Local Store whether its stored invariants hold, each as a named query, and reports every violation. The tests run it; it is where those invariants are recorded.
