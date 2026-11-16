@@ -1,8 +1,22 @@
-# 18: Offline editing and replay
+# 18: Offline editing, and quitting with unsent changes
 
-**What to build:** The user can create, edit, move and delete Events in server Calendars while offline. Queued changes are sent automatically when the connection returns. The user can see which changes haven't reached the server yet, and is warned when quitting with changes not yet sent. Spec: US-131 and "Quitting" under Frontend.
+**What to build:** The user can create, edit, move and delete Events in server Calendars while offline, and the unsent changes are sent when the connection returns. That part is built. What is left is the end of the quit flow: the user is warned when quitting with unsent changes, with the reason for each Calendar. Spec: US-131 and "Quitting" under Frontend.
 
-**Blocked by:** 13, 16, 33, 91, 92, 124, 127, 128
+- **What "unsent" is now:** a Calendar has unsent changes while its user's side differs from what the server holds, read from the Current-Version Marks (ticket 153). Nothing is queued, and "Sync status changed" says whether a Calendar has unsent changes, not how many (ticket 161). The ticked boxes below were built on `unsent_change` and are history; tickets 153 and 161 change what they read and show.
+- **Sending before quit** (`Core::send_before_quit`) runs an Outgoing Sync of each Calendar that has unsent changes and waits for those, or 5 seconds on the core's clock. It keeps this form on ticket 153's Outgoing Sync.
+- **Quit in the tray menu** goes through the window's quit flow (`WindowDialogs::quit`, `src/lib/windowDialogs.svelte.ts`), as closing the window does through the "quit asked" event. Ticket 139 still lists "tray Quit in the background quits at once" for review; this box follows the spec unless that review decides otherwise.
+- **The dialog's reasons** are read from derived state, one per Calendar that still has unsent changes, the first that applies:
+  - its Account is Offline, or has a Sync Error;
+  - the Calendar is paused by the Mass-Change Guard (ticket 22's kind of Sync Error): needs attention;
+  - the Calendar has a Conflict, so it isn't Tracking and sends nothing (its number of Conflicts in the Sync Status, ticket 133): needs attention;
+  - the Calendar has another Sync Error;
+  - otherwise "not sent yet", or "still sending" while its sync runs.
+  The dialog says the changes will be sent at the next start, or, for a paused Calendar and one with a Conflict, that they need the user's attention. "Waiting for approval" is no reason any more: a paused Calendar is one.
+- **The numbers:** the dialog and "Sending 2 changes…" name Calendars, or Events where the core can count them from the marks; a count of Unsent Changes no longer exists.
+
+Spec: US-131; "Quitting"; "Sync engine" (the Mass-Change Guard). ADR 0019.
+
+**Blocked by:** 22, 133, 153
 
 **Status:** ready-for-agent
 
@@ -14,9 +28,9 @@
 - [x] The sidebar shows the unsent count per Account and Calendar when not zero
 - [x] An Occurrence with unsent changes gets a dashed outline once the change has waited more than a few seconds, or immediately when its Account is Offline (component test)
 - [x] Event details show "Not yet synced: <reason>"
-- [ ] Quitting with unsent changes (Quit in the main menu, Quit in the tray menu, or closing the window when that quits FreeCal) first tries to send them for a few seconds under the "Working…" dialog ("Sending 2 changes…"), then quits if that worked
-- [ ] If changes are still unsent, a modal dialog says how many, lists the Calendars with the reason for each (Offline, Conflict, waiting for approval, error) and says they'll be sent at the next start, or that they need attention for a Conflict or a paused Calendar. "Cancel" has initial focus; "Quit anyway" quits
-- [x] Logout and system shutdown never wait for this and never show the dialog; the queue stays in the Local Store
+- [ ] Quitting with unsent changes (Quit in the main menu, Quit in the tray menu, or closing the window when that quits FreeCal) first tries to send them for a few seconds under the "Working…" dialog, then quits if that worked
+- [ ] If changes are still unsent, a modal dialog lists the Calendars with the reason for each (Offline, Sync Error, paused, Conflict, not sent yet) and says they'll be sent at the next start, or that they need attention for a Conflict or a paused Calendar. "Cancel" has initial focus; "Quit anyway" quits
+- [x] Logout and system shutdown never wait for this and never show the dialog; what is unsent stays in the Local Store
 - [x] Core tests for the send-before-quit attempt with a controllable clock; component tests against the fake core for the dialog, Cancel and Quit anyway
 
 ## Comments
@@ -44,3 +58,4 @@
     - **Quit Asked** (new term): the shell asking the window to quit as Quit does, when closing it with Unsent Changes waiting (`QUIT_ASKED_EVENT`, `onQuitAsked`).
     - Code names: `KeptUnsentChange` (an Unsent Change as read from the Local Store, untrusted), `UnsentChangeRow` (renamed test-only row), `UnsentAtQuit`, `QuitDialog`, `heldBackBy`, `notYetSyncedText`, `outlineDue`, `offlineAccounts`, `unsent_since`/`unsentSince`.
 - 2026-11-09 (review with the user): Batch, Session End, Quit Asked and Send Failure approved as code names, not added to `GLOSSARY.md`.
+- 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. Only the two quit-flow boxes remain, and the dialog's reasons are read from derived state. Blocked by 153 and 22 as agreed in the triage. Added while rewording: blocked by 133 as well, since the Conflict reason reads the number of Conflicts that 133 puts into the Sync Status. The comments above are history where they name `unsent_change`, Send Failures stored on it, the Sender's replay and the dashed outline.

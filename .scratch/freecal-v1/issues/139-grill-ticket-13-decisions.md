@@ -18,7 +18,7 @@ The decisions, with the strongest con of each (details in ticket 13's comments):
   - [ ] Start at login: inside Flatpak only the Background portal is asked; outside Flatpak FreeCal writes its own autostart file and never asks the portal (changed after the review: there the portal named the entry after the terminal's app ID). Con: outside Flatpak the desktop never asks the user.
   - [ ] No `org.freedesktop.host.portal.Registry.Register` call. Since the review this matters only if the host build should use the portal again; outside Flatpak FreeCal now always writes its own file. Con: should a later portal version stop the host from writing `~/.config/autostart` itself, FreeCal has no app ID to offer it.
   - [ ] At login, FreeCal opens its window as at any launch, not straight into the tray. Con: the window pops up at every login.
-  - [ ] Tray Quit in the background quits at once without trying to send the Unsent Changes. Con: spec "Quitting" says tray Quit tries first.
+  - [ ] Tray Quit in the background quits at once without trying to send the unsent changes. Con: spec "Quitting" says tray Quit tries first.
   - [ ] The tray menu's labels are English text in the shell. Con: no translations until the shell has an i18n.
   - [ ] A close goes to the background only with a tray host and FreeCal's own icon; unreadable settings quit; the tray check waits 1 s at most. Con: a hung desktop delays the close by up to that second.
   - [ ] FreeCal ends only through `exit`; an exit request without a code is refused. Con: after a webview crash FreeCal keeps running with only the tray to quit it.
@@ -34,3 +34,4 @@ The decisions, with the strongest con of each (details in ticket 13's comments):
   - [ ] Judgement calls from the standards review, each fixable later: the Background section repeats layout `src/app.css` has and hard-codes WebKitGTK's 13px checkbox width for the hint; `StartupFailed` and `StartupFailure` are near-identical names for different things; the quit-asked emit and the `StartupFailed` checks are repeated in `src-tauri/src/main.rs`; `closing(…)` takes bare booleans. Con of fixing now: churn in code that works, for readability alone.
 
 ## Comments
+- 2026-11-16: Reworded from the triage against ADRs 0017 to 0020: "unsent changes", as the user sees them, is the one term; Unsent Changes as stored rows go with ticket 153. The outcome of the tray Quit decision also settles ticket 18's open box on it.

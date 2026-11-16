@@ -6,8 +6,9 @@ Questions for the grilling, among others:
 
 - Which features, in which order: showing attendees, RSVP, editing Events with guests, inviting, and whether all of them come before v1.
 - How changes reach the attendees: through the server's scheduling (CalDAV RFC 6638, Google's `sendUpdates`), or never by email from FreeCal. What a server without scheduling support, such as Radicale, means for this.
-- The user's role per Event: organiser or attendee, and what each may change. What `SEQUENCE`, `PARTSTAT` and the other iTIP rules ask of FreeCal's writes (ticket 122 builds the CalDAV resource text).
-- Whether the user is asked before a change notifies other people, and how this fits the Mass-Change Guard and the Change Journal (an undo that would notify attendees).
+- The user's role per Event: organiser or attendee, and what each may change. What `SEQUENCE`, `PARTSTAT` and the other iTIP rules ask of FreeCal's writes (ticket 144's writer builds the CalDAV resource).
+- Where attendees live: today they are among an Event's Unimplemented Fields (ADR 0017), written back unchanged. Which of their parts become managed fields with columns, which get neutral names (ticket 163), and what the migration moves.
+- Whether the user is asked before a change notifies other people, and how this fits the Mass-Change Guard and the Calendar History: Ctrl+Z, "Go back to before this" and a Backup restore each send what differs like any other change (ADR 0020), so each can notify attendees. Whether a change in attendees alone can be a Conflict, or the server's wins as for Unimplemented Fields.
 - Own Addresses (`core/src/guests.rs`): whether they are read only when an Account is added, as now, or kept up to date, and how the user corrects them.
 - Untrusted content: attendee names and addresses shown in the window, and the hostile test Event.
 
@@ -24,3 +25,4 @@ Spec: US-151, US-31, US-46, US-47; "Attendees"; "Untrusted content".
 
 ## Comments
 - 2026-11-16: To decide here: who raises `SEQUENCE`. Until then FreeCal keeps a server's `SEQUENCE` among the Unimplemented Fields and writes it back unchanged (ADR 0017, ticket 144), which is only right while FreeCal changes no Event with guests.
+- 2026-11-16: Reworded from the triage against ADRs 0017 to 0020: the questions name the Calendar History and the Unimplemented Fields.

@@ -2,13 +2,13 @@
 
 **What to build:** An Exception from a file whose `RECURRENCE-ID` has `RANGE=THISANDFUTURE` changes its Occurrence and every later one (RFC 5545, 3.2.13 and 3.8.4.4). Today it changes only its own Occurrence, so every later one shows the old title, place or time.
 
-**Blocked by:** 08, 84
+**Blocked by:** 08, 84, 149
 
 **Status:** ready-for-agent
 
 **Effort:** L
 
-- [ ] Import keeps the range on the Exception, stored as its own column; the Change Journal's hash covers it (a new format, re-hashed by the migration as ticket 07 did). FreeCal keeps the Exception as it came instead of splitting the Recurring Event, so export (ticket 09) and CalDAV (tickets 54, 17) can write back what the file or server holds, under the same UID
+- [ ] The range is a managed field of the Exception's Event Version, in its own column. Until this ticket `RANGE=THISANDFUTURE` sits among the Unimplemented Fields as a parameter FreeCal doesn't know on the recurrence ID (ticket 143), written back untouched but read as no range. It must not stay there: it changes what the Exception means, and an entry of that kind is dropped when its field is edited (ADR 0017). A migration, in Rust, moves it from the tree to the column in every Event Version; the reader and the writer (tickets 143 and 144) then read and write the column. FreeCal keeps the Exception as it came instead of splitting the Recurring Event, so export (ticket 09) and the CalDAV Sender (ticket 150) write back what the file or server holds, under the same UID
 - [ ] Each Occurrence from the Exception's on takes the Exception's fields (title, place, description); its start and end move by the same amount the Exception moved its own, in wall time in the Event Time Zone (ADR 0007)
 - [ ] With several such Exceptions, each later Occurrence follows the latest one before it; an Exception without a range still changes only its own Occurrence, and wins over a range
 - [ ] Cancelled Occurrences (`exdates`) stay cancelled after a range; an Occurrence a range moves keeps its recurrence ID, so it can still be deleted and changed one by one
@@ -17,7 +17,7 @@
 - [ ] The details of an Occurrence a range changed show its changed fields. Ticket 08's scopes work on it: "this event" changes it alone, "this and following" splits the Recurring Event there (ranges after the split go with the new Recurring Event, which gets their changes as its own fields and times), and "all" changes the Recurring Event and keeps its ranges where possible, as ticket 08 keeps Exceptions
 - [ ] Core tests for every point above, including a range that moves Occurrences across a DST change
 
-Out of scope: writing the range on export (ticket 09); the user's own "this and following" (ticket 08, which splits the Recurring Event).
+Out of scope: the user's own "this and following" (ticket 08, which splits the Recurring Event).
 
 ## Comments
 
@@ -27,3 +27,4 @@ Out of scope: writing the range on export (ticket 09); the user's own "this and 
 - 2026-10-18 (from ticket 08): The scopes are in `core/src/scope.rs`. A change is measured from the Occurrence's place as the rule gives it (`Opened::slot`, from `recurrence::occurrence_at`); with ranges, that place is where the range put it, so `occurrence_at` and `carry_exceptions` are where ranges come in.
 - 2026-10-24: Blocked by 84 after an architecture review: the rule and scope changes go into the core's Event module (tickets 83 and 84) rather than the six places that rebuild a Recurring Event today.
 - 2026-11-15 (grilling on Unimplemented Fields, ADR 0017, on the branch `explore/unknown-fields-and-change-journal`): parameters FreeCal doesn't know on a managed property are kept as Unimplemented Fields and dropped when that field is edited. `RANGE` must not go that way, as it changes what the Exception means, so this ticket stays the place where it becomes a managed field. If the exploration is merged, "stored as its own column; the Change Journal's hash covers it" becomes a field of the Event Version, with no hash.
+- 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. The comment of 2026-11-15 is now the body: the range is a field of the Event Version, with no hash, and this ticket moves it out of the Unimplemented Fields. Blocked by 149 as well. Effort stays L: it was sized before the M cap (2026-11-16) and wasn't on the triage's list of splits. A split into "the range as a managed field, read and written" and "Occurrences and scopes follow a range" would bring both parts to M; for the user to decide.
