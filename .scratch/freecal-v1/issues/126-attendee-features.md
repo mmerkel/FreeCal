@@ -23,3 +23,4 @@ Spec: US-151, US-31, US-46, US-47; "Attendees"; "Untrusted content".
 - [ ] Split into implementation tickets with Effort and Blocked by lines
 
 ## Comments
+- 2026-11-16: To decide here: who raises `SEQUENCE`. Until then FreeCal keeps a server's `SEQUENCE` among the Unimplemented Fields and writes it back unchanged (ADR 0017, ticket 144), which is only right while FreeCal changes no Event with guests.

@@ -1,0 +1,113 @@
+# Triage of the open tickets against ADRs 0017 to 0020 (working file, delete when Step 2 is done)
+
+Branch `explore/unknown-fields-and-change-journal`. Design: `docs/adr/0017` to `0020`, `GLOSSARY.md`, `spec.md` (commit e9b8cc8). `TODO.md` stays out of commits. Commit only when the user says so. Stay below 130k tokens: grep first, short ranges.
+
+State on 2026-11-16: Step 1 (triage) presented. **Agreed:** 19 is closed as `wontfix` with a comment naming its successors; ticket 71's created Calendars take the import as their first Snapshot (see "Open"). **Also agreed (2026-11-16, later):** the whole table; no ticket above M, so the L and XL tickets are split as listed below, each part a ticket of its own; the cap goes into `docs/agents/issue-tracker.md`, and `.claude/skills/implement/SKILL.md` gets three lines (the Explore map and the commit before the first layer go into a ticket comment; past about 100k of context, commit at the next green point, write what is left into the ticket comment and stop; `/code-review` runs in a fresh session from the recorded commit); 138 stays a ticket of its own, rewritten as S (not `wontfix`, not folded into 134); for ticket 71, Ctrl+Z on the import takes it back in the Calendars that existed and leaves the created ones, and FreeCal says so, with a line each in ADRs 0018 and 0020, the spec's Calendar History and `GLOSSARY.md`. Everything under "Open" and every "proposed" below is therefore decided.
+
+**Batch 1 done (2026-11-16, not committed):** tickets 142 to 154 written in `issues/`. **All numbers in this file are the new ones** (see "Numbering"). Next: batch 2.
+
+## Order in which the old model comes out
+
+Every step leaves the tests green. No migration code: no real Local Store exists.
+
+0. 142, 143, 144: nothing comes out. Row IDs leave the core interface and the window; the Unimplemented Fields tree, CalDAV reader and writer are pure code.
+1. 145 to 148 (the journal goes in 147): the `event` table (becomes a view), `journal_transaction`, `journal_event_modification`, the hash, undo per Event (`core/src/journal/undo.rs`, `list.rs`), Dangerous Undo, the core's Undo History. Glue until step 3: `unsent_change` is written on every move of the User's Pointer; an Incoming Sync moves the User's Pointer directly.
+2. 149, 150: the Mirror's text, the patching writer and the Sender's comparison of texts (150).
+3. 151 to 154: Propagate (152), `unsent_change` and Sent Event Rows (153). The glue goes in 153. A Conflict is held from 152 on (Server's Pointer off the Reference Snapshot), so every Conflict ticket waits on 152.
+4. 155, 156: the stored unfinished First Sync (tickets 80, 111), `SyncStatus::Syncing { first_sync }`.
+5. 157: Write Permissions, Guards, Unguarded Writes (code, `CODING_STANDARDS.md`, `GLOSSARY.md`).
+
+## Numbering
+
+Written (batch 1), in build order:
+
+| # | Title | Effort | Blocked by | Status |
+|---|---|---|---|---|
+| 142 | An Event is identified by its Combined Event Key in the core interface and the window | M | none | ready-for-agent |
+| 143 | Unimplemented Fields: the tree, its canonical form and the CalDAV reader | M | none | ready-for-agent |
+| 144 | The CalDAV writer builds a resource from managed fields and Unimplemented Fields | M | 143 | ready-for-agent |
+| 145 | Event Versions are rows that never change; `event` becomes a view | M | 142 | ready-for-agent |
+| 146 | Snapshots, the User's Pointer and the Store Check | M | 145 | ready-for-agent |
+| 147 | Undo and redo move the User's Pointer; the Change Journal goes | M | 146 | ready-for-agent |
+| 148 | Undo for one Calendar, and Snapshots dropped after 90 days | M | 147 | ready-for-agent |
+| 149 | Event Versions carry Unimplemented Fields | M | 143, 147 | ready-for-agent |
+| 150 | The Sender builds every resource from Event Versions; the Mirror's text goes | M | 144, 149 | ready-for-agent |
+| 151 | The Server's Pointer: an Incoming Sync records the server's state | M | 148, 150 | ready-for-agent |
+| 152 | The Reference Snapshot and the comparison of the two sides; Propagate goes | M | 151 | ready-for-agent |
+| 153 | An Outgoing Sync sends what differs between the marks; `unsent_change` goes | M | 152 | ready-for-agent |
+| 154 | One sync activity per Calendar; read-back; the server's form | M | 153 | ready-for-agent |
+
+To write (batch 2). "Was" is the number in the triage as first presented:
+
+| # | Was | Title | Effort | Blocked by |
+|---|---|---|---|---|
+| 155 | 147 | A Calendar enters the Local Store with its first Snapshot: First Sync in memory, "First Sync progress" | M | 154 |
+| 156 | 148 | The dialog that adds server Calendars and shows their First Sync | M | 155 |
+| 157 | 149 | Write Permissions and Guards go; module visibility replaces them | S | 154, 155 |
+| 158 | 150 | Ctrl+Z and redo in the window: question before a sync, at a merge, at a redo fork; toasts' wording | M | 151 at least (core's choices at a merge), check 152 to 154 when writing |
+| 159 | 151 | A Calendar's History in the sidebar menu, with "Go back to before this" | M | 148 |
+| 160 | 152 | An Event's History in its details | S | 149 |
+| 161 | 153 | Status Marks in the sidebar, the Unsent Mark, progress of a long sync | M | 153 |
+| 162 | 154 | The Conflict bar, and the dialog when a Calendar stops Tracking | M | 133, 137 |
+
+Still to split when its batch comes: 25 (re-sized XL) → Google's reader with Unimplemented Fields and neutral names; the Account and its Calendars. 134 stays M with 138 a ticket of its own (S).
+
+### What batch 1 changed against the split as listed, and what later batches must pick up
+
+- The end of the redo path is in 147, not 148 (a change after an undo would otherwise fork the user's side).
+- The Sender's comparison of texts goes in 150 with the text, not in 153.
+- The server's form of a write is put in place in 154 (with the read-back), not 153.
+- Undo and redo at a merge are in the core from 151; the window's questions are 158. Until 158 the window goes back through the user's side.
+- 147 already removes: the Undo button on toasts, the Change Journal dialog and menu entry, the History button in an Event's details. 158, 159 and 160 bring back what the spec asks for.
+- 150 removes the showing of the server's original text (ticket 81's).
+- 152 holds Conflicts but shows nothing until 133. Running the comparison after each move of the User's Pointer is left to 138.
+- 153 keeps the reason a send failed in a table of its own (not in an ADR; listed in the ticket as chosen there).
+- 148: Ctrl+Z on a Snapshot spanning Calendars that one Calendar has left, or whose first Snapshot it is, undoes it in the others (covers ticket 71's agreed rule).
+- 143: "the first Exception" for calendar-level entries is the one with the earliest Occurrence.
+
+### Decided after batch 1 (2026-11-16), in ADR 0017 and the tickets
+
+- `SEQUENCE` is an entry, written back unchanged until ticket 126 (comment added there).
+- A new Exception takes the Recurring Event's tree.
+- Prefixes name the format: everything from iCalendar text is `ical:`; `caldav:` is reserved, assigned to nothing. Each Provider names the prefixes it holds (Local and ICS feed `ical:`; CalDAV `ical:`, `caldav:`; Google `google:`); a move or an import keeps the neutral entries and those the target holds. Tickets 24, 25, 26, 09 and 71 take this wording in their rewords.
+- 144 and 149 are `ready-for-agent`.
+
+## Open tickets
+
+| # | Verdict | What changes |
+|---|---|---|
+| 09 | reword | Export writes Unimplemented Fields through 144's writer. Add blockers 144, 149. |
+| 11 | reword | A restore is one Snapshot; a Calendar with a Conflict can be restored and is compared again. Add blocker 147. |
+| 12 | reword | Alarms arrive as Unimplemented Fields; managing them moves them to a column (ADR 0017). Add blocker 149. |
+| 15 | reword | Open box (overall status Conflict) reads Tracking. Signal: has unsent changes, Conflict count, progress; first-sync marker goes with 155. Blocked by 153. |
+| 18 | reword | Only the two quit-flow boxes remain; reasons from derived state. Blockers 153, 22. |
+| 19 | drop (`wontfix`, agreed) | Superseded by ADR 0020; successors 147, 148, 158, 159, 160. |
+| 21 | rewrite | Comparison per Occurrence for Recurring Events and the merge of changes to different Occurrences, inside 152's comparison. Blocked by 152, 134, 135. |
+| 22 | rewrite | Checks every Outgoing Sync on the difference between the marks; imports and restores the server hasn't reached aren't counted; "Send"; pause ends under the thresholds. Blocked by 153. Check `core/src/mass_change_guard.rs` first. |
+| 23 | reword | "Problems changed" → "Conflicts changed"; comment of 2026-10-25 outdated. Blocked by 16, 133. |
+| 24 | reword | One Snapshot spanning both Calendars; neutral entries and the target Provider's carried. Blocked by 149, 153. |
+| 25 | reword | First Sync through 155, 156; an Incoming Sync is a Snapshot; Google's reader fills Unimplemented Fields and assigns neutral names. Add blockers 154, 155. |
+| 26 | reword | Google's Server Object table holds where and ETag only; a write's answer is the server's form; Mirror comments outdated; uses 154's function for the server's form. Blocked by 25, 154, 09. |
+| 61 | keep | needs-triage; its "Mirror" is FullCalendar's. |
+| 68 | reword | "dashed outline" → Unsent Mark. |
+| 71 | reword | One Snapshot spanning its Calendars; a Calendar the import creates takes it as its first Snapshot (agreed, see "Open"). |
+| 73, 74, 75 | reword | Hash clause goes; until built the fields sit in the Unimplemented Fields; the ticket moves them to columns. 75: comment of 2026-11-15 becomes the body. Add blocker 149. |
+| 126, 140, 141 | reword | Questions name the Calendar History and Unimplemented Fields. 140: status is a candidate neutral name. |
+| 129 | split | ADR box done (0017 to 0020); the three cases are in 149 and 150 (done in batch 1; 129 itself still to close). |
+| 133 | rewrite | Finding and holding is 152. Left: the core reports Conflicts (which Events, three versions read from the pointers and the Reference Snapshot, count in the Sync Status, "Conflicts changed", overall status). No `conflict` tables. S. Blocked by 152. |
+| 134 | rewrite | Ending a Conflict by the user's choices: one merge Snapshot through the comparison's second step, undoable. Stale-choice and Server read-only rules stay. Blocked by 133. |
+| 135 | reword | Compared against the Reference Snapshot; the "no Last Agreed Version" case goes. |
+| 136 | reword | The badge is the chip's only mark. Blocked by 133. |
+| 137 | rewrite | Conflict list for all Calendars or one, opened from the bar (162) and the Status Mark; no Undo toast, no "can't be undone" note. Blocked by 134, 135, 136. |
+| 138 | rewrite as S (agreed) | The comparison runs after every move of the User's Pointer while the Server's Pointer is off the Reference Snapshot. |
+| 139 | reword | One term: unsent changes, as the user sees them. |
+| 27, 28, 30, 38, 43, 44, 45, 49, 50, 51, 52, 63, 64, 67, 89 | keep | 63 runs after 157. |
+
+## Open
+
+- Ticket 71, agreed in principle: a Calendar an import creates enters the Local Store with the import's Snapshot as its first, as a First Sync's does. ADRs 0018 ("an empty one for a Local Calendar") and 0020 ("Undo can't go before a Calendar's first Snapshot"), the spec's Calendar History and `GLOSSARY.md` need a line for it. To confirm: Ctrl+Z on that import takes it back in the Calendars that existed and leaves the created ones as they are, and FreeCal says so.
+- Whether tickets may be above M at all (see the proposed split), and the matching lines in `docs/agents/issue-tracker.md` and `.claude/skills/implement/SKILL.md`.
+
+## Step 2 batches
+
+1. Done: 142 to 154. 2. 155 to 162; also the M cap in `docs/agents/issue-tracker.md`, the three lines in `.claude/skills/implement/SKILL.md`, and ticket 71's line in ADRs 0018 and 0020, the spec and `GLOSSARY.md`. 3. Conflict tickets 133 to 138, 21, 22, 19, 129. 4. The rewords. Then `tickets-pdf`.
