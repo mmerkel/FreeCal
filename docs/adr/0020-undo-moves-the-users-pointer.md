@@ -9,9 +9,9 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 - **At a merge**, undo asks which side to go back through, the user's or the server's. **Redo** moves the pointer forward again, and asks which way where two Snapshots arose from the one it is at.
 - **The redo path ends whenever the User's Pointer leaves its line**: by a change the user makes, by an Incoming Sync that moves the User's Pointer, and at a fork by redo, for the way not taken. The Snapshots that are then neither an ancestor of a pointer nor beyond the User's Pointer are dropped. That is one rule, which the Store Check asks as one query (ADR 0018).
 - Undo can't go before a Calendar's first Snapshot (its First Sync, or the empty one of a Local Calendar).
-- An undo is not itself recorded. After the send that follows it, the Server's Pointer moves back with the User's.
+- An undo is not itself recorded. After the Outgoing Sync that follows it, the Server's Pointer moves back with the User's.
 - While a Calendar isn't Tracking its server, undo moves the User's Pointer and sends nothing.
-- The Dangerous Undo's thresholds go; the confirmation before undoing a sync stays, and the Mass-Change Guard checks the send that follows (ADR 0019).
+- The Dangerous Undo's thresholds go; the confirmation before undoing a sync stays, and the Mass-Change Guard checks the Outgoing Sync that follows (ADR 0019).
 
 ## Considered Options
 
@@ -23,7 +23,7 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 
 ## Consequences
 
-- There is no selective undo. Undoing an old change in a Calendar takes back everything since in that Calendar, changes from the server included, and the following send overwrites the server with it.
+- There is no selective undo. Undoing an old change in a Calendar takes back everything since in that Calendar, changes from the server included, and the following Outgoing Sync overwrites the server with it.
 - What Ctrl+Z reaches depends on when the last poll ran, as syncs are steps in the stack.
 - An unrelated edit after an accidental undo loses the redo, and so does an Incoming Sync that brings a change before the redo.
 - Choosing the server's way at a redo fork drops the user's own undone Snapshots for good.

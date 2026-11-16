@@ -426,8 +426,9 @@
             for (const v of s.versions) v[side] = ids.has(v.id);
           }
         }
-        // Tracking is not stored: a Calendar is Tracking exactly while it has no Reference Snapshot.
-        const tracking = (s) => s.cal.base === null;
+        // Tracking is not stored: a Calendar is Tracking exactly while the Server's Pointer is on its
+        // Reference Snapshot (s.cal.base), the server's Snapshot the user's side last took in.
+        const tracking = (s) => s.cal.base === s.cal.serverPtr;
         const marked = (s, side) =>
           Object.fromEntries(s.versions.filter((v) => v[side]).map((v) => [v.uid, v.id]));
 
@@ -500,8 +501,8 @@
           }
           return { content, conflicts };
         }
-        // Conflicts are derived, never stored. The base is the Snapshot the Server's
-        // Pointer was at when the Conflict arose (s.cal.base, the Reference Snapshot). FINDING: the "last
+        // Conflicts are derived, never stored. The base is the server's Snapshot the
+        // user's side last took in (s.cal.base, the Reference Snapshot). FINDING: the "last
         // common Snapshot" by ancestry is the wrong base after an undo.
         function conflicts(s, baseRule = 'stored') {
           if (tracking(s)) return [];
@@ -634,8 +635,7 @@
                 'Their content equals what FreeCal already had, so no Snapshot: only the ETags were stored.',
               );
           } else {
-            // Step 1: record where the server was (unless a Conflict is open already) and move the Server's Pointer.
-            if (tracking(s)) s.cal.base = s.cal.serverPtr;
+            // Step 1: move the Server's Pointer. The Reference Snapshot stays where the user's side last took the server in.
             movePointer(
               s,
               'server',
@@ -655,7 +655,7 @@
 
         // The one place where the two sides are compared and joined: used by the
         // Incoming Sync, when the user ends a Conflict, and after every move of the
-        // User's Pointer while a Reference Snapshot is set.
+        // User's Pointer while the Server's Pointer is off the Reference Snapshot.
         function compareSides(s, choices, quiet = false) {
           const m = mergeContents(
             s,
@@ -697,7 +697,7 @@
               `Merge Snapshot ${id} has both sides as parents; the User's Pointer moved to it. What the user's side has beyond the server's is to send.`,
             );
           }
-          s.cal.base = null;
+          s.cal.base = s.cal.serverPtr; // the user's side has taken the server's state in
           prune(s);
           return true;
         }
@@ -879,6 +879,8 @@
               `Not everything could be sent. Snapshot ${id} holds what the server now has; an Incoming Sync has to fetch the rest.`,
             );
           }
+          // What FreeCal itself sent is nothing new to the user's side: the Reference Snapshot follows.
+          s.cal.base = s.cal.serverPtr;
           s.pending = null;
           refreshMarks(s);
           prune(s);
@@ -1009,22 +1011,21 @@
           );
           check(
             'reference-snapshot',
-            "A Calendar's Reference Snapshot, if it has one, is a Snapshot the Server's Pointer descends from.",
+            "A Calendar's Reference Snapshot is the Server's Pointer's Snapshot or one it descends from.",
             '0019',
             () =>
-              s.cal.base === null ||
-              (snap(s, s.cal.base) && ancestors(s, s.cal.serverPtr).has(s.cal.base))
+              snap(s, s.cal.base) && ancestors(s, s.cal.serverPtr).has(s.cal.base)
                 ? []
                 : ['the Calendar'],
           );
           check(
             'reference-snapshot-means-conflict',
-            'A Calendar has a Reference Snapshot exactly while its two sides are in Conflict against it.',
+            "The Server's Pointer is off the Reference Snapshot exactly while the two sides are in Conflict against it.",
             '0019',
             () =>
-              s.cal.base === null || conflicts(s).length
+              tracking(s) || conflicts(s).length
                 ? []
-                : ['a Reference Snapshot is set but no Conflict is left'],
+                : ["the Server's Pointer is off the Reference Snapshot but no Conflict is left"],
           );
           return checks;
         }
@@ -1069,7 +1070,7 @@
             s.caldav.push({ uid, href: r.href, etag: r.etag });
           }
           const id = makeSnapshot(s, 'first sync', 'First Sync', [], c);
-          s.cal.userPtr = s.cal.serverPtr = id;
+          s.cal.userPtr = s.cal.serverPtr = s.cal.base = id;
           refreshMarks(s);
           s.log = ["First Sync: the Calendar's first Snapshot. Both pointers are on it."];
           return s;
@@ -1294,7 +1295,7 @@
               label: 'Incoming Sync',
               action: { type: 'incomingSync' },
               watch:
-                "The Calendar is no longer Tracking. The server's change is a Snapshot on the server's side only, and the Reference Snapshot is where the server was before.",
+                "The Calendar is no longer Tracking. The server's change is a Snapshot on the server's side only, and the Reference Snapshot stays where the server was before: the last state of the server your side took in.",
             },
             {
               label: 'Someone else moves Dentist to 15:00',
@@ -1328,7 +1329,7 @@
           title: '6. Undo, then the server changes the same Event',
           rewrites: false,
           intro:
-            "A FINDING, now built in. After an undo that isn't sent yet, the last Snapshot both pointers have in common is the user's own. Read by ancestry, a later change on the server would simply win, and the undo would be lost without a word. So FreeCal records a Reference Snapshot: where the server was when the Conflict arose.",
+            "A FINDING, now built in. After an undo that isn't sent yet, the last Snapshot both pointers have in common is the user's own. Read by ancestry, a later change on the server would simply win, and the undo would be lost without a word. So FreeCal stores a Reference Snapshot: the server's Snapshot the user's side last took in.",
           steps: [
             {
               label: 'Someone else moves Standup to 10:00',
@@ -1519,7 +1520,8 @@
           `<span class="tag fill">User's Pointer: ${c.userPtr}</span><span class="tag fill">Server's Pointer: ${c.serverPtr}</span>` +
           (c.tracking
             ? '<span class="tag">Tracking</span>'
-            : `<span class="tag warn">Not Tracking: a Conflict is open (Reference Snapshot: ${c.base})</span>`) +
+            : '<span class="tag warn">Not Tracking: a Conflict is open</span>') +
+          `<span class="tag">Reference Snapshot: ${c.base}</span>` +
           (s.pending
             ? `<span class="tag warn">A send of ${s.pending.snapshot} is running</span>`
             : '') +

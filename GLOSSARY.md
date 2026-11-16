@@ -171,12 +171,12 @@ The function that asks a Local Store whether its stored invariants hold, each as
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
 
 **Tracking**:
-The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict; with one, its Events stay as each side has them until a merge. The user can't turn it off, only end Conflicts.
+The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict, which is while its Server's Pointer is on its Reference Snapshot; with one, its Events stay as each side has them until a merge. The user can't turn it off, only end Conflicts.
 _Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)
 
 **Reference Snapshot**:
-The Snapshot a Calendar's Server's Pointer was on when a Conflict arose, recorded for as long as the Calendar isn't Tracking. Both sides are compared with it; the Last Agreed Version of an Event in Conflict is read from it.
-_Avoid_: Merge base, last common Snapshot (by ancestry it can be another one, after an undo)
+The server's Snapshot that a Calendar's user's side last took in. It is always set; the Server's Pointer is on it while the Calendar is Tracking and has moved on from it while there is a Conflict. Both sides are compared with it; the Last Agreed Version of an Event in Conflict is read from it.
+_Avoid_: Merge base, last common Snapshot (by ancestry it can be another one, after an undo), last sync (the pointers can stay apart while it moves)
 
 **Server Object**:
 What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
