@@ -127,7 +127,7 @@ A periodic full `.ics` copy of a Calendar, kept locally as a last resort.
 _Avoid_: Snapshot (a Snapshot is a state in the Calendar History), dump, export (an export is user-initiated)
 
 **Snapshot**:
-The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones.
+The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones. A Calendar's first Snapshot is the one it enters the Local Store with: its First Sync's, an empty one for a Local Calendar, or the import's for a Calendar that an import creates. Undo doesn't go before it.
 _Avoid_: Commit, version (on its own), backup (a Backup is a file)
 
 **Calendar History**:

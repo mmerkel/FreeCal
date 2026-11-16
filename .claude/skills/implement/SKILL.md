@@ -8,7 +8,9 @@ Implement the work described by the user in the spec or tickets.
 
 Read the ticket's comments first. When they leave a grilling open, hold it with /grilling before writing code. With the user away, decide each question yourself, name its strongest con, and list these decisions first in the ticket comment and the report, marked "decision, for review".
 
-Map the code through an Explore subagent: ask for `file:line` pointers to the seams and tests the work touches, not file contents. Then read only the lines you change.
+Map the code through an Explore subagent: ask for `file:line` pointers to the seams and tests the work touches, not file contents. Then read only the lines you change. Write the map, and the commit before the first layer, into a ticket comment.
+
+Past about 100k tokens of context, commit at the next point where the checks pass, write what is left into the ticket comment, and stop.
 
 When the work spans more than one layer (the core, the shell, the frontend), build one layer at a time. Once a layer's checks pass, commit it, report what's done and which layer is next, and stop so the user can `/compact` or start a fresh session. The review comes after the last layer, from the commit before the first.
 
@@ -18,7 +20,7 @@ Run typechecking regularly and single test files regularly. The commit's pre-com
 
 Use the vocabulary of `GLOSSARY.md`, including its "Internals" section, for names and comments. If a concept needs a term that isn't there, use one and mark it "(new term)" with a one-line definition in the ticket comment; don't add it to `GLOSSARY.md` yourself. The user approves or renames it after `/code-review` lists it.
 
-Once done, use /code-review to review the work.
+Once done, review the work with /code-review, in a fresh session, from the commit recorded in the ticket comment.
 
 Close the ticket: tick each box only after checking it is done. A box that is partly done, or waits on another ticket, stays open, with a comment naming what is left and which ticket finishes it. On the local tracker, set `**Status:** done` once every box is ticked, then run the `tickets-pdf` skill.
 

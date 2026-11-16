@@ -4,7 +4,9 @@ Branch `explore/unknown-fields-and-change-journal`. Design: `docs/adr/0017` to `
 
 State on 2026-11-16: Step 1 (triage) presented. **Agreed:** 19 is closed as `wontfix` with a comment naming its successors; ticket 71's created Calendars take the import as their first Snapshot (see "Open"). **Also agreed (2026-11-16, later):** the whole table; no ticket above M, so the L and XL tickets are split as listed below, each part a ticket of its own; the cap goes into `docs/agents/issue-tracker.md`, and `.claude/skills/implement/SKILL.md` gets three lines (the Explore map and the commit before the first layer go into a ticket comment; past about 100k of context, commit at the next green point, write what is left into the ticket comment and stop; `/code-review` runs in a fresh session from the recorded commit); 138 stays a ticket of its own, rewritten as S (not `wontfix`, not folded into 134); for ticket 71, Ctrl+Z on the import takes it back in the Calendars that existed and leaves the created ones, and FreeCal says so, with a line each in ADRs 0018 and 0020, the spec's Calendar History and `GLOSSARY.md`. Everything under "Open" and every "proposed" below is therefore decided.
 
-**Batch 1 done (2026-11-16, not committed):** tickets 142 to 154 written in `issues/`. **All numbers in this file are the new ones** (see "Numbering"). Next: batch 2.
+**Batch 1 done (2026-11-16, committed in bb1e088):** tickets 142 to 154 written in `issues/`. **All numbers in this file are the new ones** (see "Numbering").
+
+**Batch 2 done (2026-11-16, committed after bb1e088):** tickets 155 to 162 written; the M cap is in `docs/agents/issue-tracker.md`; `.claude/skills/implement/SKILL.md` has its three lines; ticket 71's rule is in ADRs 0018 and 0020, the spec's Calendar History and `GLOSSARY.md` (Snapshot). Next: batch 3.
 
 ## Order in which the old model comes out
 
@@ -37,14 +39,14 @@ Written (batch 1), in build order:
 | 153 | An Outgoing Sync sends what differs between the marks; `unsent_change` goes | M | 152 | ready-for-agent |
 | 154 | One sync activity per Calendar; read-back; the server's form | M | 153 | ready-for-agent |
 
-To write (batch 2). "Was" is the number in the triage as first presented:
+Written (batch 2), all `ready-for-agent`. "Was" is the number in the triage as first presented:
 
 | # | Was | Title | Effort | Blocked by |
 |---|---|---|---|---|
 | 155 | 147 | A Calendar enters the Local Store with its first Snapshot: First Sync in memory, "First Sync progress" | M | 154 |
-| 156 | 148 | The dialog that adds server Calendars and shows their First Sync | M | 155 |
+| 156 | 148 | The dialog that adds server Calendars and shows their First Sync (modal) | S | 155 |
 | 157 | 149 | Write Permissions and Guards go; module visibility replaces them | S | 154, 155 |
-| 158 | 150 | Ctrl+Z and redo in the window: question before a sync, at a merge, at a redo fork; toasts' wording | M | 151 at least (core's choices at a merge), check 152 to 154 when writing |
+| 158 | 150 | Ctrl+Z and redo in the window: question before a sync, at a merge, at a redo fork; toasts' wording | M | 151 (checked: 152 to 154 don't change an undo's choices) |
 | 159 | 151 | A Calendar's History in the sidebar menu, with "Go back to before this" | M | 148 |
 | 160 | 152 | An Event's History in its details | S | 149 |
 | 161 | 153 | Status Marks in the sidebar, the Unsent Mark, progress of a long sync | M | 153 |
@@ -71,6 +73,17 @@ Still to split when its batch comes: 25 (re-sized XL) → Google's reader with U
 - A new Exception takes the Recurring Event's tree.
 - Prefixes name the format: everything from iCalendar text is `ical:`; `caldav:` is reserved, assigned to nothing. Each Provider names the prefixes it holds (Local and ICS feed `ical:`; CalDAV `ical:`, `caldav:`; Google `google:`); a move or an import keeps the neutral entries and those the target holds. Tickets 24, 25, 26, 09 and 71 take this wording in their rewords.
 - 144 and 149 are `ready-for-agent`.
+
+### What batch 2 chose, and what later batches must pick up
+
+- 155: until 156 the window waits for the whole add as today. Ticket 111's rules for Calendars a sync didn't reach have no First Sync case left. Reword of 15: the first-sync marker is gone with 155. Reword of 25: Google's First Sync uses 155's operation and Signal.
+- 158: the core reports the number of Events per step and per way (new there). Read-only Calendars are left out of Ctrl+Z in 158 if 147 didn't. Wording of the merge question and "Nothing to undo" chosen in the ticket, for review.
+- 159: at a merge the list shows both sides' Snapshots by time; "before" a server's-side Snapshot is its parent on that side (chosen in the ticket, for review). Decided (2026-11-16): a "Go back" is taken back both by Ctrl+Shift+Z (noted in 158) and by "Go forward to this" on the Snapshots beyond the User's Pointer, listed in the dialog; the spec's Calendar History has the sentence.
+- Redo across Calendars (decided 2026-11-16, ADR 0020 "Which Calendar", spec, tickets 147, 158, 159): redo runs when exactly one Snapshot is next beyond all User's Pointers, otherwise asks; no order from times, IDs or undo numbers. Numbering the undos is in ADR 0020's "Left open".
+- 160: the history follows the user's side; a "deleted" line (chosen in the ticket, for review).
+- 161: the Conflict count in "Sync status changed" is added there and is 0 until 133 fills it; the Conflict mark's click waits for 137; "Send" on a paused Calendar's Sync Error mark waits for 22. So the rewrites of 133, 137 and 22 name these.
+- 162: blocked by 133 and 137 as batch 3 rewrites them. "Stopped Tracking" is seen by the window (count from 0 to more), nothing stored.
+- 156: decided (2026-11-16): the dialog is modal and locks the window (ADR 0018 and the spec changed); 156 is S; no read of the running First Syncs is needed.
 
 ## Open tickets
 
@@ -105,9 +118,9 @@ Still to split when its batch comes: 25 (re-sized XL) → Google's reader with U
 
 ## Open
 
-- Ticket 71, agreed in principle: a Calendar an import creates enters the Local Store with the import's Snapshot as its first, as a First Sync's does. ADRs 0018 ("an empty one for a Local Calendar") and 0020 ("Undo can't go before a Calendar's first Snapshot"), the spec's Calendar History and `GLOSSARY.md` need a line for it. To confirm: Ctrl+Z on that import takes it back in the Calendars that existed and leaves the created ones as they are, and FreeCal says so.
-- Whether tickets may be above M at all (see the proposed split), and the matching lines in `docs/agents/issue-tracker.md` and `.claude/skills/implement/SKILL.md`.
+- (Done in batch 2.) Ticket 71, agreed in principle: a Calendar an import creates enters the Local Store with the import's Snapshot as its first, as a First Sync's does. ADRs 0018 ("an empty one for a Local Calendar") and 0020 ("Undo can't go before a Calendar's first Snapshot"), the spec's Calendar History and `GLOSSARY.md` need a line for it. To confirm: Ctrl+Z on that import takes it back in the Calendars that existed and leaves the created ones as they are, and FreeCal says so.
+- (Done in batch 2.) Whether tickets may be above M at all (see the proposed split), and the matching lines in `docs/agents/issue-tracker.md` and `.claude/skills/implement/SKILL.md`.
 
 ## Step 2 batches
 
-1. Done: 142 to 154. 2. 155 to 162; also the M cap in `docs/agents/issue-tracker.md`, the three lines in `.claude/skills/implement/SKILL.md`, and ticket 71's line in ADRs 0018 and 0020, the spec and `GLOSSARY.md`. 3. Conflict tickets 133 to 138, 21, 22, 19, 129. 4. The rewords. Then `tickets-pdf`.
+1. Done: 142 to 154. 2. Done: 155 to 162; also the M cap in `docs/agents/issue-tracker.md`, the three lines in `.claude/skills/implement/SKILL.md`, and ticket 71's line in ADRs 0018 and 0020, the spec and `GLOSSARY.md`. 3. Conflict tickets 133 to 138, 21, 22, 19, 129. 4. The rewords. Then `tickets-pdf`.
