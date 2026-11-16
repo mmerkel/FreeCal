@@ -6,7 +6,9 @@ State on 2026-11-16: Step 1 (triage) presented. **Agreed:** 19 is closed as `won
 
 **Batch 1 done (2026-11-16, committed in bb1e088):** tickets 142 to 154 written in `issues/`. **All numbers in this file are the new ones** (see "Numbering").
 
-**Batch 2 done (2026-11-16, committed after bb1e088):** tickets 155 to 162 written; the M cap is in `docs/agents/issue-tracker.md`; `.claude/skills/implement/SKILL.md` has its three lines; ticket 71's rule is in ADRs 0018 and 0020, the spec's Calendar History and `GLOSSARY.md` (Snapshot). Next: batch 3.
+**Batch 2 done (2026-11-16, committed after bb1e088):** tickets 155 to 162 written; the M cap is in `docs/agents/issue-tracker.md`; `.claude/skills/implement/SKILL.md` has its three lines; ticket 71's rule is in ADRs 0018 and 0020, the spec's Calendar History and `GLOSSARY.md` (Snapshot).
+
+**Batch 3 done (2026-11-16, not committed yet):** tickets 133 to 138, 21 and 22 rewritten (133, 134 and 138 under new file names); 19 and 129 closed as `wontfix` with their successors. Its two open points are decided (see "What batch 3 chose"). Next: batch 4.
 
 ## Order in which the old model comes out
 
@@ -85,6 +87,17 @@ Still to split when its batch comes: 25 (re-sized XL) → Google's reader with U
 - 162: blocked by 133 and 137 as batch 3 rewrites them. "Stopped Tracking" is seen by the window (count from 0 to more), nothing stored.
 - 156: decided (2026-11-16): the dialog is modal and locks the window (ADR 0018 and the spec changed); 156 is S; no read of the running First Syncs is needed.
 
+### What batch 3 chose, and what later batches must pick up
+
+- **Decided (2026-11-16, agreed):** 134's call ends all of a Calendar's Conflicts at once, with a choice for each, as one merge Snapshot; 137 keeps the choices in the window until every Conflict of the Calendar has one, then "Apply". Reason: no table holds a Conflict and the Reference Snapshot is per Calendar, so "Your version" for one Conflict can't be kept while another is open; ADR 0019 ("the user's choices", "picks one side whole") and the prototype read the same way. Both are `ready-for-agent`, and the spec's core interface line says "end a Calendar's Conflicts together by keeping, for each, …".
+- The spec's Mass-Change Guard says "more than 10 Events or more than 5%"; the code (`core/src/mass_change_guard.rs`, ticket 72) has "and". Decided (2026-11-16): "and", so that small Calendars aren't bothered; the spec (US-85, Sync engine) changed, 22 keeps the code's rule.
+- 133 has the list (moved from 134), S, blocked by 152. A listed Conflict is one Calendar and UID; no "when raised". "Conflicts changed" is sent after every Database Transaction that moves a pointer or the Reference Snapshot of a Calendar that isn't Tracking before or after. 133 ticks ticket 15's overall-status box, so the reword of 15 finds it ticked or names 133. 133 adds 161's Conflict count field itself if 161 isn't built.
+- 135 and 136 are blocked by 133 only. 135: an empty Last Agreed Version (both sides created the UID) replaces "no Last Agreed Version".
+- 137 isn't blocked by 138 and doesn't open from the toolbar's status indicator. 138 drops the "Conflict resolved" toast and the result that fed it.
+- 21: M. An excluded date is a change to the Recurring Event; the choice takes the chosen side's whole UID.
+- 22: creations aren't counted; the share is of the server's side; "Send" is a core call, refused when not paused; the restore's origin is read once ticket 11 records it (so the reword of 11 names the origin). 18's reword: a paused Calendar is one of the quit flow's reasons.
+- 19 and 129 are `wontfix`. 129's Effort line is gone (split).
+
 ## Open tickets
 
 | # | Verdict | What changes |
@@ -123,4 +136,4 @@ Still to split when its batch comes: 25 (re-sized XL) → Google's reader with U
 
 ## Step 2 batches
 
-1. Done: 142 to 154. 2. Done: 155 to 162; also the M cap in `docs/agents/issue-tracker.md`, the three lines in `.claude/skills/implement/SKILL.md`, and ticket 71's line in ADRs 0018 and 0020, the spec and `GLOSSARY.md`. 3. Conflict tickets 133 to 138, 21, 22, 19, 129. 4. The rewords. Then `tickets-pdf`.
+1. Done: 142 to 154. 2. Done: 155 to 162; also the M cap in `docs/agents/issue-tracker.md`, the three lines in `.claude/skills/implement/SKILL.md`, and ticket 71's line in ADRs 0018 and 0020, the spec and `GLOSSARY.md`. 3. Done: Conflict tickets 133 to 138, 21, 22, 19, 129. 4. The rewords. Then `tickets-pdf`.

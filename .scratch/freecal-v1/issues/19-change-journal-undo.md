@@ -4,7 +4,7 @@
 
 **Blocked by:** 70, 72, 125
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 **Effort:** M
 
@@ -70,3 +70,4 @@
   - Undoing a Calendar since a time (see above).
   - Boxes left open: the list (Conflict resolutions and Backup restores wait on their tickets), Events each with Undo (above), undo since (above), Dangerous Undos (ticket 22 owns the Mass-Change Guard's approval).
   - New terms from the review, for the user to approve or rename: User Action, Listed Journal Transaction, Listed Journal Event Modification, Journal Event Modification Kind, Undo History Step, User Change, Redo, Undo Chain, Undo Changed Nothing, Stored Journal Transaction, Stored Modification Outline, Calendar Since, Brought Along, Undoing (with UndoResult and UndoHooks), made calendar and made title.
+- 2026-11-16: Closed as `wontfix` (triage against ADRs 0017 to 0020). ADR 0020 supersedes ADR 0009: undo moves the User's Pointer, and the Change Journal, undo per Event, the Dangerous Undo and the core's Undo History go with ticket 147. Successors: 147 (undo and redo move the User's Pointer), 148 (undo for one Calendar, Snapshots dropped after 90 days), 158 (Ctrl+Z and redo in the window), 159 (a Calendar's History, "Go back to before this"), 160 (an Event's History in its details). The Mass-Change Guard no longer lets an undo through (ticket 22).

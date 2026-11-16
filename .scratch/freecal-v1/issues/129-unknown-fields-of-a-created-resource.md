@@ -16,9 +16,7 @@ Spec: "Untrusted content"; "Moves across Accounts"; "Change Journal". ADRs 0010,
 
 **Blocked by:** 127
 
-**Status:** needs-triage
-
-**Effort:** L
+**Status:** wontfix
 
 - [ ] A decision on where unknown fields live without a Server Object, in an ADR
 - [ ] An Event moved to another CalDAV Calendar keeps what FreeCal doesn't show on the server
@@ -35,3 +33,4 @@ Spec: "Untrusted content"; "Moves across Accounts"; "Change Journal". ADRs 0010,
   3. **What undo means:** setting a Calendar back to what its server held at a given time, rather than reversing local changes. Would revise ADR 0009 and ticket 19's "undo everything in a Calendar since…".
   Ticket 19 goes ahead as specified first, so there's a working version; what this ticket decides may change it later. The Effort (L) is likely to grow once the grilling has scoped it.
 - 2026-11-15: Grilling held on the branch `explore/unknown-fields-and-change-journal`. The ADR this ticket asks for is ADR 0017 (Unimplemented Fields on the Event Version); the Change Journal's part became ADRs 0018 (Calendar History), 0019 (sync reads the two pointers) and 0020 (undo moves the User's Pointer), which supersede ADRs 0009, 0014 and 0015. Next is a prototype of the Event Version table, the merge and undo; this ticket is then split into implementation tickets. Status left as it is until the exploration is merged or dropped.
+- 2026-11-16: Split and closed as `wontfix`. The decision this ticket asks for is in ADRs 0017 to 0020 (the grilling's box). Its three cases are built by ticket 149 (the Unimplemented Fields on every Event Version: a move carries them, the new Recurring Event of "this and following events" takes the original's) and ticket 150 (the Sender builds every resource from Event Versions; the three cases tested against Radicale). Undoing a sent DELETE creates the Event again under a new href, not the original one (ADR 0019).
