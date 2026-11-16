@@ -2,15 +2,6 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] work on new branch
-  - [ ] further ideas:
-    - [ ] reference snapshot -> last synced snapshot
-      - [ ] always set, who needs to synchronize (user, server), or conflict follows directly from comparing the three poinetrs
-    - [ ] "single" rather than stack undo: can be done by reordering snapshots, 2 conditions: user pointer behind snapshot to be undone, and everything on path in between does not "interfere" with snapshot to be undone; then: (i) put snapshot to be undone at current user pointer, (ii) do a normal undo
-      - [ ] potential issue with multi-calendar snapshots - think through
-    - [ ] remove first sync special case:
-      - [ ] very first snapshot is empty
-      - [ ] allow for large syncs generally: as soon as more than at reasonable threshold: show dialog displaying the loading status (e.g. x/y z loaded - z= event resources in caldav and event occurrences in google)
-  - [ ] change specs accordingly
   - [ ] change tickets accordingly
 - [ ] simplify work for tickets 72, 70, 19, and related.
 - [ ] ticket 20 parts
