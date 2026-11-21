@@ -2,7 +2,10 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 
 # Global
 - [ ] work on new branch
-  - [ ] ask if better version now, if sees anything to improve
+  - [ ] grilling
+    - [ ] point 1 - undo
+    - [ ] point 2 - merge
+      - [ ] term join not needed any more, right?
 - [ ] ideas:
   - [ ] in v 2.0
     - [ ] shared calendars - something can be done in the app? Or it has to be done per web?
