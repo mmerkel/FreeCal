@@ -215,7 +215,9 @@
         <b>The question.</b> ADRs 0017 to 0020 replace the Change Journal, the Mirror, the Unsent
         Changes and the Conflict tables by one structure: Event Versions that never change,
         Snapshots, and a User's Pointer and a Server's Pointer per Calendar. Does that model hold
-        when pushed through sends, Incoming Syncs, Conflicts and undo? And the point ADR 0019 left
+        when pushed through sends, Incoming Syncs, Conflicts and undo? Undo is a Snapshot that takes
+        back an earlier one (grilling of 2026-11-21): Ctrl+Z reaches only your own changes, both
+        pointers only move forward, and nothing from the server waits. And the point ADR 0019 left
         open:
         <b
           >when the server stores FreeCal's own write in another form than was sent, how does the
@@ -297,6 +299,12 @@
           parent.
         </p>
         <div id="graph"></div>
+        <h3>The History list: your side's line, newest first</h3>
+        <p class="muted">
+          Any Snapshot here can be undone, a sync or a Join too, without a question: the toast says
+          what was undone. Ctrl+Z only reaches your own.
+        </p>
+        <div id="history"></div>
       </section>
 
       <section class="two" style="display: grid">
@@ -320,8 +328,11 @@
       // The "tables" are arrays; the Store Check at the end holds the invariants.
       const CalendarHistory = (() => {
         class Refused extends Error {}
-        const refuse = (m) => {
-          throw new Refused(m);
+        // offer: a button the toast shows with the refusal, e.g. "Undo both changes".
+        const refuse = (m, offer = null) => {
+          const e = new Refused(m);
+          e.offer = offer;
+          throw e;
         };
 
         // ---------- Event Versions ----------
@@ -432,10 +443,10 @@
         const marked = (s, side) =>
           Object.fromEntries(s.versions.filter((v) => v[side]).map((v) => [v.uid, v.id]));
 
-        // Keeping and dropping: a Snapshot stays while it is an ancestor of a
-        // pointer or lies on the redo path (beyond the User's Pointer).
+        // Keeping and dropping: a Snapshot stays while it is an ancestor of a pointer.
+        // There is no redo path: an Undo is a Snapshot, so the User's Pointer only moves forward.
         function prune(s) {
-          const roots = [s.cal.serverPtr, ...descendants(s, s.cal.userPtr)];
+          const roots = [s.cal.serverPtr, s.cal.userPtr];
           if (s.pending) roots.push(s.pending.snapshot);
           const kept = new Set();
           for (const r of roots) for (const a of ancestors(s, r)) kept.add(a);
@@ -682,20 +693,37 @@
               `The user's side had nothing of its own, so it follows: both pointers are on Snapshot ${s.cal.serverPtr}.`,
             );
           } else if (s.cal.serverPtr !== s.cal.base && s.cal.serverPtr !== s.cal.userPtr) {
-            const id = makeSnapshot(
-              s,
-              'merge',
-              byUser
-                ? 'Conflict ended by the user'
-                : "Merge of the user's and the server's changes",
-              [s.cal.userPtr, s.cal.serverPtr],
-              m.content,
-            );
-            movePointer(s, 'user', id);
-            say(
-              s,
-              `Merge Snapshot ${id} has both sides as parents; the User's Pointer moved to it. What the user's side has beyond the server's is to send.`,
-            );
+            if (byUser) {
+              const id = makeSnapshot(
+                s,
+                'merge',
+                'Conflict ended by the user',
+                [s.cal.userPtr, s.cal.serverPtr],
+                m.content,
+              );
+              // OPEN (found 2026-11-21): a merge also takes in the server's changes outside the
+              // Conflict. To take back only the user's choices, an Undo has to know which Events
+              // were in Conflict. The prototype keeps that list on the merge.
+              snap(s, id).conflictUids = Object.keys(choices);
+              movePointer(s, 'user', id);
+              say(
+                s,
+                `Merge Snapshot ${id} has both sides as parents; the User's Pointer moved to it. What the user's side has beyond the server's is to send.`,
+              );
+            } else if (canon(m.content) !== canon(contentOf(s, s.cal.userPtr))) {
+              const id = makeSnapshot(
+                s,
+                'join',
+                "Join: the server's changes taken in",
+                [s.cal.userPtr],
+                m.content,
+              );
+              movePointer(s, 'user', id);
+              say(
+                s,
+                `Join ${id}: the server's changes are taken in after your own unsent ones. Its only parent is your previous Snapshot; the server's Snapshot is not a parent. Ctrl+Z skips it.`,
+              );
+            }
           }
           s.cal.base = s.cal.serverPtr; // the user's side has taken the server's state in
           prune(s);
@@ -715,43 +743,117 @@
           say(s, 'The Calendar is Tracking again.');
         };
 
-        A.undo = (s, a) => {
-          if (s.pending) refuse('(Prototype only) undo waits while a send is running.');
-          const cur = snap(s, s.cal.userPtr);
-          if (!cur.parents.length) refuse("Undo can't go before the Calendar's first Snapshot.");
-          if (cur.parents.length === 2 && !a.side)
-            refuse('This Snapshot is a merge: undo asks which side to go back through.');
-          const target =
-            cur.parents.length === 2 && a.side === 'server' ? cur.parents[1] : cur.parents[0];
-          if (cur.kind !== 'user')
-            say(s, `(FreeCal asks first: Snapshot ${cur.id} came from the server.)`);
-          movePointer(s, 'user', target);
+        // ---------- Undo: a Snapshot that takes back an earlier one ----------
+        const seq = (id) => Number(id.slice(1)); // Snapshots in the order made
+        // The user's line: the User's Pointer's Snapshot and its first parents, newest first.
+        function userLine(s) {
+          const out = [];
+          for (let id = s.cal.userPtr; id; id = snap(s, id).parents[0]) out.push(id);
+          return out;
+        }
+        // A Snapshot is in effect unless an Undo in effect takes it back. A Redo is an Undo of an Undo.
+        const inEffect = (s, id) =>
+          !s.snapshots.some((u) => u.takesBack === id && inEffect(s, u.id));
+        const isRedo = (s, x) => x.kind === 'undo' && snap(s, x.takesBack)?.kind === 'undo';
+        // The Events a Snapshot changed on the user's side. For a merge, only those in Conflict:
+        // the rest of a merge is the server's changes, which Ctrl+Z doesn't take back.
+        function changedBy(s, x) {
+          if (!x.parents.length) return [];
+          const now = contentOf(s, x.id),
+            before = contentOf(s, x.parents[0]);
+          const uids = [...new Set([...Object.keys(now), ...Object.keys(before)])].filter(
+            (u) => now[u] !== before[u],
+          );
+          return x.conflictUids ? uids.filter((u) => x.conflictUids.includes(u)) : uids;
+        }
+        const own = (x) => x.kind === 'user' || x.kind === 'merge';
+        // Ctrl+Z: the newest of the user's own Snapshots in effect that changed something.
+        const ctrlZTarget = (s) =>
+          userLine(s)
+            .map((id) => snap(s, id))
+            .find((x) => own(x) && inEffect(s, x.id) && changedBy(s, x).length);
+        // Redo: the newest Undo in effect that isn't a Redo, while no change of the user's own came since.
+        function redoTarget(s) {
+          for (const id of userLine(s)) {
+            const x = snap(s, id);
+            if (own(x)) return null;
+            if (x.kind === 'undo' && !isRedo(s, x) && inEffect(s, id)) return x;
+          }
+          return null;
+        }
+        // Who changed an Event after Snapshot x: "on the server" or by a change of the user's.
+        function changedSince(s, x, uid) {
+          const line = userLine(s);
+          for (const id of line) {
+            if (id === x.id) break;
+            const y = snap(s, id);
+            const before = contentOf(s, y.parents[0]);
+            if (contentOf(s, id)[uid] !== before[uid])
+              return own(y) || y.kind === 'undo' ? `by "${y.note}"` : 'on the server';
+          }
+          return 'since';
+        }
+        // The one function for undo, redo and undo from the History.
+        function takeBack(s, x, { both = false, verb = 'undo' } = {}) {
+          if (s.pending) refuse(`(Prototype only) ${verb} waits while a send is running.`);
+          if (!userLine(s).includes(x.id)) refuse(`${x.id} isn't on your side's line.`);
+          if (!x.parents.length) refuse("A Calendar's first Snapshot can't be undone.");
+          if (!inEffect(s, x.id)) refuse(`${x.id} is already undone.`);
+          const atX = contentOf(s, x.id),
+            before = contentOf(s, x.parents[0]),
+            c = { ...contentOf(s, s.cal.userPtr) },
+            blocked = [];
+          for (const uid of changedBy(s, x)) {
+            const cur = fieldsOf(s, c[uid]),
+              was = fieldsOf(s, atX[uid]),
+              back = fieldsOf(s, before[uid]);
+            // The comparison of the two sides, with x as the base: x's change against what came since.
+            let r = merge3(was, cur, back);
+            if (!r.ok && both) r = { ok: true, result: back };
+            if (!r.ok) {
+              blocked.push(uid);
+              continue;
+            }
+            if (r.result) c[uid] = writeVersion(s, uid, r.result);
+            else delete c[uid];
+          }
+          const what = `"${verb === 'redo' ? snap(s, x.takesBack).note : x.note}"`;
+          if (blocked.length) {
+            const why = blocked.map((u) => `${u} was changed ${changedSince(s, x, u)}`).join('; ');
+            refuse(`Couldn't ${verb} ${what}: ${why}.`, {
+              label: verb === 'redo' ? "Redo over the server's change" : 'Undo both changes',
+              action: { type: verb === 'redo' ? 'redo' : 'undo', target: x.id, both: true },
+            });
+          }
+          if (canon(c) === canon(contentOf(s, s.cal.userPtr)))
+            refuse(`Nothing to ${verb}: ${what} no longer makes a difference.`);
+          const label = verb === 'redo' ? `Redo ${snap(s, x.takesBack).note}` : `Undo ${x.note}`;
+          const id = makeSnapshot(s, 'undo', label, [s.cal.userPtr], c);
+          Object.assign(snap(s, id), { takesBack: x.id, over: both });
+          movePointer(s, 'user', id);
+          prune(s);
           say(
             s,
-            `Undo moved the User's Pointer from ${cur.id} back to ${target}. Nothing else was written, and the undo itself isn't recorded.` +
+            `Toast: "${label}"` +
+              (own(x) || x.kind === 'undo' ? '' : ', a change on the server') +
+              (both ? ', and the later change to it' : '') +
+              `. Snapshot ${id} takes back ${x.id}; the User's Pointer moved forward to it.` +
               (tracking(s)
-                ? ' The difference to the server is now waiting to be sent.'
-                : " The Calendar isn't Tracking, so nothing will be sent."),
+                ? ' It is sent like any edit.'
+                : " The Calendar isn't Tracking (a Conflict is open), so it waits like any edit."),
           );
           compareAfterMove(s);
+        }
+        A.undo = (s, a) => {
+          const x = a.target
+            ? (snap(s, a.target) ?? refuse('No such Snapshot.'))
+            : (ctrlZTarget(s) ?? refuse('Nothing of yours to undo: Ctrl+Z skips syncs and Joins.'));
+          takeBack(s, x, { both: a.both });
         };
         A.redo = (s, a) => {
-          if (s.pending) refuse('(Prototype only) redo waits while a send is running.');
-          const next = children(s, s.cal.userPtr);
-          if (!next.length) refuse('Nothing to redo.');
-          if (next.length > 1 && !a.to)
-            refuse('Two Snapshots arose from this one: redo asks which way.');
-          const target = a.to ?? next[0].id;
-          movePointer(s, 'user', target);
-          prune(s); // at a fork, the way not taken is dropped (decided 2026-11-15)
-          say(
-            s,
-            `Redo moved the User's Pointer forward to ${target}.` +
-              (next.length > 1
-                ? " The other way is dropped: no pointer can reach it and it is not beyond the User's Pointer."
-                : ''),
-          );
-          compareAfterMove(s);
+          const u = a.target ? snap(s, a.target) : redoTarget(s);
+          if (!u) refuse('Nothing to redo.');
+          takeBack(s, u, { both: a.both, verb: 'redo' });
         };
 
         // A send. Its requests run outside any Database Transaction ...
@@ -990,14 +1092,30 @@
           );
           check(
             'every-snapshot-is-kept-for-a-reason',
-            "Every Snapshot is an ancestor of a pointer or of a Snapshot on the redo path beyond the User's Pointer.",
-            '0018, 0020',
+            'Every Snapshot is an ancestor of a pointer (or of the Snapshot being sent).',
+            '0018',
             () => {
-              const roots = [s.cal.serverPtr, ...descendants(s, s.cal.userPtr)];
+              const roots = [s.cal.serverPtr, s.cal.userPtr];
               if (s.pending) roots.push(s.pending.snapshot);
               const kept = new Set(roots.flatMap((r) => [...ancestors(s, r)]));
               return s.snapshots.filter((x) => !kept.has(x.id)).map((x) => x.id);
             },
+          );
+          check(
+            'an-undo-takes-back-an-earlier-snapshot-on-its-line',
+            "An Undo takes back a Snapshot on its own line on the user's side (its first parents), never a Calendar's first one.",
+            '0020',
+            () =>
+              s.snapshots
+                .filter((x) => x.kind === 'undo')
+                .filter((x) => {
+                  const t = snap(s, x.takesBack);
+                  if (!t || !t.parents.length) return true;
+                  for (let id = x.parents[0]; id; id = snap(s, id).parents[0])
+                    if (id === x.takesBack) return false;
+                  return true;
+                })
+                .map((x) => x.id),
           );
           check(
             'etags-belong-to-the-servers-marks',
@@ -1080,6 +1198,7 @@
           const s = structuredClone(state);
           s.log = [];
           s.refused = false;
+          s.offer = null;
           try {
             A[action.type](s, action);
             return s;
@@ -1088,6 +1207,7 @@
             const r = structuredClone(state);
             r.log = ['Refused: ' + e.message];
             r.refused = true;
+            r.offer = e.offer;
             return r;
           }
         }
@@ -1104,6 +1224,11 @@
           children,
           lastCommon,
           snap,
+          userLine,
+          inEffect,
+          changedBy,
+          ctrlZTarget,
+          redoTarget,
           ver,
         };
       })();
@@ -1117,7 +1242,7 @@
           title: '1. A plain round trip',
           rewrites: false,
           intro:
-            'An edit, a send, a change by someone else, and the undo of that change. Watch the two pointers: everything else is read from them.',
+            'An edit, a send, a change by someone else, then Ctrl+Z. Watch the two pointers: everything else is read from them.',
           steps: [
             {
               label: 'You rename Standup',
@@ -1140,26 +1265,25 @@
               watch: 'One Snapshot, both pointers on it.',
             },
             {
-              label: 'Ctrl+Z (undoes the sync)',
+              label: 'Ctrl+Z',
               action: { type: 'undo' },
               watch:
-                "Only the User's Pointer moved back. Dentist at 14:00 is now waiting to be sent.",
+                "Ctrl+Z skipped the sync and took back your rename, as a new Snapshot. Dentist stays at 15:00. The User's Pointer moved forward.",
             },
             {
               label: 'FreeCal sends',
               action: { type: 'send' },
-              watch:
-                "The server is overwritten with the earlier state; the Server's Pointer moved back too. The undone Snapshot stays as the redo path.",
+              watch: "The undo is sent like an edit; the Server's Pointer moved forward too.",
             },
             {
               label: 'Redo',
               action: { type: 'redo' },
-              watch: "The User's Pointer moved forward again.",
+              watch: 'Redo is one more Snapshot: it takes back the Undo.',
             },
             {
               label: 'FreeCal sends',
               action: { type: 'send' },
-              watch: 'Back where we were, with no new Snapshot.',
+              watch: 'Back where we were. Every step is in the history, and nothing was dropped.',
             },
           ],
         },
@@ -1195,13 +1319,13 @@
               label: 'Ctrl+Z',
               action: { type: 'undo' },
               watch:
-                'With "a new Snapshot": this only went back to your own form of the rename, the rename is still there.',
+                'With "a new Snapshot": refused, as the Snapshot holding the server\'s form changed Standup after your rename, and Ctrl+Z reads that as a change on the server. With the other two: the rename is taken back.',
             },
             {
               label: 'FreeCal sends',
               action: { type: 'send' },
               watch:
-                'With "a new Snapshot": the same text is sent again, the server reforms it again, and you are where you were before Ctrl+Z. With the other two: Standup has its old title on the server. With "replace everywhere", look at the First Sync Snapshot: it now holds the server\'s form of the old Standup, which the server did not have then.',
+                'Standup has its old title on the server, which adds its field again. With "replace everywhere", look at the First Sync Snapshot: it now holds the server\'s form of the old Standup, which the server did not have then.',
             },
             { label: 'Ctrl+Z', action: { type: 'undo' }, watch: '' },
             { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
@@ -1234,12 +1358,12 @@
               label: 'Ctrl+Z',
               action: { type: 'undo' },
               watch:
-                'Look at "To send". Amend: Standup is sent again in your old form, besides deleting the lunch. Replace everywhere: only the lunch is deleted.',
+                'Look at "To send": only the lunch is deleted, with "amend" too. An Undo takes back only what the undone Snapshot changed, so the difference between "amend" and "replace everywhere" that the pointer-moving undo showed here is gone.',
             },
             {
               label: 'FreeCal sends',
               action: { type: 'send' },
-              watch: 'Either way both pointers end on the same Snapshot.',
+              watch: 'Both pointers end on the same Snapshot.',
             },
           ],
         },
@@ -1317,10 +1441,10 @@
             },
             { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
             {
-              label: "Ctrl+Z, back through the server's side",
-              action: { type: 'undo', side: 'server' },
+              label: 'Ctrl+Z',
+              action: { type: 'undo' },
               watch:
-                'At a merge, undo asks which side. You now have what the server had before the merge.',
+                "You kept your own Standup, so the merge changed none of its Events in Conflict, and Ctrl+Z skips it. It takes back your rename. Dentist stays at 15:00: the merge took that in from the server, and Ctrl+Z doesn't take it back (OPEN: the merge has to know which Events were in Conflict).",
             },
           ],
         },
@@ -1329,14 +1453,14 @@
           title: '6. Undo, then the server changes the same Event',
           rewrites: false,
           intro:
-            "A FINDING, now built in. After an undo that isn't sent yet, the last Snapshot both pointers have in common is the user's own. Read by ancestry, a later change on the server would simply win, and the undo would be lost without a word. So FreeCal stores a Reference Snapshot: the server's Snapshot the user's side last took in.",
+            'An Undo is a change like any other: when the server changes the same Event before the Undo is sent, that is a Conflict, compared with the Reference Snapshot.',
           steps: [
             {
-              label: 'Someone else moves Standup to 10:00',
-              action: { type: 'otherEdit', uid: 'standup', patch: { time: '10:00' } },
+              label: 'You move Standup to 10:00',
+              action: { type: 'userEdit', uid: 'standup', patch: { time: '10:00' } },
               watch: '',
             },
-            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
             {
               label: 'Ctrl+Z (you want 09:00 back)',
               action: { type: 'undo' },
@@ -1350,8 +1474,7 @@
             {
               label: 'Incoming Sync',
               action: { type: 'incomingSync' },
-              watch:
-                'A Conflict: you want 09:00, the server has 11:00, and 10:00 was last agreed. See the note under "Conflicts": the last common Snapshot by ancestry would report none.',
+              watch: 'A Conflict: you want 09:00, the server has 11:00, and 10:00 was last agreed.',
             },
             {
               label: 'You keep your version',
@@ -1410,7 +1533,7 @@
             {
               label: 'Ctrl+Z at the First Sync',
               action: { type: 'undo' },
-              watch: 'Refused: undoing the First Sync would empty the server.',
+              watch: 'Refused: nothing of yours to undo. The First Sync is never undone.',
             },
             { label: 'Redo with nothing undone', action: { type: 'redo' }, watch: 'Refused.' },
             {
@@ -1436,6 +1559,130 @@
               watch:
                 "Both sides now agree. The two sides are compared after every move of the User's Pointer, so the Conflict is over at once and the Calendar is Tracking again.",
             },
+          ],
+        },
+        {
+          id: 'refused',
+          title: '9. Ctrl+Z after someone changed the same Event',
+          rewrites: false,
+          intro:
+            'Your change was sent, then a colleague changed the same Event. Ctrl+Z refuses, and offers to undo both changes.',
+          steps: [
+            {
+              label: 'You move Standup to 10:00',
+              action: { type: 'userEdit', uid: 'standup', patch: { time: '10:00' } },
+              watch: '',
+            },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            {
+              label: 'Someone else renames Standup',
+              action: { type: 'otherEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
+              watch: '',
+            },
+            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
+            {
+              label: 'Ctrl+Z',
+              action: { type: 'undo' },
+              watch:
+                'Refused: no merging per field, so the rename blocks taking back the move. The toast offers "Undo both changes".',
+            },
+            {
+              label: 'Undo both changes',
+              action: { type: 'undo', both: true },
+              watch:
+                "Standup is back to 09:00 with its old title: the colleague's rename is taken back too, and will be sent.",
+            },
+            {
+              label: 'Redo',
+              action: { type: 'redo' },
+              watch: "Redo brings back both: your move and the colleague's rename.",
+            },
+          ],
+        },
+        {
+          id: 'nowait',
+          title: '10. Undo, then the server changes another Event',
+          rewrites: false,
+          intro:
+            "Nothing waits for an undo: the server's change comes in at once, and redo still works.",
+          steps: [
+            {
+              label: 'You rename Standup',
+              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
+              watch: '',
+            },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            { label: 'Ctrl+Z', action: { type: 'undo' }, watch: 'The Undo is not sent yet.' },
+            {
+              label: 'Someone else moves Dentist to 15:00',
+              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
+              watch: '',
+            },
+            {
+              label: 'Incoming Sync',
+              action: { type: 'incomingSync' },
+              watch: 'A Join takes Dentist in at once. The Calendar stays Tracking.',
+            },
+            {
+              label: 'Redo',
+              action: { type: 'redo' },
+              watch: 'Redo skips the Join and takes back the Undo.',
+            },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+          ],
+        },
+        {
+          id: 'redo-refused',
+          title: '11. Undo, the server changes the same Event, then Redo',
+          rewrites: false,
+          intro:
+            'Redo is not guaranteed: a change on the server between undo and redo can refuse it. A change in the other part (here the alarm, an Unimplemented Field) does not.',
+          steps: [
+            {
+              label: 'You rename Standup',
+              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
+              watch: '',
+            },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            { label: 'Ctrl+Z', action: { type: 'undo' }, watch: '' },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            {
+              label: 'Someone else moves Standup to 10:00',
+              action: { type: 'otherEdit', uid: 'standup', patch: { time: '10:00' } },
+              watch: '',
+            },
+            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
+            {
+              label: 'Redo',
+              action: { type: 'redo' },
+              watch: 'Refused, with "Redo over the server\'s change".',
+            },
+          ],
+        },
+        {
+          id: 'history',
+          title: "12. Undo a colleague's change from the History",
+          rewrites: false,
+          intro:
+            "Ctrl+Z never reaches someone else's change; the History list does, without a question.",
+          steps: [
+            {
+              label: 'Someone else moves Dentist to 15:00',
+              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
+              watch: '',
+            },
+            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
+            {
+              label: 'Ctrl+Z',
+              action: { type: 'undo' },
+              watch: 'Refused: nothing of yours to undo.',
+            },
+            {
+              label: 'Undo S2 from the History',
+              action: { type: 'undo', target: 'S2' },
+              watch: 'The toast says it was a change on the server. Dentist at 14:00 is to send.',
+            },
+            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
           ],
         },
       ];
@@ -1514,6 +1761,7 @@
         $('log').innerHTML =
           '<b>What just happened</b><br>' +
           s.log.map(esc).join('<br>') +
+          (s.offer ? '<br>' + btn(s.offer.label, () => act(s.offer.action)) : '') +
           (lastWatch ? `<br><span class="watch">Look at: ${esc(lastWatch)}</span>` : '');
 
         $('status').innerHTML =
@@ -1624,8 +1872,8 @@
               : '') +
             '</div>';
 
-        const cur = H.snap(s, c.userPtr),
-          next = H.children(s, c.userPtr);
+        const z = H.ctrlZTarget(s),
+          r = H.redoTarget(s);
         $('actions').innerHTML =
           '<p>' +
           btn('Incoming Sync', () => act({ type: 'incomingSync' })) +
@@ -1633,21 +1881,12 @@
           btn('Send: requests only', () => act({ type: 'sendRequests' }), '', !!s.pending) +
           btn('Send: record the outcome', () => act({ type: 'sendClose' }), '', !s.pending) +
           '</p><p>' +
-          (cur.parents.length === 2
-            ? btn(`Ctrl+Z, back through your side (${cur.parents[0]})`, () =>
-                act({ type: 'undo', side: 'user' }),
-              ) +
-              btn(`Ctrl+Z, back through the server's side (${cur.parents[1]})`, () =>
-                act({ type: 'undo', side: 'server' }),
-              )
-            : btn('Ctrl+Z (undo)', () => act({ type: 'undo' }))) +
-          (next.length > 1
-            ? next
-                .map((n) =>
-                  btn(`Redo towards ${n.id} (${n.kind})`, () => act({ type: 'redo', to: n.id })),
-                )
-                .join('')
-            : btn('Redo', () => act({ type: 'redo' }))) +
+          btn(z ? `Ctrl+Z (undo ${z.id}: ${z.note})` : 'Ctrl+Z (nothing of yours)', () =>
+            act({ type: 'undo' }),
+          ) +
+          btn(r ? `Ctrl+Shift+Z (redo: take back ${r.id})` : 'Ctrl+Shift+Z (nothing to redo)', () =>
+            act({ type: 'redo' }),
+          ) +
           '</p><p>' +
           btn('Start again', reset) +
           '</p>';
@@ -1658,25 +1897,21 @@
           x = (sn) => (sn.lane === 'server' ? 62 : 22),
           y = (i) => 24 + i * rowH;
         const at = Object.fromEntries(order.map((sn, i) => [sn.id, { x: x(sn), y: y(i) }]));
-        const redo = new Set(
-          order
-            .filter(
-              (sn) => !ancestorsOf(c.userPtr).has(sn.id) && !ancestorsOf(c.serverPtr).has(sn.id),
-            )
-            .map((sn) => sn.id),
-        );
         let svg = `<svg width="100%" height="${order.length * rowH + 10}">`;
         for (const sn of order)
           for (const p of sn.parents)
             svg += `<line x1="${at[sn.id].x}" y1="${at[sn.id].y}" x2="${at[p].x}" y2="${at[p].y}" stroke="#9aa4ae" stroke-width="2"/>`;
         for (const sn of order) {
           const p = at[sn.id],
-            isRedo = redo.has(sn.id);
-          svg += `<circle cx="${p.x}" cy="${p.y}" r="7" fill="${isRedo ? '#fff' : '#2f6f9f'}" stroke="#2f6f9f" stroke-width="2"/>`;
+            undone = !H.inEffect(s, sn.id);
+          svg += `<circle cx="${p.x}" cy="${p.y}" r="7" fill="${undone ? '#fff' : '#2f6f9f'}" stroke="#2f6f9f" stroke-width="2"/>`;
           const badges =
             (sn.id === c.userPtr ? " ◀ User's Pointer" : '') +
             (sn.id === c.serverPtr ? " ◀ Server's Pointer" : '') +
-            (isRedo ? ' (redo path)' : '') +
+            (sn.takesBack
+              ? ` (takes back ${sn.takesBack}${sn.over ? ', over a later change' : ''})`
+              : '') +
+            (undone ? ' (undone)' : '') +
             (s.pending?.snapshot === sn.id ? ' (being sent)' : '');
           svg += `<text x="92" y="${p.y - 3}"><tspan font-weight="600">${sn.id}</tspan> · ${esc(sn.kind)} · ${esc(sn.note)}<tspan fill="#b3261e" font-weight="600">${esc(badges)}</tspan></text>`;
           const steps = (sn.parents.length ? sn.parents : [null])
@@ -1692,6 +1927,16 @@
           svg += `<text x="92" y="${p.y + 13}" fill="#68717c">${esc(steps)}</text>`;
         }
         $('graph').innerHTML = svg + '</svg>';
+        const line = H.userLine(s);
+        $('history').innerHTML =
+          '<table><tr><th>Snapshot</th><th>Made by</th><th></th></tr>' +
+          line
+            .map((id) => {
+              const x = H.snap(s, id);
+              return `<tr><td>${id}</td><td>${esc(x.kind)} · ${esc(x.note)}${H.inEffect(s, id) ? '' : ' <span class="muted">(undone)</span>'}</td><td>${x.parents.length && H.inEffect(s, id) ? btn('Undo', () => act({ type: 'undo', target: id }), 'mini') : ''}</td></tr>`;
+            })
+            .join('') +
+          '</table>';
 
         $('versions').innerHTML =
           "<table><tr><th>Row</th><th>Event</th><th>Content</th><th>User's mark</th><th>Server's mark</th></tr>" +

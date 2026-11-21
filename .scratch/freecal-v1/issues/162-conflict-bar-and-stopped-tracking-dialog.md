@@ -30,3 +30,4 @@ Spec: US-71, US-73; "A Calendar with a Conflict isn't syncing" under the fronten
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Blocked by tickets 133 and 137 as the triage rewrites them (the core reports Conflicts; the Conflict list for all Calendars or one), not as they read today; their rewrite is the triage's next batch.
 - 2026-11-21: Not Tracking now also covers Held during Undo, so the dialog is worded by Conflicts. Ticket 165 adds a line to the bar while the Calendar is also Held during Undo (grilling, ADR 0019).
+- 2026-11-21: Held during Undo goes (ticket 165 `wontfix`, grilling on critique 1, ADR 0020 rewritten): Tracking means no Conflict again, and the bar has no line about redo.

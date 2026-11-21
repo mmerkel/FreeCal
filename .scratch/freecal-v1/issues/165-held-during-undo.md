@@ -14,7 +14,7 @@ Spec: "Calendar History" (undo and redo) and "Sync engine" (Tracking). ADR 0019 
 
 **Blocked by:** 152, 161, 162
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 **Effort:** M
 
@@ -28,3 +28,4 @@ Spec: "Calendar History" (undo and redo) and "Sync engine" (Tracking). ADR 0019 
 ## Comments
 - 2026-11-21: Written from the grilling of 2026-11-21 (ADR 0019, "Held during Undo"). The rule itself (the second step waits while a redo path exists) is in ticket 152; this ticket adds what shows it and ends it. Left out of the overall status, for review.
 - 2026-11-21: Decided in a grilling on read-only Calendars: marking a Calendar read-only ends its redo path, as "Continue" does, so a Read-only Calendar is never Held during Undo (ADR 0020). That part comes with ticket 166.
+- 2026-11-21: Closed as `wontfix` (grilling on critique 1, `.scratch/freecal-v1/critiques.md`): undo makes an Undo Snapshot and both pointers only move forwards (ADR 0020 rewritten), so the server's changes never wait for a redo and Held during Undo, its Status Mark, bar and "Continue" go.

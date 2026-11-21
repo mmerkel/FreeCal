@@ -32,3 +32,4 @@ Spec: US-68, US-69, US-72; "Signals"; the status indicator, "Event chips stay sp
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Ticket 15 keeps the overall status; its reword (the Signal's fields, the first-sync marker gone with ticket 155) follows in the triage's last batch. Ticket 68's "dashed outline" becomes the Unsent Mark there.
 - 2026-11-21: Ticket 165 adds the Status Mark for Held during Undo (grilling, ADR 0019).
+- 2026-11-21: Ticket 165 is `wontfix`: no Status Mark for Held during Undo (grilling on critique 1, ADR 0020 rewritten).

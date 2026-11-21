@@ -22,7 +22,7 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques.m
 
 ---
 
-## 1. Ctrl+Z undoes syncs → Reverting Undo
+## 1. Ctrl+Z undoes syncs → Reverting Undo (decided: taken, as Undo)
 
 **Critique.** ADR 0020: Ctrl+Z undoes the newest Snapshot of any Calendar, Incoming Syncs included. `main` promised that Ctrl+Z undoes the user's own latest action. On the branch, what Ctrl+Z reaches depends on when the last poll ran. A stray Ctrl+Z takes back a colleague's change and sends that at once. Until ticket 126 it can also move a meeting on a server that notifies the attendees (RFC 6638). Undoing one's own action from two hours ago first undoes, and sends, every Incoming Sync since. No other calendar app or collaborative editor works this way.
 
@@ -73,6 +73,19 @@ Moving the pointer back is also what forces:
 **Questions to grill.** Stop and say so, or skip, when Ctrl+Z is refused? Is a "Skip" record acceptable? Which origins count as the user's own (imports, restores, merges)? Is a Reverting Undo itself undone with Ctrl+Z, or only redone? Does the Calendar History offer taking back a sync, and with what confirmation? What becomes of ADR 0020's other "Left open" note (swapping Snapshots), which A makes unnecessary? Does the Reference Snapshot stay (it should: Joins still keep the server's Snapshot out of the user's ancestry)?
 
 **Affected if taken.** ADRs 0019 (Held during Undo, the invariant, the Server's Pointer moving backwards, Outgoing Sync) and 0020 (largely rewritten); spec sections on undo and Held during Undo; `GLOSSARY.md` (Held during Undo goes, Reverting Undo added); tickets 147, 148, 158, 165, and those naming Held during Undo (grep for it).
+
+**Outcome (grilling of 2026-11-21): A taken, as "Undo"** (no new term). Played through in the prototype, walkthroughs 1 to 12.
+
+- An Undo is a Snapshot whose origin names the one it takes back. Both pointers only move forwards. The redo path, Held during Undo (ticket 165 `wontfix`), the Server's Pointer moving backwards and ADR 0019's "behind means undone" go.
+- Ctrl+Z takes back the newest of the user's own Snapshots in effect, across all Calendars: actions, imports, restores, merges and "Stop waiting". It passes over the First Sync, Incoming Syncs, Joins, Undos and Snapshots that changed nothing on the user's side, such as a merge where the user kept their own version.
+- Refused whole when anything the Snapshot changed has changed since, checked per Occurrence by ADR 0019's comparison (now ticket 167, before ticket 147). The toast names the later change, the server's or the user's own, and offers "Open X" and "Undo both changes". There is no "Skip": a stuck Ctrl+Z is unstuck by "Undo both changes", and older changes can be undone from the Calendar History.
+- Redo reverses the newest Undo, however it was made, until the user's next own change; syncs don't end it. When refused, it offers "Redo over the server's change".
+- The Calendar History is one list of all Calendars, with filters. Any Snapshot can be undone from it, whole, syncs included. No undo asks first, which also settles ADR 0019's Join sentence. Undo for one Calendar and "Go back to before this" go.
+- The Mass-Change Guard counts every Undo, an import's too. "Stop waiting and mark read-only" is a Snapshot with an origin of its own, not a merge. A Snapshot spanning a Calendar marked read-only is refused without a button.
+- The swap note in ADR 0020's "Left open" moved to "Considered Options". The Reference Snapshot stays, with a Join as the reason the last common Snapshot can't serve.
+- **Left open:** which Events undoing a merge takes back. A merge also takes in the server's changes that weren't in Conflict, and Ctrl+Z shouldn't take back a colleague's change. Either only the Events that were in Conflict go back, or Ctrl+Z passes over merges (ADR 0020, "Left open"; ticket 134).
+
+Reworded: ADRs 0018, 0019 and 0020 (now `0020-undo-is-a-snapshot.md`), the spec (US-146, US-150, new US-155, "Calendar History", Tracking, the tests, the main menu), `GLOSSARY.md` (Undo added; Undo History, Snapshot, Join, Tracking and Reference Snapshot reworded; Held during Undo removed; Dangerous Undo stays until ticket 147 removes it from the code), and tickets 134, 138, 147, 148, 151, 152, 153, 158, 159, 161, 162, 165, 166 and the new 167.
 
 ---
 

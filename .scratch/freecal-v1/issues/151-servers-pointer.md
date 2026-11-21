@@ -10,7 +10,6 @@
 - **A First Sync** ends with both pointers on the Calendar's first Snapshot (still built as in ticket 146 until the ticket for the First Sync in memory).
 - **An Outgoing Sync.** Glue until ticket 153, named: each send of a UID that succeeds records, in the Database Transaction that stores its new ETag, that the server now holds the user's Event Versions of that UID. If the Calendar then has no Unsent Change left, the Server's Pointer moves to the User's Pointer's Snapshot; otherwise a Snapshot on the server's side holds the server's state, with the origin "an Outgoing Sync that couldn't send everything". Ticket 153 replaces this with one closing Database Transaction per Outgoing Sync.
 - **The stored ETag** of a kept resource is written in the same Database Transaction as the Event Versions with the server's mark it belongs to. A Server Object FreeCal can no longer read keeps its Event Versions and loses its ETag, as now.
-- **Undo and redo at a merge** (ADR 0020; only ending a Conflict makes one, ticket 134), in the core: an undo of a merge Snapshot names the side to go back through, the user's or the server's; a redo from a Snapshot that two arose from names the way. The core reports which choices the next undo and redo have. A redo at a fork ends the redo path for the way not taken. Until the ticket for Ctrl+Z in the window asks the user, the window goes back through the user's side and forward the way it came.
 - **The Store Check** gains: the server's Current-Version Marks are exactly the Event Versions of the Snapshot the Server's Pointer names; a Calendar has a Server's Pointer exactly when it has a server; every stored ETag belongs to a UID with Event Versions carrying the server's mark. Its query for kept Snapshots counts both pointers.
 - **Dropping** (ticket 148) spares the last common ancestor of the two sides; its test comes here.
 - No change to what the user sees.
@@ -27,7 +26,7 @@ Spec: US-81; "Calendar History"; "Sync engine". ADRs 0018 ("The pointers"), 0019
 - [ ] After any Incoming Sync, the Event Versions with the server's mark read as the server's resources do (test against Radicale, also with Unsent Changes in the Calendar)
 - [ ] An Incoming Sync into a Calendar with nothing of its own makes one Snapshot for both pointers; with Unsent Changes it makes the server's Snapshot and a Join on the user's side, in one Database Transaction
 - [ ] After an Outgoing Sync that sent everything, both pointers are on one Snapshot; after one that didn't, the server's side holds what was sent
-- [ ] Undo at a merge goes back through the side named, redo at a fork takes the way named and drops the other
+- [ ] Ctrl+Z passes over an Incoming Sync's Snapshot and a Join; an Undo of either from the core takes back the server's changes
 - [ ] Old Snapshots are dropped without the last common ancestor of the two sides
 - [ ] The Store Check's new queries, each with a test that breaks it by hand
 - [ ] The existing sync, send and undo tests pass unchanged
@@ -36,3 +35,4 @@ Spec: US-81; "Calendar History"; "Sync engine". ADRs 0018 ("The pointers"), 0019
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. First of four parts of what was proposed as one ticket (XL): 151 the Server's Pointer, 152 the Reference Snapshot and the comparison, 153 the Outgoing Sync from the marks, 154 one sync activity and the read-back.
 - 2026-11-21: Decided in a grilling: every write makes a new row, also for content equal to an earlier one; only undo and redo bring a row back. Event Versions are compared same row first, then by canonical form; a side that takes over the other's version takes its row (ADR 0018, "Event Versions").
 - 2026-11-21: A Join with one parent replaces the merge of an Incoming Sync; merges with two parents come only from ending a Conflict (grilling, ADR 0019).
+- 2026-11-21: Reworded from the grilling on critique 1 (`.scratch/freecal-v1/critiques.md`; ADR 0020 rewritten: undo makes an Undo Snapshot, both pointers only move forwards, Held during Undo goes). Undo and redo at a merge moved to ticket 134, as merges only end Conflicts; there are no forks to redo through.

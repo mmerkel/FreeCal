@@ -7,7 +7,7 @@
 - **The requests** run outside any Database Transaction. Every update and delete is conditional on the stored ETag.
 - **The closing Database Transaction,** one per Outgoing Sync:
   - stores the new ETags and gives the server's mark to what was sent;
-  - if everything was sent and the server holds what the user had at the start, moves the Server's Pointer to the Snapshot that was sent, backwards too after an undo;
+  - if everything was sent and the server holds what the user had at the start, moves the Server's Pointer to the Snapshot that was sent;
   - if not everything could be sent, makes one new Snapshot holding the server's state, with the origin "an Outgoing Sync that couldn't send everything", and moves the Server's Pointer to it;
   - moves the Reference Snapshot to the Server's Pointer, in both cases.
 - **A change the user makes while an Outgoing Sync runs** moves the User's Pointer on and is simply still different afterwards. No Sent Event Rows are needed.
@@ -28,7 +28,7 @@ Spec: US-62, US-63, US-72, US-131; "Sync engine"; "Local Store". ADR 0019 ("What
 
 - [ ] The Sender reads what to send from the two marks; `unsent_change` and the Sent Event Rows are gone from the code and the schema
 - [ ] One closing Database Transaction per Outgoing Sync records ETags, marks, the Server's Pointer and the Reference Snapshot
-- [ ] After a full send both pointers are on the Snapshot that was sent, also when that is an older Snapshot after an undo
+- [ ] After a full send both pointers are on the Snapshot that was sent, an Undo's too
 - [ ] After a partial send (one UID refused) the server's side holds a new Snapshot with what the server has, and the refused UID still differs
 - [ ] A change made while the requests run is sent by the next Outgoing Sync (test with a held request)
 - [ ] An edit and its undo before any sync send nothing
@@ -40,3 +40,4 @@ Spec: US-62, US-63, US-72, US-131; "Sync engine"; "Local Store". ADR 0019 ("What
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Third of four parts (see ticket 151). Against the split as first listed, putting the server's form of a write in place is in ticket 154, with the read-back that first makes it reachable on CalDAV.
 - 2026-11-21: Decided in a grilling: every write makes a new row, also for content equal to an earlier one; only undo and redo bring a row back. Event Versions are compared same row first, then by canonical form; a side that takes over the other's version takes its row (ADR 0018, "Event Versions").
+- 2026-11-21: Reworded from the grilling on critique 1 (`.scratch/freecal-v1/critiques.md`; ADR 0020 rewritten: undo makes an Undo Snapshot, both pointers only move forwards, Held during Undo goes). The Server's Pointer no longer moves backwards.

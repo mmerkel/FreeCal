@@ -72,10 +72,6 @@ _Avoid_: Diagnostic log, debug log
 The state of an Event when a change made in FreeCal and a newer change on the server can't both be kept, so the user has to choose.
 _Avoid_: Collision, sync error
 
-**Held during Undo**:
-The state of a server Calendar whose server's changes, though fetched, aren't taken into the user's side while redo is still possible after an undo. It ends with "Continue", an edit or the last redo.
-_Avoid_: Paused (the Mass-Change Guard pauses), sync off, Held Server Changes
-
 **Server Version**:
 The Events a server holds for one Calendar and UID, the Recurring Event with its Exceptions, as FreeCal reads them; empty when the server deleted them. In a Conflict it stands against the User's Version, shown as "Server version".
 _Avoid_: Remote version, their version, server copy
@@ -118,8 +114,12 @@ _Avoid_: Modification (on its own), entry, journal entry, change (on its own: Un
 One Event at one moment: the fields FreeCal manages and its Unimplemented Fields, for a single Event, a Recurring Event or one Exception. Once stored it never changes; a change to the Event makes a new one. Until the code follows ADR 0018, the Change Journal's stored Event Versions hold the managed fields only.
 _Avoid_: Version (on its own), revision, snapshot (a Snapshot is a whole Calendar's state)
 
+**Undo**:
+A Snapshot that takes back one earlier Snapshot: what that Snapshot changed goes back to how it was before, and everything else stays. It is refused whole when something it would take back has changed since. A redo is an Undo of an Undo.
+_Avoid_: Reverting Undo, revert, rollback
+
 **Undo History**:
-What Ctrl+Z and Ctrl+Shift+Z step through, read from the Change Journal: the user's own changes and imports not yet undone, newest first, and the undos made since the user's last change, which redo brings back. A restart doesn't reset it.
+What Ctrl+Z and Ctrl+Shift+Z step through, read from the Calendar History: for Ctrl+Z the user's own changes, imports and restores still in effect, newest first across all Calendars, passing over syncs; for Ctrl+Shift+Z the Undos still in effect, newest first, until the user's next change. A restart doesn't reset it.
 _Avoid_: Session Undo, undo stack, History (on its own: an Event's History)
 
 **Mass-Change Guard**:
@@ -135,7 +135,7 @@ The existing Calendar that one source of an import or a restore goes into: an `.
 _Avoid_: Association, mapping, destination
 
 **Snapshot**:
-The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones. A Calendar's first Snapshot is the one it enters the Local Store with: its First Sync's, or an empty one for a Local Calendar. Undo doesn't go before it.
+The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, an Undo, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones. A Calendar's first Snapshot is the one it enters the Local Store with: its First Sync's, or an empty one for a Local Calendar. No Undo takes it back.
 _Avoid_: Commit, version (on its own), backup (a Backup is a file)
 
 **Calendar History**:
@@ -179,7 +179,7 @@ The change of one Calendar's Events from a parent Snapshot, or from nothing for 
 _Avoid_: Step (one action can change several Calendars), edge, parent link, commit
 
 **Join**:
-A Snapshot that takes the server's changes into a Calendar's user's side when the two sides changed without a Conflict. Its only parent is the Snapshot the User's Pointer was on; the server's Snapshot is not a parent.
+A Snapshot that takes the server's changes into a Calendar's user's side when the two sides changed without a Conflict. Its only parent is the Snapshot the User's Pointer was on; the server's Snapshot is not a parent. Ctrl+Z passes over it.
 _Avoid_: Merge (a merge ends a Conflict and has both sides as parents), rebase
 
 **Current-Version Mark**:
@@ -191,12 +191,12 @@ The function that asks a Local Store whether its stored invariants hold, each as
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
 
 **Tracking**:
-The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict and isn't Held during Undo, which is while its Server's Pointer is on its Reference Snapshot; otherwise its Events stay as each side has them until a merge or a Join. The user can't turn it off, only end Conflicts and continue after an undo.
+The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict, which is while its Server's Pointer is on its Reference Snapshot; otherwise its Events stay as each side has them until a merge or a Join. The user can't turn it off, only end Conflicts.
 _Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)
 
 **Reference Snapshot**:
 The server's Snapshot that a Calendar's user's side last took in. It is always set; the Server's Pointer is on it while the Calendar is Tracking and has moved on from it while there is a Conflict. Both sides are compared with it; the Last Agreed Version of an Event in Conflict is read from it.
-_Avoid_: Merge base, last common Snapshot (by ancestry it can be another one, after an undo), last sync (the pointers can stay apart while it moves)
+_Avoid_: Merge base, last common Snapshot (by ancestry it can be an older one, after a Join), last sync (the pointers can stay apart while it moves)
 
 **Server Object**:
 What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
