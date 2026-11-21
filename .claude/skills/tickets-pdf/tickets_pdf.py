@@ -114,8 +114,10 @@ def short(s, n=30):
         ls = [ls[0], textwrap.shorten(" ".join(ls[1:]), n, placeholder="…")]
     return "<br/>".join(html.escape(l) for l in ls)
 
-linked = {n for n, t in active.items() if t["deps"] or blocks[n]}
-isolated = [n for n in active if n not in linked]
+# Done and wontfix tickets are left out of the graph and the unlinked chips; the table still lists them.
+shown = set(open_)
+linked = {n for n in shown if any(d in shown for d in active[n]["deps"]) or any(b in shown for b in blocks[n])}
+isolated = [n for n in active if n in shown and n not in linked]
 
 lines = ['digraph G {', 'rankdir=LR; ranksep=0.45; nodesep=0.12; size="16,9.2"; ratio="fill"; bgcolor="transparent";',
          'node [shape=box style="rounded,filled" fontname="Helvetica" fontsize=10 margin="0.08,0.03" penwidth=1.2];',
@@ -133,6 +135,8 @@ for n, t in active.items():
     lines.append(f'"{n}" [label={label} fillcolor="{fill}" color="{line}" fontcolor="{font}" penwidth={pen} style="{style}"];')
 for n, t in active.items():
     for d in t["deps"]:
+        if n not in linked or d not in linked:
+            continue
         attr = ' [color="#dc2626" penwidth=2]' if d in crit_set and n in crit_set and crit[1].index(n) == crit[1].index(d) + 1 else ""
         lines.append(f'"{d}" -> "{n}"{attr};')
 lines.append("}")
@@ -224,7 +228,7 @@ tr.dim td {{ color: #8a8a8a; }} tr.crit td:first-child {{ color: #dc2626; }}
 <table><tr><th>#</th><th>Ticket</th><th>Status</th><th>Effort</th><th>Unblocks (transitively)</th></tr>{front_rows}</table>
 
 <div class="graph"><h2 style="margin-top:0">Dependency graph</h2>
-<div class="legend">Arrow = "must come before".<i style="background:#e7e7e7;border-color:#9a9a9a"></i>done<i style="background:#f5f5f5;border-color:#c4c4c4"></i>wontfix<i style="background:#dbeafe;border-color:#2563eb"></i>ready for agent<i style="background:#fde7c7;border-color:#d97706"></i>ready for human<i style="background:#f3e8ff;border-color:#9333ea"></i>needs triage<i style="background:#fff;border-color:#555;border-style:dashed"></i>open but blocked<i style="background:#fff;border-color:#dc2626;border-width:2.5px"></i>critical path · [S/M/L/XL] effort</div>
+<div class="legend">Arrow = "must come before"; done and wontfix tickets are left out.<i style="background:#dbeafe;border-color:#2563eb"></i>ready for agent<i style="background:#fde7c7;border-color:#d97706"></i>ready for human<i style="background:#f3e8ff;border-color:#9333ea"></i>needs triage<i style="background:#fff;border-color:#555;border-style:dashed"></i>open but blocked<i style="background:#fff;border-color:#dc2626;border-width:2.5px"></i>critical path · [S/M/L/XL] effort</div>
 <div class="svg">{svg}</div>
 <div class="iso"><b>No dependencies either way:</b> {iso_html}</div></div>
 

@@ -9,7 +9,7 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 - **At a merge**, which only ending a Conflict makes (ADR 0019), undo asks which side to go back through, the user's or the server's. **Redo** moves the pointer forward again, and asks which way where two Snapshots arose from the one it is at.
 - **Which Calendar.** Ctrl+Z takes the Snapshot made last among those a User's Pointer is on. Redo has no such order to follow, as nothing records in which order Snapshots were undone: it redoes when exactly one Snapshot is next beyond the User's Pointers of all Calendars, and otherwise asks which, as it does at a fork (decided 2026-11-16).
 - **The redo path ends whenever the User's Pointer leaves its line**: by a change the user makes, by "Continue" while the Calendar is Held during Undo, and at a fork by redo, for the way not taken. An Incoming Sync doesn't end it: while a redo path exists, the server's changes wait (ADR 0019, decided 2026-11-21). The Snapshots that are then neither an ancestor of a pointer nor beyond the User's Pointer are dropped. That is one rule, which the Store Check asks as one query (ADR 0018).
-- Undo can't go before a Calendar's first Snapshot (its First Sync, the empty one of a Local Calendar, or the import that created it). Ctrl+Z on an import that created Calendars therefore takes it back in the Calendars that existed and leaves the created ones as they are, and FreeCal says so (decided 2026-11-16).
+- Undo can't go before a Calendar's first Snapshot (its First Sync or the empty one of a Local Calendar). An import or a restore doesn't create Calendars (ADR 0018, decided 2026-11-21, replacing the half-undo of an import that created Calendars, of 2026-11-16), so Ctrl+Z takes either back whole.
 - An undo is not itself recorded. After the Outgoing Sync that follows it, the Server's Pointer moves back with the User's. If the server changes before the redo path ends, the Calendar is Held during Undo (ADR 0019).
 - While a Calendar isn't Tracking its server, undo moves the User's Pointer and sends nothing.
 - The Dangerous Undo's thresholds go; the confirmation before undoing a sync goes too (decided 2026-11-21), and the Mass-Change Guard checks the Outgoing Sync that follows (ADR 0019).
@@ -34,8 +34,7 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 - An unrelated edit after an accidental undo loses the redo. An Incoming Sync doesn't, but the server's changes wait until the user redoes to the end, continues or makes a change, and the Calendar isn't Tracking meanwhile.
 - Redo asks in a common case: after undoing one change in each of two Calendars, both have a Snapshot to bring back.
 - Choosing the server's way at a redo fork drops the user's own undone Snapshots for good.
-- Undoing one Calendar's part of a move or of an import leaves the other part: one UID in two Calendars, or half an import.
-- An import can't be taken back in a Calendar it created. To be rid of it there, the user deletes that Calendar.
+- Undoing one Calendar's part of a move, an import or a restore leaves the other part: one UID in two Calendars, or half an import or restore.
 - An Event's History shows versions but offers no way to restore one.
 
 ## Left open
