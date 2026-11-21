@@ -4,14 +4,16 @@ With ADR 0018 this supersedes ADR 0009, and reverses its choice of undo per Even
 
 Undo per Event had to work out which later changes stood in the way, undo those first, check hashes, and classify the result as benign or dangerous. With the Calendar History (ADR 0018), an undo moves a Calendar's User's Pointer to the parent Snapshot and writes nothing else; if the Calendar is Tracking its server, the difference between the pointers is then sent like any other (ADR 0019). We take that simple form first and judge it in use.
 
-- **Ctrl+Z** undoes the newest Snapshot of any Calendar, Incoming Syncs included, and asks nothing where there is nothing to choose: a toast after each undo says what was undone, a change on the server too, and offers "Redo"; a toast after each redo says what was redone, without a button (decided 2026-11-21, replacing the question before undoing a Snapshot from a server). A Snapshot spanning several Calendars is undone whole.
+- **Ctrl+Z** undoes the newest Snapshot of any Calendar, Incoming Syncs included, and asks nothing where there is nothing to choose: a toast after each undo says what was undone, a change on the server too, and offers "Redo"; a toast after each redo says what was redone, without a button (decided 2026-11-21, replacing the question before undoing a Snapshot from a server). A Snapshot spanning several Calendars is undone whole, unless one of them is read-only (below).
 - **Undo for one Calendar** moves only that Calendar's User's Pointer. Undoing a move there leaves the other Calendar as it is, so the Event is then in both, and FreeCal says so.
 - **At a merge**, which only ending a Conflict makes (ADR 0019), undo asks which side to go back through, the user's or the server's. **Redo** moves the pointer forward again, and asks which way where two Snapshots arose from the one it is at.
 - **Which Calendar.** Ctrl+Z takes the Snapshot made last among those a User's Pointer is on. Redo has no such order to follow, as nothing records in which order Snapshots were undone: it redoes when exactly one Snapshot is next beyond the User's Pointers of all Calendars, and otherwise asks which, as it does at a fork (decided 2026-11-16).
-- **The redo path ends whenever the User's Pointer leaves its line**: by a change the user makes, by "Continue" while the Calendar is Held during Undo, and at a fork by redo, for the way not taken. An Incoming Sync doesn't end it: while a redo path exists, the server's changes wait (ADR 0019, decided 2026-11-21). The Snapshots that are then neither an ancestor of a pointer nor beyond the User's Pointer are dropped. That is one rule, which the Store Check asks as one query (ADR 0018).
+- **The redo path ends whenever the User's Pointer leaves its line**: by a change the user makes, by "Continue" while the Calendar is Held during Undo, by marking the Calendar read-only, and at a fork by redo, for the way not taken. An Incoming Sync doesn't end it: while a redo path exists, the server's changes wait (ADR 0019, decided 2026-11-21). The Snapshots that are then neither an ancestor of a pointer nor beyond the User's Pointer are dropped. That is one rule, which the Store Check asks as one query (ADR 0018).
 - Undo can't go before a Calendar's first Snapshot (its First Sync or the empty one of a Local Calendar). An import or a restore doesn't create Calendars (ADR 0018, decided 2026-11-21, replacing the half-undo of an import that created Calendars, of 2026-11-16), so Ctrl+Z takes either back whole.
 - An undo is not itself recorded. After the Outgoing Sync that follows it, the Server's Pointer moves back with the User's. If the server changes before the redo path ends, the Calendar is Held during Undo (ADR 0019).
 - While a Calendar isn't Tracking its server, undo moves the User's Pointer and sends nothing.
+- **Read-only Calendars** (decided 2026-11-21): Ctrl+Z and History leave out Calendars marked read-only. Incoming Syncs still take the server's changes in, and Unsent Changes made before the mark are still sent. A Calendar whose server refuses changes isn't read-only: undo works there and its changes wait (ADR 0019). Where a Snapshot spans a Calendar marked read-only, such as a move into it, Ctrl+Z asks before undoing the other Calendars' part alone, saying the Event will then be in both; cancelling leaves it, and the next Ctrl+Z asks again. Removing the mark puts the Calendar back into Ctrl+Z, with the Incoming Syncs taken in while it was read-only.
+- **Events with guests** are undone and redone like any Event, although the user can't edit them, until the attendee features (ticket 126) decide how changes to them reach attendees (decided 2026-11-21).
 - The Dangerous Undo's thresholds go; the confirmation before undoing a sync goes too (decided 2026-11-21), and the Mass-Change Guard checks the Outgoing Sync that follows (ADR 0019).
 
 ## Considered Options
@@ -25,6 +27,9 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 - **Asking before undoing a Snapshot from a server** (the first form): a guard against a stray Ctrl+Z taking back someone else's change on the server, but a dialog in the most common undo after a sync. Held during Undo (ADR 0019) lets the toast's "Redo" bring back exactly what was undone, as nothing from the server comes in meanwhile.
 - **"Undo" in the toast after a redo**: symmetric, but once the redo path has ended, the server's held changes come in, and the toast's Undo would take those back instead.
 - **Keeping the redo path after an unrelated change**: the history would fork on the user's side, with a choice at every redo.
+- **An Undo Floor**, a Snapshot stored per Calendar when its read-only mark is removed, that undo can't go back past: the first Ctrl+Z after the mark goes never takes back a change from the server of the read-only time, but it is stored state and needed only after a long mark, now that Calendars don't start read-only before 1.0.
+- **Skipping, refusing or undoing whole a Snapshot that spans a Read-only Calendar**: skipping leaves the other Calendars stuck behind it, as each undoes along its own line; refusing blocks Ctrl+Z until the mark goes; undoing it whole changes a Calendar the user protected.
+- **Refusing to undo a Snapshot that changes an Event with guests**: no undo writes a meeting, but in a busy work Calendar almost every change from the server touches one, so Ctrl+Z would stop there all the time.
 
 ## Consequences
 
@@ -34,7 +39,9 @@ Undo per Event had to work out which later changes stood in the way, undo those 
 - An unrelated edit after an accidental undo loses the redo. An Incoming Sync doesn't, but the server's changes wait until the user redoes to the end, continues or makes a change, and the Calendar isn't Tracking meanwhile.
 - Redo asks in a common case: after undoing one change in each of two Calendars, both have a Snapshot to bring back.
 - Choosing the server's way at a redo fork drops the user's own undone Snapshots for good.
-- Undoing one Calendar's part of a move, an import or a restore leaves the other part: one UID in two Calendars, or half an import or restore.
+- Undoing one Calendar's part of a move, an import or a restore leaves the other part: one UID in two Calendars, or half an import or restore. Ctrl+Z does this too, after asking, where the other Calendar is read-only.
+- After a read-only mark is removed, Ctrl+Z can reach a change from the server of the time the Calendar was read-only.
+- Until ticket 126, undo can move a meeting on the server; on a CalDAV server that schedules (RFC 6638), where the user organises the meeting, that can notify its attendees.
 - An Event's History shows versions but offers no way to restore one.
 
 ## Left open

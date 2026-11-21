@@ -26,3 +26,4 @@ Spec: US-151, US-31, US-46, US-47; "Attendees"; "Untrusted content".
 ## Comments
 - 2026-11-16: To decide here: who raises `SEQUENCE`. Until then FreeCal keeps a server's `SEQUENCE` among the Unimplemented Fields and writes it back unchanged (ADR 0017, ticket 144), which is only right while FreeCal changes no Event with guests.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020: the questions name the Calendar History and the Unimplemented Fields.
+- 2026-11-21: From the grilling on read-only Calendars: until this ticket, undo, redo and a Backup restore change Events with guests like any Event (ADR 0020, "Events with guests"). Its design must cover them: what an undo of a change to a meeting sends, and whether attendees are notified (on CalDAV servers that schedule, RFC 6638, a write by the organiser can notify them).

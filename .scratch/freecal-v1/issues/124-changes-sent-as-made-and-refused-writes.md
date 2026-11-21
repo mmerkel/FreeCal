@@ -51,3 +51,4 @@ Spec: "Sync Error"; "Event details".
       - `SyncScheduler::ask_calendar`, `SyncRequests::calendars_of`, `Core::sync_account_calendars`: a sync of some Calendars of an Account
 - 2026-11-08: the user approved syncing both ways after every change.
 - 2026-11-08: the user decided the open point on read-only Calendars: keep it as built. A Calendar the server reports read-only shows the Sync Error while Unsent Changes wait, even if the user marked it read-only too.
+- 2026-11-21: Decided in a grilling (ADR 0019, "When the server refuses changes"; ticket 166): the server's read-only no longer makes a Read-only Calendar. Without the user's mark the Calendar stays editable and its changes wait under "writes refused", like being offline in one direction. This keeps the 2026-11-08 decision (a marked Calendar still shows "writes refused" while changes wait), and its bar now offers "Stop waiting" as the way out.
