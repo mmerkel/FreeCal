@@ -32,9 +32,11 @@ Spec: US-62, US-63, US-72, US-131; "Sync engine"; "Local Store". ADR 0019 ("What
 - [ ] After a partial send (one UID refused) the server's side holds a new Snapshot with what the server has, and the refused UID still differs
 - [ ] A change made while the requests run is sent by the next Outgoing Sync (test with a held request)
 - [ ] An edit and its undo before any sync send nothing
+- [ ] An edit and an edit back by hand to the server's content send nothing and show no Unsent Mark
 - [ ] A stop between the requests and the closing Database Transaction is repaired by the next Incoming Sync
 - [ ] The Unsent Mark's data, the quit warning and the reason a send failed read as before through the core interface
 - [ ] The Store Check passes after every scenario; `GLOSSARY.md` follows
 
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Third of four parts (see ticket 151). Against the split as first listed, putting the server's form of a write in place is in ticket 154, with the read-back that first makes it reachable on CalDAV.
+- 2026-11-21: Decided in a grilling: every write makes a new row, also for content equal to an earlier one; only undo and redo bring a row back. Event Versions are compared same row first, then by canonical form; a side that takes over the other's version takes its row (ADR 0018, "Event Versions").

@@ -72,6 +72,10 @@ _Avoid_: Diagnostic log, debug log
 The state of an Event when a change made in FreeCal and a newer change on the server can't both be kept, so the user has to choose.
 _Avoid_: Collision, sync error
 
+**Held during Undo**:
+The state of a server Calendar whose server's changes, though fetched, aren't taken into the user's side while redo is still possible after an undo. It ends with "Continue", an edit or the last redo.
+_Avoid_: Paused (the Mass-Change Guard pauses), sync off, Held Server Changes
+
 **Server Version**:
 The Events a server holds for one Calendar and UID, the Recurring Event with its Exceptions, as FreeCal reads them; empty when the server deleted them. In a Conflict it stands against the User's Version, shown as "Server version".
 _Avoid_: Remote version, their version, server copy
@@ -166,6 +170,14 @@ _Avoid_: Local pointer (Local is for Local Accounts and Calendars), HEAD, curren
 The Snapshot holding a Calendar's Events as its server last had them.
 _Avoid_: Remote pointer, synced pointer
 
+**Snapshot Transition**:
+The change of one Calendar's Events from a parent Snapshot, or from nothing for a Calendar's first Snapshot, to a Snapshot. A Snapshot has one in each Calendar it spans, and two in a merge's Calendar, one per side. The Event Versions that begin and end with a Snapshot Transition are its links.
+_Avoid_: Step (one action can change several Calendars), edge, parent link, commit
+
+**Join**:
+A Snapshot that takes the server's changes into a Calendar's user's side when the two sides changed without a Conflict. Its only parent is the Snapshot the User's Pointer was on; the server's Snapshot is not a parent.
+_Avoid_: Merge (a merge ends a Conflict and has both sides as parents), rebase
+
 **Current-Version Mark**:
 One of two marks on an Event Version, the user's and the server's, saying that it is the current version of its Event on that side: in the Snapshot the User's Pointer or the Server's Pointer names. An Event Version that both sides agree on has both.
 _Avoid_: Mark (on its own: a Status Mark is a badge, an Unsent Mark an hourglass), current flag, head
@@ -175,7 +187,7 @@ The function that asks a Local Store whether its stored invariants hold, each as
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
 
 **Tracking**:
-The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict, which is while its Server's Pointer is on its Reference Snapshot; with one, its Events stay as each side has them until a merge. The user can't turn it off, only end Conflicts.
+The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict and isn't Held during Undo, which is while its Server's Pointer is on its Reference Snapshot; otherwise its Events stay as each side has them until a merge or a Join. The user can't turn it off, only end Conflicts and continue after an undo.
 _Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)
 
 **Reference Snapshot**:
