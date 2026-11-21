@@ -83,7 +83,7 @@ Moving the pointer back is also what forces:
 - The Calendar History is one list of all Calendars, with filters. Any Snapshot can be undone from it, whole, syncs included. No undo asks first, which also settles ADR 0019's Join sentence. Undo for one Calendar and "Go back to before this" go.
 - The Mass-Change Guard counts every Undo, an import's too. "Stop waiting and mark read-only" is a Snapshot with an origin of its own, not a merge. A Snapshot spanning a Calendar marked read-only is refused without a button.
 - The swap note in ADR 0020's "Left open" moved to "Considered Options". The Reference Snapshot stays, with a Join as the reason the last common Snapshot can't serve.
-- **Left open:** which Events undoing a merge takes back. A merge also takes in the server's changes that weren't in Conflict, and Ctrl+Z shouldn't take back a colleague's change. Either only the Events that were in Conflict go back, or Ctrl+Z passes over merges (ADR 0020, "Left open"; ticket 134).
+- Undoing a merge takes back only the Events that were in Conflict, as a merge also takes in the server's other changes and Ctrl+Z shouldn't take back a colleague's change. Decided for now; to discuss again in ticket 134, with Ctrl+Z passing over merges as the alternative.
 
 Reworded: ADRs 0018, 0019 and 0020 (now `0020-undo-is-a-snapshot.md`), the spec (US-146, US-150, new US-155, "Calendar History", Tracking, the tests, the main menu), `GLOSSARY.md` (Undo added; Undo History, Snapshot, Join, Tracking and Reference Snapshot reworded; Held during Undo removed; Dangerous Undo stays until ticket 147 removes it from the code), and tickets 134, 138, 147, 148, 151, 152, 153, 158, 159, 161, 162, 165, 166 and the new 167.
 
