@@ -3,13 +3,11 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] work on new branch
   - [ ] ideas:
-    - [ ] restoring a backup is not an import, bc. it potentially requires also deletes
-    - [ ] first snapshot of calendar needs to be synced one.  So, import should not be able to create remote calendar. Instead, multi-calendar sync (as well as backup restoration) gives dialog to set association of to be imported calendars to existing ones
     - [ ] think thorough read-only calendars, switching on and off user and server read-only marks
-    - [ ] later: attachments in caldav in extra table indexed by hash, maybe v2.0?
     - [ ] in v 2.0
       - [ ] attendee features
       - [ ] shared calendars - something can be done in the app? Or it has to be done per web?
+      - [ ] attachments in caldav in extra table indexed by hash
       - [ ] WebDAV/Google drive etc accounts associated to calendars for attachments - attention to shared calendars
   - [ ] ask if better version now, if sees anything to improve
 - [ ] simplify work for tickets 72, 70, 19, and related.
