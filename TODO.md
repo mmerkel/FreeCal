@@ -3,22 +3,15 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] work on new branch
   - [ ] ideas:
-    - [ ] how is the event table currently associated with the snapshots?  e.g. how are these cases differentiated at a branching point: (i) an event appears only on the user side, (ii) an event appears on both user and server side, etc.?
-    - [ ] undo & merges:
-      - [ ] branch off the user pointer when in front (past) of the reference pointer - is this already happening today?
-      - [ ] merge dialog:
-        - [ ] compare events for both versions (server vs user), and have always 2 buttons: "all server side" and "all user side", but for undo conflicts, also have the option "apply only server-side changes to uder side"
-        - [ ] merges are silent if user pointer after reference pointer, but show the conflict dialog if user pointer before ref pointer.
-      - [ ] is user pointer after ref pointer, and if merge does not inetrfere with user branch, then get rid of the branching, and just add the merge to the commit line, in order to keep the git tree as simple as possible.  the user does not care if the incoming sync arrived during or slightly after their change.
     - [ ] restoring a backup is not an import, bc. it potentially requires also deletes
     - [ ] first snapshot of calendar needs to be synced one.  So, import should not be able to create remote calendar. Instead, multi-calendar sync (as well as backup restoration) gives dialog to set association of to be imported calendars to existing ones
-    - [ ] later: attachments in caldav in extra table indexed by hash, maybe v2.0?
     - [ ] think thorough read-only calendars, switching on and off user and server read-only marks
+    - [ ] later: attachments in caldav in extra table indexed by hash, maybe v2.0?
     - [ ] in v 2.0
       - [ ] attendee features
       - [ ] shared calendars - something can be done in the app? Or it has to be done per web?
       - [ ] WebDAV/Google drive etc accounts associated to calendars for attachments - attention to shared calendars
-  - [ ] resume, remaining questions
+  - [ ] ask if better version now, if sees anything to improve
 - [ ] simplify work for tickets 72, 70, 19, and related.
 - [ ] ticket 20 parts
 - [ ] simplify
