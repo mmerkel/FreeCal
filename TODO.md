@@ -3,11 +3,11 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 # Global
 - [ ] work on new branch
   - [ ] ask if better version now, if sees anything to improve
-  - [ ] ideas:
-    - [ ] in v 2.0
-      - [ ] shared calendars - something can be done in the app? Or it has to be done per web?
-      - [ ] attachments in caldav in extra table indexed by hash
-      - [ ] WebDAV/Google drive etc accounts associated to calendars for attachments - attention to shared calendars
+- [ ] ideas:
+  - [ ] in v 2.0
+    - [ ] shared calendars - something can be done in the app? Or it has to be done per web?
+    - [ ] attachments in caldav in extra table indexed by hash
+    - [ ] WebDAV/Google drive etc accounts associated to calendars for attachments - attention to shared calendars
 - [ ] simplify work for tickets 72, 70, 19, and related.
 - [ ] ticket 20 parts
 - [ ] simplify
