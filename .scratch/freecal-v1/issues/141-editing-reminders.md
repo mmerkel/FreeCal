@@ -28,3 +28,4 @@ Spec: US-101, US-102; "Out of Scope"; "Untrusted content".
 
 - 2026-11-15: From the overview of iCalendar fields in `ical.md`.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020: the questions name the Calendar History and the Unimplemented Fields. Effort L is for the work after the grilling, which the second box splits under the M cap.
+- 2026-11-21 (review with the user): this ticket will make reminders editable. Ticket 12 makes them a column of the Event Version (agreed), so the editor works on that column. When editing comes (before v1 or after) is still the grilling's first question.
