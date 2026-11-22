@@ -2,7 +2,7 @@
 
 A second review of 2026-11-22 compared the documents (`GLOSSARY.md`, ADRs, spec, tickets) of three versions: `design/change-journal` (`main` at `4857548`, ADRs 0009, 0014, 0015), `design/snapshot-tree` (`e7b3e45`, ADRs 0017 to 0020 as a tree with two pointers) and the branch at `2f24150` (ADRs 0017 to 0020 as one line of Snapshots with the server's marks). It follows the first review, `.scratch/freecal-v1/critiques.md`, and uses the same form: each numbered point is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); the rest open; the scorecard is updated for point 3 of `critiques.md`, decided since. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
+**Status (2026-11-22):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); points 2 and 3 decided together (outcome under point 2); the rest open; the scorecard is updated for point 3 of `critiques.md` and points 2 and 3 here. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
 
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
@@ -19,19 +19,19 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 | Criterion | A | B | C |
 |---|---|---|---|
 | Code quality, conceptual economy | 2: five stores kept in step | 1: most concepts (two pointers, Reference Snapshot, Tracking, Join vs merge, Snapshot Transitions, link table) | **3**: one table of Event Versions, the rest derived |
-| Robustness: invariants enforced | 2: Write Permissions, a Conflict rule run on every write | 2: strong schema, marks derived from pointers | **3**: Event Versions that never change, unique indexes, foreign keys, the Store Check |
-| Robustness: data safety | **3**: the Mirror's text keeps what FreeCal doesn't understand (except ticket 129's cases) | 2: no Mirror text; Conflicts never guessed | 2 (was 1–2, before point 3 of `critiques.md`): unknown and partly understood parts kept in the tree, ticket 129's cases too; a reader bug loses data once and the round-trip check shows it; nothing cross-checks the server's marks yet |
+| Robustness: invariants enforced | 2: Write Permissions, a Conflict rule run on every write | 2: strong schema, marks derived from pointers | **3**: Event Versions that never change, unique indexes, foreign keys, the Store Check; zero-length Event Versions by a trigger |
+| Robustness: data safety | **3**: the Mirror's text keeps what FreeCal doesn't understand (except ticket 129's cases); never sends a guess | 2: no Mirror text; Conflicts never guessed | 2 (was 1–2, before point 3 of `critiques.md`): unknown and partly understood parts kept in the tree, ticket 129's cases too; a reader bug loses data once and the round-trip check shows it; Mark Reconciliation checks the server's marks weekly; a Server Event Merge sends a guess, limited to title, Location, description and Unimplemented Fields |
 | Maintainability | 2: a new field goes into five places | 1 | **3**: a field goes into one place; a schema change touches schema, Store Check and an ADR |
-| Exception cases | 2: hashes, Sent Event Rows, Propagate's special cases, Dangerous Undo | 1: Join vs merge, Reference Snapshot moves, Tracking | 2: fewer, but new ones (below) |
+| Exception cases | 2: hashes, Sent Event Rows, Propagate's special cases, Dangerous Undo | 1: Join vs merge, Reference Snapshot moves, Tracking | 2: fewer, but new ones (below); point 2 removed about as many as it added |
 | UX, undo | 1–2: per Event, undoing later changes first, Dangerous Undo dialogs | 2 | **3**: Ctrl+Z only takes back the user's own changes; refusals name the later change |
-| UX, Conflicts | 2: never guesses, only the UID waits, but the colleague's change stays unseen until resolved | 1: one Conflict freezes the whole Calendar both ways | **2–3**: sync never stops, the server's version shows, but the user's edit leaves the grid |
+| UX, Conflicts | 2: never guesses, only the UID waits, but the colleague's change stays unseen until resolved | 1: one Conflict freezes the whole Calendar both ways | **3** (was 2–3): sync never stops; changes to different field groups are combined, with a toast and an Undo per Event; the user's edit leaves the grid only for the same group, the times against another group, or a series against one Occurrence |
 | Cost and risk to reach | **3**: exists, about 4,000 tested lines | n/a | 1: about 27 tickets replace tested code |
 
 **What the review concluded.** B is dominated by C: once an Undo was a Snapshot of its own, the server's line had no job left (point 2 of `critiques.md`). B's one remaining advantage, the Server's Pointer cross-checking the server's marks, is what point 1 below is about. C is better than A in storage, maintainability and undo, and weaker in data safety: points 3 and 5 of `critiques.md` and point 1 here close that gap.
 
 **After point 3 of `critiques.md` (2026-11-22).** On what FreeCal doesn't manage, C now keeps what A keeps, and also keeps it in ticket 129's cases, where A loses it; only a bug in the reader still loses data, once per bug and reported in the Log and the Event's details, where A loses nothing. The rest of the gap is the server's marks: point 1 here with point 5 of `critiques.md`. The check added one exception, a display-only mark beside the ETag; the other rows are unchanged.
 
-**C's exceptions, as the review counted them.** The server's form of FreeCal's own write replaces the sent row; `begin` is emptied when its Snapshot is dropped; the retention rule's conditions; the Mass-Change Guard reading origins; the Automatic Resolution as a Server Event Replacement plus a second Snapshot; `resolution` as the one state of sync outside the Calendar History; the First Sync modal, in memory and not undoable; Ctrl+Z stopping at a Snapshot spanning a read-only Calendar; calendar-level entries on "the first Exception"; two rules when both sides changed the Unimplemented Fields.
+**C's exceptions, as the review counted them.** The server's form of FreeCal's own write replaces the sent row; `begin` is emptied when its Snapshot is dropped; the retention rule's conditions; the Mass-Change Guard reading origins; the Automatic Resolution as a Server Event Replacement plus a second Snapshot (gone with point 2, which added zero-length Event Versions, the copy at a Server Event Replacement, the follow-ups' reference and the times as a group apart); `resolution` as the one state of sync outside the Calendar History; the First Sync modal, in memory and not undoable; Ctrl+Z stopping at a Snapshot spanning a read-only Calendar; calendar-level entries on "the first Exception"; two rules when both sides changed the Unimplemented Fields (gone with points 2 and 3).
 
 **Files to read.** `docs/adr/0017-*.md` to `0020-*.md`, `GLOSSARY.md` (Conflict, Resolution, Automatic Resolution, Server Intake, Server Event Replacement, Current-Version Mark, Snapshot, Calendar History), `.scratch/freecal-v1/spec.md`, `.scratch/freecal-v1/critiques.md`, and the tickets named under each point. Older versions: `git show design/snapshot-tree:<file>`, `git show design/change-journal:<file>`.
 
@@ -52,7 +52,16 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 
 ---
 
-## 2. The Automatic Resolution is a modelling artifact → a server-only Event Version, and field-level merging
+## 2. The Automatic Resolution is a modelling artifact → a server-only Event Version, and field-level merging (decided: taken, as a zero-length Event Version and the Server Event Merge)
+
+**Outcome (2026-11-22).** Taken in this form, recorded in ADRs 0017 to 0020, `GLOSSARY.md`, the spec and tickets 21, 133, 135, 147, 152, 159, 167, 168 (now `168-server-event-merge.md`) and 171:
+
+- **The Incoming Sync Snapshot** (new term, replacing Server Intake) records every server version fetched. The server's version of an Event merged or in Conflict begins and ends with it, a **zero-length Event Version**, in no Snapshot's state, carrying the server's mark; an insert trigger allows that only at an Incoming Sync Snapshot.
+- After it, one Snapshot per Event: a **Server Event Merge** (new term, short form Merge) with the combination, sent and undoable alone, or a **Server Event Replacement** with a copy of the server's version, to which the mark moves. Each refers to its Incoming Sync Snapshot by a foreign key in the Snapshot table. The Automatic Resolution goes, with its Snapshot and its row of `resolution`.
+- **Field groups,** by default: the times (with time zone and rule), title, Location, description, Unimplemented Fields. The times combine only with the Unimplemented Fields; nothing combines across a Recurring Event and its Exceptions. One function names every managed field's group. The same rule decides an Undo, which settles **point 3**: Unimplemented Fields changed on both sides are a Conflict, or refuse the Undo.
+- A toast after an Incoming Sync with Merges ("Undo" for one, "Show" for several); an Event's History shows the zero-length row before a Merge as "on the server, before combining".
+- Rejected (in ADR 0019's Considered Options): G with a flag; two lines, which check nothing against the server; the combination inside the Incoming Sync Snapshot, which can't be undone per Event; every group combining freely; opt-in merging.
+- The cost named: a Server Event Merge sends a guess, against ADR 0019's reason for taking the server's version, so the groups were narrowed.
 
 **Critique.** The user changes an Event's title and a colleague adds an alarm. Nobody would call that a Conflict, yet ADR 0019 makes a Conflict, a Server Event Replacement Snapshot, an Automatic Resolution Snapshot and a row of `resolution` for it. The reason is a storage one (`critiques.md`, point 2, "Settled with the prototype"): the server's mark needs a row holding exactly the server's content, and the combined version isn't that. The Calendar History then shows "replaced by the server's version" and "Automatic Resolution" for an ordinary concurrent change.
 
@@ -68,7 +77,7 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 
 ---
 
-## 3. Two rules when both sides changed the Unimplemented Fields → one rule
+## 3. Two rules when both sides changed the Unimplemented Fields → one rule (decided with point 2: one rule by field groups, both changed is a Conflict or a refused Undo)
 
 **Critique.** ADR 0017 ("Part of the version") and ADR 0020 ("Where both changed"): in an Automatic Resolution the server's Unimplemented Fields win, in an Undo the current version's. That is two rules for one situation, against `CLAUDE.md`'s "one rule for every case", and no ADR gives the reason.
 
