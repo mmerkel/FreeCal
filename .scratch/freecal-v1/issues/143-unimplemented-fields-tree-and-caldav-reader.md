@@ -13,6 +13,8 @@
   - `SEQUENCE`, as an entry like any other (ADR 0017: written back unchanged until ticket 126);
   - what today's fields don't cover of the recurrence (`RDATE`, a second `RRULE`, `EXRULE`, `RANGE=THISANDFUTURE` on a recurrence ID), until tickets 73 to 75 make them managed fields;
   - what the resource holds at the calendar level, outside its Events, under one `ical:` name on the resource's single Event or Recurring Event, or, when it holds only Exceptions, on the Exception with the earliest Occurrence (ADR 0017 leaves "the first" open; this ticket fixes it).
+- **What the reader can't represent exactly** (ADR 0017, decided 2026-11-22): the reader consumes only what it represents exactly. Where it has a precise rule, that rule decides, and what the rule drops on purpose is listed in one place in the module, for the round-trip check (ticket 169) to accept. Anything else of a managed property it can't represent exactly goes into the tree whole, under the property's name: a second `DESCRIPTION` or `DTSTART`, a value form FreeCal doesn't model. Ticket 149 drops it on an edit of that field.
+- **RFC violations** the reader notices while reading (a second `RRULE`, a missing `DTSTAMP`, a `DTEND` before `DTSTART`) are returned with the result for the caller to write to the Log; no separate validator.
 - **What doesn't:** the values of managed properties; `DTSTAMP` and `LAST-MODIFIED`; time zone definitions; at the calendar level, what the writer sets itself (`VERSION`, `PRODID`, `CALSCALE` when it is the default).
 - **Untrusted content:** the tree is server data. It is never shown and never crosses the core interface. The reader keeps the limits the reading of a resource has today, and a resource it can't read is refused whole, as now.
 - The patching writer and the Mirror's text are untouched by this ticket.
@@ -28,6 +30,8 @@ Spec: "Local Store"; "Untrusted content". ADR 0017.
 - [ ] The tree type with serde, in a module named after Unimplemented Fields
 - [ ] Canonical form: tests feed the same content in different order, folding, case and line endings and get equal serialised forms; content that differs gives different forms
 - [ ] The reader gives managed fields and tree from one pass over a `VEVENT`
+- [ ] A duplicate managed property and a value form FreeCal doesn't model go into the tree whole; what a precise rule drops is in the module's one list
+- [ ] The RFC violations the reader notices are returned with its result
 - [ ] Tests cover every kind of property value, parameter (quoted, several values, `X-`) and component (alarm, nested, unknown), unknown parameters on each managed property, and calendar-level content in a resource with a Recurring Event, with a single Event, and with Exceptions only
 - [ ] The texts in `core/src/sync/caldav/resource/tests.rs` that the patching writer is tested with are read without loss: a test lists, for each, what the reader left out, and the list holds only what "What doesn't" names
 

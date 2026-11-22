@@ -30,3 +30,4 @@ Spec: "Local Store"; "Untrusted content". ADR 0017.
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Second half of what was proposed as one ticket (L); the reader is ticket 143.
 - 2026-11-16: `SEQUENCE` decided by the user: kept as an entry and written back unchanged until the attendee features (ticket 126); ADR 0017 has the line.
+- 2026-11-22: Ticket 169 uses this writer at fetch time, in memory, to check that the reader lost nothing; ticket 170 runs the same check over a corpus of real servers' texts.

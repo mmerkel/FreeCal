@@ -2,7 +2,7 @@
 
 A review of 2026-11-21 compared the branch's ADRs 0017 to 0020 with the design they replace (ADRs 0009, 0014 and 0015, as on `main`). Each numbered point below is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** points 1 and 2 are decided, and their outcomes recorded below each; point 3 is next, in a session of its own; points 4 and 5 are open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
+**Status (2026-11-22):** points 1, 2 and 3 are decided, and their outcomes recorded below each; points 4 and 5 are open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
 
 A second review of 2026-11-22, after points 1 and 2, is in `.scratch/freecal-v1/critiques-2.md`: it compares `design/change-journal`, `design/snapshot-tree` and the branch, and adds points of its own. Its findings on points 3 and 5 are added below, under "Second review".
 
@@ -131,7 +131,7 @@ Reworded after it: the spec ("Sync engine", "Calendar History", US-33, US-73, US
 
 ---
 
-## 3. Losing the server's text risks losing data → keep the raw text as a write guard (open: next, in a session of its own)
+## 3. Losing the server's text risks losing data → keep the raw text as a write guard (decided: a robust reader and a round-trip check that reports, not guards)
 
 **Critique.** ADR 0017: the Mirror's text and the patching writer go; a writer builds each Server Object from Event Versions alone. On `main`, a property the reader didn't understand survived every write. On the branch, anything the reader fails to carry into the tree of Unimplemented Fields is lost at the next write of that Event (ADR 0017, Consequences). The only mitigation is "the reader's tests must cover every kind of property, parameter and component". Servers produce more variety than tests do, and the loss is silent and reaches other clients.
 
@@ -145,6 +145,21 @@ Reworded after it: the spec ("Sync engine", "Calendar History", US-33, US-73, US
 **Affected if taken.** ADR 0017 (Consequences, Considered Options), ADR 0019 ("Server Objects"), tickets 143, 144, 149; the Store Check if a mark is stored.
 
 **Second review** (`critiques-2.md`). This is the place where the branch is clearly less safe than `main`, and the review recommends the lighter variant: the round-trip check at fetch time, nothing stored, and a Server Object that fails it treated like an unreadable one (its Events shown, its writes waiting, a Log line). Settle it before tickets 143, 144 and 149 start. Strongest con: one gap in the reader makes a whole UID's edits wait until FreeCal is updated.
+
+**Outcome (grilling of 2026-11-22): the cause fixed in the reader, the rest detected, nothing guarded.**
+
+- **Why the check runs on reading.** The danger is a gap in the reader, and a gap drops the part from the managed fields and the tree alike, so only the server's text shows it. A check at write time has only the Event Version: `reader(writer(version))` tests the writer (ticket 144), never the reader. The check also needs no extra request: it runs on the text the fetch brought in.
+- **The reader's rule** (ADR 0017, "What the reader can't represent exactly"; ticket 143). It consumes only what it represents exactly. A precise rule wins where it has one, with its deliberate drops listed. Anything else of a managed property goes into the tree whole and is dropped by an edit of that field, as unknown parameters already were. Unknown properties and components already went into the tree. The reader logs the RFC violations it notices, with no separate validator.
+- **The round-trip check at fetch** (ADR 0017, "The round-trip check"; ticket 169). The two texts are compared after a plain parse. Layout and what the writer sets fresh are ignored, a managed value may be normalised when the reader reads the same field from both, and listed drops are accepted. Anything else is a Log line naming the parts (names, not values) and a display-only mark beside the ETag in the CalDAV table, written with the ETag on every fetch (not with Event Version rows: a version whose only change is a lost part reads as the same Event Version and adds no row). The Event's details say: "FreeCal couldn't read everything in this event. Changing it here may remove data that other apps stored in it." CalDAV now, Google's JSON with its reader; no check on imports and ICS feeds.
+- **Rejected**, in ADR 0017's Considered Options:
+  - The guard, which makes a failing Server Object read-only. It would be the one lasting per-Event read-only reason, as "has guests" goes with the attendee features, with three exceptions behind it: whole-UID delete allowed but not a scoped one; no Automatic Resolution or restore in a Conflict; re-checking after an update. Its case is rare once the reader's rule holds. It stays possible if the Log shows real losses.
+  - Storing the text.
+  - Patching the remainder into the stored text: it doesn't travel with the Event, stays outside the Calendar History, and a stale remainder can contradict an edit.
+  - A toast at fetch time.
+- **Strongest con:** a reader bug still deletes another client's data on the server, once per bug before it is seen and fixed.
+- **Added:** ticket 170, a scrubbed corpus of real servers' texts through the same check in the tests (the user collects, an agent tests and fixes). For v2.0: keeping a failing resource's text for a bug report (`.scratch/freecal-v2/`).
+
+Reworded: ADR 0017 (two new paragraphs, Considered Options, Consequences), the spec ("Event details", the tests), tickets 143, 149, comments on 144 and 163, new tickets 169 and 170. No new terms.
 
 ---
 

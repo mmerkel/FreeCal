@@ -2,7 +2,7 @@
 
 A second review of 2026-11-22 compared the documents (`GLOSSARY.md`, ADRs, spec, tickets) of three versions: `design/change-journal` (`main` at `4857548`, ADRs 0009, 0014, 0015), `design/snapshot-tree` (`e7b3e45`, ADRs 0017 to 0020 as a tree with two pointers) and the branch at `2f24150` (ADRs 0017 to 0020 as one line of Snapshots with the server's marks). It follows the first review, `.scratch/freecal-v1/critiques.md`, and uses the same form: each numbered point is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** all points open. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
+**Status (2026-11-22):** all points open; the scorecard is updated for point 3 of `critiques.md`, decided since. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
 
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
@@ -20,7 +20,7 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 |---|---|---|---|
 | Code quality, conceptual economy | 2: five stores kept in step | 1: most concepts (two pointers, Reference Snapshot, Tracking, Join vs merge, Snapshot Transitions, link table) | **3**: one table of Event Versions, the rest derived |
 | Robustness: invariants enforced | 2: Write Permissions, a Conflict rule run on every write | 2: strong schema, marks derived from pointers | **3**: Event Versions that never change, unique indexes, foreign keys, the Store Check |
-| Robustness: data safety | **3**: the Mirror's text keeps what FreeCal doesn't understand (except ticket 129's cases) | 2: no Mirror text; Conflicts never guessed | 1–2: no Mirror text, nothing cross-checks the server's marks |
+| Robustness: data safety | **3**: the Mirror's text keeps what FreeCal doesn't understand (except ticket 129's cases) | 2: no Mirror text; Conflicts never guessed | 2 (was 1–2, before point 3 of `critiques.md`): unknown and partly understood parts kept in the tree, ticket 129's cases too; a reader bug loses data once and the round-trip check shows it; nothing cross-checks the server's marks yet |
 | Maintainability | 2: a new field goes into five places | 1 | **3**: a field goes into one place; a schema change touches schema, Store Check and an ADR |
 | Exception cases | 2: hashes, Sent Event Rows, Propagate's special cases, Dangerous Undo | 1: Join vs merge, Reference Snapshot moves, Tracking | 2: fewer, but new ones (below) |
 | UX, undo | 1–2: per Event, undoing later changes first, Dangerous Undo dialogs | 2 | **3**: Ctrl+Z only takes back the user's own changes; refusals name the later change |
@@ -28,6 +28,8 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 | Cost and risk to reach | **3**: exists, about 4,000 tested lines | n/a | 1: about 27 tickets replace tested code |
 
 **What the review concluded.** B is dominated by C: once an Undo was a Snapshot of its own, the server's line had no job left (point 2 of `critiques.md`). B's one remaining advantage, the Server's Pointer cross-checking the server's marks, is what point 1 below is about. C is better than A in storage, maintainability and undo, and weaker in data safety: points 3 and 5 of `critiques.md` and point 1 here close that gap.
+
+**After point 3 of `critiques.md` (2026-11-22).** On what FreeCal doesn't manage, C now keeps what A keeps, and also keeps it in ticket 129's cases, where A loses it; only a bug in the reader still loses data, once per bug and reported in the Log and the Event's details, where A loses nothing. The rest of the gap is the server's marks: point 1 here with point 5 of `critiques.md`. The check added one exception, a display-only mark beside the ETag; the other rows are unchanged.
 
 **C's exceptions, as the review counted them.** The server's form of FreeCal's own write replaces the sent row; `begin` is emptied when its Snapshot is dropped; the retention rule's conditions; the Mass-Change Guard reading origins; the Automatic Resolution as a Server Event Replacement plus a second Snapshot; `resolution` as the one state of sync outside the Calendar History; the First Sync modal, in memory and not undoable; Ctrl+Z stopping at a Snapshot spanning a read-only Calendar; calendar-level entries on "the first Exception"; two rules when both sides changed the Unimplemented Fields.
 

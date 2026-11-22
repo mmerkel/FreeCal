@@ -31,3 +31,4 @@ Spec: "Local Store"; "Untrusted content"; "Provider interface". ADR 0017 ("The f
 
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Ticket 25 was re-sized to XL and split under the M cap into 163 (this reader), 164 (the Account) and 25 (the Calendars and their sync). The triage listed two parts; the Account's login and the Calendars' sync together were above M, so there are three.
+- 2026-11-22: ADR 0017 now has a round-trip check at fetch (ticket 169 for CalDAV): Google's reader gets the same check on its JSON, with the same Log line and mark. It is part of this ticket or of ticket 25, whichever fetches; to decide when either is next.
