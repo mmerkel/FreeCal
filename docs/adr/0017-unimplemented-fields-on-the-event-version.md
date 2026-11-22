@@ -33,6 +33,6 @@ A move or an import into a Calendar carries the neutral entries and those with a
 - A field can have three homes over its life: a format's name, a neutral name, a column. Each change is a migration over all Event Versions.
 - Neutral names are a second schema that SQL can't check. Whether a name is truly neutral shows only once Google's reader exists; with three Providers each neutral name needs three converters.
 - An edit of a managed field silently drops that property's unknown parameters, such as the `LANGUAGE` of a title.
-- An undo can take back another client's change to an alarm, and after a merge in which the server's Unimplemented Fields won, an undo may not bring an older alarm back.
+- An undo can take back another client's change to an alarm, and after an Automatic Resolution in which the server's Unimplemented Fields won, an undo may not bring an older alarm back.
 - Changes made on a server to fields the user can't see appear in the Calendar History as changes.
 - Which Exception is "the first" is arbitrary, and the calendar-level entries move when that Exception is deleted.

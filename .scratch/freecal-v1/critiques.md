@@ -2,6 +2,8 @@
 
 A review of 2026-11-21 compared the branch's ADRs 0017 to 0020 with the design they replace (ADRs 0009, 0014 and 0015, as on `main`). Each numbered point below is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
+**Status (2026-11-22):** points 1 and 2 are decided, and their outcomes recorded below each; point 3 is next, in a session of its own; points 4 and 5 are open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
+
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
 ## Shared context
@@ -114,9 +116,20 @@ Reworded: ADRs 0018, 0019 and 0020 (now `0020-undo-is-a-snapshot.md`), the spec 
 
 Terms: Server Intake, Server Event Replacement added; Conflict, Resolution, Snapshot, Calendar History, Current-Version Mark, Last Agreed Version reworded; Join, User's Pointer, Server's Pointer, Reference Snapshot, Tracking, Snapshot Transition and merge removed.
 
+**Settled with the prototype reworked to the line (commit `2a4bbe6`, 2026-11-22).** Playing the line model through found five gaps; each is now decided in ADRs 0017 to 0020 and `GLOSSARY.md`.
+
+- **A Conflict is any Event changed differently on both sides,** whatever the fields. Before, both sides changing only the Unimplemented Fields raised no Conflict, and a change to the managed fields on one side and to the Unimplemented Fields on the other was combined in the Server Intake. That combined version is one the server doesn't hold, so the server's mark had no row to sit on (walkthrough 14). Now the Server Event Replacement puts the server's version in place, with the server's mark, and where the managed fields changed on at most one side an **Automatic Resolution** (new term, agreed) ends the Conflict at once: a Snapshot of its own after the replacement, with its row of `resolution`, the managed fields from the side that changed them and the Unimplemented Fields from the side that changed them, the server's if both did. Its version differs from the server's mark and is sent like any change. No badge, bar or notification: the Conflict is resolved. Glossary: Conflict and Resolution reworded, Automatic Resolution added.
+- **Undo combines the same way.** An Event changed since on both sides is no longer always refused: where the managed fields changed on at most one side, the Undo combines them as an Automatic Resolution does, the current version's Unimplemented Fields winning if both changed them, with no extra Snapshot. Otherwise it is refused as before.
+- **Dropping keeps open Conflicts and what a kept Undo takes back.** An Event Version that a Server Event Replacement without a Resolution ended isn't dropped, so an open Conflict always has its User's Version. An Undo refers to the Snapshot it takes back with `ON DELETE RESTRICT`, so that Snapshot stays as long as the Undo does (the prototype showed an Undo, kept by a row with the server's mark, outliving what it took back). This reverses the agreement of the same day in ticket 148 that such an Undo loses its reference.
+- **A Resolution names no Snapshot exactly when the server's version was kept,** enforced by a CHECK on `resolution`.
+- **Ctrl+Z and read-only Calendars:** Ctrl+Z passes over the Snapshots only in Calendars marked read-only and stops at one spanning such a Calendar and another, which is refused whole; the Calendar History shows both without "Undo", as an Undo that can only be refused offers no button. An Undo of only the writable Calendars' part was rejected again: it would need a "partly undone" state and turn a move into a copy.
+- In the prototype, alarms are `ical:` entries, as ADR 0017 names what is read from iCalendar text.
+
+Reworded after it: the spec ("Sync engine", "Calendar History", US-33, US-73, US-150, the tests, "Out of scope") and tickets 21, 133, 134, 135, 147, 148, 152, 159, 167 and the new 168 (the Automatic Resolution).
+
 ---
 
-## 3. Losing the server's text risks losing data → keep the raw text as a write guard
+## 3. Losing the server's text risks losing data → keep the raw text as a write guard (open: next, in a session of its own)
 
 **Critique.** ADR 0017: the Mirror's text and the patching writer go; a writer builds each Server Object from Event Versions alone. On `main`, a property the reader didn't understand survived every write. On the branch, anything the reader fails to carry into the tree of Unimplemented Fields is lost at the next write of that Event (ADR 0017, Consequences). The only mitigation is "the reader's tests must cover every kind of property, parameter and component". Servers produce more variety than tests do, and the loss is silent and reaches other clients.
 
