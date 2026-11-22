@@ -69,7 +69,7 @@ _Avoid_: Diagnostic log, debug log
 ## Sync
 
 **Conflict**:
-The state of an Event when a change made in FreeCal and a newer change on the server can't both be kept, so the user has to choose.
+An Event whose change made in FreeCal was replaced with a different change from the server, until the user resolves it. FreeCal shows the server's version meanwhile and keeps the user's.
 _Avoid_: Collision, sync error
 
 **Server Version**:
@@ -83,6 +83,10 @@ _Avoid_: Local version (Local is for Local Accounts and Calendars), mine, client
 **Last Agreed Version**:
 The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it. In a Conflict, what each side changed is shown against it.
 _Avoid_: Common version, common reference version, base version, ancestor, original
+
+**Resolution**:
+How the user ends a Conflict: keeping the server's version, restoring their own, or changing the Event again.
+_Avoid_: Merge, conflict decision
 
 **Unsent Change**:
 A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.
@@ -119,7 +123,7 @@ A Snapshot that takes back one earlier Snapshot: what that Snapshot changed goes
 _Avoid_: Reverting Undo, revert, rollback
 
 **Undo History**:
-What Ctrl+Z and Ctrl+Shift+Z step through, read from the Calendar History: for Ctrl+Z the user's own changes, imports and restores still in effect, newest first across all Calendars, passing over syncs; for Ctrl+Shift+Z the Undos still in effect, newest first, until the user's next change. A restart doesn't reset it.
+What Ctrl+Z and Ctrl+Shift+Z step through, read from the Calendar History: for Ctrl+Z the user's own changes, imports and restores still in effect, newest first across all Calendars, passing over what the server brought in; for Ctrl+Shift+Z the Undos still in effect, newest first, until the user's next change. A restart doesn't reset it.
 _Avoid_: Session Undo, undo stack, History (on its own: an Event's History)
 
 **Mass-Change Guard**:
@@ -135,11 +139,11 @@ The existing Calendar that one source of an import or a restore goes into: an `.
 _Avoid_: Association, mapping, destination
 
 **Snapshot**:
-The state of one Calendar's Events at one moment, as the Calendar History keeps it. An action of the user, an Undo, a sync or a merge makes a new one from the one or two it arose from. A step that changes several Calendars together, such as a move, is one Snapshot holding the state of each, arisen in each Calendar from one or two earlier ones. A Calendar's first Snapshot is the one it enters the Local Store with: its First Sync's, or an empty one for a Local Calendar. No Undo takes it back.
+The state of every Calendar's Events at one moment, as the Calendar History keeps it. Each change makes a new one from the one before: an action of the user, an import, a restore, an Undo, or what an Incoming Sync brings in. A step that changes several Calendars together, such as a move, is one Snapshot.
 _Avoid_: Commit, version (on its own), backup (a Backup is a file)
 
 **Calendar History**:
-The record of a Calendar's Snapshots and of how each arose from earlier ones, on the user's side and on the server's.
+The line of Snapshots of all Calendars together, each arisen from the one before.
 _Avoid_: History (on its own: an Event's History), undo history (the Undo History is what Ctrl+Z steps through), log
 
 ## Internals
@@ -166,37 +170,21 @@ _Avoid_: Opened event, full event
 What a server holds about one Event beyond the fields FreeCal manages, such as alarms, attachments, custom properties and unknown parameters. FreeCal keeps them without showing them.
 _Avoid_: Unknown fields, unmanaged fields, not-yet-implemented fields, server data (on its own)
 
-**User's Pointer**:
-The Snapshot holding a Calendar's Events as the user has them, which is what FreeCal shows.
-_Avoid_: Local pointer (Local is for Local Accounts and Calendars), HEAD, current snapshot
+**Server Intake**:
+A Snapshot in which an Incoming Sync takes in the server's changes that are in no Conflict, for one Calendar; a First Sync is one, from nothing. Ctrl+Z passes over it.
+_Avoid_: Join, pull, fetch (both name the Incoming Sync), merge
 
-**Server's Pointer**:
-The Snapshot holding a Calendar's Events as its server last had them.
-_Avoid_: Remote pointer, synced pointer
-
-**Snapshot Transition**:
-The change of one Calendar's Events from a parent Snapshot, or from nothing for a Calendar's first Snapshot, to a Snapshot. A Snapshot has one in each Calendar it spans, and two in a merge's Calendar, one per side. The Event Versions that begin and end with a Snapshot Transition are its links.
-_Avoid_: Step (one action can change several Calendars), edge, parent link, commit
-
-**Join**:
-A Snapshot that takes the server's changes into a Calendar's user's side when the two sides changed without a Conflict. Its only parent is the Snapshot the User's Pointer was on; the server's Snapshot is not a parent. Ctrl+Z passes over it.
-_Avoid_: Merge (a merge ends a Conflict and has both sides as parents), rebase
+**Server Event Replacement**:
+A Snapshot in which one Event in Conflict takes the Server Version in place of the User's Version. Its origin names the Last Agreed Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
+_Avoid_: Override (an Exception's name elsewhere), merge, auto-merge, resolution (the Resolution is the user's)
 
 **Current-Version Mark**:
-One of two marks on an Event Version, the user's and the server's, saying that it is the current version of its Event on that side: in the Snapshot the User's Pointer or the Server's Pointer names. An Event Version that both sides agree on has both.
+One of two marks on an Event Version, saying that it is the current version of its Event on that side. The user's is that the Event Version hasn't ended in the Calendar History; the server's is stored, and is FreeCal's record of what the server holds. An Event Version that both sides agree on has both.
 _Avoid_: Mark (on its own: a Status Mark is a badge, an Unsent Mark an hourglass), current flag, head
 
 **Store Check**:
 The function that asks a Local Store whether its stored invariants hold, each as a named query, and reports every violation. The tests run it; it is where those invariants are recorded.
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
-
-**Tracking**:
-The state of a Calendar whose user's side follows its server and whose server is brought to the user's side. A Calendar is Tracking exactly while it has no Conflict, which is while its Server's Pointer is on its Reference Snapshot; otherwise its Events stay as each side has them until a merge or a Join. The user can't turn it off, only end Conflicts.
-_Avoid_: Syncing (a Sync Status), paused (the Mass-Change Guard pauses), following (on its own: one direction)
-
-**Reference Snapshot**:
-The server's Snapshot that a Calendar's user's side last took in. It is always set; the Server's Pointer is on it while the Calendar is Tracking and has moved on from it while there is a Conflict. Both sides are compared with it; the Last Agreed Version of an Event in Conflict is read from it.
-_Avoid_: Merge base, last common Snapshot (by ancestry it can be an older one, after a Join), last sync (the pointers can stay apart while it moves)
 
 **Server Object**:
 What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
