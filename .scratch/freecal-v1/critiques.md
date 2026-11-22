@@ -4,6 +4,8 @@ A review of 2026-11-21 compared the branch's ADRs 0017 to 0020 with the design t
 
 **Status (2026-11-22):** points 1 and 2 are decided, and their outcomes recorded below each; point 3 is next, in a session of its own; points 4 and 5 are open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
 
+A second review of 2026-11-22, after points 1 and 2, is in `.scratch/freecal-v1/critiques-2.md`: it compares `design/change-journal`, `design/snapshot-tree` and the branch, and adds points of its own. Its findings on points 3 and 5 are added below, under "Second review".
+
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
 ## Shared context
@@ -142,6 +144,8 @@ Reworded after it: the spec ("Sync engine", "Calendar History", US-33, US-73, US
 
 **Affected if taken.** ADR 0017 (Consequences, Considered Options), ADR 0019 ("Server Objects"), tickets 143, 144, 149; the Store Check if a mark is stored.
 
+**Second review** (`critiques-2.md`). This is the place where the branch is clearly less safe than `main`, and the review recommends the lighter variant: the round-trip check at fetch time, nothing stored, and a Server Object that fails it treated like an unreadable one (its Events shown, its writes waiting, a Log line). Settle it before tickets 143, 144 and 149 start. Strongest con: one gap in the reader makes a whole UID's edits wait until FreeCal is updated.
+
 ---
 
 ## 4. The First Sync locks the window → staging table
@@ -170,3 +174,5 @@ Reworded after it: the spec ("Sync engine", "Calendar History", US-33, US-73, US
 **Questions to grill.** Which queries are cheap enough for every start or every Outgoing Sync? Pause only Outgoing Syncs, or the Calendar? What can the user do about it: report, restore a Backup? Is this a Sync Error, a Problem, or both?
 
 **Affected if taken.** ADR 0018 ("Where the invariants are recorded"), ADR 0019 (Sync Errors), spec sections on Sync Errors and Problems, `GLOSSARY.md` (Sync Error), a new ticket.
+
+**Second review** (`critiques-2.md`, point 1). The Store Check can't see the worst fault of derived intent: a server's mark on the user's version while the server holds something else, which sends nothing and shows no Unsent Mark. Point 1 there proposes reconciling the marks with a full fetch now and then; grill both points together, as the cheap subset before an Outgoing Sync and the reconciliation guard the same thing.
