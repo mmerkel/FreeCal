@@ -14,7 +14,7 @@ Spec: "Sync engine" (Tracking); "Calendar History" (undo while a Calendar has a 
 
 **Blocked by:** 133
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 **Effort:** S
 
@@ -29,3 +29,4 @@ Spec: "Sync engine" (Tracking); "Calendar History" (undo while a Calendar has a 
 - 2026-11-16: Rewritten from the triage against ADRs 0017 to 0020; kept as a ticket of its own, S. Ticket 133's rule and the Change Journal's write path are gone: this is ticket 152's comparison run at one more point. The result that told the window "this change ended a Conflict", and its toast "Conflict resolved", are dropped: the bar goes and the list says so (tickets 162, 137).
 - 2026-11-21: An undo that ends a Conflict leaves the Calendar Held during Undo until the redo path ends; typing the server's values ends it with a Join (grilling, ADR 0019).
 - 2026-11-21: Reworded from the grilling on critique 1 (`.scratch/freecal-v1/critiques.md`; ADR 0020 rewritten: undo makes an Undo Snapshot, both pointers only move forwards, Held during Undo goes). An Undo that ends a Conflict ends it with a Join, like any change.
+- 2026-11-22: `wontfix` after the grilling on critique 2 (ADR 0019 rewritten): Conflicts end at once with a Server Event Replacement, so no Calendar waits for a comparison, and the User's Pointer, the Reference Snapshot and Joins are gone. That a change of the user's to an Event in Conflict resolves it is now ticket 134's "changed again".

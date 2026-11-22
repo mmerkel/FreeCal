@@ -7,7 +7,7 @@
 - **A finished Calendar** appears in the sidebar at once, through "Calendars changed", behind the dialog, while the others still load.
 - **Cancel** stops those still running and keeps the finished ones; the dialog says which were added. When all have finished it offers "Close" instead, and closes by itself if none had a Sync Error.
 - **Retry** adds that Calendar again; its line starts from the beginning.
-- **It locks the window:** it is a modal `Dialog` like the others, without a ✕ while any First Sync runs, so that Cancel is the one way out; Escape does what Cancel does. The Window Dialogs' rule for which dialog may open over which covers it: a waiting import and the dialog for a Calendar that stopped Tracking (ticket 162) wait until it closes.
+- **It locks the window:** it is a modal `Dialog` like the others, without a ✕ while any First Sync runs, so that Cancel is the one way out; Escape does what Cancel does. The Window Dialogs' rule for which dialog may open over which covers it: a waiting import waits until it closes.
 - **Closing the window to the tray** keeps the First Syncs running, and the dialog is there when the window is shown again, as the window is hidden and not destroyed (ADR 0016). Quit from the tray ends them without a question: nothing but loading time is lost, and the Calendars are Available Calendars again.
 - **The Window Dialogs** (`src/lib/windowDialogs.svelte.ts`) hold the dialog's state; the fake core of the frontend tests gains the Signal.
 
@@ -31,3 +31,4 @@ Spec: US-5, US-6, US-152; "Adding server Calendars" under the frontend; "Signals
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Second of two parts (see ticket 155).
 - 2026-11-16: Decided by the user: the dialog is modal and locks the window (ADR 0018 and the spec changed with it), so the ticket is S. Its con, accepted: a large Calendar on a slow server locks the window for as long as it loads. No read of the running First Syncs is needed, as the window that started them is the one that shows them.
+- 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): the dialog for a Calendar that stopped Tracking is gone (ticket 162).

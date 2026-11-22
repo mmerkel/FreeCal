@@ -4,7 +4,7 @@
 
 - **Two Signals** feed the tray and the notifications inside the shell: "Conflicts changed" for Conflicts (ticket 133) and "Sync status changed" for Sync Errors. The spec's former "Problems changed" doesn't exist.
 - **Problem lines in the tray menu:** one per Calendar with Conflicts, with their number ("Work: 3 Conflicts"), and one per Sync Error, Conflicts first. At most 8 problem lines are listed; past that, a last line "n more…" opens the window. Choosing a Calendar's line opens the window at the Conflict list for that Calendar (ticket 137; until it is built, it opens the window). Choosing a Sync Error's line opens the window.
-- **Notifications for Conflicts** are per Calendar, not per Conflict: one when a Calendar stops Tracking its server ("“Work” isn't syncing: 3 Conflicts"), none for further Conflicts while it stays stopped, and one again when it stops anew after Tracking again. The shell sees that as the Calendar's number of Conflicts going from 0 to more; nothing is stored (as ticket 162 does in the window).
+- **Notifications for Conflicts** are per Calendar, not per Conflict: one when the server's version replaces changes of the user's ("“Work”: 3 of your changes were replaced by the server's"), none for further Conflicts until its open ones are resolved, and one again after that. The shell sees that as the Calendar's number of open Conflicts going from 0 to more; nothing is stored (as ticket 162 does in the window).
 - **An open window** follows the same two Signals: the Conflict bar and the Status Marks are tickets 162 and 161. This ticket checks that they show without a reopen.
 
 Spec: US-71, US-109, US-110, US-111; "Tray" and "Notifications" under Desktop interfaces; "Signals"; "Untrusted content".
@@ -17,7 +17,7 @@ Spec: US-71, US-109, US-110, US-111; "Tray" and "Notifications" under Desktop in
 
 - [ ] The tray icon follows the same overall status as the window indicator, driven by the same Signals inside the shell
 - [ ] The tray menu: Open FreeCal, Sync now, a line per Calendar with Conflicts (with their number) and per Sync Error, at most 8 and then "n more…", Quit; choosing a problem line opens the window at it
-- [ ] With the window closed, one notification per new Sync Error and one per Calendar that stops Tracking, none for its further Conflicts
+- [ ] With the window closed, one notification per new Sync Error and one per Calendar whose open Conflicts go from none to some, none for its further Conflicts
 - [ ] An open window shows new Conflicts and Sync Errors as soon as "Conflicts changed" or "Sync status changed" arrives
 - [ ] Tested with the recording fake tray and notifier
 - [ ] Tray labels escape `_` and notification bodies are escaped: problem lines and notifications naming a hostile Calendar name show it literally (checked with the recording fakes)
@@ -28,3 +28,4 @@ Spec: US-71, US-109, US-110, US-111; "Tray" and "Notifications" under Desktop in
 - 2026-11-09 (grilling of 133 to 137): the spec's "Problems changed" is now "Conflicts changed" (ticket 133), for Conflicts only; Sync Errors come with "Sync status changed". The tray and the notifications follow both, so the question in the comment above is settled.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. "Problems changed" is "Conflicts changed"; blocked by 16 and 133 (133 now has the list, not 134). The tray's lines and the notifications are per Calendar with Conflicts, as the spec's "Tray" and "Notifications" now read. The comment of 2026-10-25 is outdated: a resource holding a UID that a kept resource already holds is an Ignored Resource, written to the Log and not listed as a problem (ADR 0019).
 - 2026-11-21 (review with the user): the tray lists at most 8 problem lines, Conflicts first, then "n more…" opening the window, so that many Calendars with problems don't make the menu run off the screen. The number 8 is a proposal, open to change. Con: a problem past the eighth line is reached only through the window.
+- 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): Calendars no longer stop syncing; the notification says the server's version replaced changes, as in the spec.

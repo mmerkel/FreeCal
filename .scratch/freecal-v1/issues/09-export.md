@@ -2,7 +2,7 @@
 
 **What to build:** The user can export any Calendar to an `.ics` file, or export everything to a `.zip` with one `.ics` per Calendar organised by Account. While the export runs, a modal "Working…" dialog blocks the window.
 
-- **What is written:** a Calendar's Events as the user has them (the Event Versions at its User's Pointer), each with its managed fields and its Unimplemented Fields (ADR 0017). An exported Event keeps its alarms, its custom properties and whatever else FreeCal doesn't show. A Calendar with a Conflict exports the user's side.
+- **What is written:** a Calendar's Events as the user has them (its current Event Versions), each with its managed fields and its Unimplemented Fields (ADR 0017). An exported Event keeps its alarms, its custom properties and whatever else FreeCal doesn't show. An Event with an open Conflict exports the server's version, which FreeCal shows.
 - **One writer:** the text is built by ticket 144's writer, which builds a CalDAV resource from the same two parts. The export has no code of its own that builds iCalendar text. A Recurring Event and its Exceptions go through the writer together; one `.ics` holds all of a Calendar's Events with one set of time zone definitions.
 - **Which entries are written:** those under `ical:` names, as they are. No other entries exist yet: neutral names are written once ticket 163 assigns them, and Google's entries (`google:`, as `X-` properties) come with ticket 26.
 
@@ -29,3 +29,4 @@ Spec: US-91, US-92; "Import/export"; "Untrusted content". ADR 0017.
 - 2026-10-18 (from ticket 73): Once ticket 73 stores `RDATE`, export writes it back, in the same form as `EXDATE`.
 - 2026-10-18 (from tickets 74 and 75): Once stored, export writes back every `RRULE` and `EXRULE` of an Event (ticket 74) and the `RANGE=THISANDFUTURE` of an Exception (ticket 75).
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. Export writes through ticket 144's writer from the managed fields and the Unimplemented Fields, so it is also blocked by 144 and 149. The comments of 2026-10-18 from tickets 73, 74 and 75 ask for no code here any more: `RDATE`, further `RRULE`s, `EXRULE` and `RANGE=THISANDFUTURE` are Unimplemented Fields until those tickets manage them, and the writer writes them back either way. The one from ticket 07 (the form of `UNTIL`) is the writer's business.
+- 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): no User's Pointer; a Conflict no longer holds the user's side apart.

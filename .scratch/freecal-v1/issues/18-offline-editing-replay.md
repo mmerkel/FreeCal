@@ -8,7 +8,7 @@
 - **The dialog's reasons** are read from derived state, one per Calendar that still has unsent changes, the first that applies:
   - its Account is Offline, or has a Sync Error;
   - the Calendar is paused by the Mass-Change Guard (ticket 22's kind of Sync Error): needs attention;
-  - the Calendar has a Conflict, so it isn't Tracking and sends nothing (its number of Conflicts in the Sync Status, ticket 133): needs attention;
+  - the Calendar has an open Conflict, whose change was replaced by the server's version and waits for the user (its number of Conflicts in the Sync Status, ticket 133): needs attention;
   - the Calendar has another Sync Error;
   - otherwise "not sent yet", or "still sending" while its sync runs.
   The dialog says the changes will be sent at the next start, or, for a paused Calendar and one with a Conflict, that they need the user's attention. "Waiting for approval" is no reason any more: a paused Calendar is one.
@@ -59,3 +59,4 @@ Spec: US-131; "Quitting"; "Sync engine" (the Mass-Change Guard). ADR 0019.
     - Code names: `KeptUnsentChange` (an Unsent Change as read from the Local Store, untrusted), `UnsentChangeRow` (renamed test-only row), `UnsentAtQuit`, `QuitDialog`, `heldBackBy`, `notYetSyncedText`, `outlineDue`, `offlineAccounts`, `unsent_since`/`unsentSince`.
 - 2026-11-09 (review with the user): Batch, Session End, Quit Asked and Send Failure approved as code names, not added to `GLOSSARY.md`.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. Only the two quit-flow boxes remain, and the dialog's reasons are read from derived state. Blocked by 153 and 22 as agreed in the triage. Added while rewording: blocked by 133 as well, since the Conflict reason reads the number of Conflicts that 133 puts into the Sync Status. The comments above are history where they name `unsent_change`, Send Failures stored on it, the Sender's replay and the dashed outline.
+- 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): a Conflict no longer stops a Calendar from sending.

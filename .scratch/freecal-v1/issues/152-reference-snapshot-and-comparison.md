@@ -1,26 +1,25 @@
-# 152: The Reference Snapshot and the comparison of the two sides; Propagate goes
+# 152: The comparison against the server's marks; Server Intakes and Server Event Replacements; Propagate goes
 
-**What to build:** The one piece of code that compares a Calendar's two sides (ADR 0019), with the Reference Snapshot it compares them with. An Incoming Sync follows the server or takes its changes in by a Join, and a Conflict is held from here on: the Server's Pointer stays off the Reference Snapshot and nothing is sent. Propagate comes out. Reporting Conflicts to the window and ending them by the user's choice are tickets 133 and 134.
+**What to build:** An Incoming Sync compares what it fetched with the user's current versions and the server's marks (ADR 0019, rewritten 2026-11-22). What is in no Conflict goes into the Server Intake; each Event in Conflict gets a Server Event Replacement, in which it takes the Server Version. No Calendar stops syncing. Propagate comes out. Reporting Conflicts and the Resolution are tickets 133 and 134.
 
-- **The Reference Snapshot** is a column of the Calendar, set for every Calendar with a server from its First Sync on: the server's Snapshot the user's side last took in. It moves to the Server's Pointer when a comparison leaves no Conflict and when an Outgoing Sync records its outcome, and nowhere else.
-- **The comparison** is ticket 167's function, called with the user's Event Versions, the server's and those of the Reference Snapshot, the server's side winning in the Unimplemented Fields. Per Occurrence:
-  - only the server changed it: it follows the server;
+- **The comparison** is ticket 167's function, called per Occurrence with the fetched versions, the user's current ones and the ones with the server's mark (what the server held when FreeCal last looked), the server's side winning in the Unimplemented Fields:
+  - only the server changed it: it follows the server, in the Server Intake;
   - only the user changed it: it stays to be sent;
-  - both changed it to the same result: they agree, and the Join ends the user's row on the user's side and takes over the server's, so the Event Version is one row with both marks;
+  - both changed it to the same result: they agree, and the server's mark moves to the user's row;
   - both changed it differently: a Conflict.
-  A change to the Recurring Event itself counts as a change to every Occurrence. A deletion is a change. "Changed" compares content against the Reference Snapshot: the same row is unchanged, different rows are compared by canonical form, so an edit back to the Reference Snapshot's content is no change. The managed fields and the Unimplemented Fields are two parts: for the Unimplemented Fields, if only one side changed them that side's are taken, and if both did the server's win and no Conflict is raised.
-- **An Incoming Sync** does two steps in one Database Transaction, and no code may split them:
-  1. if the server's Events changed, the Server's Pointer moves to a new Snapshot holding the server's state (ticket 151); the Reference Snapshot stays;
-  2. if the Server's Pointer is off the Reference Snapshot, the comparison runs. With a Conflict left, nothing more happens. Otherwise the User's Pointer follows to the server's Snapshot if the user's side was on the Reference Snapshot, or else a Join takes the server's changes in: a new Snapshot whose only parent is the User's Pointer's Snapshot; then the Reference Snapshot moves to the Server's Pointer.
-  The second step runs on every Incoming Sync while the Server's Pointer is off the Reference Snapshot, also when the server changed nothing, so a Conflict the two sides no longer have ends with the next Incoming Sync. Running it after each move of the User's Pointer is ticket 138.
-- **An Outgoing Sync** needs the Server's Pointer on the Reference Snapshot and sends nothing otherwise. In ticket 151's glue, a send that records its outcome moves the Reference Snapshot to the Server's Pointer.
-- **Unsent Changes.** Glue until ticket 153, named: after the second step, the Calendar's Unsent Changes are set to the Combined Event Keys whose Event Version with the user's mark differs from the one with the server's, keeping the time and the reason of those that stay.
+  A change to the Recurring Event itself counts as a change to every Occurrence. A deletion is a change. "Changed" compares content: the same row is unchanged, different rows are compared by canonical form, so an edit back to what the server has is no change. For the Unimplemented Fields, if only one side changed them that side's are taken, and if both did the server's win and no Conflict is raised.
+- **An Incoming Sync** writes in one Database Transaction, and no code may split it:
+  1. a Server Intake with every change that is in no Conflict;
+  2. a Server Event Replacement per Event (Calendar and UID) in Conflict, one Snapshot each, in which that Event's versions take the Server Version, an edit against a deletion on the server too. Its origin names the Event Version that had the server's mark before the fetch, the Last Agreed Version, as a foreign key; it is empty where the UID wasn't on the server before;
+  3. the server's marks moved to the fetched versions, with their ETags.
+  A Server Intake or Server Event Replacement that would change nothing isn't made. Nothing is sent for a replacement.
+- **Dropping** (ticket 148) keeps an Event Version a Server Event Replacement names; its test comes here.
+- **Unsent Changes.** Glue until ticket 153, named: after the Incoming Sync, the Calendar's Unsent Changes are set to the Combined Event Keys whose current Event Version differs from the one with the server's mark, keeping the time and the reason of those that stay.
 - **What comes out:** Propagate and its special cases for Unsent Changes (`core/src/sync/`, `core/src/journal/mod.rs`'s successor), with the `GLOSSARY.md` entry Propagate a Server Object.
-- **Until ticket 133,** a Calendar with a Conflict shows nothing: it only stops sending and merging. That is acceptable between tickets, as no real Local Store exists.
-- **The Store Check** gains: the Reference Snapshot is the Server's Pointer's Snapshot or one it descends from; it is another one exactly while the comparison finds a Conflict.
-- **Tests,** through the core interface against Radicale and as unit tests of the comparison, one per line of this table and more: each of the four outcomes, for an edit, a creation and a deletion on either side; the Unimplemented Fields changed on one side and on both; a change to a Recurring Event against a change to one Occurrence; an Undo not yet sent followed by another change on the server to the same Event (a Conflict, as for any edit); a Join not yet sent followed by a second change on the server to the same Event (no Conflict: ADR 0019's reason for the Reference Snapshot); a merge not yet sent followed by a second change by someone else to the same Event (no Conflict); a Conflict that ends because the server came to agree.
+- **Until ticket 133,** a replacement shows nothing beyond the Server Version in the grid. That is acceptable between tickets, as no real Local Store exists.
+- **Tests,** through the core interface against Radicale and as unit tests of the comparison: each of the four outcomes, for an edit, a creation and a deletion on either side; the Unimplemented Fields changed on one side and on both; a change to a Recurring Event against a change to one Occurrence; an Undo not yet sent followed by another change on the server to the same Event (a Conflict, as for any edit); a Server Intake followed by a second change on the server to the same Event (no Conflict); two Events in Conflict in one Incoming Sync make two Server Event Replacements beside one Server Intake; an edit against a delete on the server makes the Event go; an Undo of a replacement restores the User's Version and sends it; the Mass-Change Guard doesn't count a replacement.
 
-Spec: US-73 to US-76; "Sync engine"; "Calendar History". ADRs 0017 ("Part of the version"), 0019 ("Whether the server changed", "Tracking and the Reference Snapshot", "An Incoming Sync", "The invariant", "Conflicts").
+Spec: US-73 to US-76; "Sync engine"; "Calendar History". ADRs 0017 ("Part of the version"), 0018, 0019 ("Whether the server changed", "An Incoming Sync", "The invariant", "Conflicts end at once").
 
 **Blocked by:** 151
 
@@ -28,19 +27,20 @@ Spec: US-73 to US-76; "Sync engine"; "Calendar History". ADRs 0017 ("Part of the
 
 **Effort:** M
 
-- [ ] The Reference Snapshot on the Calendar, set from the First Sync on, moved only by the comparison and by an Outgoing Sync's outcome
-- [ ] One function compares the two sides; no other code does
-- [ ] An Incoming Sync's two steps run in one Database Transaction: follow, Join, or hold a Conflict
+- [ ] One function compares; no other code does
+- [ ] An Incoming Sync writes its Server Intake, one Server Event Replacement per Event in Conflict and the moved server's marks in one Database Transaction
+- [ ] A Server Event Replacement names its Last Agreed Version by foreign key and sends nothing
 - [ ] After an Undo, an Incoming Sync takes the server's changes in at once, as after any change
-- [ ] While the Server's Pointer is off the Reference Snapshot, nothing is sent and Incoming Syncs keep moving the Server's Pointer
+- [ ] Ctrl+Z passes over Server Event Replacements; an Undo of one from the core restores the User's Version
 - [ ] The tests listed above
 - [ ] An edit back by hand (not undo) while the server changed the Event follows the server, with no Conflict
-- [ ] Both sides changing an Event to the same content ends with one row carrying both marks
+- [ ] Both sides changing an Event to the same content ends with the server's mark on the user's row
+- [ ] An Event Version named by a Server Event Replacement survives dropping
 - [ ] Propagate is gone from the code and `GLOSSARY.md`
-- [ ] The Store Check's two new queries, each with a test that breaks it by hand
 
 ## Comments
-- 2026-11-16: Written from the triage against ADRs 0017 to 0020. Second of four parts (see ticket 151). Every Conflict ticket (133 to 138, 21) builds on this one.
+- 2026-11-16: Written from the triage against ADRs 0017 to 0020. Second of four parts (see ticket 151). Every Conflict ticket (133 to 137, 21) builds on this one.
 - 2026-11-21: Decided in a grilling: every write makes a new row, also for content equal to an earlier one; only undo and redo bring a row back. Event Versions are compared same row first, then by canonical form; a side that takes over the other's version takes its row (ADR 0018, "Event Versions").
 - 2026-11-21: A Join with one parent replaces the merge of an Incoming Sync. While the User's Pointer has a redo path, the second step waits (Held during Undo); the comparison still runs. Store Check rule widened (grilling, ADR 0019).
 - 2026-11-21: Reworded from the grilling on critique 1 (`.scratch/freecal-v1/critiques.md`; ADR 0020 rewritten: undo makes an Undo Snapshot, both pointers only move forwards, Held during Undo goes). The comparison itself moved to ticket 167, which Undo needs first; the second step no longer waits for a redo path.
+- 2026-11-22: Rewritten from the grilling on critique 2 (ADR 0019 rewritten): the base of the comparison is the server's marks, not a Reference Snapshot; a Conflict ends at once with a Server Event Replacement instead of holding the Calendar; no Join. The comments above are history; the file name keeps the old title.

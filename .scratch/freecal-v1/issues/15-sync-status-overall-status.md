@@ -4,12 +4,12 @@
 
 Everything here is built except the overall status's Conflict. What the ticked boxes describe has since moved on, in other tickets:
 
-- **The overall status is Conflict** while any Calendar isn't Tracking its server, which is while it has a Conflict (ADR 0019). Ticket 133 reads that from the pointers and the Reference Snapshot, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 133.
+- **The overall status is Conflict** while any Calendar has an open Conflict (ADR 0019). Ticket 133 reads that from the Server Event Replacements without a Resolution, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 133.
 - **"Sync status changed"** for a Calendar carries whether it has unsent changes (no longer how many), its number of Conflicts, and how far a long sync has come. Ticket 161 changes the Signal; the count of Conflicts is filled by ticket 133.
 - **The first-sync marker** (`SyncStatus::Syncing { first_sync }`) goes with ticket 155: a Calendar is in the Local Store only once its First Sync has finished, and "First Sync progress" reports a running one.
 - **The sidebar** shows Status Marks and the Unsent Mark instead of text and a count (ticket 161).
 
-Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Tracking and the Reference Snapshot").
+Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Conflicts end at once").
 
 **Blocked by:** 133, 153
 
@@ -20,7 +20,7 @@ Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Tracking
 - [x] The core sends "Sync status changed" separately for Accounts and Calendars, carrying the new state, the time and outcome of the last finished sync, the number of unsent local changes, and a first-sync marker; the Local Account never sends it
 - [x] A network-level failure (DNS, connection refused, timeout) makes that Account Offline; an error response from the server is a Sync Error with a clear message, on the Account or Calendar where it happened
 - [x] Account-level states appear once on the Account row, not repeated on every Calendar
-- [ ] Overall status: Conflict (a Calendar isn't Tracking its server), else Sync Error, else Offline (at least one server Account and every server Account Offline), else Syncing, else Online and synced; correct with no server Accounts (ticked by ticket 133)
+- [ ] Overall status: Conflict (a Calendar has an open Conflict), else Sync Error, else Offline (at least one server Account and every server Account Offline), else Syncing, else Online and synced; correct with no server Accounts (ticked by ticket 133)
 - [x] "Syncing" is displayed only after a sync has run for about 1 second, or immediately if the user started it; the Signals are still sent straight away
 - [x] Component tests check that the indicator and sidebar markers follow "Sync status changed"
 
@@ -48,3 +48,4 @@ Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Tracking
 - 2026-11-07 (review with the user): Sync Record approved as a code name only, not added to `GLOSSARY.md`.
 - 2026-11-09: Ticket 20 was split; ticket 133 now feeds Conflicts into the overall status and ticks the box.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. The open box reads Tracking; the Signal's new fields are ticket 161's and the first-sync marker goes with ticket 155. Blocked by 153 as agreed in the triage. Added while rewording: blocked by 133 as well, since 133 ticks the only open box and nothing else is left here.
+- 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): Tracking is gone; Conflict means an open Conflict.
