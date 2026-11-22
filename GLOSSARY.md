@@ -69,7 +69,7 @@ _Avoid_: Diagnostic log, debug log
 ## Sync
 
 **Conflict**:
-An Event whose change made in FreeCal was replaced with a different change from the server, until the user resolves it. FreeCal shows the server's version meanwhile and keeps the user's.
+An Event changed differently in FreeCal and on the server. FreeCal takes the server's version. Where only one side changed the fields FreeCal shows, it combines both changes at once (an Automatic Resolution); otherwise the Conflict stays open until the user resolves it, showing the server's version and keeping the user's.
 _Avoid_: Collision, sync error
 
 **Server Version**:
@@ -85,8 +85,12 @@ The last Server Version that FreeCal and the server both held for one Calendar a
 _Avoid_: Common version, common reference version, base version, ancestor, original
 
 **Resolution**:
-How the user ends a Conflict: keeping the server's version, restoring their own, or changing the Event again.
+How a Conflict ends: by an Automatic Resolution, or by the user keeping the server's version, restoring their own, or changing the Event again.
 _Avoid_: Merge, conflict decision
+
+**Automatic Resolution**:
+The Resolution FreeCal makes at once when only one side changed the fields FreeCal shows: those come from the side that changed them, the fields it doesn't show from the server if it changed them.
+_Avoid_: Merge, auto-merge
 
 **Unsent Change**:
 A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.

@@ -349,31 +349,20 @@
         const fieldsOf = (v) => (v ? pick(v) : null);
         const current = (s, k) => s.versions.find((v) => keyOf(v) === k && v.end === null);
         const serverRow = (s, k) => s.versions.find((v) => keyOf(v) === k && v.server);
-        // A row that began and ended with the same Snapshot was never current on the user's side
-        // (see the finding in the Incoming Sync).
-        const userSide = (v) => !(v.begin !== null && v.begin === v.end);
         const versionAfter = (s, x, k) =>
           s.versions.find(
             (v) =>
-              keyOf(v) === k &&
-              userSide(v) &&
-              (v.begin === null || v.begin <= x) &&
-              (v.end === null || v.end > x),
+              keyOf(v) === k && (v.begin === null || v.begin <= x) && (v.end === null || v.end > x),
           );
         const versionBefore = (s, x, k) =>
           s.versions.find(
             (v) =>
-              keyOf(v) === k &&
-              userSide(v) &&
-              (v.begin === null || v.begin < x) &&
-              (v.end === null || v.end >= x),
+              keyOf(v) === k && (v.begin === null || v.begin < x) && (v.end === null || v.end >= x),
           );
         // The Events a Snapshot changed, and the Calendars it spans: read from the Event Versions
         // that begin or end with it. No table of its own.
         const keysOf = (s, x) => [
-          ...new Set(
-            s.versions.filter((v) => userSide(v) && (v.begin === x || v.end === x)).map(keyOf),
-          ),
+          ...new Set(s.versions.filter((v) => v.begin === x || v.end === x).map(keyOf)),
         ];
         const calsOf = (s, x) => [
           ...new Set(s.versions.filter((v) => v.begin === x || v.end === x).map((v) => v.cal)),
@@ -425,7 +414,7 @@
           return {
             key: R.key,
             lastAgreed: R.lastAgreed === null ? null : (row(s, R.lastAgreed) ?? 'dropped'),
-            yours: s.versions.find((v) => keyOf(v) === R.key && userSide(v) && v.end === R.id),
+            yours: s.versions.find((v) => keyOf(v) === R.key && v.end === R.id),
             servers: s.versions.find((v) => keyOf(v) === R.key && v.begin === R.id),
           };
         }
@@ -454,7 +443,7 @@
           const c = pick(fields);
           if (byFreeCal && srv.rewrites) {
             c.title = c.title.charAt(0).toUpperCase() + c.title.slice(1);
-            c.extra['caldav:x-server-note'] = 'added by the server';
+            c.extra['ical:x-server-note'] = 'added by the server';
           }
           srv.resources[uid] = {
             ...c,
@@ -629,11 +618,17 @@
               intake[k] = F;
               marks.push({ k, how: 'intake', F });
             } else {
+              // Changed on both sides to different content: a Conflict, whatever the fields.
+              // It ends at once with an Automatic Resolution where the managed fields changed on
+              // at most one side (ADR 0019).
               const r = merge3(Vf, U, F);
-              if (r.ok) {
-                intake[k] = r.result;
-                marks.push({ k, how: same(r.result, F) ? 'intake' : 'apart', F });
-              } else conflicts.push({ k, uid, F, lastAgreed: Vrow?.id ?? null });
+              conflicts.push({
+                k,
+                uid,
+                F,
+                lastAgreed: Vrow?.id ?? null,
+                auto: r.ok ? r.result : null,
+              });
             }
           }
           // 1. The Server Intake: the server's changes that are in no Conflict.
@@ -655,19 +650,6 @@
           for (const m of marks) {
             if (m.how === 'user') setServerMark(s, m.k, current(s, m.k).id);
             else if (m.how === 'intake') setServerMark(s, m.k, m.F ? I.begun[m.k] : null);
-            else {
-              // FINDING: your change and the server's were in different parts (managed fields
-              // against Unimplemented Fields), so your side gets a combination neither side held.
-              // The server's mark must be on what the server holds, a row that was never current
-              // on your side. ADR 0018 gives every row a begin and an end; the prototype writes
-              // both as the Intake.
-              const g = insertRow(s, m.k, m.F, I.id, I.id, true);
-              setServerMark(s, m.k, g.id);
-              say(
-                s,
-                `FINDING: ${split(m.k).uid} combines your change with the server's. The server holds neither your row nor the combination, so its mark goes on a new row ${V(g.id)} that never was current on your side: begin and end are both ${S(I.id)}, which "end after begin" refuses.`,
-              );
-            }
           }
           // 2. A Server Event Replacement per Event in Conflict, one Snapshot each.
           for (const c of conflicts) {
@@ -679,6 +661,18 @@
               { key: c.k, lastAgreed: c.lastAgreed },
             );
             setServerMark(s, c.k, c.F ? R.begun[c.k] : null);
+            if (c.auto) {
+              // 3. The Automatic Resolution: the combination on your side, to be sent.
+              const AR = commit(s, 'automatic', `Automatic Resolution: ${c.uid}`, {
+                [c.k]: c.auto,
+              });
+              s.resolutions.push({ replacement: R.id, how: 'automatic', by: AR.id });
+              say(
+                s,
+                `Conflict on ${c.uid}, ended at once: Server Event Replacement ${S(R.id)} takes the server's version (the server's mark goes there), then Automatic Resolution ${S(AR.id)} combines it with yours: the fields FreeCal shows from the side that changed them, the Unimplemented Fields the server's if both changed them. The combination is sent; a Resolution row names both.`,
+              );
+              continue;
+            }
             say(
               s,
               `Conflict on ${c.uid}: both sides changed it differently. Server Event Replacement ${S(R.id)} puts the server's version in place of yours (${c.F ? 'changed' : 'deleted'} on the server) and sends nothing. Your version stays in the Calendar History; the Conflict stays open until you resolve it.`,
@@ -723,7 +717,7 @@
         // The first Snapshot after x that changed the Event, to name it in the refusal.
         function laterChange(s, x, k) {
           const ids = s.versions
-            .filter((v) => keyOf(v) === k && userSide(v))
+            .filter((v) => keyOf(v) === k)
             .flatMap((v) => [v.begin, v.end])
             .filter((id) => id !== null && id > x.id);
           return snap(s, Math.min(...ids));
@@ -748,9 +742,9 @@
             const was = fieldsOf(versionAfter(s, x.id, k)),
               back = fieldsOf(versionBefore(s, x.id, k)),
               cur = fieldsOf(current(s, k));
-            // The comparison per Event: what x left is the base, the current version one side,
-            // the version x ended the other.
-            let r = merge3(was, cur, back);
+            // The comparison per Event: what x left is the base, the version x ended one side,
+            // the current version the other, which wins the Unimplemented Fields (ADR 0020).
+            let r = merge3(was, back, cur);
             if (!r.ok && both) r = { ok: true, result: back };
             if (!r.ok) blocked.push({ k, title: (was ?? cur ?? back).title });
             else changes[k] = r.result;
@@ -904,12 +898,25 @@
           const named = new Set(
             s.snapshots.filter((x) => x.origin === 'replacement').map((x) => x.lastAgreed),
           );
+          const open = new Set(openConflicts(s).map((x) => x.id));
           const goneV = s.versions.filter(
-            (v) => v.end !== null && old(v.end) && !v.server && !named.has(v.id),
+            (v) =>
+              v.end !== null && old(v.end) && !v.server && !named.has(v.id) && !open.has(v.end),
           );
           s.versions = s.versions.filter((v) => !goneV.includes(v));
           const ends = new Set(s.versions.map((v) => v.end));
-          const goneS = s.snapshots.filter((x) => old(x.id) && !ends.has(x.id)).map((x) => x.id);
+          // An Undo's takesBack is ON DELETE RESTRICT: what a kept Undo takes back stays.
+          const backs = (gone) =>
+            new Set(s.snapshots.filter((x) => !gone.has(x.id)).map((x) => x.takesBack));
+          let goneS = new Set(
+            s.snapshots.filter((x) => old(x.id) && !ends.has(x.id)).map((x) => x.id),
+          );
+          for (let n = -1; n !== goneS.size;) {
+            n = goneS.size;
+            const b = backs(goneS);
+            goneS = new Set([...goneS].filter((id) => !b.has(id)));
+          }
+          goneS = [...goneS];
           const openBefore = openConflicts(s).map((x) => x.id);
           s.snapshots = s.snapshots.filter((x) => !goneS.includes(x.id));
           for (const v of s.versions) if (goneS.includes(v.begin)) v.begin = null; // ON DELETE SET NULL
@@ -1018,6 +1025,20 @@
                 .map((x) => S(x.id)),
           );
           check(
+            'resolution-snapshot-unless-kept',
+            "A Resolution names no Snapshot exactly when the server's version was kept. (A CHECK.)",
+            '0019',
+            () =>
+              s.resolutions
+                .filter((r) => (r.by === null) !== (r.how === "kept the server's version"))
+                .map((r) => `Resolution of ${S(r.replacement)}`),
+          );
+          check('open-conflicts-kept', 'The row an open Conflict replaced is kept.', '0018', () =>
+            openConflicts(s)
+              .filter((x) => !s.versions.some((v) => v.end === x.id))
+              .map((x) => S(x.id)),
+          );
+          check(
             'one-resolution-per-replacement',
             'A Server Event Replacement has at most one Resolution.',
             '0019',
@@ -1078,7 +1099,7 @@
           serverStore(
             s,
             'dentist',
-            { title: 'Dentist', time: '14:00', extra: { 'caldav:alarm': '30 min before' } },
+            { title: 'Dentist', time: '14:00', extra: { 'ical:alarm': '30 min before' } },
             false,
           );
           const res = s.server.resources;
@@ -1143,7 +1164,6 @@
           ctrlZTarget,
           redoTarget,
           newestFirst,
-          userSide,
         };
       })();
     </script>
@@ -1470,22 +1490,20 @@
         },
         {
           id: 'parts',
-          title: "14. Finding: your title, the server's alarm",
+          title: "14. Your title, the server's alarm: an Automatic Resolution",
           intro:
-            "You rename Standup; someone else adds an alarm (an Unimplemented Field). The comparison treats them as two parts, so there is no Conflict. But where does the server's mark go?",
+            'You rename Standup; someone else adds an alarm (an Unimplemented Field). Both sides changed the Event, so it is a Conflict; only you changed the fields FreeCal shows, so it ends at once.',
           steps: [
             rename('Standup (daily)'),
             step('Someone else adds an alarm to Standup', {
               type: 'otherEdit',
               uid: 'standup',
-              extra: { 'caldav:alarm': '10 min before' },
+              extra: { 'ical:alarm': '10 min before' },
             }),
             sync(
-              'FINDING: your side gets your title with the server\'s alarm, a version neither side held. The server holds the old title with the alarm: that row was never current on your side, so the prototype gives it begin = end = the Intake, and "end after begin" fails. ADR 0018 needs a rule for such rows.',
+              "A Server Event Replacement puts the server's version (old title, alarm) in place, with the server's mark; an Automatic Resolution then gives your title with the alarm. No bar: the Conflict is resolved.",
             ),
-            send(
-              "The combination is sent; the server's mark moves to your row. The odd row stays until it is dropped.",
-            ),
+            send("The combination is sent; the server's mark moves to your row."),
           ],
         },
         {
@@ -1520,9 +1538,9 @@
         },
         {
           id: 'drop',
-          title: '16. Finding: dropping after 90 days',
+          title: '16. Dropping keeps what an Undo takes back',
           intro:
-            "Snapshots older than 90 days are dropped, unless a kept Event Version ended with them. A row with the server's mark is kept however old, and so is the Snapshot it ended. Can an Undo outlive the Snapshot it takes back?",
+            "Snapshots older than 90 days are dropped, unless a kept Event Version ended with them or a kept Undo takes them back. A row with the server's mark is kept however old, and so is the Snapshot it ended.",
           steps: [
             rename('Standup (daily)'),
             send("The server's mark is on your row, which began with S2."),
@@ -1537,15 +1555,14 @@
             days(30),
             days(
               30,
-              "FINDING: S2 is dropped, as the only row it ended (the First Sync's) is gone. S3 is kept, as the row with the server's mark ended with it. S3 now takes back a Snapshot that is gone: \"undo-takes-back-an-older-kept-snapshot\" fails, and the Calendar History can't name what S3 undid. ADR 0018 gives the reference from an Undo to what it takes back no rule (ON DELETE SET NULL, RESTRICT, or keep the target).",
+              "S1 and its row go; S2 stays, as S3, kept by the row with the server's mark, takes it back (ON DELETE RESTRICT). The Calendar History can still name what S3 undid.",
             ),
           ],
         },
         {
           id: 'drop-open',
           title: '17. An open Conflict after 90 days',
-          intro:
-            'A Conflict you never resolve: what happens when its Server Event Replacement is dropped?',
+          intro: 'A Conflict you never resolve: is it dropped after 90 days?',
           steps: [
             rename('Standup (mine)'),
             theyRename('Standup (theirs)'),
@@ -1555,7 +1572,7 @@
             days(30),
             days(
               30,
-              "Your version ended with S3 more than 90 days ago and has no server's mark: dropped, and with it S3, the open Conflict and its bar. The Last Agreed Version is kept one round longer, as S3 named it. Is a silently vanishing Conflict what ADR 0019 wants?",
+              'Only S1 goes. Your version ended with S3, a Server Event Replacement without a Resolution, so it is kept, and with it S3, the open Conflict and its bar.',
             ),
           ],
         },
@@ -1634,7 +1651,7 @@
             Object.entries(v.extra)
               .map(
                 ([k, x]) =>
-                  ` <span class="tag" title="Unimplemented Field">${esc(k.replace('caldav:', ''))}: ${esc(x)}</span>`,
+                  ` <span class="tag" title="Unimplemented Field">${esc(k.replace(/^ical:/, ''))}: ${esc(x)}</span>`,
               )
               .join('')
           : '<span class="muted">(deleted)</span>';
@@ -1644,6 +1661,7 @@
         'first sync': 'First Sync (a Server Intake)',
         intake: 'Server Intake',
         replacement: 'Server Event Replacement',
+        automatic: 'Automatic Resolution',
         user: 'your change',
         'stop waiting': 'your change',
         undo: 'Undo',
@@ -1754,8 +1772,8 @@
                       type: 'otherEdit',
                       uid,
                       extra: {
-                        'caldav:alarm':
-                          res[uid].extra['caldav:alarm'] === '10 min before'
+                        'ical:alarm':
+                          res[uid].extra['ical:alarm'] === '10 min before'
                             ? '1 hour before'
                             : '10 min before',
                       },
@@ -1857,18 +1875,9 @@
               const effect = H.inEffect(s, x.id);
               const ch =
                 s.versions
-                  .filter((v) => v.end === x.id && H.userSide(v))
+                  .filter((v) => v.end === x.id)
                   .map((v) => '− ' + short(v))
-                  .concat(
-                    s.versions
-                      .filter((v) => v.begin === x.id && H.userSide(v))
-                      .map((v) => '+ ' + short(v)),
-                  )
-                  .concat(
-                    s.versions
-                      .filter((v) => !H.userSide(v) && v.begin === x.id)
-                      .map((v) => "server's mark only: " + short(v)),
-                  )
+                  .concat(s.versions.filter((v) => v.begin === x.id).map((v) => '+ ' + short(v)))
                   .map(esc)
                   .join('<br>') || '<span class="muted">(its rows are dropped)</span>';
               const kind =
