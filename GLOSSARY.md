@@ -179,8 +179,12 @@ A Snapshot in which an Incoming Sync takes in the server's changes that are in n
 _Avoid_: Join, pull, fetch (both name the Incoming Sync), merge
 
 **Full Fetch**:
-An Incoming Sync that fetches every resource of a Calendar and compares it with the versions carrying the server's mark, because no sync token or ETags say what changed: a First Sync, one after the server reset its sync token, and every Incoming Sync of a server without ETags.
+An Incoming Sync that fetches every resource of a Calendar and compares it with the versions carrying the server's mark, because no sync token or ETags say what changed: a First Sync, one after the server reset its sync token, and every Incoming Sync of a server without ETags; also a Mark Reconciliation.
 _Avoid_: Initial load, resync, full sync
+
+**Mark Reconciliation**:
+A Full Fetch run because a Calendar's last Full Fetch is more than a week old, to check the server's Current-Version Marks against what the server holds.
+_Avoid_: Resync, consistency check, audit
 
 **Server Event Replacement**:
 A Snapshot in which one Event in Conflict takes the Server Version in place of the User's Version. Its origin names the Last Agreed Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
@@ -191,7 +195,7 @@ One of two marks on an Event Version, saying that it is the current version of i
 _Avoid_: Mark (on its own: a Status Mark is a badge, an Unsent Mark an hourglass), current flag, head
 
 **Store Check**:
-The function that asks a Local Store whether its stored invariants hold, each as a named query, and reports every violation. The tests run it; it is where those invariants are recorded.
+The function that asks a Local Store whether its stored invariants hold, each as a named query, and reports every violation. The tests run it, and debug builds after every write to the Calendar History; it is where those invariants are recorded.
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
 
 **Server Object**:

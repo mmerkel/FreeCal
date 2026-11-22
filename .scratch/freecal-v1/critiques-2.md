@@ -2,7 +2,7 @@
 
 A second review of 2026-11-22 compared the documents (`GLOSSARY.md`, ADRs, spec, tickets) of three versions: `design/change-journal` (`main` at `4857548`, ADRs 0009, 0014, 0015), `design/snapshot-tree` (`e7b3e45`, ADRs 0017 to 0020 as a tree with two pointers) and the branch at `2f24150` (ADRs 0017 to 0020 as one line of Snapshots with the server's marks). It follows the first review, `.scratch/freecal-v1/critiques.md`, and uses the same form: each numbered point is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** all points open; the scorecard is updated for point 3 of `critiques.md`, decided since. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
+**Status (2026-11-22):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); the rest open; the scorecard is updated for point 3 of `critiques.md`, decided since. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
 
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
@@ -37,7 +37,7 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 
 ---
 
-## 1. Nothing cross-checks the server's marks → reconcile them with a full fetch now and then
+## 1. Nothing cross-checks the server's marks → reconcile them with a full fetch now and then (decided: taken, weekly; see point 5 of `critiques.md`)
 
 **Critique.** ADR 0019 (Consequences): "The server's Current-Version Mark is the only record of what the server holds, and nothing cross-checks it." The dangerous fault is a mark sitting on the user's version while the server holds something else: the change is never sent, no Unsent Mark shows, and the Mass-Change Guard can't catch a send that never happens. `If-Match` on the stored ETag protects only writes that are sent. On `design/snapshot-tree` the Server's Pointer gave a second record to compare with; the line has none.
 

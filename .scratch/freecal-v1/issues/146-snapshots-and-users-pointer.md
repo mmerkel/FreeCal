@@ -26,10 +26,12 @@ Spec: US-81; "Calendar History"; "Local Store". ADR 0018.
 - [ ] Each kind of write makes one Snapshot with its origin: a user's change, an import, an Incoming Sync, an undo; a move and an import into several Calendars make one Snapshot
 - [ ] A test reads the Events of a Calendar as they were at each Snapshot (`begin ≤ N < end`)
 - [ ] The Store Check with its queries, run after each scenario of the tests through the core interface; a test per query breaks the invariant by hand and sees it reported
+- [ ] Debug builds run the Store Check after every Database Transaction that writes the Calendar History and panic on a violation; release builds don't run it
 - [ ] The write functions are private to the Calendar History's module
 
 ## Comments
 - 2026-11-16: Written from the triage against ADRs 0017 to 0020. Second of four parts (see ticket 145).
+- 2026-11-22: Debug builds run the Store Check too (point 5 of `critiques.md`); running it in release builds before an Outgoing Sync was rejected (ADR 0018, Considered Options).
 - 2026-11-21: Decided in a grilling: links belong to a Snapshot Transition, not to a Snapshot; a Calendar's first Snapshot has a Snapshot Transition without a parent; the origin stays on the Snapshot (ADR 0018, "Snapshots").
 - 2026-11-22: Rewritten after the grilling on critique 2: one line for all Calendars, so no Snapshot Transitions, no link table and no User's Pointer; `begin` and `end` on the Event Version replace them and the user's mark. The ticket's file name keeps its old title.
 - 2026-11-22: Reworded from the grilling on point 4 of `.scratch/freecal-v1/critiques.md` (ADR 0018): ticket 155 no longer holds the First Sync in memory; a server Calendar stays stored when added, and only the glue for an unfinished First Sync goes with 155.

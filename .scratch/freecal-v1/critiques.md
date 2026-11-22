@@ -2,7 +2,7 @@
 
 A review of 2026-11-21 compared the branch's ADRs 0017 to 0020 with the design they replace (ADRs 0009, 0014 and 0015, as on `main`). Each numbered point below is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** points 1 to 4 are decided, and their outcomes recorded below each; point 5 is open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
+**Status (2026-11-22):** all five points are decided, and their outcomes recorded below each. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
 
 A second review of 2026-11-22, after points 1 and 2, is in `.scratch/freecal-v1/critiques-2.md`: it compares `design/change-journal`, `design/snapshot-tree` and the branch, and adds points of its own. Its findings on points 3 and 5 are added below, under "Second review".
 
@@ -188,7 +188,7 @@ Reworded: ADRs 0018 ("Calendars", Considered Options, Consequences), 0019 ("Whet
 
 ---
 
-## 5. The Store Check runs only in tests → run it in use too
+## 5. The Store Check runs only in tests → run it in use too (decided: rejected; debug builds run it, and Mark Reconciliation checks the server's marks)
 
 **Critique.** ADR 0018 ("Where the invariants are recorded"): the tests run the Store Check after each scenario. On the branch, what to send is derived (ADR 0019, Consequences: "Any fault that changes one side's Event Versions becomes writes to the server"). A broken invariant in a user's Local Store, from a bug the tests missed, becomes writes to the server, with only the Mass-Change Guard in between.
 
@@ -201,3 +201,14 @@ Reworded: ADRs 0018 ("Calendars", Considered Options, Consequences), 0019 ("Whet
 **Affected if taken.** ADR 0018 ("Where the invariants are recorded"), ADR 0019 (Sync Errors), spec sections on Sync Errors and Problems, `GLOSSARY.md` (Sync Error), a new ticket.
 
 **Second review** (`critiques-2.md`, point 1). The Store Check can't see the worst fault of derived intent: a server's mark on the user's version while the server holds something else, which sends nothing and shows no Unsent Mark. Point 1 there proposes reconciling the marks with a full fetch now and then; grill both points together, as the cheap subset before an Outgoing Sync and the reconciliation guard the same thing.
+
+**Outcome (grilling of 2026-11-22, with point 1 of `critiques-2.md`): E rejected; what it was for moved to Mark Reconciliation.** Points 1 to 4 changed the premise: the line model enforces in the schema the invariants that decide what is sent (the user's Current-Version Mark as `end IS NULL` under a partial unique index, the server's under a unique index, Event Versions that never change), so they hold in use on every write. The Store Check's remaining queries (`end` after `begin`, an Undo's target kept, Resolutions, `begin` ordering, ETags beside marks) decide undo, the display and dropping, never what is sent; and the faults that send wrong writes, a wrong user's version or a server's mark on the wrong row, pass every query.
+
+- **Rejected,** in ADR 0018's Considered Options: the Store Check before every Outgoing Sync and at startup, pausing a Calendar on a violation. Strongest con of rejecting: a later schema change could move a sending rule into a query only; so ADR 0018 now states that an invariant that decides what is sent is enforced by the schema.
+- **Debug builds** run the Store Check after every Database Transaction that writes the Calendar History, with a panic on a violation; release builds never (ticket 146).
+- **Mark Reconciliation** (new term, agreed): a Full Fetch run as a Calendar's next Incoming Sync once its last Full Fetch is more than 7 days old; the time is stored beside the sync token and every Full Fetch sets it (ADR 0019, ticket 171). Strongest con: a large Calendar is fetched whole every week.
+- **An untrusted base:** on any Full Fetch, a resource whose ETag is unchanged but whose content differs from the version with the server's mark means FreeCal's record is wrong. The mark moves to the fetched version, and any difference from the user's current version is a Conflict with no Automatic Resolution, so an unsent edit is never replaced without one. A Log line, nothing else; the ordinary Conflict bar shows it, and the Server Event Replacement carries no mark of the case (rejected: stored state only debugging reads). Strongest con: where only the server had changed, the user sees a Conflict that isn't one.
+- **Rejected** in ADR 0019's Considered Options: reconciling only on a sync-token reset, on every start, an interval that doubles by itself, the usual comparison or the user's version winning where the base is untrusted, a Sync Error or toast for it.
+- **Added:** ticket 171; `.scratch/freecal-v2/issues/02-mark-reconciliation-less-often.md`, to run it less often once the Logs show no untrusted base.
+
+Reworded: ADRs 0018 ("Where the invariants are recorded", Considered Options, Consequences) and 0019 ("Whether the server changed", new "An untrusted base", Considered Options, Consequences), `GLOSSARY.md` (Mark Reconciliation added; Full Fetch, Store Check reworded), the spec ("Sync engine", the tests), ticket 146.
