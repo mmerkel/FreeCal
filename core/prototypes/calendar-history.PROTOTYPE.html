@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>PROTOTYPE: FreeCal's Calendar History</title>
+    <title>PROTOTYPE: FreeCal's Calendar History as one line</title>
     <style>
       :root {
         --accent: #2f6f9f;
@@ -42,9 +42,7 @@
       p {
         margin: 0 0 8px;
       }
-      .muted {
-        color: var(--muted);
-      }
+      .muted,
       small {
         color: var(--muted);
       }
@@ -96,8 +94,10 @@
         padding: 5px 0;
         border-top: 1px solid #eef0f2;
       }
-      .event:first-of-type {
-        border-top: 0;
+      .calname {
+        margin: 10px 0 2px;
+        font-weight: 600;
+        font-size: 13px;
       }
       .tag {
         display: inline-block;
@@ -131,6 +131,13 @@
         background: #fbeceb;
         border-color: var(--bad);
       }
+      .bar {
+        background: #fbeceb;
+        border: 1px solid #e3b4b0;
+        border-radius: 6px;
+        padding: 8px 12px;
+        margin-top: 12px;
+      }
       table {
         border-collapse: collapse;
         width: 100%;
@@ -147,6 +154,9 @@
         border-top: 0;
         color: var(--muted);
         font-weight: 500;
+      }
+      tr.undone td {
+        color: var(--muted);
       }
       .ok {
         color: var(--ok);
@@ -189,11 +199,6 @@
         border-radius: 6px;
         font-size: 13px;
       }
-      svg text {
-        font:
-          12px system-ui,
-          sans-serif;
-      }
       label {
         margin-right: 14px;
       }
@@ -207,48 +212,30 @@
   <body>
     <main>
       <div class="banner">
-        <b>PROTOTYPE, throwaway.</b> Nothing is saved; reloading starts again. One Calendar on one
-        CalDAV server, single Events only (no Recurring Events, no moves between Calendars).
+        <b>PROTOTYPE, throwaway.</b> Nothing is saved; reloading starts again. Two Calendars: Work
+        on one CalDAV server, and Personal, a Local Calendar. Single Events only (no Recurring
+        Events, no imports or restores, no Mass-Change Guard). The tree form this replaced is under
+        the tag <code>design/snapshot-tree</code>.
       </div>
-      <h1>FreeCal's Calendar History: Event Versions, two pointers, merge and undo</h1>
+      <h1>FreeCal's Calendar History as one line: Event Versions, Conflicts and Undo</h1>
       <p>
-        <b>The question.</b> ADRs 0017 to 0020 replace the Change Journal, the Mirror, the Unsent
-        Changes and the Conflict tables by one structure: Event Versions that never change,
-        Snapshots, and a User's Pointer and a Server's Pointer per Calendar. Does that model hold
-        when pushed through sends, Incoming Syncs, Conflicts and undo? Undo is a Snapshot that takes
-        back an earlier one (grilling of 2026-11-21): Ctrl+Z reaches only your own changes, both
-        pointers only move forward, and nothing from the server waits. And the point ADR 0019 left
-        open:
-        <b
-          >when the server stores FreeCal's own write in another form than was sent, how does the
-          Snapshot that was sent take that form</b
-        >, given that Event Versions never change, also after an undo?
+        <b>The question.</b> ADRs 0018 to 0020, as rewritten on 2026-11-22, replace the tree of
+        Snapshots and its two pointers by <b>one line of Snapshots across all Calendars</b>. Each
+        Event Version records the Snapshot it <b>began</b> with and the one it <b>ended</b> with;
+        the user's Current-Version Mark is an empty end, the server's is stored. A Conflict ends at
+        once with a <b>Server Event Replacement</b> and stays open until the user resolves it; an
+        <b>Undo</b> is a Snapshot that takes back an earlier one. Does this hold when pushed through
+        sends, the server's own form of a write, Incoming Syncs with Conflicts, Resolutions, undo
+        and redo across Calendars, a server refusing writes, and dropping after 90 days? Where it
+        doesn't, the walkthrough says <b>Finding</b>.
       </p>
 
       <section>
-        <h2>Setup <small>(changing either starts again)</small></h2>
-        <p>
-          <b>When the server stores another form of FreeCal's own write:</b><br />
-          <label
-            ><input type="radio" name="mode" value="replace" /> <b>Replace everywhere</b> (decided
-            2026-11-15): the server's form is a new Event Version that takes the sent one's place in
-            every Snapshot</label
-          ><br />
-          <label
-            ><input type="radio" name="mode" value="amend" /> <b>Amend the sent Snapshot</b>: only
-            the Snapshot that was sent, and later ones that took the version over from it</label
-          ><br />
-          <label
-            ><input type="radio" name="mode" value="snapshot" /> <b>A new Snapshot</b> for the
-            server's form (the option ADR 0019 rejected, to feel why)</label
-          >
-        </p>
-        <p>
-          <label
-            ><input type="checkbox" id="rewrites" /> The server rewrites what FreeCal sends
-            (capitalises the title, adds a field of its own)</label
-          >
-        </p>
+        <h2>Setup <small>(changing it starts again)</small></h2>
+        <label
+          ><input type="checkbox" id="rewrites" /> The server rewrites what FreeCal sends
+          (capitalises the title, adds a field of its own)</label
+        >
       </section>
 
       <section>
@@ -260,27 +247,25 @@
       <section class="sticky"><div id="log" class="log"></div></section>
 
       <section>
-        <h2>The Calendar now</h2>
+        <h2>The Calendars now</h2>
         <div id="status"></div>
         <div class="cols" style="margin-top: 12px">
           <div class="box">
             <h3>What you see in FreeCal</h3>
-            <small>Event Versions with the user's Current-Version Mark</small>
+            <small>Event Versions whose end is empty: the user's Current-Version Mark</small>
             <div id="userCol"></div>
-            <div id="userActions"></div>
           </div>
           <div class="box">
-            <h3>What FreeCal knows the server had</h3>
+            <h3>What FreeCal knows Work's server holds</h3>
             <small
               >Event Versions with the server's Current-Version Mark, and the stored ETag</small
             >
             <div id="serverCol"></div>
           </div>
           <div class="box">
-            <h3>The actual server</h3>
+            <h3>Work's actual server</h3>
             <small>Not part of the Local Store. Someone else can change it here.</small>
             <div id="realCol"></div>
-            <div id="otherActions"></div>
           </div>
         </div>
         <div id="conflicts"></div>
@@ -294,24 +279,26 @@
       <section>
         <h2>The Calendar History</h2>
         <p class="muted">
-          Newest on top. Left lane: your side. Right lane: Snapshots only the server's side went
-          through. Each line says which Event Versions end (−) and begin (+) on the step from each
-          parent.
+          One line of Snapshots of all Calendars, newest first. Each lists the Event Versions that
+          end (−) and begin (+) with it. Any Snapshot can be undone from here, whole, a Server
+          Intake or a Server Event Replacement too, but not a First Sync's. Ctrl+Z only reaches your
+          own.
         </p>
-        <div id="graph"></div>
-        <h3>The History list: your side's line, newest first</h3>
-        <p class="muted">
-          Any Snapshot here can be undone, a sync or a Join too, without a question: the toast says
-          what was undone. Ctrl+Z only reaches your own.
-        </p>
+        <div class="tabs" id="filters"></div>
         <div id="history"></div>
       </section>
 
       <section class="two" style="display: grid">
         <div>
           <h2>The Event Version table</h2>
-          <p class="muted">A row never changes. Only the two marks do.</p>
+          <p class="muted">
+            Its content never changes: only end (once), begin (emptied when its Snapshot is dropped)
+            and the server's mark.
+          </p>
           <div id="versions"></div>
+          <h2 style="margin-top: 16px">The Resolution table</h2>
+          <p class="muted">Written once per Server Event Replacement, never changed.</p>
+          <div id="resolutions"></div>
         </div>
         <div>
           <h2>The Store Check</h2>
@@ -323,9 +310,10 @@
       </section>
     </main>
     <script id="logic">
-      // PROTOTYPE of the Calendar History (ADRs 0017 to 0020). Throwaway.
-      // Pure module: no DOM. One Calendar on one CalDAV server, single Events only.
-      // The "tables" are arrays; the Store Check at the end holds the invariants.
+      // PROTOTYPE of the Calendar History as one line (ADRs 0018 to 0020, rewritten 2026-11-22).
+      // Throwaway. Pure module: no DOM. Work is a Calendar on one CalDAV server, Personal a Local
+      // Calendar; single Events only. The "tables" are arrays; Snapshot and Event Version IDs are
+      // numbers in the order made, so the line's order is the order of the IDs.
       const CalendarHistory = (() => {
         class Refused extends Error {}
         // offer: a button the toast shows with the refusal, e.g. "Undo both changes".
@@ -334,6 +322,15 @@
           e.offer = offer;
           throw e;
         };
+        const WORK = 'Work',
+          PERSONAL = 'Personal';
+        const key = (cal, uid) => `${cal}/${uid}`; // the Combined Event Key, without recurrence ID
+        const split = (k) => {
+          const [cal, uid] = k.split('/');
+          return { cal, uid };
+        };
+        const S = (id) => (id == null ? '(dropped)' : 'S' + id);
+        const V = (id) => 'v' + id;
 
         // ---------- Event Versions ----------
         const canon = (o) =>
@@ -344,193 +341,107 @@
           );
         const sameManaged = (a, b) => a.title === b.title && a.time === b.time;
         const sameExtra = (a, b) => canon(a.extra) === canon(b.extra);
+        // Two Event Versions are equal when their content is, never compared by row alone.
         const same = (a, b) => (!a && !b) || (!!a && !!b && sameManaged(a, b) && sameExtra(a, b));
         const pick = (v) => (v ? { title: v.title, time: v.time, extra: { ...v.extra } } : null);
-        const ver = (s, id) => s.versions.find((v) => v.id === id);
-        const fieldsOf = (s, id) => pick(ver(s, id));
-
-        // A row never changes. Equal content of one Event is stored once.
-        function writeVersion(s, uid, fields) {
-          const found = s.versions.find((v) => v.uid === uid && same(v, fields));
-          if (found) return found.id;
-          const id = 'v' + s.nextVersion++;
-          s.versions.push({ id, uid, ...pick(fields), user: false, server: false });
-          return id;
-        }
-
-        // ---------- Snapshots and links ----------
-        const snap = (s, id) => s.snapshots.find((x) => x.id === id);
-        function applyStep(s, id, parent, start) {
-          const c = { ...start };
-          const step = s.links.filter((l) => l.snap === id && l.parent === parent);
-          for (const l of step)
-            if (l.kind === 'end') {
-              const v = ver(s, l.version);
-              if (v && c[v.uid] === v.id) delete c[v.uid];
-            }
-          for (const l of step)
-            if (l.kind === 'begin') {
-              const v = ver(s, l.version);
-              if (v) c[v.uid] = v.id;
-            }
-          return c;
-        }
-        // A Calendar's Events at a Snapshot: { uid: version id }.
-        function contentVia(s, id, parent) {
-          return applyStep(s, id, parent, parent ? contentOf(s, parent) : {});
-        }
-        function contentOf(s, id) {
-          return contentVia(s, id, snap(s, id).parents[0] ?? null);
-        }
-        function diffLinks(id, parent, from, to) {
-          const out = [];
-          for (const uid of new Set([...Object.keys(from), ...Object.keys(to)])) {
-            if (from[uid] === to[uid]) continue;
-            if (from[uid]) out.push({ snap: id, parent, kind: 'end', version: from[uid] });
-            if (to[uid]) out.push({ snap: id, parent, kind: 'begin', version: to[uid] });
-          }
-          return out;
-        }
-        function makeSnapshot(s, kind, note, parents, content, lane = 'user') {
-          const id = 'S' + s.nextSnapshot++;
-          const contents = parents.map((p) => contentOf(s, p));
-          s.snapshots.push({ id, kind, note, parents, lane });
-          if (!parents.length) s.links.push(...diffLinks(id, null, {}, content));
-          parents.forEach((p, i) => s.links.push(...diffLinks(id, p, contents[i], content)));
-          return id;
-        }
-        function ancestors(s, id) {
-          const seen = new Set();
-          const todo = [id];
-          while (todo.length) {
-            const x = todo.pop();
-            if (!x || seen.has(x)) continue;
-            seen.add(x);
-            todo.push(...snap(s, x).parents);
-          }
-          return seen;
-        }
-        function descendants(s, id) {
-          const seen = new Set([id]);
-          let grew = true;
-          while (grew) {
-            grew = false;
-            for (const x of s.snapshots)
-              if (!seen.has(x.id) && x.parents.some((p) => seen.has(p))) {
-                seen.add(x.id);
-                grew = true;
-              }
-          }
-          return seen;
-        }
-        const children = (s, id) => s.snapshots.filter((x) => x.parents.includes(id));
-
-        // ---------- Pointers and Current-Version Marks ----------
-        // The one function that moves a pointer; it rewrites the marks with it.
-        function movePointer(s, side, id) {
-          s.cal[side + 'Ptr'] = id;
-          refreshMarks(s);
-        }
-        function refreshMarks(s) {
-          for (const side of ['user', 'server']) {
-            const ids = new Set(Object.values(contentOf(s, s.cal[side + 'Ptr'])));
-            for (const v of s.versions) v[side] = ids.has(v.id);
-          }
-        }
-        // Tracking is not stored: a Calendar is Tracking exactly while the Server's Pointer is on its
-        // Reference Snapshot (s.cal.base), the server's Snapshot the user's side last took in.
-        const tracking = (s) => s.cal.base === s.cal.serverPtr;
-        const marked = (s, side) =>
-          Object.fromEntries(s.versions.filter((v) => v[side]).map((v) => [v.uid, v.id]));
-
-        // Keeping and dropping: a Snapshot stays while it is an ancestor of a pointer.
-        // There is no redo path: an Undo is a Snapshot, so the User's Pointer only moves forward.
-        function prune(s) {
-          const roots = [s.cal.serverPtr, s.cal.userPtr];
-          if (s.pending) roots.push(s.pending.snapshot);
-          const kept = new Set();
-          for (const r of roots) for (const a of ancestors(s, r)) kept.add(a);
-          s.snapshots = s.snapshots.filter((x) => kept.has(x.id));
-          s.links = s.links.filter((l) => kept.has(l.snap));
-          s.versions = s.versions.filter(
-            (v) => v.user || v.server || s.links.some((l) => l.version === v.id),
+        const keyOf = (v) => key(v.cal, v.uid);
+        const row = (s, id) => s.versions.find((v) => v.id === id);
+        const fieldsOf = (v) => (v ? pick(v) : null);
+        const current = (s, k) => s.versions.find((v) => keyOf(v) === k && v.end === null);
+        const serverRow = (s, k) => s.versions.find((v) => keyOf(v) === k && v.server);
+        // A row that began and ended with the same Snapshot was never current on the user's side
+        // (see the finding in the Incoming Sync).
+        const userSide = (v) => !(v.begin !== null && v.begin === v.end);
+        const versionAfter = (s, x, k) =>
+          s.versions.find(
+            (v) =>
+              keyOf(v) === k &&
+              userSide(v) &&
+              (v.begin === null || v.begin <= x) &&
+              (v.end === null || v.end > x),
           );
+        const versionBefore = (s, x, k) =>
+          s.versions.find(
+            (v) =>
+              keyOf(v) === k &&
+              userSide(v) &&
+              (v.begin === null || v.begin < x) &&
+              (v.end === null || v.end >= x),
+          );
+        // The Events a Snapshot changed, and the Calendars it spans: read from the Event Versions
+        // that begin or end with it. No table of its own.
+        const keysOf = (s, x) => [
+          ...new Set(
+            s.versions.filter((v) => userSide(v) && (v.begin === x || v.end === x)).map(keyOf),
+          ),
+        ];
+        const calsOf = (s, x) => [
+          ...new Set(s.versions.filter((v) => v.begin === x || v.end === x).map((v) => v.cal)),
+        ];
+        const keysIn = (s, cal) => [
+          ...new Set(
+            s.versions.filter((v) => v.cal === cal && (v.end === null || v.server)).map(keyOf),
+          ),
+        ];
+
+        function insertRow(s, k, fields, begin, end, server = false) {
+          const { cal, uid } = split(k);
+          const v = { id: s.nextVersion++, cal, uid, ...pick(fields), begin, end, server };
+          s.versions.push(v);
+          return v;
+        }
+        // The server's mark: one row per Event at most (a unique index in the real Local Store).
+        function setServerMark(s, k, id) {
+          for (const v of s.versions) if (keyOf(v) === k) v.server = v.id === id;
         }
 
-        // ---------- What to send: read from the marks alone ----------
-        function toSend(s) {
-          const u = marked(s, 'user'),
-            v = marked(s, 'server'),
-            ops = [];
-          for (const uid of new Set([...Object.keys(u), ...Object.keys(v)])) {
-            if (u[uid] === v[uid]) continue;
-            ops.push({
-              uid,
-              op: !v[uid] ? 'create' : !u[uid] ? 'delete' : 'update',
-              version: u[uid] ?? null,
-            });
+        // ---------- Snapshots ----------
+        const snap = (s, id) => s.snapshots.find((x) => x.id === id);
+        // The one function that writes a Snapshot. changes: { key: fields | null }. Each changed
+        // Event's current row ends with the Snapshot and a new row begins with it, even when its
+        // content equals an earlier row. A Snapshot that would change nothing isn't made.
+        function commit(s, origin, note, changes, props = {}) {
+          const real = Object.entries(changes).filter(
+            ([k, f]) => !same(fieldsOf(current(s, k)), f),
+          );
+          if (!real.length) return null;
+          const id = s.nextSnapshot++;
+          s.snapshots.push({ id, origin, note, day: s.today, ...props });
+          const begun = {};
+          for (const [k, f] of real) {
+            const cur = current(s, k);
+            if (cur) cur.end = id;
+            if (f) begun[k] = insertRow(s, k, f, id, null).id;
           }
-          return ops;
+          return { id, begun };
         }
+        const newestFirst = (s) => [...s.snapshots].sort((a, b) => b.id - a.id);
 
-        // ---------- The three-way merge ----------
-        function merge3(base, mine, theirs) {
-          if (same(mine, theirs) || same(mine, base)) return { ok: true, result: theirs };
-          if (same(theirs, base)) return { ok: true, result: mine };
-          if (!mine || !theirs) return { ok: false }; // deleted on one side, changed on the other
-          let managed;
-          if (base && sameManaged(mine, base)) managed = theirs;
-          else if (base && sameManaged(theirs, base)) managed = mine;
-          else if (sameManaged(mine, theirs)) managed = mine;
-          else return { ok: false };
-          // Unimplemented Fields: one side's if only one changed them, else the server's (ADR 0017).
-          const extra = base && sameExtra(theirs, base) ? mine.extra : theirs.extra;
+        // ---------- Conflicts and Resolutions ----------
+        const resolutionOf = (s, id) => s.resolutions.find((r) => r.replacement === id);
+        const openConflicts = (s) =>
+          s.snapshots.filter((x) => x.origin === 'replacement' && !resolutionOf(s, x.id));
+        function conflictParts(s, R) {
           return {
-            ok: true,
-            result: { title: managed.title, time: managed.time, extra: { ...extra } },
+            key: R.key,
+            lastAgreed: R.lastAgreed === null ? null : (row(s, R.lastAgreed) ?? 'dropped'),
+            yours: s.versions.find((v) => keyOf(v) === R.key && userSide(v) && v.end === R.id),
+            servers: s.versions.find((v) => keyOf(v) === R.key && v.begin === R.id),
           };
         }
-        function mergeContents(s, baseC, mineC, theirsC, choices = {}) {
-          const content = {},
-            conflicts = [];
-          for (const uid of new Set([
-            ...Object.keys(baseC),
-            ...Object.keys(mineC),
-            ...Object.keys(theirsC),
-          ])) {
-            const b = fieldsOf(s, baseC[uid]),
-              m = fieldsOf(s, mineC[uid]),
-              t = fieldsOf(s, theirsC[uid]);
-            let r = merge3(b, m, t);
-            if (!r.ok && choices[uid] === 'mine') r = { ok: true, result: m };
-            if (!r.ok && choices[uid] === 'theirs') r = { ok: true, result: t };
-            if (!r.ok) {
-              conflicts.push({ uid, base: b, mine: m, theirs: t });
-              continue;
-            }
-            if (r.result) content[uid] = writeVersion(s, uid, r.result);
+        function addResolution(s, R, how, by) {
+          s.resolutions.push({ replacement: R.id, how, by });
+          say(
+            s,
+            `The Conflict on ${R.key} is resolved (${how}${by ? ', by ' + S(by) : ''}): a Resolution row names ${S(R.id)}.`,
+          );
+        }
+        // After a Snapshot by the user (own or an Undo): every open Conflict it touches is resolved.
+        function resolveTouched(s, id, takesBack = null) {
+          for (const R of openConflicts(s)) {
+            if (takesBack === R.id) addResolution(s, R, 'restored', id);
+            else if (keysOf(s, id).includes(R.key)) addResolution(s, R, 'changed again', id);
           }
-          return { content, conflicts };
-        }
-        // Conflicts are derived, never stored. The base is the server's Snapshot the
-        // user's side last took in (s.cal.base, the Reference Snapshot). FINDING: the "last
-        // common Snapshot" by ancestry is the wrong base after an undo.
-        function conflicts(s, baseRule = 'stored') {
-          if (tracking(s)) return [];
-          const t = structuredClone(s);
-          const base = baseRule === 'stored' ? t.cal.base : lastCommon(t);
-          return mergeContents(
-            t,
-            contentOf(t, base),
-            contentOf(t, t.cal.userPtr),
-            contentOf(t, t.cal.serverPtr),
-          ).conflicts;
-        }
-        function lastCommon(s) {
-          const a = ancestors(s, s.cal.userPtr),
-            b = ancestors(s, s.cal.serverPtr);
-          const common = s.snapshots.filter((x) => a.has(x.id) && b.has(x.id));
-          return common[common.length - 1].id; // Snapshots are stored in the order made
         }
 
         // ---------- The simulated server (outside the Local Store) ----------
@@ -552,43 +463,94 @@
           };
           return srv.resources[uid];
         }
+        const stored = (s, uid) => s.caldav.find((r) => r.uid === uid);
+        function storeEtag(s, uid, r) {
+          s.caldav = s.caldav.filter((x) => x.uid !== uid);
+          if (r) s.caldav.push({ uid, href: r.href, etag: r.etag });
+        }
 
-        // ---------- Actions ----------
+        // ---------- What to send: read from the two marks alone ----------
+        function toSend(s) {
+          const ops = [];
+          for (const k of keysIn(s, WORK)) {
+            const u = current(s, k),
+              v = serverRow(s, k);
+            if (same(fieldsOf(u), fieldsOf(v))) continue; // the same row, or equal content
+            ops.push({
+              key: k,
+              uid: split(k).uid,
+              op: !v ? 'create' : !u ? 'delete' : 'update',
+              sent: u?.id ?? null,
+            });
+          }
+          return ops;
+        }
+
+        // ---------- The comparison per Event, three ways (ADR 0019) ----------
+        // Managed fields and Unimplemented Fields are two parts. Returns { ok, result }.
+        function merge3(base, mine, theirs) {
+          if (same(mine, theirs) || same(mine, base)) return { ok: true, result: theirs };
+          if (same(theirs, base)) return { ok: true, result: mine };
+          if (!mine || !theirs) return { ok: false }; // deleted on one side, changed on the other
+          let managed;
+          if (base && sameManaged(mine, base)) managed = theirs;
+          else if (base && sameManaged(theirs, base)) managed = mine;
+          else if (sameManaged(mine, theirs)) managed = mine;
+          else return { ok: false };
+          // Unimplemented Fields: one side's if only one changed them, else the server's (ADR 0017).
+          const extra = base && sameExtra(theirs, base) ? mine.extra : theirs.extra;
+          return {
+            ok: true,
+            result: { title: managed.title, time: managed.time, extra: { ...extra } },
+          };
+        }
+
+        // ---------- Actions of the user ----------
         const say = (s, m) => s.log.push(m);
-        function userChange(s, note, change) {
-          const c = { ...contentOf(s, s.cal.userPtr) };
-          change(c);
-          const id = makeSnapshot(s, 'user', note, [s.cal.userPtr], c);
-          movePointer(s, 'user', id);
-          prune(s); // a new Snapshot on the user's side ends the redo path
+        const own = (x) => x.origin === 'user' || x.origin === 'stop waiting';
+        function writable(s, cal) {
+          if (cal === WORK && s.readOnly)
+            refuse("Work is marked read-only: its Events can't be changed in FreeCal.");
+        }
+        function userChange(s, note, changes) {
+          for (const k of Object.keys(changes)) writable(s, split(k).cal);
+          const r = commit(s, 'user', note, changes) ?? refuse('That changes nothing.');
           say(
             s,
-            `The user's change made Snapshot ${id}; the User's Pointer moved to it. Nothing records that it is unsent: the two Current-Version Marks simply differ.`,
+            `Your change is Snapshot ${S(r.id)}: ${keysOf(s, r.id).length} Event Version(s) ended with it, new ones began. Nothing records that it is unsent: for Work, the two Current-Version Marks simply differ.`,
           );
-          compareAfterMove(s);
+          resolveTouched(s, r.id);
         }
         const A = {};
         A.userAdd = (s, a) => {
           const uid = a.uid ?? 'event' + s.nextUid++;
-          userChange(s, `Add "${a.title}"`, (c) => {
-            c[uid] = writeVersion(s, uid, { title: a.title, time: a.time, extra: {} });
+          userChange(s, `Add ‘${a.title}’ to ${a.cal}`, {
+            [key(a.cal, uid)]: { title: a.title, time: a.time, extra: {} },
           });
         };
+        function describe(old, now) {
+          if (old.title !== now.title) return `Rename ‘${old.title}’ to ‘${now.title}’`;
+          if (old.time !== now.time) return `Move ‘${old.title}’ to ${now.time}`;
+          return `Change ‘${old.title}’`;
+        }
         A.userEdit = (s, a) => {
-          const old =
-            fieldsOf(s, marked(s, 'user')[a.uid]) ?? refuse('The user has no such Event.');
+          const old = fieldsOf(current(s, a.key)) ?? refuse('You have no such Event.');
           const now = { ...old, ...a.patch };
-          userChange(s, `Change "${old.title}" to "${now.title}" ${now.time}`, (c) => {
-            c[a.uid] = writeVersion(s, a.uid, now);
-          });
+          userChange(s, describe(old, now), { [a.key]: now });
         };
         A.userDelete = (s, a) => {
-          const old =
-            fieldsOf(s, marked(s, 'user')[a.uid]) ?? refuse('The user has no such Event.');
-          userChange(s, `Delete "${old.title}"`, (c) => {
-            delete c[a.uid];
-          });
+          const old = fieldsOf(current(s, a.key)) ?? refuse('You have no such Event.');
+          userChange(s, `Delete ‘${old.title}’`, { [a.key]: null });
         };
+        A.userMove = (s, a) => {
+          const old = fieldsOf(current(s, a.key)) ?? refuse('You have no such Event.');
+          const { uid } = split(a.key);
+          const to = key(a.to, uid);
+          if (current(s, to)) refuse(`${a.to} already has an Event with this UID.`);
+          userChange(s, `Move ‘${old.title}’ to ${a.to}`, { [a.key]: null, [to]: old });
+        };
+
+        // ---------- Someone else, on Work's server ----------
         A.otherAdd = (s, a) => {
           const uid = a.uid ?? 'event' + s.nextUid++;
           serverStore(s, uid, { title: a.title, time: a.time, extra: {} }, false);
@@ -609,387 +571,359 @@
           serverStore(s, a.uid, null, false);
           say(s, `Someone else deleted "${r.title}" on the server.`);
         };
+        A.serverWrites = (s, a) => {
+          s.server.refusesWrites = !a.allow;
+          say(
+            s,
+            a.allow
+              ? 'The server lets you change Work again.'
+              : 'The server no longer lets you change Work (privileges taken away).',
+          );
+        };
 
+        // ---------- An Incoming Sync: one Database Transaction ----------
         A.incomingSync = (s) => {
           if (s.pending) refuse('A send is running; the Incoming Sync waits for it.');
           const res = s.server.resources;
-          const changed = [
-            ...Object.keys(res).filter(
-              (uid) => s.caldav.find((r) => r.uid === uid)?.etag !== res[uid].etag,
-            ),
-            ...s.caldav.filter((r) => !res[r.uid]).map((r) => r.uid),
-          ];
-          const oldServer = contentOf(s, s.cal.serverPtr),
-            newServer = { ...oldServer };
-          for (const uid of changed) {
-            s.caldav = s.caldav.filter((r) => r.uid !== uid);
-            if (res[uid]) {
-              newServer[uid] = writeVersion(s, uid, res[uid]);
-              s.caldav.push({ uid, href: res[uid].href, etag: res[uid].etag });
-            } else delete newServer[uid];
-          }
-          if (!changed.length)
+          if (s.syncError === 'writes refused' && !s.server.refusesWrites) {
+            s.syncError = null;
             say(
+              s,
+              'The Poll read that the server allows changes again: the waiting changes go with the next send.',
+            );
+          }
+          const changed = [
+            ...new Set([
+              ...Object.keys(res).filter((uid) => stored(s, uid)?.etag !== res[uid].etag),
+              ...s.caldav.filter((r) => !res[r.uid]).map((r) => r.uid),
+            ]),
+          ];
+          if (!changed.length)
+            return say(
               s,
               'Incoming Sync: every ETag is the one stored. Nothing fetched, nothing compared.',
             );
-          else
-            say(
-              s,
-              `Incoming Sync: ETags say ${changed.length} Server Object(s) changed; only those were fetched.`,
-            );
-          if (canon(oldServer) === canon(newServer)) {
-            refreshMarks(s);
-            if (changed.length)
-              say(
-                s,
-                'Their content equals what FreeCal already had, so no Snapshot: only the ETags were stored.',
-              );
-          } else {
-            // Step 1: move the Server's Pointer. The Reference Snapshot stays where the user's side last took the server in.
-            movePointer(
-              s,
-              'server',
-              makeSnapshot(
-                s,
-                'sync',
-                'Server changed: ' + changed.join(', '),
-                [s.cal.serverPtr],
-                newServer,
-                'server',
-              ),
-            );
-          }
-          // Step 2, in the same Database Transaction: bring the user's side up to it, if no Conflict stands in the way.
-          if (!tracking(s)) compareSides(s, {});
-        };
-
-        // The one place where the two sides are compared and joined: used by the
-        // Incoming Sync, when the user ends a Conflict, and after every move of the
-        // User's Pointer while the Server's Pointer is off the Reference Snapshot.
-        function compareSides(s, choices, quiet = false) {
-          const m = mergeContents(
+          say(
             s,
-            contentOf(s, s.cal.base),
-            contentOf(s, s.cal.userPtr),
-            contentOf(s, s.cal.serverPtr),
-            choices,
+            `Incoming Sync: ETags say ${changed.join(', ')} changed; only those were fetched.`,
           );
-          if (m.conflicts.length) {
-            prune(s);
-            if (!quiet)
+          const intake = {},
+            marks = [],
+            conflicts = [];
+          for (const uid of changed) {
+            const k = key(WORK, uid),
+              F = pick(res[uid]),
+              Vrow = serverRow(s, k),
+              Vf = fieldsOf(Vrow),
+              Urow = current(s, k),
+              U = fieldsOf(Urow);
+            if (same(F, Vf)) {
+              say(s, `${uid}: same content as the server's mark, only the ETag is new.`);
+            } else if (same(U, F)) {
+              marks.push({ k, how: 'user' });
               say(
                 s,
-                `Conflict in ${m.conflicts.map((c) => c.uid).join(', ')}: both sides changed it differently. The Calendar isn't Tracking: nothing is sent, nothing from the server is taken over. No Conflict is stored, only the Reference Snapshot ${s.cal.base}.`,
+                `${uid}: both sides reached the same content; the server's mark moves to your row ${V(Urow.id)}.`,
               );
-            return false;
+            } else if (same(U, Vf)) {
+              intake[k] = F;
+              marks.push({ k, how: 'intake', F });
+            } else {
+              const r = merge3(Vf, U, F);
+              if (r.ok) {
+                intake[k] = r.result;
+                marks.push({ k, how: same(r.result, F) ? 'intake' : 'apart', F });
+              } else conflicts.push({ k, uid, F, lastAgreed: Vrow?.id ?? null });
+            }
           }
-          const byUser = Object.keys(choices).length > 0;
-          if (s.cal.userPtr === s.cal.base && !byUser) {
-            snap(s, s.cal.serverPtr).lane = 'user';
-            movePointer(s, 'user', s.cal.serverPtr);
+          // 1. The Server Intake: the server's changes that are in no Conflict.
+          const I = commit(
+            s,
+            'intake',
+            'Server Intake: ' +
+              Object.keys(intake)
+                .map((k) => split(k).uid)
+                .join(', '),
+            intake,
+          );
+          if (I)
             say(
               s,
-              `The user's side had nothing of its own, so it follows: both pointers are on Snapshot ${s.cal.serverPtr}.`,
+              `Server Intake ${S(I.id)} takes in ${Object.keys(intake).length} change(s) from the server.`,
             );
-          } else if (s.cal.serverPtr !== s.cal.base && s.cal.serverPtr !== s.cal.userPtr) {
-            if (byUser) {
-              const id = makeSnapshot(
-                s,
-                'merge',
-                'Conflict ended by the user',
-                [s.cal.userPtr, s.cal.serverPtr],
-                m.content,
-              );
-              // OPEN (found 2026-11-21): a merge also takes in the server's changes outside the
-              // Conflict. To take back only the user's choices, an Undo has to know which Events
-              // were in Conflict. The prototype keeps that list on the merge.
-              snap(s, id).conflictUids = Object.keys(choices);
-              movePointer(s, 'user', id);
+          // 3. (for the Intake) the server's marks move to the fetched versions.
+          for (const m of marks) {
+            if (m.how === 'user') setServerMark(s, m.k, current(s, m.k).id);
+            else if (m.how === 'intake') setServerMark(s, m.k, m.F ? I.begun[m.k] : null);
+            else {
+              // FINDING: your change and the server's were in different parts (managed fields
+              // against Unimplemented Fields), so your side gets a combination neither side held.
+              // The server's mark must be on what the server holds, a row that was never current
+              // on your side. ADR 0018 gives every row a begin and an end; the prototype writes
+              // both as the Intake.
+              const g = insertRow(s, m.k, m.F, I.id, I.id, true);
+              setServerMark(s, m.k, g.id);
               say(
                 s,
-                `Merge Snapshot ${id} has both sides as parents; the User's Pointer moved to it. What the user's side has beyond the server's is to send.`,
-              );
-            } else if (canon(m.content) !== canon(contentOf(s, s.cal.userPtr))) {
-              const id = makeSnapshot(
-                s,
-                'join',
-                "Join: the server's changes taken in",
-                [s.cal.userPtr],
-                m.content,
-              );
-              movePointer(s, 'user', id);
-              say(
-                s,
-                `Join ${id}: the server's changes are taken in after your own unsent ones. Its only parent is your previous Snapshot; the server's Snapshot is not a parent. Ctrl+Z skips it.`,
+                `FINDING: ${split(m.k).uid} combines your change with the server's. The server holds neither your row nor the combination, so its mark goes on a new row ${V(g.id)} that never was current on your side: begin and end are both ${S(I.id)}, which "end after begin" refuses.`,
               );
             }
           }
-          s.cal.base = s.cal.serverPtr; // the user's side has taken the server's state in
-          prune(s);
-          return true;
-        }
-        function compareAfterMove(s) {
-          if (tracking(s)) return;
-          if (compareSides(s, {}, true))
+          // 2. A Server Event Replacement per Event in Conflict, one Snapshot each.
+          for (const c of conflicts) {
+            const R = commit(
+              s,
+              'replacement',
+              `Server Event Replacement: ${c.uid}`,
+              { [c.k]: c.F },
+              { key: c.k, lastAgreed: c.lastAgreed },
+            );
+            setServerMark(s, c.k, c.F ? R.begun[c.k] : null);
             say(
               s,
-              'The two sides no longer differ in a way that needs a choice, so the Conflict is over and the Calendar is Tracking again.',
+              `Conflict on ${c.uid}: both sides changed it differently. Server Event Replacement ${S(R.id)} puts the server's version in place of yours (${c.F ? 'changed' : 'deleted'} on the server) and sends nothing. Your version stays in the Calendar History; the Conflict stays open until you resolve it.`,
             );
-        }
-        A.resolve = (s, a) => {
-          if (tracking(s)) refuse('There is no open Conflict.');
-          compareSides(s, Object.fromEntries(conflicts(s).map((c) => [c.uid, a.side])));
-          say(s, 'The Calendar is Tracking again.');
+          }
+          for (const uid of changed) storeEtag(s, uid, res[uid]);
         };
 
-        // ---------- Undo: a Snapshot that takes back an earlier one ----------
-        const seq = (id) => Number(id.slice(1)); // Snapshots in the order made
-        // The user's line: the User's Pointer's Snapshot and its first parents, newest first.
-        function userLine(s) {
-          const out = [];
-          for (let id = s.cal.userPtr; id; id = snap(s, id).parents[0]) out.push(id);
-          return out;
-        }
-        // A Snapshot is in effect unless an Undo in effect takes it back. A Redo is an Undo of an Undo.
+        // ---------- Keeping the server's version ----------
+        A.keepServer = (s, a) => {
+          const R =
+            openConflicts(s).find((x) => x.key === a.key) ??
+            refuse('No open Conflict on that Event.');
+          addResolution(s, R, "kept the server's version", null);
+          say(s, 'Keeping makes no Snapshot, so the Resolution names none.');
+        };
+        A.restore = (s, a) => {
+          const R =
+            openConflicts(s).find((x) => x.key === a.key) ??
+            refuse('No open Conflict on that Event.');
+          takeBack(s, R);
+        };
+
+        // ---------- Undo: a Snapshot that takes back an earlier one (ADR 0020) ----------
+        // A Snapshot is in effect while no Undo in effect takes it back. A redo is an Undo of an Undo.
         const inEffect = (s, id) =>
           !s.snapshots.some((u) => u.takesBack === id && inEffect(s, u.id));
-        const isRedo = (s, x) => x.kind === 'undo' && snap(s, x.takesBack)?.kind === 'undo';
-        // The Events a Snapshot changed on the user's side. For a merge, only those in Conflict:
-        // the rest of a merge is the server's changes, which Ctrl+Z doesn't take back.
-        function changedBy(s, x) {
-          if (!x.parents.length) return [];
-          const now = contentOf(s, x.id),
-            before = contentOf(s, x.parents[0]);
-          const uids = [...new Set([...Object.keys(now), ...Object.keys(before)])].filter(
-            (u) => now[u] !== before[u],
-          );
-          return x.conflictUids ? uids.filter((u) => x.conflictUids.includes(u)) : uids;
-        }
-        const own = (x) => x.kind === 'user' || x.kind === 'merge';
-        // Ctrl+Z: the newest of the user's own Snapshots in effect that changed something.
+        const isRedo = (s, x) => x.origin === 'undo' && snap(s, x.takesBack)?.origin === 'undo';
+        // Ctrl+Z and redo leave out Snapshots only in Calendars marked read-only.
+        const onlyReadOnly = (s, x) => s.readOnly && calsOf(s, x.id).every((c) => c === WORK);
         const ctrlZTarget = (s) =>
-          userLine(s)
-            .map((id) => snap(s, id))
-            .find((x) => own(x) && inEffect(s, x.id) && changedBy(s, x).length);
-        // Redo: the newest Undo in effect that isn't a Redo, while no change of the user's own came since.
+          newestFirst(s).find((x) => own(x) && inEffect(s, x.id) && !onlyReadOnly(s, x));
+        // Redo: the newest Undo in effect, until the user makes a change of their own.
         function redoTarget(s) {
-          for (const id of userLine(s)) {
-            const x = snap(s, id);
+          for (const x of newestFirst(s)) {
             if (own(x)) return null;
-            if (x.kind === 'undo' && !isRedo(s, x) && inEffect(s, id)) return x;
+            if (x.origin === 'undo' && !isRedo(s, x) && inEffect(s, x.id) && !onlyReadOnly(s, x))
+              return x;
           }
           return null;
         }
-        // Who changed an Event after Snapshot x: "on the server" or by a change of the user's.
-        function changedSince(s, x, uid) {
-          const line = userLine(s);
-          for (const id of line) {
-            if (id === x.id) break;
-            const y = snap(s, id);
-            const before = contentOf(s, y.parents[0]);
-            if (contentOf(s, id)[uid] !== before[uid])
-              return own(y) || y.kind === 'undo' ? `by "${y.note}"` : 'on the server';
-          }
-          return 'since';
+        // The first Snapshot after x that changed the Event, to name it in the refusal.
+        function laterChange(s, x, k) {
+          const ids = s.versions
+            .filter((v) => keyOf(v) === k && userSide(v))
+            .flatMap((v) => [v.begin, v.end])
+            .filter((id) => id !== null && id > x.id);
+          return snap(s, Math.min(...ids));
         }
-        // The one function for undo, redo and undo from the History.
-        function takeBack(s, x, { both = false, verb = 'undo' } = {}) {
-          if (s.pending) refuse(`(Prototype only) ${verb} waits while a send is running.`);
-          if (!userLine(s).includes(x.id)) refuse(`${x.id} isn't on your side's line.`);
-          if (!x.parents.length) refuse("A Calendar's first Snapshot can't be undone.");
-          if (!inEffect(s, x.id)) refuse(`${x.id} is already undone.`);
-          const atX = contentOf(s, x.id),
-            before = contentOf(s, x.parents[0]),
-            c = { ...contentOf(s, s.cal.userPtr) },
+        const label = (s, x) =>
+          x.origin === 'undo' ? `Redo ${snap(s, x.takesBack)?.note}` : `Undo ${x.note}`;
+        // The one function for Ctrl+Z, redo, the Calendar History's undo and restoring a Conflict.
+        function takeBack(s, x, { both = false } = {}) {
+          const verb = x.origin === 'undo' ? 'redo' : 'undo';
+          const what = `“${verb === 'redo' ? snap(s, x.takesBack)?.note : x.note}”`;
+          if (s.pending) refuse(`(Prototype only) The ${verb} waits while a send is running.`);
+          if (x.origin === 'first sync')
+            refuse(
+              "A First Sync's Server Intake can't be undone: it would empty Work on the server.",
+            );
+          if (!inEffect(s, x.id)) refuse(`${S(x.id)} is already undone.`);
+          if (s.readOnly && calsOf(s, x.id).includes(WORK))
+            refuse(`Couldn't ${verb} ${what}: Work is marked read-only.`);
+          const changes = {},
             blocked = [];
-          for (const uid of changedBy(s, x)) {
-            const cur = fieldsOf(s, c[uid]),
-              was = fieldsOf(s, atX[uid]),
-              back = fieldsOf(s, before[uid]);
-            // The comparison of the two sides, with x as the base: x's change against what came since.
+          for (const k of keysOf(s, x.id)) {
+            const was = fieldsOf(versionAfter(s, x.id, k)),
+              back = fieldsOf(versionBefore(s, x.id, k)),
+              cur = fieldsOf(current(s, k));
+            // The comparison per Event: what x left is the base, the current version one side,
+            // the version x ended the other.
             let r = merge3(was, cur, back);
             if (!r.ok && both) r = { ok: true, result: back };
-            if (!r.ok) {
-              blocked.push(uid);
-              continue;
-            }
-            if (r.result) c[uid] = writeVersion(s, uid, r.result);
-            else delete c[uid];
+            if (!r.ok) blocked.push({ k, title: (was ?? cur ?? back).title });
+            else changes[k] = r.result;
           }
-          const what = `"${verb === 'redo' ? snap(s, x.takesBack).note : x.note}"`;
           if (blocked.length) {
-            const why = blocked.map((u) => `${u} was changed ${changedSince(s, x, u)}`).join('; ');
-            refuse(`Couldn't ${verb} ${what}: ${why}.`, {
-              label: verb === 'redo' ? "Redo over the server's change" : 'Undo both changes',
-              action: { type: verb === 'redo' ? 'redo' : 'undo', target: x.id, both: true },
-            });
+            const b = blocked[0],
+              y = laterChange(s, x, b.k);
+            const why =
+              y.origin === 'replacement'
+                ? `${b.title} was replaced by the server's version`
+                : y.origin === 'intake'
+                  ? `${b.title} was changed on the server since`
+                  : `${b.title} was changed since, by “${y.note}”`;
+            const offer =
+              y.origin === 'replacement'
+                ? { label: 'Restore my version', action: { type: 'undo', target: y.id } }
+                : {
+                    label: verb === 'redo' ? "Redo over the server's change" : 'Undo both changes',
+                    action: { type: verb, target: x.id, both: true },
+                  };
+            refuse(`Couldn't ${verb} ${what}: ${why}.`, offer);
           }
-          if (canon(c) === canon(contentOf(s, s.cal.userPtr)))
+          const U =
+            commit(s, 'undo', label(s, x), changes, { takesBack: x.id, over: both }) ??
             refuse(`Nothing to ${verb}: ${what} no longer makes a difference.`);
-          const label = verb === 'redo' ? `Redo ${snap(s, x.takesBack).note}` : `Undo ${x.note}`;
-          const id = makeSnapshot(s, 'undo', label, [s.cal.userPtr], c);
-          Object.assign(snap(s, id), { takesBack: x.id, over: both });
-          movePointer(s, 'user', id);
-          prune(s);
           say(
             s,
-            `Toast: "${label}"` +
-              (own(x) || x.kind === 'undo' ? '' : ', a change on the server') +
+            `Toast: ${verb === 'redo' ? 'Redid' : 'Undid'} ${what}` +
+              (x.origin === 'intake' || x.origin === 'replacement'
+                ? ', a change on the server'
+                : '') +
               (both ? ', and the later change to it' : '') +
-              `. Snapshot ${id} takes back ${x.id}; the User's Pointer moved forward to it.` +
-              (tracking(s)
-                ? ' It is sent like any edit.'
-                : " The Calendar isn't Tracking (a Conflict is open), so it waits like any edit."),
+              `. Snapshot ${S(U.id)} takes back ${S(x.id)}, with new rows even where the content is an earlier one's. For Work it is sent like any change.`,
           );
-          compareAfterMove(s);
+          resolveTouched(s, U.id, x.id);
         }
         A.undo = (s, a) => {
           const x = a.target
             ? (snap(s, a.target) ?? refuse('No such Snapshot.'))
-            : (ctrlZTarget(s) ?? refuse('Nothing of yours to undo: Ctrl+Z skips syncs and Joins.'));
+            : (ctrlZTarget(s) ??
+              refuse(
+                s.readOnly && s.snapshots.some((x) => own(x) && inEffect(s, x.id))
+                  ? 'Nothing of yours to undo: Ctrl+Z leaves out Snapshots only in Work, which is marked read-only.'
+                  : 'Nothing of yours to undo: Ctrl+Z passes over Server Intakes, Server Event Replacements and Undos.',
+              ));
           takeBack(s, x, { both: a.both });
         };
         A.redo = (s, a) => {
-          const u = a.target ? snap(s, a.target) : redoTarget(s);
-          if (!u) refuse('Nothing to redo.');
-          takeBack(s, u, { both: a.both, verb: 'redo' });
+          const u = (a.target ? snap(s, a.target) : redoTarget(s)) ?? refuse('Nothing to redo.');
+          takeBack(s, u, { both: a.both });
         };
 
-        // A send. Its requests run outside any Database Transaction ...
+        // ---------- An Outgoing Sync ----------
+        // Its requests run outside any Database Transaction ...
         A.sendRequests = (s) => {
-          if (!tracking(s))
-            refuse("The Calendar isn't Tracking (a Conflict is open): nothing is sent.");
           if (s.pending) refuse('A send is already running.');
           const ops = toSend(s);
           if (!ops.length)
             return say(
               s,
-              'Nothing to send: both Current-Version Marks are on the same Event Versions.',
+              'Nothing to send: for every Work Event, the two Current-Version Marks are on equal content.',
             );
-          const results = ops.map(({ uid, op, version }) => {
-            const stored = s.caldav.find((r) => r.uid === uid),
-              there = s.server.resources[uid];
-            const ok = op === 'create' ? !there : !!there && !!stored && there.etag === stored.etag; // If-None-Match / If-Match
-            if (!ok) return { uid, op, ok: false };
-            const r = serverStore(s, uid, fieldsOf(s, version), true);
-            return {
-              uid,
-              op,
-              ok: true,
-              sent: version,
-              form: pick(r),
-              etag: r?.etag,
-              href: r?.href,
-            };
+          if (s.server.refusesWrites) {
+            s.syncError = 'writes refused';
+            return say(
+              s,
+              `The server refused every write (403). Work has the Sync Error "writes refused": its ${ops.length} Unsent Change(s) wait; Incoming Syncs go on.`,
+            );
+          }
+          const results = ops.map((o) => {
+            const st = stored(s, o.uid),
+              there = s.server.resources[o.uid];
+            const ok = o.op === 'create' ? !there : !!there && !!st && there.etag === st.etag; // If-None-Match / If-Match
+            if (!ok) return { ...o, ok: false };
+            const r = serverStore(s, o.uid, fieldsOf(row(s, o.sent)), true);
+            return { ...o, ok: true, form: pick(r), etag: r?.etag, href: r?.href };
           });
-          s.pending = { snapshot: s.cal.userPtr, results };
+          s.pending = { results };
           for (const r of results)
             say(
               s,
               r.ok
                 ? `Request: ${r.op} ${r.uid}: accepted.`
-                : `Request: ${r.op} ${r.uid}: refused (412), someone else changed it since FreeCal last read it.`,
+                : `Request: ${r.op} ${r.uid}: refused (412), someone else changed it since FreeCal last read it. Left for the next Incoming Sync.`,
             );
-          say(
-            s,
-            `The requests of the send of Snapshot ${s.pending.snapshot} are done; the outcome isn't recorded yet.`,
-          );
+          say(s, "The requests are done; the outcome isn't recorded yet.");
         };
         // ... and one Database Transaction at the end records the outcome.
         A.sendClose = (s) => {
           const p = s.pending ?? refuse('No send is running.');
-          const sent = p.snapshot,
-            allOk = p.results.every((r) => r.ok);
           for (const r of p.results.filter((r) => r.ok)) {
-            s.caldav = s.caldav.filter((x) => x.uid !== r.uid);
-            if (r.form) s.caldav.push({ uid: r.uid, href: r.href, etag: r.etag });
-          }
-          const reformed = p.results.filter((r) => r.ok && r.form && !same(r.form, ver(s, r.sent)));
-          const substitute = (from, to, where) => {
-            const C = Object.fromEntries(s.snapshots.map((x) => [x.id, contentOf(s, x.id)]));
-            for (const id of Object.keys(C))
-              if (!where || where.has(id))
-                for (const uid of Object.keys(C[id])) if (C[id][uid] === from) C[id][uid] = to;
-            s.links = [];
-            for (const x of s.snapshots) {
-              if (!x.parents.length) s.links.push(...diffLinks(x.id, null, {}, C[x.id]));
-              for (const par of x.parents) s.links.push(...diffLinks(x.id, par, C[par], C[x.id]));
+            storeEtag(s, r.uid, r.form ? { href: r.href, etag: r.etag } : null);
+            if (r.op === 'delete') {
+              setServerMark(s, r.key, null);
+              continue;
             }
-          };
-          if (s.mode === 'replace' || (s.mode === 'amend' && allOk)) {
-            for (const r of reformed) {
-              const v2 = writeVersion(s, r.uid, r.form);
-              substitute(r.sent, v2, s.mode === 'replace' ? null : descendants(s, sent));
-              say(
-                s,
-                s.mode === 'replace'
-                  ? `The server stored ${r.uid} in another form. Its Event Version ${r.sent} is replaced by ${v2} in every Snapshot that held it; ${r.sent} is dropped.`
-                  : `The server stored ${r.uid} in another form. Snapshot ${sent}, and the later ones that took ${r.sent} over from it, now hold ${v2}.`,
-              );
-            }
-          }
-          if (allOk) {
-            if (s.mode === 'snapshot' && reformed.length) {
-              const c = { ...contentOf(s, sent) };
-              for (const r of reformed) c[r.uid] = writeVersion(s, r.uid, r.form);
-              const id = makeSnapshot(
-                s,
-                "server's form",
-                'What the server made of ' + reformed.map((r) => r.uid).join(', '),
-                [sent],
-                c,
-              );
-              const follow = s.cal.userPtr === sent;
-              s.cal.serverPtr = id;
-              if (follow) s.cal.userPtr = id;
-              say(
-                s,
-                `The server stored another form than was sent: new Snapshot ${id} holds it.` +
-                  (follow
-                    ? ' Both pointers moved to it.'
-                    : ' The user has moved on meanwhile, so the two sides now differ in it.'),
-              );
+            const sent = row(s, r.sent);
+            if (same(r.form, sent)) {
+              setServerMark(s, r.key, sent.id);
+              say(s, `${r.uid}: the server's mark moves to the row that was sent, ${V(sent.id)}.`);
             } else {
-              s.cal.serverPtr = sent;
+              // The server's form takes the sent row's place, with its begin and end (ADR 0018).
+              const n = insertRow(s, r.key, r.form, sent.begin, sent.end);
+              s.versions = s.versions.filter((v) => v !== sent);
+              setServerMark(s, r.key, n.id);
               say(
                 s,
-                `Everything was sent. The Server's Pointer went to Snapshot ${sent}, the one that was sent.`,
+                `${r.uid}: the server stored another form. New row ${V(n.id)} takes the place of ${V(sent.id)}, with its begin ${S(sent.begin)} and end ${sent.end === null ? '(empty)' : S(sent.end)}; ${V(sent.id)} is deleted.`,
               );
             }
-          } else {
-            const c = { ...contentOf(s, s.cal.serverPtr) };
-            for (const r of p.results.filter((r) => r.ok)) {
-              if (r.form) c[r.uid] = writeVersion(s, r.uid, r.form);
-              else delete c[r.uid];
-            }
-            const id = makeSnapshot(
-              s,
-              'partly sent',
-              'Sent: ' +
-                (p.results
-                  .filter((r) => r.ok)
-                  .map((r) => r.uid)
-                  .join(', ') || 'nothing'),
-              [s.cal.serverPtr],
-              c,
-              'server',
-            );
-            s.cal.serverPtr = id;
-            say(
-              s,
-              `Not everything could be sent. Snapshot ${id} holds what the server now has; an Incoming Sync has to fetch the rest.`,
-            );
           }
-          // What FreeCal itself sent is nothing new to the user's side: the Reference Snapshot follows.
-          s.cal.base = s.cal.serverPtr;
+          if (p.results.every((r) => r.ok)) s.syncError = null;
           s.pending = null;
-          refreshMarks(s);
-          prune(s);
         };
         A.send = (s) => {
           A.sendRequests(s);
           if (s.pending) A.sendClose(s);
+        };
+
+        // ---------- When the server refuses changes (ADR 0019) ----------
+        A.stopWaiting = (s) => {
+          if (s.syncError !== 'writes refused')
+            refuse('Only offered while Work has the Sync Error "writes refused".');
+          const changes = Object.fromEntries(
+            toSend(s).map((o) => [o.key, fieldsOf(serverRow(s, o.key))]),
+          );
+          const r = commit(s, 'stop waiting', 'Stop waiting and mark read-only', changes);
+          s.readOnly = true;
+          s.syncError = null;
+          say(
+            s,
+            (r
+              ? `Snapshot ${S(r.id)} puts the versions with the server's mark in place of yours. `
+              : '') + 'Work is marked read-only.',
+          );
+          if (r) resolveTouched(s, r.id);
+        };
+        A.unmark = (s) => {
+          if (!s.readOnly) refuse('Work is not marked read-only.');
+          if (s.server.refusesWrites)
+            refuse("FreeCal asked the server, and it doesn't let you change Work: the mark stays.");
+          s.readOnly = false;
+          say(s, 'FreeCal asked the server, which allows changes: the read-only mark is removed.');
+        };
+
+        // ---------- Keeping and dropping (ADR 0018) ----------
+        A.daysPass = (s, a) => {
+          if (s.pending) refuse('(Prototype only) Wait for the send to finish.');
+          s.today += a.days;
+          const old = (id) => (snap(s, id)?.day ?? Infinity) < s.today - 90;
+          const named = new Set(
+            s.snapshots.filter((x) => x.origin === 'replacement').map((x) => x.lastAgreed),
+          );
+          const goneV = s.versions.filter(
+            (v) => v.end !== null && old(v.end) && !v.server && !named.has(v.id),
+          );
+          s.versions = s.versions.filter((v) => !goneV.includes(v));
+          const ends = new Set(s.versions.map((v) => v.end));
+          const goneS = s.snapshots.filter((x) => old(x.id) && !ends.has(x.id)).map((x) => x.id);
+          const openBefore = openConflicts(s).map((x) => x.id);
+          s.snapshots = s.snapshots.filter((x) => !goneS.includes(x.id));
+          for (const v of s.versions) if (goneS.includes(v.begin)) v.begin = null; // ON DELETE SET NULL
+          s.resolutions = s.resolutions.filter((r) => !goneS.includes(r.replacement));
+          say(
+            s,
+            `Day ${s.today}. Dropped: Event Versions ${goneV.map((v) => V(v.id)).join(', ') || 'none'}; Snapshots ${goneS.map(S).join(', ') || 'none'}.`,
+          );
+          const lost = openBefore.filter((id) => goneS.includes(id));
+          if (lost.length)
+            say(
+              s,
+              `Open Conflict(s) dropped with their Server Event Replacement: ${lost.map(S).join(', ')}. Nothing shows them any more.`,
+            );
         };
 
         // ---------- The Store Check: every invariant a stored state can be asked ----------
@@ -997,183 +931,148 @@
           const checks = [];
           const check = (name, rule, adr, find) =>
             checks.push({ name, rule, adr, violations: find() });
-          const marksAgainst = (side) => () => {
-            const want = new Set(Object.values(contentOf(s, s.cal[side + 'Ptr'])));
-            return s.versions
-              .filter((v) => v[side] !== want.has(v.id))
-              .map((v) => `${v.id} is ${v[side] ? '' : 'not '}marked`);
-          };
-          check(
-            'users-marks-follow-users-pointer',
-            "The user's Current-Version Marks are on exactly the Event Versions of the User's Pointer's Snapshot.",
-            '0018',
-            marksAgainst('user'),
-          );
-          check(
-            'servers-marks-follow-servers-pointer',
-            "The server's Current-Version Marks are on exactly the Event Versions of the Server's Pointer's Snapshot.",
-            '0018',
-            marksAgainst('server'),
-          );
+          const twice = (pred) =>
+            s.versions
+              .filter(
+                (v) =>
+                  pred(v) && s.versions.some((w) => w !== v && pred(w) && keyOf(w) === keyOf(v)),
+              )
+              .map((v) => V(v.id));
           check(
             'one-current-version-per-event',
-            'On each side, at most one Event Version of an Event has the mark. (In the real Local Store: a unique index.)',
+            'Each Event has at most one Event Version whose end is empty. (A partial unique index.)',
             '0018',
-            () =>
-              ['user', 'server'].flatMap((side) =>
-                s.versions
-                  .filter(
-                    (v) => v[side] && s.versions.some((w) => w !== v && w[side] && w.uid === v.uid),
-                  )
-                  .map((v) => `${v.id} (${side})`),
-              ),
+            () => twice((v) => v.end === null),
           );
           check(
-            'equal-versions-stored-once',
-            'No two Event Versions of one Event are equal.',
+            'one-servers-mark-per-event',
+            "Each Event has at most one Event Version with the server's mark. (A unique index.)",
             '0018',
-            () =>
-              s.versions
-                .filter((v) => s.versions.some((w) => w !== v && w.uid === v.uid && same(v, w)))
-                .map((v) => v.id),
+            () => twice((v) => v.server),
+          );
+          check('end-after-begin', "An Event Version's end comes after its begin.", '0018', () =>
+            s.versions
+              .filter((v) => v.begin !== null && v.end !== null && v.end <= v.begin)
+              .map((v) => V(v.id)),
           );
           check(
-            'every-version-is-held',
-            'Every Event Version is referred to by a kept Snapshot or has a Current-Version Mark.',
-            '0018',
-            () =>
-              s.versions
-                .filter((v) => !v.user && !v.server && !s.links.some((l) => l.version === v.id))
-                .map((v) => v.id),
-          );
-          check(
-            'links-refer-to-rows',
-            'Every link refers to an Event Version, a Snapshot and one of its parents that exist. (In the real Local Store: foreign keys.)',
-            '0018',
-            () =>
-              s.links
+            'references-exist',
+            "An Event Version's begin and end, a Server Event Replacement's Last Agreed Version and a Resolution's Snapshots exist. (Foreign keys.)",
+            '0018, 0019',
+            () => [
+              ...s.versions
                 .filter(
-                  (l) =>
-                    !ver(s, l.version) ||
-                    !snap(s, l.snap) ||
-                    (l.parent
-                      ? !snap(s, l.snap).parents.includes(l.parent)
-                      : snap(s, l.snap).parents.length > 0),
+                  (v) =>
+                    (v.begin !== null && !snap(s, v.begin)) || (v.end !== null && !snap(s, v.end)),
                 )
-                .map((l) => `${l.snap}/${l.version}`),
+                .map((v) => V(v.id)),
+              ...s.snapshots
+                .filter(
+                  (x) =>
+                    x.origin === 'replacement' && x.lastAgreed !== null && !row(s, x.lastAgreed),
+                )
+                .map((x) => S(x.id)),
+              ...s.resolutions
+                .filter(
+                  (r) =>
+                    snap(s, r.replacement)?.origin !== 'replacement' ||
+                    (r.by !== null && !snap(s, r.by)),
+                )
+                .map((r) => 'Resolution of ' + S(r.replacement)),
+            ],
           );
           check(
-            'a-step-ends-what-its-parent-holds',
-            'A step ends only Event Versions its parent holds, and begins only ones it does not.',
+            'every-snapshot-changes-something',
+            'Every Snapshot has an Event Version beginning or ending with it.',
             '0018',
             () =>
-              s.links
-                .filter((l) => ver(s, l.version) && snap(s, l.snap))
-                .filter((l) => {
-                  const held =
-                    (l.parent ? contentOf(s, l.parent) : {})[ver(s, l.version).uid] === l.version;
-                  return l.kind === 'end' ? !held : held;
-                })
-                .map((l) => `${l.snap}: ${l.kind} ${l.version}`),
+              s.snapshots
+                .filter((x) => !s.versions.some((v) => v.begin === x.id || v.end === x.id))
+                .map((x) => S(x.id)),
           );
           check(
-            'a-merge-is-the-same-from-both-parents',
-            "A merge's two differences lead to the same Events.",
-            '0018',
+            'undo-takes-back-an-older-kept-snapshot',
+            "An Undo takes back an older Snapshot that is still kept, never a First Sync's.",
+            '0018, 0020',
+            () =>
+              s.snapshots
+                .filter((x) => x.origin === 'undo')
+                .filter((x) => {
+                  const t = snap(s, x.takesBack);
+                  return !t || t.id >= x.id || t.origin === 'first sync';
+                })
+                .map((x) => `${S(x.id)} takes back ${S(x.takesBack)}`),
+          );
+          check(
+            'undo-of-a-replacement-has-its-resolution',
+            'Every Undo of a Server Event Replacement has its Resolution.',
+            '0019',
             () =>
               s.snapshots
                 .filter(
                   (x) =>
-                    x.parents.length === 2 &&
-                    canon(contentVia(s, x.id, x.parents[0])) !==
-                      canon(contentVia(s, x.id, x.parents[1])),
+                    x.origin === 'undo' &&
+                    snap(s, x.takesBack)?.origin === 'replacement' &&
+                    !resolutionOf(s, x.takesBack),
                 )
-                .map((x) => x.id),
+                .map((x) => S(x.id)),
           );
           check(
-            'every-snapshot-is-kept-for-a-reason',
-            'Every Snapshot is an ancestor of a pointer (or of the Snapshot being sent).',
-            '0018',
-            () => {
-              const roots = [s.cal.serverPtr, s.cal.userPtr];
-              if (s.pending) roots.push(s.pending.snapshot);
-              const kept = new Set(roots.flatMap((r) => [...ancestors(s, r)]));
-              return s.snapshots.filter((x) => !kept.has(x.id)).map((x) => x.id);
-            },
-          );
-          check(
-            'an-undo-takes-back-an-earlier-snapshot-on-its-line',
-            "An Undo takes back a Snapshot on its own line on the user's side (its first parents), never a Calendar's first one.",
-            '0020',
+            'one-resolution-per-replacement',
+            'A Server Event Replacement has at most one Resolution.',
+            '0019',
             () =>
-              s.snapshots
-                .filter((x) => x.kind === 'undo')
-                .filter((x) => {
-                  const t = snap(s, x.takesBack);
-                  if (!t || !t.parents.length) return true;
-                  for (let id = x.parents[0]; id; id = snap(s, id).parents[0])
-                    if (id === x.takesBack) return false;
-                  return true;
-                })
-                .map((x) => x.id),
+              s.resolutions
+                .filter((r) =>
+                  s.resolutions.some((q) => q !== r && q.replacement === r.replacement),
+                )
+                .map((r) => S(r.replacement)),
           );
           check(
             'etags-belong-to-the-servers-marks',
-            "A Server Object's place and ETag are stored for exactly the Events that have a server's Current-Version Mark.",
-            '0019',
+            "A stored ETag belongs to an Event with the server's mark, and the other way round.",
+            '0018, 0019',
             () => {
-              const have = new Set(s.caldav.map((r) => r.uid)),
-                want = new Set(Object.keys(marked(s, 'server')));
-              return [...new Set([...have, ...want])].filter((u) => have.has(u) !== want.has(u));
+              const have = new Set(s.caldav.map((r) => key(WORK, r.uid))),
+                want = new Set(s.versions.filter((v) => v.server).map(keyOf));
+              return [...new Set([...have, ...want])].filter((k) => have.has(k) !== want.has(k));
             },
           );
           check(
-            'reference-snapshot',
-            "A Calendar's Reference Snapshot is the Server's Pointer's Snapshot or one it descends from.",
-            '0019',
-            () =>
-              snap(s, s.cal.base) && ancestors(s, s.cal.serverPtr).has(s.cal.base)
-                ? []
-                : ['the Calendar'],
-          );
-          check(
-            'reference-snapshot-means-conflict',
-            "The Server's Pointer is off the Reference Snapshot exactly while the two sides are in Conflict against it.",
-            '0019',
-            () =>
-              tracking(s) || conflicts(s).length
-                ? []
-                : ["the Server's Pointer is off the Reference Snapshot but no Conflict is left"],
+            'no-servers-mark-in-a-local-calendar',
+            "A Local Calendar's Event Versions have no server's mark.",
+            '0018',
+            () => s.versions.filter((v) => v.server && v.cal === PERSONAL).map((v) => V(v.id)),
           );
           return checks;
         }
-        // Not a Store Check (it needs the server): where the stored ETag is the
-        // server's, FreeCal's Event Version with the server's mark equals what the server holds.
+        // Not a Store Check (it needs the server): where the stored ETag is the server's,
+        // FreeCal's Event Version with the server's mark equals what the server holds.
         function beliefAgainstServer(s) {
-          const m = marked(s, 'server');
           return s.caldav
             .filter(
               (r) =>
                 s.server.resources[r.uid]?.etag === r.etag &&
-                !same(ver(s, m[r.uid]), s.server.resources[r.uid]),
+                !same(fieldsOf(serverRow(s, key(WORK, r.uid))), s.server.resources[r.uid]),
             )
             .map((r) => r.uid);
         }
 
-        function initial({ mode = 'replace', rewrites = false } = {}) {
+        function initial({ rewrites = false } = {}) {
           const s = {
             nextVersion: 1,
             nextSnapshot: 1,
             nextUid: 1,
+            today: 0,
             versions: [],
             snapshots: [],
-            links: [],
+            resolutions: [],
             caldav: [],
             pending: null,
-            mode,
+            readOnly: false,
+            syncError: null,
             log: [],
-            cal: { userPtr: null, serverPtr: null, base: null },
-            server: { resources: {}, nextEtag: 1, rewrites },
+            server: { resources: {}, nextEtag: 1, rewrites, refusesWrites: false },
           };
           serverStore(s, 'standup', { title: 'Standup', time: '09:00', extra: {} }, false);
           serverStore(
@@ -1182,15 +1081,20 @@
             { title: 'Dentist', time: '14:00', extra: { 'caldav:alarm': '30 min before' } },
             false,
           );
-          const c = {};
-          for (const [uid, r] of Object.entries(s.server.resources)) {
-            c[uid] = writeVersion(s, uid, r);
-            s.caldav.push({ uid, href: r.href, etag: r.etag });
+          const res = s.server.resources;
+          const r = commit(
+            s,
+            'first sync',
+            'First Sync of Work',
+            Object.fromEntries(Object.keys(res).map((uid) => [key(WORK, uid), res[uid]])),
+          );
+          for (const uid of Object.keys(res)) {
+            setServerMark(s, key(WORK, uid), r.begun[key(WORK, uid)]);
+            storeEtag(s, uid, res[uid]);
           }
-          const id = makeSnapshot(s, 'first sync', 'First Sync', [], c);
-          s.cal.userPtr = s.cal.serverPtr = s.cal.base = id;
-          refreshMarks(s);
-          s.log = ["First Sync: the Calendar's first Snapshot. Both pointers are on it."];
+          s.log = [
+            "Work's First Sync is a Server Intake from nothing, S1. Personal, a Local Calendar, has no Event Versions yet.",
+          ];
           return s;
         }
         // (state, action) => state. A refused action leaves the state as it was.
@@ -1212,79 +1116,87 @@
           }
         }
         return {
+          WORK,
+          PERSONAL,
+          key,
+          split,
+          S,
+          V,
           initial,
           apply,
-          tracking,
           toSend,
-          conflicts,
+          openConflicts,
+          conflictParts,
+          resolutionOf,
           storeCheck,
           beliefAgainstServer,
-          contentOf,
-          marked,
-          children,
-          lastCommon,
+          current,
+          serverRow,
+          keysIn,
+          keysOf,
+          calsOf,
           snap,
-          userLine,
+          row,
+          own,
           inEffect,
-          changedBy,
+          isRedo,
           ctrlZTarget,
           redoTarget,
-          ver,
+          newestFirst,
+          userSide,
         };
       })();
     </script>
     <script id="scenarios">
       // Guided walkthroughs: plain data, each step one action of the module above.
       const later = (t) => String((parseInt(t, 10) + 1) % 24).padStart(2, '0') + ':00';
+      const ST = 'Work/standup',
+        DE = 'Work/dentist';
+      const step = (label, action, watch = '') => ({ label, action, watch });
+      const sync = (watch = '') => step('Incoming Sync', { type: 'incomingSync' }, watch);
+      const send = (watch = '') => step('FreeCal sends', { type: 'send' }, watch);
+      const ctrlZ = (watch = '') => step('Ctrl+Z', { type: 'undo' }, watch);
+      const redo = (watch = '') => step('Ctrl+Shift+Z (redo)', { type: 'redo' }, watch);
+      const days = (n = 30, watch = '') =>
+        step(`${n} days pass`, { type: 'daysPass', days: n }, watch);
+      const rename = (to, watch = '') =>
+        step(
+          `You rename Standup to "${to}"`,
+          { type: 'userEdit', key: ST, patch: { title: to } },
+          watch,
+        );
+      const theyRename = (to, watch = '') =>
+        step(
+          `Someone else renames Standup to "${to}"`,
+          { type: 'otherEdit', uid: 'standup', patch: { title: to } },
+          watch,
+        );
       const SCENARIOS = [
         {
           id: 'round',
           title: '1. A plain round trip',
-          rewrites: false,
           intro:
-            'An edit, a send, a change by someone else, then Ctrl+Z. Watch the two pointers: everything else is read from them.',
+            'An edit, a send, a change by someone else, then Ctrl+Z and redo. Watch the Event Version table: rows are only added, and each says when it began and ended.',
           steps: [
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
-              watch: 'A new Snapshot on your side. "To send" is derived from the marks differing.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch: "The Server's Pointer moved to the Snapshot that was sent. No new Snapshot.",
-            },
-            {
-              label: 'Someone else moves Dentist to 15:00',
-              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
-              watch: 'Only the actual server changed.',
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch: 'One Snapshot, both pointers on it.',
-            },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch:
-                "Ctrl+Z skipped the sync and took back your rename, as a new Snapshot. Dentist stays at 15:00. The User's Pointer moved forward.",
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch: "The undo is sent like an edit; the Server's Pointer moved forward too.",
-            },
-            {
-              label: 'Redo',
-              action: { type: 'redo' },
-              watch: 'Redo is one more Snapshot: it takes back the Undo.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch: 'Back where we were. Every step is in the history, and nothing was dropped.',
-            },
+            rename(
+              'Standup (daily)',
+              'Snapshot S2. The old row ended with S2, a new one began with it. "To send" is read from the two marks differing.',
+            ),
+            send("No Snapshot: the server's mark moved to the row that was sent."),
+            step('Someone else moves Dentist to 15:00', {
+              type: 'otherEdit',
+              uid: 'dentist',
+              patch: { time: '15:00' },
+            }),
+            sync('Server Intake S3. Both marks on the new Dentist row.'),
+            ctrlZ(
+              'Ctrl+Z passed over the Server Intake and took back your rename as Undo S4: a new row for Standup with the old content, a copy. Dentist stays at 15:00.',
+            ),
+            send(),
+            redo('The redo is S5, an Undo of the Undo: one more copy.'),
+            send(
+              'Back where we were. Nothing was dropped and no row changed but its end and marks.',
+            ),
           ],
         },
         {
@@ -1292,397 +1204,385 @@
           title: '2. The server stores another form',
           rewrites: true,
           intro:
-            'THE OPEN POINT. This server capitalises titles and adds a field of its own to whatever FreeCal writes. Run this once for each of the three options (switch at the top) and compare the history after the send, and what Ctrl+Z does.',
+            "This server capitalises titles and adds a field of its own to whatever FreeCal writes. The server's form takes the place of the row that was sent, with its begin and end; no Snapshot is made for it.",
           steps: [
-            {
-              label: 'You add "team lunch" at 12:00',
-              action: { type: 'userAdd', uid: 'lunch', title: 'team lunch', time: '12:00' },
-              watch: 'One Snapshot on your side.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch:
-                'The server stored "Team lunch" with an extra field. Where did that form go: into the sent Snapshot, or a new one?',
-            },
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
-              watch: '',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch: 'Again the server added its field.',
-            },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch:
-                'With "a new Snapshot": refused, as the Snapshot holding the server\'s form changed Standup after your rename, and Ctrl+Z reads that as a change on the server. With the other two: the rename is taken back.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch:
-                'Standup has its old title on the server, which adds its field again. With "replace everywhere", look at the First Sync Snapshot: it now holds the server\'s form of the old Standup, which the server did not have then.',
-            },
-            { label: 'Ctrl+Z', action: { type: 'undo' }, watch: '' },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-          ],
-        },
-        {
-          id: 'unsent',
-          title: '3. Undo to a Snapshot that was never sent',
-          rewrites: true,
-          intro:
-            'Two edits, one send, then one undo. The Snapshot undo goes back to was never sent itself. This is where "amend the sent Snapshot" and "replace everywhere" differ.',
-          steps: [
-            {
-              label: 'You rename Standup to "standup (daily)"',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'standup (daily)' } },
-              watch: '',
-            },
-            {
-              label: 'You add "team lunch"',
-              action: { type: 'userAdd', uid: 'lunch', title: 'team lunch', time: '12:00' },
-              watch: 'Two Snapshots, none sent.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch:
-                "Only the newest Snapshot was sent. Does the one before it hold your form of Standup, or the server's?",
-            },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch:
-                'Look at "To send": only the lunch is deleted, with "amend" too. An Undo takes back only what the undone Snapshot changed, so the difference between "amend" and "replace everywhere" that the pointer-moving undo showed here is gone.',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch: 'Both pointers end on the same Snapshot.',
-            },
+            step('You add "team lunch" at 12:00 to Work', {
+              type: 'userAdd',
+              cal: 'Work',
+              uid: 'lunch',
+              title: 'team lunch',
+              time: '12:00',
+            }),
+            send(
+              "Look at the Event Version table: the row that was sent is gone; a row with the server's form has its begin and both marks.",
+            ),
+            rename('Standup (daily)'),
+            send('Again the server added its field.'),
+            ctrlZ(
+              "The rename is taken back: Standup goes back to the First Sync's content, as a copy. The server's form never stands in Ctrl+Z's way, as it is no Snapshot.",
+            ),
+            send(),
+            ctrlZ("Now the lunch: the server's form is what S2 left, so nothing changed it since."),
+            send(),
           ],
         },
         {
           id: 'during',
-          title: '4. A change while a send runs',
+          title: '3. A change while a send runs',
           rewrites: true,
           intro:
-            'The requests of a send run outside any Database Transaction, so the user can change the same Event in between.',
+            'The requests of a send run outside any Database Transaction, so you can change the same Event in between.',
           steps: [
-            {
-              label: 'You add "team lunch"',
-              action: { type: 'userAdd', uid: 'lunch', title: 'team lunch', time: '12:00' },
-              watch: '',
-            },
-            {
-              label: "The send's requests go out",
-              action: { type: 'sendRequests' },
-              watch: "The server has the Event; FreeCal hasn't recorded the outcome.",
-            },
-            {
-              label: 'Meanwhile you move the lunch to 13:00',
-              action: { type: 'userEdit', uid: 'lunch', patch: { time: '13:00' } },
-              watch: "The User's Pointer moved on.",
-            },
-            {
-              label: 'The send records its outcome',
-              action: { type: 'sendClose' },
-              watch:
-                "The Server's Pointer is on the Snapshot that was sent, not on yours. Your later change is simply still different. Note: your later Event Version has your form of the title and lacks the server's field.",
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            step('You add "team lunch" to Work', {
+              type: 'userAdd',
+              cal: 'Work',
+              uid: 'lunch',
+              title: 'team lunch',
+              time: '12:00',
+            }),
+            step(
+              "The send's requests go out",
+              { type: 'sendRequests' },
+              "The server has the Event; FreeCal hasn't recorded the outcome.",
+            ),
+            step(
+              'Meanwhile you move the lunch to 13:00',
+              { type: 'userEdit', key: 'Work/lunch', patch: { time: '13:00' } },
+              'The sent row ended with S3.',
+            ),
+            step(
+              'The send records its outcome',
+              { type: 'sendClose' },
+              "The server's form takes the sent row's place with begin S2 and end S3: it is history now, with the server's mark. Your 13:00 row lacks the server's field and is simply still different.",
+            ),
+            send('Sent as you made it.'),
           ],
         },
         {
           id: 'conflict',
-          title: '5. A Conflict',
-          rewrites: false,
+          title: '4. A Conflict ends at once',
           intro:
-            'Both sides rename the same Event. No table holds the Conflict: it is read from the two pointers.',
+            'Both sides rename Standup, and someone moves Dentist. One Incoming Sync makes two Snapshots: a Server Intake for Dentist and a Server Event Replacement for Standup. Nothing stops syncing.',
           steps: [
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (mine)' } },
-              watch: '',
-            },
-            {
-              label: 'Someone else renames Standup',
-              action: { type: 'otherEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
-              watch: '',
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch:
-                "The Calendar is no longer Tracking. The server's change is a Snapshot on the server's side only, and the Reference Snapshot stays where the server was before: the last state of the server your side took in.",
-            },
-            {
-              label: 'Someone else moves Dentist to 15:00',
-              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
-              watch: '',
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch:
-                "FreeCal keeps fetching: the Server's Pointer follows, your side doesn't. The whole Calendar is stale, not just Standup.",
-            },
-            { label: 'FreeCal tries to send', action: { type: 'send' }, watch: 'Refused.' },
-            {
-              label: 'You keep your version',
-              action: { type: 'resolve', side: 'mine' },
-              watch:
-                'A merge Snapshot with both sides as parents. Dentist followed the server; your Standup is to send.',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch:
-                "You kept your own Standup, so the merge changed none of its Events in Conflict, and Ctrl+Z skips it. It takes back your rename. Dentist stays at 15:00: the merge took that in from the server, and Ctrl+Z doesn't take it back (OPEN: the merge has to know which Events were in Conflict).",
-            },
+            rename('Standup (mine)'),
+            theyRename('Standup (theirs)'),
+            step('Someone else moves Dentist to 15:00', {
+              type: 'otherEdit',
+              uid: 'dentist',
+              patch: { time: '15:00' },
+            }),
+            sync(
+              'S3 takes Dentist in, S4 puts "Standup (theirs)" in place of yours. The bar names the open Conflict; the Conflict box shows the Last Agreed Version, yours and the server\'s.',
+            ),
+            send('Nothing to send: the replacement made the two marks agree.'),
+            ctrlZ(
+              'Refused: your rename was replaced by the server\'s version. The toast offers "Restore my version".',
+            ),
+            step(
+              'Restore my version',
+              { type: 'restore', key: ST },
+              'An Undo of S4: your version is back, a Resolution "restored" is written, and it is sent like any change.',
+            ),
+            send(),
           ],
         },
         {
-          id: 'undo-base',
-          title: '6. Undo, then the server changes the same Event',
-          rewrites: false,
+          id: 'keep',
+          title: "5. Keep the server's version",
           intro:
-            'An Undo is a change like any other: when the server changes the same Event before the Undo is sent, that is a Conflict, compared with the Reference Snapshot.',
+            "The Conflict stays open until you've looked. Keeping the server's version only writes a Resolution.",
           steps: [
-            {
-              label: 'You move Standup to 10:00',
-              action: { type: 'userEdit', uid: 'standup', patch: { time: '10:00' } },
-              watch: '',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            {
-              label: 'Ctrl+Z (you want 09:00 back)',
-              action: { type: 'undo' },
-              watch: 'To send: Standup at 09:00.',
-            },
-            {
-              label: 'Before the send, someone else moves Standup to 11:00',
-              action: { type: 'otherEdit', uid: 'standup', patch: { time: '11:00' } },
-              watch: '',
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch: 'A Conflict: you want 09:00, the server has 11:00, and 10:00 was last agreed.',
-            },
-            {
-              label: 'You keep your version',
-              action: { type: 'resolve', side: 'mine' },
-              watch: '',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            rename('Standup (mine)'),
+            theyRename('Standup (theirs)'),
+            sync(),
+            step(
+              "Keep the server's version",
+              { type: 'keepServer', key: ST },
+              'A Resolution row, no Snapshot. The bar is gone.',
+            ),
+            ctrlZ(
+              'Still refused, still offering "Restore my version": it would make an Undo of the replacement, and the Conflict is already resolved, so no second Resolution.',
+            ),
+          ],
+        },
+        {
+          id: 'again',
+          title: '6. Changing the Event again resolves it',
+          intro: 'Any change of yours to an Event in Conflict resolves the Conflict.',
+          steps: [
+            rename('Standup (mine)'),
+            theyRename('Standup (theirs)'),
+            sync(),
+            step(
+              'You move Standup to 10:00',
+              { type: 'userEdit', key: ST, patch: { time: '10:00' } },
+              'Resolution "changed again", naming your Snapshot.',
+            ),
+            send('"Standup (theirs)" at 10:00 goes to the server.'),
+          ],
+        },
+        {
+          id: 'deleted',
+          title: '7. Your edit against a deletion on the server',
+          intro: 'The server deleted the Event you changed. It is gone until you restore it.',
+          steps: [
+            step('You move Standup to 10:00', {
+              type: 'userEdit',
+              key: ST,
+              patch: { time: '10:00' },
+            }),
+            step('Someone else deletes Standup', { type: 'otherDelete', uid: 'standup' }),
+            sync(
+              "The Server Event Replacement ends your row and begins none. The Conflict shows the server's version as deleted.",
+            ),
+            step('Restore my version', { type: 'restore', key: ST }),
+            send('Sent as a create.'),
+          ],
+        },
+        {
+          id: 'redo-restore',
+          title: '8. Redo of a restore',
+          intro:
+            "A redo of the restore puts the server's version back, and the Conflict stays resolved.",
+          steps: [
+            rename('Standup (mine)'),
+            theyRename('Standup (theirs)'),
+            sync(),
+            step('Restore my version', { type: 'restore', key: ST }),
+            send(),
+            redo(
+              'The server\'s version is back. The Resolution is still "restored": nothing changes a Resolution, so no bar returns.',
+            ),
+            send(),
           ],
         },
         {
           id: 'ifmatch',
-          title: '7. Someone else was faster',
-          rewrites: false,
+          title: '9. Someone else was faster',
           intro:
             'A send without an Incoming Sync before it. If-Match makes the server refuse the Event someone else changed.',
           steps: [
-            {
-              label: 'Someone else renames Standup',
-              action: { type: 'otherEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
-              watch: '',
-            },
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (mine)' } },
-              watch: '',
-            },
-            {
-              label: 'You move Dentist to 16:00',
-              action: { type: 'userEdit', uid: 'dentist', patch: { time: '16:00' } },
-              watch: '',
-            },
-            {
-              label: 'FreeCal sends',
-              action: { type: 'send' },
-              watch:
-                "Dentist went through, Standup was refused. One Snapshot on the server's side holds what the server now has.",
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch: 'Now the Conflict shows.',
-            },
-            {
-              label: "You keep the server's version",
-              action: { type: 'resolve', side: 'theirs' },
-              watch: 'Nothing left to send.',
-            },
+            theyRename('Standup (theirs)'),
+            rename('Standup (mine)'),
+            step('You move Dentist to 16:00', {
+              type: 'userEdit',
+              key: DE,
+              patch: { time: '16:00' },
+            }),
+            send(
+              "Dentist went through, Standup was refused. No Snapshot: only Dentist's mark moved.",
+            ),
+            sync('Now the Conflict: a Server Event Replacement.'),
           ],
         },
         {
-          id: 'illegal',
-          title: '8. Things that must not work',
-          rewrites: false,
-          intro: 'Each of these should be refused or do nothing.',
-          steps: [
-            {
-              label: 'Ctrl+Z at the First Sync',
-              action: { type: 'undo' },
-              watch: 'Refused: nothing of yours to undo. The First Sync is never undone.',
-            },
-            { label: 'Redo with nothing undone', action: { type: 'redo' }, watch: 'Refused.' },
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (mine)' } },
-              watch: '',
-            },
-            {
-              label: 'Someone else renames Standup',
-              action: { type: 'otherEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
-              watch: '',
-            },
-            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: 'A Conflict.' },
-            {
-              label: 'FreeCal tries to send',
-              action: { type: 'send' },
-              watch:
-                'Refused: a Calendar is Tracking exactly while it has no Conflict, and there is no other switch.',
-            },
-            {
-              label: 'You rename Standup to what the server has',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
-              watch:
-                "Both sides now agree. The two sides are compared after every move of the User's Pointer, so the Conflict is over at once and the Calendar is Tracking again.",
-            },
-          ],
-        },
-        {
-          id: 'refused',
-          title: '9. Ctrl+Z after someone changed the same Event',
-          rewrites: false,
+          id: 'both',
+          title: '10. Ctrl+Z after someone changed the same Event',
           intro:
-            'Your change was sent, then a colleague changed the same Event. Ctrl+Z refuses, and offers to undo both changes.',
+            'Your change was sent, then a colleague changed the same Event. Ctrl+Z refuses whole, and offers to undo both changes.',
           steps: [
-            {
-              label: 'You move Standup to 10:00',
-              action: { type: 'userEdit', uid: 'standup', patch: { time: '10:00' } },
-              watch: '',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            {
-              label: 'Someone else renames Standup',
-              action: { type: 'otherEdit', uid: 'standup', patch: { title: 'Standup (theirs)' } },
-              watch: '',
-            },
-            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch:
-                'Refused: no merging per field, so the rename blocks taking back the move. The toast offers "Undo both changes".',
-            },
-            {
-              label: 'Undo both changes',
-              action: { type: 'undo', both: true },
-              watch:
-                "Standup is back to 09:00 with its old title: the colleague's rename is taken back too, and will be sent.",
-            },
-            {
-              label: 'Redo',
-              action: { type: 'redo' },
-              watch: "Redo brings back both: your move and the colleague's rename.",
-            },
-          ],
-        },
-        {
-          id: 'nowait',
-          title: '10. Undo, then the server changes another Event',
-          rewrites: false,
-          intro:
-            "Nothing waits for an undo: the server's change comes in at once, and redo still works.",
-          steps: [
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
-              watch: '',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            { label: 'Ctrl+Z', action: { type: 'undo' }, watch: 'The Undo is not sent yet.' },
-            {
-              label: 'Someone else moves Dentist to 15:00',
-              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
-              watch: '',
-            },
-            {
-              label: 'Incoming Sync',
-              action: { type: 'incomingSync' },
-              watch: 'A Join takes Dentist in at once. The Calendar stays Tracking.',
-            },
-            {
-              label: 'Redo',
-              action: { type: 'redo' },
-              watch: 'Redo skips the Join and takes back the Undo.',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            step('You move Standup to 10:00', {
+              type: 'userEdit',
+              key: ST,
+              patch: { time: '10:00' },
+            }),
+            send(),
+            theyRename('Standup (theirs)'),
+            sync(),
+            ctrlZ(
+              'Refused: Standup was changed on the server since. Both changed the managed fields, so no merging per field.',
+            ),
+            step(
+              'Undo both changes',
+              { type: 'undo', both: true },
+              "Standup is back to 09:00 with its old title: the colleague's rename is taken back too, and will be sent.",
+            ),
+            redo("Redo brings back both: your move and the colleague's rename."),
           ],
         },
         {
           id: 'redo-refused',
-          title: '11. Undo, the server changes the same Event, then Redo',
-          rewrites: false,
-          intro:
-            'Redo is not guaranteed: a change on the server between undo and redo can refuse it. A change in the other part (here the alarm, an Unimplemented Field) does not.',
+          title: '11. Undo, the server changes the same Event, then redo',
+          intro: 'Redo survives syncs, but a change on the server to the same Event refuses it.',
           steps: [
-            {
-              label: 'You rename Standup',
-              action: { type: 'userEdit', uid: 'standup', patch: { title: 'Standup (daily)' } },
-              watch: '',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            { label: 'Ctrl+Z', action: { type: 'undo' }, watch: '' },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
-            {
-              label: 'Someone else moves Standup to 10:00',
-              action: { type: 'otherEdit', uid: 'standup', patch: { time: '10:00' } },
-              watch: '',
-            },
-            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
-            {
-              label: 'Redo',
-              action: { type: 'redo' },
-              watch: 'Refused, with "Redo over the server\'s change".',
-            },
+            rename('Standup (daily)'),
+            send(),
+            ctrlZ(),
+            send(),
+            step('Someone else moves Standup to 10:00', {
+              type: 'otherEdit',
+              uid: 'standup',
+              patch: { time: '10:00' },
+            }),
+            sync(),
+            redo('Refused, offering "Redo over the server\'s change".'),
+            step(
+              "Redo over the server's change",
+              { type: 'redo', both: true },
+              'The title comes back, and with it 09:00.',
+            ),
           ],
         },
         {
           id: 'history',
-          title: "12. Undo a colleague's change from the History",
-          rewrites: false,
+          title: "12. Undo a colleague's change from the Calendar History",
           intro:
-            "Ctrl+Z never reaches someone else's change; the History list does, without a question.",
+            "Ctrl+Z never reaches someone else's change; the Calendar History does, without a question.",
           steps: [
-            {
-              label: 'Someone else moves Dentist to 15:00',
-              action: { type: 'otherEdit', uid: 'dentist', patch: { time: '15:00' } },
-              watch: '',
-            },
-            { label: 'Incoming Sync', action: { type: 'incomingSync' }, watch: '' },
-            {
-              label: 'Ctrl+Z',
-              action: { type: 'undo' },
-              watch: 'Refused: nothing of yours to undo.',
-            },
-            {
-              label: 'Undo S2 from the History',
-              action: { type: 'undo', target: 'S2' },
-              watch: 'The toast says it was a change on the server. Dentist at 14:00 is to send.',
-            },
-            { label: 'FreeCal sends', action: { type: 'send' }, watch: '' },
+            step('Someone else moves Dentist to 15:00', {
+              type: 'otherEdit',
+              uid: 'dentist',
+              patch: { time: '15:00' },
+            }),
+            sync(),
+            ctrlZ('Refused: nothing of yours to undo.'),
+            step(
+              'Undo S2 from the Calendar History',
+              { type: 'undo', target: 2 },
+              'The toast says it was a change on the server. Dentist at 14:00 is to send.',
+            ),
+            send(),
+          ],
+        },
+        {
+          id: 'move',
+          title: '13. A move between Calendars is one Snapshot',
+          intro:
+            'Work is on the server, Personal is a Local Calendar. A move spans both; its undo is whole.',
+          steps: [
+            step(
+              'You move Standup to Personal',
+              { type: 'userMove', key: ST, to: 'Personal' },
+              'S2 spans Work and Personal: one row ended in Work, one began in Personal.',
+            ),
+            send('Deleted on the server.'),
+            step('You rename Standup in Personal', {
+              type: 'userEdit',
+              key: 'Personal/standup',
+              patch: { title: 'Standup (private)' },
+            }),
+            ctrlZ('Takes back the rename only.'),
+            ctrlZ(
+              'Takes back the move, in both Calendars at once: the copy in Work is to be created again.',
+            ),
+            send(),
+          ],
+        },
+        {
+          id: 'parts',
+          title: "14. Finding: your title, the server's alarm",
+          intro:
+            "You rename Standup; someone else adds an alarm (an Unimplemented Field). The comparison treats them as two parts, so there is no Conflict. But where does the server's mark go?",
+          steps: [
+            rename('Standup (daily)'),
+            step('Someone else adds an alarm to Standup', {
+              type: 'otherEdit',
+              uid: 'standup',
+              extra: { 'caldav:alarm': '10 min before' },
+            }),
+            sync(
+              'FINDING: your side gets your title with the server\'s alarm, a version neither side held. The server holds the old title with the alarm: that row was never current on your side, so the prototype gives it begin = end = the Intake, and "end after begin" fails. ADR 0018 needs a rule for such rows.',
+            ),
+            send(
+              "The combination is sent; the server's mark moves to your row. The odd row stays until it is dropped.",
+            ),
+          ],
+        },
+        {
+          id: 'refused-writes',
+          title: '15. The server refuses writes',
+          intro:
+            'Your changes wait. You can stop waiting, which marks Work read-only; once the mark goes, Ctrl+Z brings the waiting changes back.',
+          steps: [
+            step('The server stops letting you change Work', {
+              type: 'serverWrites',
+              allow: false,
+            }),
+            rename('Standup (daily)'),
+            send('Sync Error "writes refused". The change waits.'),
+            step(
+              'Stop waiting and mark read-only',
+              { type: 'stopWaiting' },
+              "A Snapshot of its own origin puts the server's versions back. Work is read-only.",
+            ),
+            rename('Standup (again)', 'Refused: Work is read-only.'),
+            ctrlZ('Refused: Ctrl+Z leaves out Snapshots only in read-only Calendars.'),
+            step(
+              'Remove the read-only mark',
+              { type: 'unmark' },
+              'Refused: FreeCal asks the server, which still says no.',
+            ),
+            step('The server lets you change Work again', { type: 'serverWrites', allow: true }),
+            step('Remove the read-only mark', { type: 'unmark' }),
+            ctrlZ('Takes back "Stop waiting": your rename is back.'),
+            send(),
+          ],
+        },
+        {
+          id: 'drop',
+          title: '16. Finding: dropping after 90 days',
+          intro:
+            "Snapshots older than 90 days are dropped, unless a kept Event Version ended with them. A row with the server's mark is kept however old, and so is the Snapshot it ended. Can an Undo outlive the Snapshot it takes back?",
+          steps: [
+            rename('Standup (daily)'),
+            send("The server's mark is on your row, which began with S2."),
+            step('The server stops letting you change Work', {
+              type: 'serverWrites',
+              allow: false,
+            }),
+            ctrlZ("Undo S3 ends the row with the server's mark."),
+            send('Writes refused: the Undo waits.'),
+            days(30),
+            days(30),
+            days(30),
+            days(
+              30,
+              "FINDING: S2 is dropped, as the only row it ended (the First Sync's) is gone. S3 is kept, as the row with the server's mark ended with it. S3 now takes back a Snapshot that is gone: \"undo-takes-back-an-older-kept-snapshot\" fails, and the Calendar History can't name what S3 undid. ADR 0018 gives the reference from an Undo to what it takes back no rule (ON DELETE SET NULL, RESTRICT, or keep the target).",
+            ),
+          ],
+        },
+        {
+          id: 'drop-open',
+          title: '17. An open Conflict after 90 days',
+          intro:
+            'A Conflict you never resolve: what happens when its Server Event Replacement is dropped?',
+          steps: [
+            rename('Standup (mine)'),
+            theyRename('Standup (theirs)'),
+            sync(),
+            days(30),
+            days(30),
+            days(30),
+            days(
+              30,
+              "Your version ended with S3 more than 90 days ago and has no server's mark: dropped, and with it S3, the open Conflict and its bar. The Last Agreed Version is kept one round longer, as S3 named it. Is a silently vanishing Conflict what ADR 0019 wants?",
+            ),
+          ],
+        },
+        {
+          id: 'illegal',
+          title: '18. Things that must not work',
+          intro: 'Each of these should be refused or do nothing.',
+          steps: [
+            ctrlZ('Refused: nothing of yours to undo.'),
+            redo('Refused.'),
+            step(
+              'Undo the First Sync from the Calendar History',
+              { type: 'undo', target: 1 },
+              'Refused.',
+            ),
+            send('Nothing to send.'),
+            rename('Standup (mine)'),
+            step("The send's requests go out", { type: 'sendRequests' }),
+            sync('Refused: one sync activity per Calendar.'),
+            step('The send records its outcome', { type: 'sendClose' }),
+            rename('Standup (mine)', 'Refused: that changes nothing, so no Snapshot is made.'),
+            rename('Standup (x)'),
+            rename(
+              'Standup (mine)',
+              'Back to what the server holds: two Snapshots, the marks on different rows, yet nothing to send, as content is compared.',
+            ),
+            send('Nothing to send.'),
           ],
         },
       ];
@@ -1696,12 +1596,12 @@
           /[&<>"]/g,
           (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c],
         );
-      let mode = 'replace',
-        rewrites = false,
+      let rewrites = false,
         state,
         scenario = null,
         stepAt = 0,
-        lastWatch = '';
+        lastWatch = '',
+        filter = 'all';
       let handlers = [];
       const btn = (label, fn, cls = '', disabled = false) => {
         handlers.push(fn);
@@ -1711,9 +1611,8 @@
         const h = e.target.dataset?.h;
         if (h !== undefined) handlers[+h]();
       });
-
       function reset() {
-        state = H.initial({ mode, rewrites });
+        state = H.initial({ rewrites });
         stepAt = 0;
         lastWatch = '';
         render();
@@ -1725,7 +1624,7 @@
       }
       function startScenario(sc) {
         scenario = sc;
-        if (sc) rewrites = sc.rewrites;
+        if (sc) rewrites = !!sc.rewrites;
         reset();
       }
 
@@ -1738,25 +1637,24 @@
                   ` <span class="tag" title="Unimplemented Field">${esc(k.replace('caldav:', ''))}: ${esc(x)}</span>`,
               )
               .join('')
-          : '<span class="muted">(none)</span>';
-      const short = (id) => {
-        const v = H.ver(state, id);
-        return v
-          ? `${id} ${v.title} ${v.time}${Object.keys(v.extra).length ? ' +' + Object.keys(v.extra).length + ' field(s)' : ''}`
-          : id + ' (dropped)';
+          : '<span class="muted">(deleted)</span>';
+      const short = (v) =>
+        `${H.V(v.id)} ${v.title} ${v.time}${Object.keys(v.extra).length ? ' +' + Object.keys(v.extra).length + ' field(s)' : ''}`;
+      const ORIGIN = {
+        'first sync': 'First Sync (a Server Intake)',
+        intake: 'Server Intake',
+        replacement: 'Server Event Replacement',
+        user: 'your change',
+        'stop waiting': 'your change',
+        undo: 'Undo',
       };
 
       function render() {
         handlers = [];
-        document
-          .querySelectorAll('input[name=mode]')
-          .forEach((r) => (r.checked = r.value === mode));
         $('rewrites').checked = rewrites;
         const s = state,
-          c = { ...state.cal, tracking: H.tracking(state) },
           ops = H.toSend(s),
-          um = H.marked(s, 'user'),
-          sm = H.marked(s, 'server');
+          open = H.openConflicts(s);
         $('log').className = 'log' + (s.refused ? ' refused' : '');
         $('log').innerHTML =
           '<b>What just happened</b><br>' +
@@ -1765,54 +1663,76 @@
           (lastWatch ? `<br><span class="watch">Look at: ${esc(lastWatch)}</span>` : '');
 
         $('status').innerHTML =
-          `<span class="tag fill">User's Pointer: ${c.userPtr}</span><span class="tag fill">Server's Pointer: ${c.serverPtr}</span>` +
-          (c.tracking
-            ? '<span class="tag">Tracking</span>'
-            : '<span class="tag warn">Not Tracking: a Conflict is open</span>') +
-          `<span class="tag">Reference Snapshot: ${c.base}</span>` +
-          (s.pending
-            ? `<span class="tag warn">A send of ${s.pending.snapshot} is running</span>`
+          `<span class="tag fill">Day ${s.today}</span>` +
+          (s.syncError
+            ? `<span class="tag warn">Work: Sync Error "${esc(s.syncError)}"</span>`
+            : '<span class="tag">Work: no Sync Error</span>') +
+          (s.readOnly ? '<span class="tag warn">Work is marked read-only</span>' : '') +
+          (s.server.refusesWrites
+            ? '<span class="tag warn">the server refuses writes to Work</span>'
             : '') +
-          `<p style="margin-top:8px"><b>To send</b> (read from the two marks, stored nowhere): ${ops.length ? ops.map((o) => `${o.op} ${esc(o.uid)}`).join(', ') : 'nothing'}${ops.length && !c.tracking ? ' <span class="muted">(held back: not Tracking)</span>' : ''}</p>`;
+          (s.pending ? '<span class="tag warn">a send is running</span>' : '') +
+          `<p style="margin-top:8px"><b>To send</b> (read from the two marks, stored nowhere): ${ops.length ? ops.map((o) => `${o.op} ${esc(o.uid)}`).join(', ') : 'nothing'}</p>`;
 
-        $('userCol').innerHTML =
-          [...new Set([...Object.keys(um), ...Object.keys(sm)])]
-            .map((uid) => {
-              const v = H.ver(s, um[uid]),
-                op = ops.find((o) => o.uid === uid);
-              const tag = op ? `<span class="tag warn">not sent: ${op.op}</span>` : '';
-              if (!v) return `<div class="event gone">${esc(H.ver(s, sm[uid]).title)} ${tag}</div>`;
-              return (
-                `<div class="event">${fields(v)} ${tag}<br>` +
-                btn(
-                  'Rename',
-                  () => act({ type: 'userEdit', uid, patch: { title: v.title + '!' } }),
-                  'mini',
-                ) +
-                btn(
-                  'One hour later',
-                  () => act({ type: 'userEdit', uid, patch: { time: later(v.time) } }),
-                  'mini',
-                ) +
-                btn('Delete', () => act({ type: 'userDelete', uid }), 'mini') +
-                '</div>'
-              );
-            })
-            .join('') || '<p class="muted">No Events.</p>';
-        $('userActions').innerHTML = btn('Add an Event', () =>
-          act({ type: 'userAdd', title: 'new event', time: '12:00' }),
-        );
+        const conflictOn = (k) => open.some((R) => R.key === k);
+        $('userCol').innerHTML = [H.WORK, H.PERSONAL]
+          .map((cal) => {
+            const other = cal === H.WORK ? H.PERSONAL : H.WORK;
+            const evs = H.keysIn(s, cal)
+              .map((k) => {
+                const v = H.current(s, k),
+                  op = ops.find((o) => o.key === k);
+                const tags =
+                  (op
+                    ? `<span class="tag warn" title="Unsent Mark">⌛ not sent: ${op.op}</span>`
+                    : '') + (conflictOn(k) ? '<span class="tag warn">Conflict</span>' : '');
+                if (!v)
+                  return `<div class="event gone">${esc(H.serverRow(s, k).title)} ${tags}</div>`;
+                return (
+                  `<div class="event">${fields(v)} ${tags}<br>` +
+                  btn(
+                    'Rename',
+                    () => act({ type: 'userEdit', key: k, patch: { title: v.title + '!' } }),
+                    'mini',
+                  ) +
+                  btn(
+                    'One hour later',
+                    () => act({ type: 'userEdit', key: k, patch: { time: later(v.time) } }),
+                    'mini',
+                  ) +
+                  btn(
+                    'Move to ' + other,
+                    () => act({ type: 'userMove', key: k, to: other }),
+                    'mini',
+                  ) +
+                  btn('Delete', () => act({ type: 'userDelete', key: k }), 'mini') +
+                  '</div>'
+                );
+              })
+              .join('');
+            return (
+              `<div class="calname">${cal} <small>${cal === H.WORK ? 'CalDAV' : 'Local Calendar'}</small></div>` +
+              (evs || '<p class="muted">No Events.</p>') +
+              btn(
+                'Add an Event',
+                () => act({ type: 'userAdd', cal, title: 'new event', time: '12:00' }),
+                'mini',
+              )
+            );
+          })
+          .join('');
 
+        const marked = s.versions.filter((v) => v.server);
         $('serverCol').innerHTML =
-          Object.keys(sm)
+          marked
             .map(
-              (uid) =>
-                `<div class="event">${fields(H.ver(s, sm[uid]))}<br><small>${esc(s.caldav.find((r) => r.uid === uid)?.etag ?? 'no ETag stored')}</small></div>`,
+              (v) =>
+                `<div class="event">${fields(v)} <small>${H.V(v.id)}</small><br><small>${esc(s.caldav.find((r) => r.uid === v.uid)?.etag ?? 'no ETag stored')}</small></div>`,
             )
             .join('') || '<p class="muted">No Events.</p>';
         const res = s.server.resources;
         $('realCol').innerHTML =
-          Object.keys(res)
+          (Object.keys(res)
             .map(
               (uid) =>
                 `<div class="event">${fields(res[uid])}<br><small>${esc(res[uid].etag)}</small> ` +
@@ -1845,32 +1765,51 @@
                 btn('Delete', () => act({ type: 'otherDelete', uid }), 'mini') +
                 '</div>',
             )
-            .join('') || '<p class="muted">No Events.</p>';
-        $('otherActions').innerHTML = btn('Someone else adds an Event', () =>
-          act({ type: 'otherAdd', title: 'Review', time: '16:00' }),
-        );
+            .join('') || '<p class="muted">No Events.</p>') +
+          btn(
+            'Someone else adds an Event',
+            () => act({ type: 'otherAdd', title: 'Review', time: '16:00' }),
+            'mini',
+          ) +
+          '<br>' +
+          (s.server.refusesWrites
+            ? btn(
+                'The server lets you change Work again',
+                () => act({ type: 'serverWrites', allow: true }),
+                'mini',
+              )
+            : btn(
+                'The server stops letting you change Work',
+                () => act({ type: 'serverWrites', allow: false }),
+                'mini',
+              ));
 
-        const open = H.conflicts(s),
-          byAncestry = c.tracking ? [] : H.conflicts(s, 'ancestry');
-        $('conflicts').innerHTML = c.tracking
-          ? ''
-          : `<div class="box" style="margin-top:12px"><h3>Conflicts <small>(read from the pointers; no table holds them)</small></h3>` +
-            (open.length
-              ? "<table><tr><th>Event</th><th>Last Agreed Version</th><th>User's Version</th><th>Server Version</th></tr>" +
-                open
-                  .map(
-                    (x) =>
-                      `<tr><td>${esc(x.uid)}</td><td>${fields(x.base)}</td><td>${fields(x.mine)}</td><td>${fields(x.theirs)}</td></tr>`,
-                  )
-                  .join('') +
-                '</table>' +
-                btn('Keep my version', () => act({ type: 'resolve', side: 'mine' })) +
-                btn("Keep the server's version", () => act({ type: 'resolve', side: 'theirs' }))
-              : '<p>None.</p>') +
-            (open.length !== byAncestry.length
-              ? `<p class="bad">Finding: compared with the last Snapshot both pointers have in common (${H.lastCommon(s)}), as ADR 0019 words it, FreeCal would see ${byAncestry.length} Conflict(s) here, not ${open.length}. The prototype compares with the Reference Snapshot (${c.base}), where the Server's Pointer was when the Conflict arose.</p>`
-              : '') +
-            '</div>';
+        $('conflicts').innerHTML =
+          (open.length
+            ? `<div class="bar"><b>${open.length} open Conflict(s)</b> (the bar that can't be dismissed): the server's version replaced yours. Read from the Server Event Replacements without a Resolution.` +
+              "<table style='margin-top:6px'><tr><th>Event</th><th>Replacement</th><th>Last Agreed Version</th><th>Your version</th><th>Server version</th><th></th></tr>" +
+              open
+                .map((R) => {
+                  const p = H.conflictParts(s, R);
+                  return (
+                    `<tr><td>${esc(R.key)}</td><td>${H.S(R.id)}</td><td>${p.lastAgreed === 'dropped' ? '<span class="muted">(dropped)</span>' : fields(p.lastAgreed)}</td><td>${p.yours ? fields(p.yours) : '<span class="muted">(dropped)</span>'}</td><td>${fields(p.servers)}</td><td>` +
+                    btn(
+                      "Keep the server's version",
+                      () => act({ type: 'keepServer', key: R.key }),
+                      'mini',
+                    ) +
+                    btn('Restore my version', () => act({ type: 'restore', key: R.key }), 'mini') +
+                    '</td></tr>'
+                  );
+                })
+                .join('') +
+              '</table></div>'
+            : '') +
+          (s.syncError === 'writes refused'
+            ? `<div class="bar">Work: the server refuses your changes; ${ops.length} wait. ` +
+              btn('Stop waiting and mark read-only', () => act({ type: 'stopWaiting' }), 'mini') +
+              '</div>'
+            : '');
 
         const z = H.ctrlZTarget(s),
           r = H.redoTarget(s);
@@ -1881,72 +1820,100 @@
           btn('Send: requests only', () => act({ type: 'sendRequests' }), '', !!s.pending) +
           btn('Send: record the outcome', () => act({ type: 'sendClose' }), '', !s.pending) +
           '</p><p>' +
-          btn(z ? `Ctrl+Z (undo ${z.id}: ${z.note})` : 'Ctrl+Z (nothing of yours)', () =>
+          btn(z ? `Ctrl+Z (undo ${H.S(z.id)}: ${z.note})` : 'Ctrl+Z (nothing of yours)', () =>
             act({ type: 'undo' }),
           ) +
-          btn(r ? `Ctrl+Shift+Z (redo: take back ${r.id})` : 'Ctrl+Shift+Z (nothing to redo)', () =>
-            act({ type: 'redo' }),
+          btn(
+            r ? `Ctrl+Shift+Z (redo: take back ${H.S(r.id)})` : 'Ctrl+Shift+Z (nothing to redo)',
+            () => act({ type: 'redo' }),
           ) +
           '</p><p>' +
+          (s.readOnly ? btn('Remove the read-only mark', () => act({ type: 'unmark' })) : '') +
+          btn('30 days pass', () => act({ type: 'daysPass', days: 30 })) +
           btn('Start again', reset) +
           '</p>';
 
-        // The graph
-        const order = [...s.snapshots].reverse(),
-          rowH = 46,
-          x = (sn) => (sn.lane === 'server' ? 62 : 22),
-          y = (i) => 24 + i * rowH;
-        const at = Object.fromEntries(order.map((sn, i) => [sn.id, { x: x(sn), y: y(i) }]));
-        let svg = `<svg width="100%" height="${order.length * rowH + 10}">`;
-        for (const sn of order)
-          for (const p of sn.parents)
-            svg += `<line x1="${at[sn.id].x}" y1="${at[sn.id].y}" x2="${at[p].x}" y2="${at[p].y}" stroke="#9aa4ae" stroke-width="2"/>`;
-        for (const sn of order) {
-          const p = at[sn.id],
-            undone = !H.inEffect(s, sn.id);
-          svg += `<circle cx="${p.x}" cy="${p.y}" r="7" fill="${undone ? '#fff' : '#2f6f9f'}" stroke="#2f6f9f" stroke-width="2"/>`;
-          const badges =
-            (sn.id === c.userPtr ? " ◀ User's Pointer" : '') +
-            (sn.id === c.serverPtr ? " ◀ Server's Pointer" : '') +
-            (sn.takesBack
-              ? ` (takes back ${sn.takesBack}${sn.over ? ', over a later change' : ''})`
-              : '') +
-            (undone ? ' (undone)' : '') +
-            (s.pending?.snapshot === sn.id ? ' (being sent)' : '');
-          svg += `<text x="92" y="${p.y - 3}"><tspan font-weight="600">${sn.id}</tspan> · ${esc(sn.kind)} · ${esc(sn.note)}<tspan fill="#b3261e" font-weight="600">${esc(badges)}</tspan></text>`;
-          const steps = (sn.parents.length ? sn.parents : [null])
-            .map((par) => {
-              const ls = s.links.filter((l) => l.snap === sn.id && l.parent === par);
-              return (
-                (par ? `from ${par}: ` : '') +
-                (ls.map((l) => (l.kind === 'end' ? '− ' : '+ ') + short(l.version)).join('   ') ||
-                  'no difference')
-              );
-            })
-            .join('   |   ');
-          svg += `<text x="92" y="${p.y + 13}" fill="#68717c">${esc(steps)}</text>`;
-        }
-        $('graph').innerHTML = svg + '</svg>';
-        const line = H.userLine(s);
+        $('filters').innerHTML = [
+          ['all', 'All Calendars'],
+          ['Work', 'Work'],
+          ['Personal', 'Personal'],
+          ['own', 'Your own changes'],
+        ]
+          .map(([f, l]) =>
+            btn(l, () => ((filter = f), render()), filter === f ? 'on mini' : 'mini'),
+          )
+          .join('');
+        const shown = H.newestFirst(s).filter((x) =>
+          filter === 'all'
+            ? true
+            : filter === 'own'
+              ? H.own(x)
+              : H.calsOf(s, x.id).includes(filter),
+        );
         $('history').innerHTML =
-          '<table><tr><th>Snapshot</th><th>Made by</th><th></th></tr>' +
-          line
-            .map((id) => {
-              const x = H.snap(s, id);
-              return `<tr><td>${id}</td><td>${esc(x.kind)} · ${esc(x.note)}${H.inEffect(s, id) ? '' : ' <span class="muted">(undone)</span>'}</td><td>${x.parents.length && H.inEffect(s, id) ? btn('Undo', () => act({ type: 'undo', target: id }), 'mini') : ''}</td></tr>`;
+          '<table style="margin-top:8px"><tr><th>Snapshot</th><th>Day</th><th>Made by</th><th>Calendars</th><th>Event Versions</th><th></th></tr>' +
+          shown
+            .map((x) => {
+              const effect = H.inEffect(s, x.id);
+              const ch =
+                s.versions
+                  .filter((v) => v.end === x.id && H.userSide(v))
+                  .map((v) => '− ' + short(v))
+                  .concat(
+                    s.versions
+                      .filter((v) => v.begin === x.id && H.userSide(v))
+                      .map((v) => '+ ' + short(v)),
+                  )
+                  .concat(
+                    s.versions
+                      .filter((v) => !H.userSide(v) && v.begin === x.id)
+                      .map((v) => "server's mark only: " + short(v)),
+                  )
+                  .map(esc)
+                  .join('<br>') || '<span class="muted">(its rows are dropped)</span>';
+              const kind =
+                x.origin === 'undo'
+                  ? (H.isRedo(s, x) ? 'Redo' : 'Undo') +
+                    `, takes back ${H.S(x.takesBack)}${x.over ? ', over a later change' : ''}`
+                  : ORIGIN[x.origin];
+              const res = x.origin === 'replacement' ? H.resolutionOf(s, x.id) : null;
+              const conflict =
+                x.origin === 'replacement'
+                  ? res
+                    ? ` <span class="tag">resolved: ${esc(res.how)}</span>`
+                    : ' <span class="tag warn">Conflict open</span>'
+                  : '';
+              return (
+                `<tr class="${effect ? '' : 'undone'}"><td>${H.S(x.id)}</td><td>${x.day}</td><td>${esc(kind)} · ${esc(x.note)}${conflict}${effect ? '' : ' <span class="tag">undone</span>'}</td><td>${esc(H.calsOf(s, x.id).join(', '))}</td><td>${ch}</td><td>` +
+                (effect && x.origin !== 'first sync'
+                  ? btn('Undo', () => act({ type: 'undo', target: x.id }), 'mini')
+                  : '') +
+                '</td></tr>'
+              );
             })
             .join('') +
           '</table>';
 
         $('versions').innerHTML =
-          "<table><tr><th>Row</th><th>Event</th><th>Content</th><th>User's mark</th><th>Server's mark</th></tr>" +
+          "<table><tr><th>Row</th><th>Calendar</th><th>Event</th><th>Content</th><th>begin</th><th>end</th><th>User's mark</th><th>Server's mark</th></tr>" +
           s.versions
             .map(
               (v) =>
-                `<tr><td>${v.id}</td><td>${esc(v.uid)}</td><td>${fields(v)}</td><td>${v.user ? '●' : ''}</td><td>${v.server ? '●' : ''}</td></tr>`,
+                `<tr><td>${H.V(v.id)}</td><td>${esc(v.cal)}</td><td>${esc(v.uid)}</td><td>${fields(v)}</td><td>${v.begin === null ? '<span class="muted">(empty)</span>' : H.S(v.begin)}</td><td>${v.end === null ? '' : H.S(v.end)}</td><td>${v.end === null ? '●' : ''}</td><td>${v.server ? '●' : ''}</td></tr>`,
             )
             .join('') +
           '</table>';
+        $('resolutions').innerHTML = s.resolutions.length
+          ? '<table><tr><th>Server Event Replacement</th><th>How</th><th>Snapshot that ended it</th></tr>' +
+            s.resolutions
+              .map(
+                (r) =>
+                  `<tr><td>${H.S(r.replacement)}</td><td>${esc(r.how)}</td><td>${r.by === null ? '<span class="muted">(none)</span>' : H.S(r.by)}</td></tr>`,
+              )
+              .join('') +
+            '</table>'
+          : '<p class="muted">None.</p>';
+
         const belief = H.beliefAgainstServer(s);
         $('check').innerHTML =
           '<table>' +
@@ -1956,8 +1923,8 @@
                 `<tr><td class="${k.violations.length ? 'bad' : 'ok'}">${k.violations.length ? '✗' : '✓'}</td><td>${esc(k.rule)} <small>ADR ${esc(k.adr)}</small>${k.violations.length ? `<br><span class="bad">${esc(k.violations.join('; '))}</span>` : ''}</td></tr>`,
             )
             .join('') +
-          `<tr><td class="${belief.length ? 'bad' : 'ok'}">${belief.length ? '✗' : '✓'}</td><td>(Prototype only, needs the server) Where the stored ETag is still the server's, FreeCal's version equals what the server holds.${belief.length ? ` <span class="bad">${esc(belief.join(', '))}</span>` : ''}</td></tr>` +
-          `<tr><td>–</td><td class="muted">Not covered, as it is about how a state was reached: while Tracking, the Server's Pointer moves forward only together with the user's side (ADR 0019). In the real Local Store a trigger also refuses any update of an Event Version but its marks.</td></tr></table>`;
+          `<tr><td class="${belief.length ? 'bad' : 'ok'}">${belief.length ? '✗' : '✓'}</td><td>(Prototype only, needs the server) Where the stored ETag is still the server's, FreeCal's version with the server's mark equals what the server holds.${belief.length ? ` <span class="bad">${esc(belief.join(', '))}</span>` : ''}</td></tr>` +
+          `<tr><td>–</td><td class="muted">Not covered, as they are about how a state was reached: the server's marks move forward only in a Database Transaction that brings the user's side up to them (ADR 0019); an Event Version's content never changes (a trigger, ADR 0018).</td></tr></table>`;
 
         $('tabs').innerHTML =
           SCENARIOS.map((sc) =>
@@ -1987,23 +1954,6 @@
               ? '<p class="watch">End of the walkthrough. Carry on with the free-play buttons, or pick it again to restart.</p>'
               : '');
       }
-      function ancestorsOf(id) {
-        const seen = new Set(),
-          todo = [id];
-        while (todo.length) {
-          const z = todo.pop();
-          if (seen.has(z)) continue;
-          seen.add(z);
-          todo.push(...H.snap(state, z).parents);
-        }
-        return seen;
-      }
-      document.querySelectorAll('input[name=mode]').forEach((r) =>
-        r.addEventListener('change', () => {
-          mode = r.value;
-          reset();
-        }),
-      );
       $('rewrites').addEventListener('change', (e) => {
         rewrites = e.target.checked;
         reset();
