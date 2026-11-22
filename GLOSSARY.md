@@ -175,8 +175,12 @@ What a server holds about one Event beyond the fields FreeCal manages, such as a
 _Avoid_: Unknown fields, unmanaged fields, not-yet-implemented fields, server data (on its own)
 
 **Server Intake**:
-A Snapshot in which an Incoming Sync takes in the server's changes that are in no Conflict, for one Calendar; a First Sync is one, from nothing. Ctrl+Z passes over it.
+A Snapshot in which an Incoming Sync takes in the server's changes that are in no Conflict, for one Calendar; a First Sync's takes in everything. Ctrl+Z passes over it.
 _Avoid_: Join, pull, fetch (both name the Incoming Sync), merge
+
+**Full Fetch**:
+An Incoming Sync that fetches every resource of a Calendar and compares it with the versions carrying the server's mark, because no sync token or ETags say what changed: a First Sync, one after the server reset its sync token, and every Incoming Sync of a server without ETags.
+_Avoid_: Initial load, resync, full sync
 
 **Server Event Replacement**:
 A Snapshot in which one Event in Conflict takes the Server Version in place of the User's Version. Its origin names the Last Agreed Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
@@ -299,7 +303,7 @@ Where a Journal Transaction's changes came from: a user action, an import, an un
 _Avoid_: Origin (on its own), source, cause
 
 **First Sync**:
-A Calendar's first Incoming Sync, which the Change Journal doesn't record because undoing it would delete the whole Calendar.
+A Calendar's first Incoming Sync, a Full Fetch with no server's marks yet, after the Calendar was stored empty when the user added it. Until the Calendar History is built, the Change Journal doesn't record it.
 _Avoid_: Baseline (that word is the squashed schema migration, ADR 0008), initial import
 
 **Dangerous Undo**:

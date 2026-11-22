@@ -4,7 +4,7 @@
 
 - **The server's Current-Version Mark** is a column of `event_version`, with its own unique index per Calendar, UID and recurrence ID. The trigger allows it to be set and cleared, beside ticket 146's two late changes. An Event Version both sides agree on is one row: the server's mark moves to the user's row (ADR 0018, "Event Versions").
 - **An Incoming Sync**, in one Database Transaction: what Propagate takes in is one Server Intake, a Snapshot with the origin Incoming Sync, and the server's marks move to the fetched versions, with their ETags. A Server Intake that would change nothing isn't made. The server's marks move only in that Database Transaction (ADR 0019, "The invariant").
-- **A First Sync** is one Server Intake whose versions all carry the server's mark (still built as in ticket 146 until the ticket for the First Sync in memory).
+- **A First Sync** is one Server Intake whose versions all carry the server's mark (still built as in ticket 146 until ticket 155 makes it a Full Fetch).
 - **An Outgoing Sync.** Glue until ticket 153, named: each send of a UID that succeeds moves, in the Database Transaction that stores its new ETag, the server's marks of that UID to the user's versions that were sent. No Snapshot is made for it.
 - **The stored ETag** of a kept resource is written in the same Database Transaction as the Event Versions with the server's mark it belongs to. A Server Object FreeCal can no longer read keeps its Event Versions and loses its ETag, as now.
 - **The Store Check** gains: every stored ETag belongs to a UID with Event Versions carrying the server's mark, and every Event Version with a server's mark has a stored ETag where its Provider gives one.

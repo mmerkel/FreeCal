@@ -2,7 +2,7 @@
 
 A review of 2026-11-21 compared the branch's ADRs 0017 to 0020 with the design they replace (ADRs 0009, 0014 and 0015, as on `main`). Each numbered point below is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** points 1, 2 and 3 are decided, and their outcomes recorded below each; points 4 and 5 are open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
+**Status (2026-11-22):** points 1 to 4 are decided, and their outcomes recorded below each; point 5 is open. The "Shared context" describes the branch as the review found it, before points 1 and 2 changed it.
 
 A second review of 2026-11-22, after points 1 and 2, is in `.scratch/freecal-v1/critiques-2.md`: it compares `design/change-journal`, `design/snapshot-tree` and the branch, and adds points of its own. Its findings on points 3 and 5 are added below, under "Second review".
 
@@ -163,7 +163,7 @@ Reworded: ADR 0017 (two new paragraphs, Considered Options, Consequences), the s
 
 ---
 
-## 4. The First Sync locks the window → staging table
+## 4. The First Sync locks the window → staging table (decided: neither; the Calendar is stored empty and its First Sync is a Full Fetch)
 
 **Critique.** ADR 0018 ("The pointers"): until its First Sync has finished, nothing of a Calendar is stored; the First Sync runs in a modal dialog that locks the window, and holds what it fetched in memory. A large Calendar on a slow server blocks the whole app for as long as it loads; the only way out is Cancel; an interruption (network, FreeCal closing) loses everything fetched and doesn't resume. A loading step shouldn't lock the window.
 
@@ -175,6 +175,16 @@ Reworded: ADR 0017 (two new paragraphs, Considered Options, Consequences), the s
 **Questions to grill.** How long do First Syncs actually take on the target servers (Google, Nextcloud with years of events)? Is resuming worth a table? Where does a loading Calendar show? What happens to staged data when the user cancels or the account is removed?
 
 **Affected if taken.** ADR 0018 ("The pointers", Considered Options, Consequences), spec section on adding Available Calendars, tickets 155, 156, 164.
+
+**Outcome (grilling of 2026-11-22): the window is never locked, and no staging table.** The lock came from the Calendar not existing until its First Sync had finished, not from the size of the fetch: an Incoming Sync of a stored Calendar never locked anything.
+
+- **A server Calendar is stored empty when added** (no Event Versions, sync token or ETags, so no Snapshot spans it), and its **First Sync is its first Incoming Sync**: a **Full Fetch** (new term, agreed), every resource fetched and compared with the server's marks, none yet, taken in as one Server Intake in one Database Transaction. The same path serves a sync-token reset and servers without ETags, and would serve Mark Reconciliation (`critiques-2.md`, point 1; how often stays with point 5).
+- **Goes:** the First Sync's own write, the "First Sync progress" Signal, the modal dialog with its Cancel and Retry (ticket 156 only chooses), "nothing is stored until it finishes", the First Sync not retried by itself, and the exclusion of a First Sync's Server Intake from Undo (the Mass-Change Guard asks, as for every Undo).
+- **Shown:** ticket 161's Syncing mark and its progress; "Loading for the first time" and "Not loaded yet" are read from the Sync Status's last finished sync, none yet, not stored. Cancelling is "Remove from FreeCal". Editing in a loading Calendar is allowed; the comparison sends it afterwards.
+- **Staging table rejected for now:** an interrupted Full Fetch starts again from the beginning; staging stays possible later as a cache inside the Incoming Sync. In ADR 0018's Considered Options with the in-memory modal First Sync.
+- **Strongest cons:** a Calendar shows empty until loaded; an Event created meanwhile may duplicate one not loaded yet; one question of the Mass-Change Guard stands between the Calendar History and deleting a Calendar's Events on the server; a large Full Fetch on a bad link may restart several times.
+
+Reworded: ADRs 0018 ("Calendars", Considered Options, Consequences), 0019 ("Whether the server changed"), 0020; the spec (US-152, "Signals", "Sync engine", "Calendar History", "Choosing server Calendars", "Adding server Calendars", the tests); `GLOSSARY.md` (Full Fetch added; First Sync, Server Intake reworded); tickets 155 (renamed `155-first-sync-is-a-full-fetch`, M to S), 156 (renamed `156-dialog-choosing-server-calendars`), 15, 25, 146, 147, 151, 161.
 
 ---
 
