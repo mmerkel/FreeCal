@@ -2,7 +2,7 @@
 
 A second review of 2026-11-22 compared the documents (`GLOSSARY.md`, ADRs, spec, tickets) of three versions: `design/change-journal` (`main` at `4857548`, ADRs 0009, 0014, 0015), `design/snapshot-tree` (`e7b3e45`, ADRs 0017 to 0020 as a tree with two pointers) and the branch at `2f24150` (ADRs 0017 to 0020 as one line of Snapshots with the server's marks). It follows the first review, `.scratch/freecal-v1/critiques.md`, and uses the same form: each numbered point is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-22):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); points 2 and 3 decided together (outcome under point 2); the rest open; the scorecard is updated for point 3 of `critiques.md` and points 2 and 3 here. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
+**Status (2026-11-22):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); points 2 and 3 decided together (outcome under point 2); point 4 decided (outcome there); the rest open; the scorecard is updated for point 3 of `critiques.md` and points 2 and 3 here. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
 
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
@@ -91,7 +91,16 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 
 ---
 
-## 4. The 90-day retention is the likeliest place for bugs → one reachability rule, tested with generated histories
+## 4. The 90-day retention is the likeliest place for bugs → one reachability rule, tested with generated histories (decided: the rule taken, over Snapshots; scenarios, not generated histories)
+
+**Outcome (2026-11-22).** Recorded in ADRs 0018 ("Keeping and dropping") and 0019, `GLOSSARY.md` (Last Agreed Version, Server Event Replacement), the spec and tickets 21, 133, 135, 137, 146, 147, 148, 151 and 152:
+
+- **One rule over Snapshots.** A Snapshot is kept while a root reaches it. Roots: the Snapshots of the last 90 days, open Conflicts (Server Event Replacements without a Resolution), the Snapshot with which a version carrying the server's mark ended. Edges: an Undo to the Snapshot it takes back, a Server Event Merge or Replacement to its Incoming Sync Snapshot, a Replacement through its Resolution to the Snapshot that ended the Conflict. An Event Version goes with its `end` Snapshot (`ON DELETE CASCADE`), so a kept Snapshot keeps every Event Version ending with it. A new reference is a new root or edge, never a condition.
+- **Enforced by the Local Store.** The edges are deferred foreign keys (`DEFERRABLE INITIALLY DEFERRED`, replacing `ON DELETE RESTRICT`), so a drop missing one is refused at commit; two triggers refuse deleting an Event Version with the server's mark and an open Server Event Replacement. Only keeping too much passes.
+- **A bug found on the way:** the old conditions dropped a Replacement's zero-length Event Version once it had lost the server's mark, while an open Conflict or an Undo kept the Replacement, breaking the Store Check's invariant. A kept Incoming Sync Snapshot now keeps it.
+- **The Last Agreed Version is no longer stored.** Only the Conflict view used it, and for a Recurring Event it is several Event Versions, which one column can't name. The Conflict shows the two versions with the fields where they differ (ticket 135, retitled); the user knows which change was theirs. Rejected: a table naming the Last Agreed Version's rows; storing which field groups each side changed.
+- **Tests:** one scenario per root and edge, and one where a missed edge is refused at commit. Generated histories rejected (in ADR 0018's Considered Options): with the foreign keys and triggers, the Local Store refuses every mistake in the drop but keeping too much.
+- The cost named: after a long time offline, a kept Snapshot keeps all Event Versions that ended with it, e.g. a large import's earlier versions.
 
 **Critique.** ADR 0018 ("Keeping and dropping") has four conditions on Event Versions, two on Snapshots, `ON DELETE SET NULL` on `begin` and `ON DELETE RESTRICT` on `end` and on an Undo's reference, and it already changed once after the prototype (the Undo outliving what it took back). Each new kind of reference (a Resolution, an origin naming the Last Agreed Version) adds a condition. Scenario tests cover the cases someone thought of.
 

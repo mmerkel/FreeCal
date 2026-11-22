@@ -81,7 +81,7 @@ The Events FreeCal holds for one Calendar and UID, with the changes not sent yet
 _Avoid_: Local version (Local is for Local Accounts and Calendars), mine, client version
 
 **Last Agreed Version**:
-The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it. In a Conflict, what each side changed is shown against it.
+The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it: the version with the server's mark, against which an Incoming Sync tells what each side changed. Nothing stores it after the Incoming Sync.
 _Avoid_: Common version, common reference version, base version, ancestor, original
 
 **Resolution**:
@@ -183,7 +183,7 @@ A Full Fetch run because a Calendar's last Full Fetch is more than a week old, t
 _Avoid_: Resync, consistency check, audit
 
 **Server Event Replacement**:
-A Snapshot after an Incoming Sync Snapshot in which one Event in Conflict takes a copy of the Server Version in place of the User's Version. Its origin names the Last Agreed Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
+A Snapshot after an Incoming Sync Snapshot in which one Event in Conflict takes a copy of the Server Version in place of the User's Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
 _Avoid_: Override (an Exception's name elsewhere), merge, auto-merge, resolution (the Resolution is the user's)
 
 **Server Event Merge**:

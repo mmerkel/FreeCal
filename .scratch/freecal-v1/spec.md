@@ -221,7 +221,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
   - Occurrences: get those in a date range, already converted to the Display Time Zone, each with whether it has unsent local changes and since when
   - Events: create, edit, move or delete, including the recurrence scope (this / this and following / all) and moves across Accounts
   - Sync: sync now (per Account, or for all); get the current sync status of every Account and Calendar
-  - Conflicts: list the open ones, for all Calendars or for one, each with its User's Version, Server Version and Last Agreed Version, and resolve them, one or all of a Calendar's together, by keeping the server's version or restoring the user's
+  - Conflicts: list the open ones, for all Calendars or for one, each with its User's Version and Server Version, and resolve them, one or all of a Calendar's together, by keeping the server's version or restoring the user's
   - Sync Errors: read through the Sync Status; send what a paused Calendar holds back
   - Calendar History: list the Snapshots of all Calendars, or of one, or only the user's own; undo one Snapshot, with or without the later changes standing in its way; the undo and redo of Ctrl+Z and Ctrl+Shift+Z; read an Event's History
   - Import/export: add files waiting to be imported, list them, dismiss one, preview an import, run it, export
