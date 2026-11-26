@@ -4,7 +4,7 @@
 
 Everything here is built except the overall status's Conflict. What the ticked boxes describe has since moved on, in other tickets:
 
-- **The overall status is Conflict** while any Calendar has an open Conflict (ADR 0019). Ticket 133 reads that from the Server Event Replacements without a Resolution, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 133.
+- **The overall status is Conflict** while any Calendar has an open Conflict (ADR 0019). Ticket 133 reads that from the rows of `conflict` without a resolved time, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 133.
 - **"Sync status changed"** for a Calendar carries whether it has unsent changes (no longer how many), its number of Conflicts, and how far a long sync has come. Ticket 161 changes the Signal; the count of Conflicts is filled by ticket 133.
 - **The first-sync marker** (`SyncStatus::Syncing { first_sync }`) goes with ticket 155: whether a Calendar's First Sync has finished is read from its last finished sync, none yet, which the report already carries.
 - **The sidebar** shows Status Marks and the Unsent Mark instead of text and a count (ticket 161).
@@ -50,3 +50,4 @@ Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Conflict
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. The open box reads Tracking; the Signal's new fields are ticket 161's and the first-sync marker goes with ticket 155. Blocked by 153 as agreed in the triage. Added while rewording: blocked by 133 as well, since 133 ticks the only open box and nothing else is left here.
 - 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): Tracking is gone; Conflict means an open Conflict.
 - 2026-11-22: Reworded from the grilling on point 4 of `.scratch/freecal-v1/critiques.md` (ADR 0018): no "First Sync progress" Signal; "not loaded yet" is read from the last finished sync.
+- 2026-11-26: Reworded from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): a Conflict is a row of `conflict`.

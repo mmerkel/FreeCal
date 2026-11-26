@@ -3,7 +3,7 @@
 **What to build:** Once a week per server Calendar, its next Incoming Sync is a Full Fetch, which checks the server's Current-Version Marks against what the server holds (ADR 0019, "Whether the server changed" and "An untrusted base"). Point 5 of `.scratch/freecal-v1/critiques.md` and point 1 of `critiques-2.md` have the reasons.
 
 - **When:** the time of a Calendar's last Full Fetch is stored beside its sync token, and every Full Fetch sets it (First Sync, sync-token reset, Mark Reconciliation). An Incoming Sync that starts while that time is more than 7 days old is a Full Fetch, in the background like any Incoming Sync. A server without ETags already fetches everything every time; it has no Mark Reconciliation of its own.
-- **An untrusted base,** on every Full Fetch: a fetched resource whose ETag equals the stored one but whose content differs from the version with the server's mark. The server's mark moves to the fetched version; an Occurrence where the user's current version is the same agrees; any other becomes a Server Event Replacement, never a Server Event Merge. One Log line names the Calendar and UID (no values: "Untrusted content"). Nothing else: no Sync Error, toast or mark in the origin; the Conflict shows as any other.
+- **An untrusted base,** on every Full Fetch: a fetched resource whose ETag equals the stored one but whose content differs from the version with the server's mark. The server's mark moves to the fetched version; an Occurrence where the user's current version is the same agrees; any other becomes a Server Event Replacement, never a Server Event Merge, and its Conflict Events name no Last Agreed Version (ticket 133). One Log line names the Calendar and UID (no values: "Untrusted content"). Nothing else: no Sync Error, toast or mark in the origin; the Conflict shows where the two sides differ, not what each changed (ticket 135).
 - **Everything else** of a Full Fetch, a changed ETag, a resource gone from the server or one with no server's mark, goes through ticket 167's comparison as usual.
 
 Spec: "Sync engine". ADR 0019.
@@ -25,3 +25,4 @@ Spec: "Sync engine". ADR 0019.
 ## Comments
 - 2026-11-22: Written from the grilling of point 5 of `critiques.md` with point 1 of `critiques-2.md`. To run less often later: `.scratch/freecal-v2/issues/02-mark-reconciliation-less-often.md`.
 - 2026-11-22: Reworded from the grilling on point 2 of `.scratch/freecal-v1/critiques-2.md` (ADR 0019): the Automatic Resolution is now the Server Event Merge; an untrusted base never makes one.
+- 2026-11-26: Reworded from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): an untrusted base leaves the Conflict's Last Agreed Version empty.

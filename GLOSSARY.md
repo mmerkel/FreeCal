@@ -81,11 +81,11 @@ The Events FreeCal holds for one Calendar and UID, with the changes not sent yet
 _Avoid_: Local version (Local is for Local Accounts and Calendars), mine, client version
 
 **Last Agreed Version**:
-The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it: the version with the server's mark, against which an Incoming Sync tells what each side changed. Nothing stores it after the Incoming Sync.
+The last Server Version that FreeCal and the server both held for one Calendar and UID, before either side changed it: the version with the server's mark, against which an Incoming Sync tells what each side changed. A Conflict keeps it, to show what each side changed.
 _Avoid_: Common version, common reference version, base version, ancestor, original
 
 **Resolution**:
-How a Conflict ends: by the user keeping the server's version, restoring their own, or changing the Event again.
+How a Conflict ends: by the user keeping the server's version, restoring their own, or changing the Event again. FreeCal keeps the resolved Conflict for as long as its Incoming Sync Snapshot.
 _Avoid_: Merge (a Server Event Merge ends no Conflict), Automatic Resolution, conflict decision
 
 **Unsent Change**:
@@ -139,7 +139,7 @@ The existing Calendar that one source of an import or a restore goes into: an `.
 _Avoid_: Association, mapping, destination
 
 **Snapshot**:
-The state of every Calendar's Events at one moment, as the Calendar History keeps it. Each change makes a new one from the one before: an action of the user, an import, a restore, an Undo, what an Incoming Sync brings in (an Incoming Sync Snapshot, then a Server Event Merge or a Server Event Replacement for each Event both sides changed), or "Stop waiting and mark read-only". A step that changes several Calendars together, such as a move, is one Snapshot.
+The state of every Calendar's Events at one moment, as the Calendar History keeps it. Each change makes a new one from the one before: an action of the user, an import, a restore, an Undo, what an Incoming Sync brings in (an Incoming Sync Snapshot, with a Server Event Merge or a Server Event Replacement for each Event both sides changed), or "Stop waiting and mark read-only". A step that changes several Calendars together, such as a move, is one Snapshot.
 _Avoid_: Commit, version (on its own), backup (a Backup is a file)
 
 **Calendar History**:
@@ -171,7 +171,7 @@ What a server holds about one Event beyond the fields FreeCal manages, such as a
 _Avoid_: Unknown fields, unmanaged fields, not-yet-implemented fields, server data (on its own)
 
 **Incoming Sync Snapshot**:
-The Snapshot in which an Incoming Sync records every server version it fetched. Those of Events only the server changed become current; those of Events merged or in Conflict are zero-length Event Versions, each followed by a Server Event Merge or a Server Event Replacement that refers to it. A First Sync's takes in everything. Ctrl+Z passes over it.
+The Snapshot in which an Incoming Sync takes in what it fetched from one Calendar. The server's versions of Events only the server changed, or in Conflict (a Server Event Replacement), become current; those of Events merged are zero-length Event Versions beside the combination (a Server Event Merge). Each Event's part can be undone alone. A First Sync's takes in everything. Ctrl+Z passes over it.
 _Avoid_: Server Intake, Join, pull, fetch (both name the Incoming Sync)
 
 **Full Fetch**:
@@ -183,11 +183,15 @@ A Full Fetch run because a Calendar's last Full Fetch is more than a week old, t
 _Avoid_: Resync, consistency check, audit
 
 **Server Event Replacement**:
-A Snapshot after an Incoming Sync Snapshot in which one Event in Conflict takes a copy of the Server Version in place of the User's Version. Undoing it restores the User's Version; Ctrl+Z passes over it.
+What an Incoming Sync Snapshot does to one Event in Conflict: the Server Version takes the place of the User's Version, and the Conflict is recorded. Undoing the Incoming Sync Snapshot for that Event restores the User's Version.
 _Avoid_: Override (an Exception's name elsewhere), merge, auto-merge, resolution (the Resolution is the user's)
 
+**Conflict Event**:
+One single Event of a Conflict, the Recurring Event or one Exception, found on either side or in the Last Agreed Version, with that Last Agreed Version, if there is one: a row of `conflict_event`. A Conflict on a Recurring Event has one per Event of its UID.
+_Avoid_: Conflict row, conflict entry
+
 **Server Event Merge**:
-A Snapshot after an Incoming Sync Snapshot in which one Event that both sides changed, in different field groups, takes their combination, each group from the side that changed it. No Conflict: it is sent like any change. Undoing it restores the User's Version without the server's change; Ctrl+Z passes over it. Short form: Merge.
+What an Incoming Sync Snapshot does to one Event that both sides changed in different field groups: it takes their combination, each group from the side that changed it. No Conflict: it is sent like any change. Undoing the Incoming Sync Snapshot for that Event restores the User's Version without the server's change. Short form: Merge.
 _Avoid_: Automatic Resolution, auto-merge, merge (lowercase: a Snapshot with two parents, `design/snapshot-tree`)
 
 **Field Group**:
@@ -195,7 +199,7 @@ One of the parts an Event is compared by where both sides changed it: the times 
 _Avoid_: Part (on its own), field set, section
 
 **Zero-length Event Version**:
-An Event Version that begins and ends with the same Incoming Sync Snapshot: the server's version of an Event merged or in Conflict, in no Snapshot's state and never shown in the grid, kept to carry the server's Current-Version Mark.
+An Event Version that begins and ends with the same Incoming Sync Snapshot: the server's version of an Event merged, in no Snapshot's state and never shown in the grid, kept to carry the server's Current-Version Mark.
 _Avoid_: Server-only row, ghost version
 
 **Current-Version Mark**:

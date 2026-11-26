@@ -1,21 +1,24 @@
-# 133: The core reports open Conflicts
+# 133: The core records and reports Conflicts
 
-**What to build:** Since ticket 152 an Incoming Sync ends each Conflict at once with a Server Event Replacement. Nothing shows that yet. This ticket adds the `resolution` table, which ticket 134 writes, and makes the core report the open Conflicts: a list, their number in the Sync Status, the Signal "Conflicts changed" and the overall status (ADR 0019, "Conflicts end at once"). Resolving is ticket 134, what each side changed is 135, the badge is 136, and the window is 137 and 162.
+**What to build:** Since ticket 152 an Incoming Sync replaces each Event in Conflict with the server's version at once, a Server Event Replacement in its Incoming Sync Snapshot. Nothing records or shows that yet. This ticket adds the `conflict` and `conflict_event` tables, written by the Incoming Sync, and makes the core report the open Conflicts: a list, their number in the Sync Status, the Signal "Conflicts changed" and the overall status (ADR 0019, "The Conflict tables", "Conflicts end at once"). Resolving is ticket 134, what each side changed is 135, the badge is 136, and the window is 137 and 162.
 
-- **The `resolution` table**, written once (a trigger refuses updates): the Server Event Replacement it resolves (unique, `ON DELETE CASCADE`), how it ended (kept the server's version, restored the user's, changed again), the Snapshot that ended it and the time. A CHECK makes the Snapshot empty exactly when the server's version was kept (ADR 0019). An open Conflict is a Server Event Replacement without a row. No other table or mark holds a Conflict. The reference to the Snapshot that ended it is a deferred foreign key.
-- **Kept while open** (ADR 0018, "Keeping and dropping"): this ticket adds to ticket 148's rule the root "a Server Event Replacement without a Resolution" and the edge from a Server Event Replacement, through its Resolution, to the Snapshot that ended the Conflict, and a trigger refusing to delete a Server Event Replacement without a Resolution, which would take the User's Version with it.
-- **The list,** through the core interface, for all Calendars or for one (spec: "Conflicts: list the open ones…"), newest first. One listed Conflict is one Server Event Replacement without a Resolution, and has:
-  - the Server Event Replacement's ID, which ticket 134's calls take;
-  - the Calendar, the UID and when it was replaced;
-  - the User's Version (the Event Versions the replacement ended), and the Server Version (those it began), each as the managed fields of its Events, an Event named by its Combined Event Key (ticket 142). Either may be empty: the Event was deleted on that side;
+- **The `conflict` table:** the Incoming Sync Snapshot (`ON DELETE CASCADE`), the Calendar, the UID (unique with the Snapshot and the Calendar), and the time it was resolved, empty while it is open. An insert trigger refuses a row whose Snapshot isn't an Incoming Sync Snapshot; an update trigger allows only setting the resolved time, once, from empty. How a Conflict ended isn't stored: the Calendar History shows it. No other table or mark holds a Conflict.
+- **The `conflict_event` table:** one **Conflict Event** (`GLOSSARY.md`, ADR 0019) per single Event of the UID, the Recurring Event or an Exception, found on either side or in the Last Agreed Version: the Conflict (`ON DELETE CASCADE`), the recurrence ID (unique per Conflict), and the **Last Agreed Version**, the Event Version with the server's mark before the fetch, empty where there was none or where the base is untrusted (ticket 171). The User's Version and the Server Version aren't stored: they are the Event Versions of that Calendar and UID that end and that begin with the Incoming Sync Snapshot.
+- **Written by the Incoming Sync,** in ticket 152's branch that decides a Conflict, in its Database Transaction, and nowhere else. This is the one invariant no query can check afterwards (ADR 0019), as an Event in Conflict and one the server alone changed leave the same Event Versions; the tests reach every path to a Conflict.
+- **Kept** (ADR 0018, "Keeping and dropping"): this ticket adds to ticket 148's rule the root "the Incoming Sync Snapshot of an open Conflict", which keeps the User's Version, the edge from an Incoming Sync Snapshot, through its Conflict Events, to the Snapshots with which their Last Agreed Versions ended, and a trigger refusing to delete an open Conflict. A resolved Conflict stays as long as its Incoming Sync Snapshot.
+- **The list,** through the core interface, for all Calendars or for one (spec: "Conflicts: list the open ones…"), newest first. One listed Conflict is one row of `conflict` without a resolved time, and has:
+  - the Conflict's ID, which ticket 134's calls take;
+  - the Calendar, the UID and when the Incoming Sync was;
+  - the User's Version and the Server Version, each as the managed fields of its Events, an Event named by its Combined Event Key (ticket 142). Either may be empty: the Event was deleted on that side;
   - its kind, derived by one function and never stored: an edit on both sides; the user's edit against the server's delete (the Server Version is empty); the user's delete against the server's edit (the User's Version is empty).
 - **The number of open Conflicts** of a Calendar is the field "Sync status changed" has for it (ticket 161 adds the field with 0 in it; if 161 isn't built yet, this ticket adds it as 161 describes it). The Account's report follows.
 - **The overall status** is Conflict while any Calendar has an open one: feed the numbers into `SyncStatusTracker::overall` (`core/src/sync_status.rs`), and tick ticket 15's overall-status box. A Conflict stops nothing from syncing; the status says the user has something to look at.
-- **"Conflicts changed"** (spec: "Signals") is sent for a Calendar after every Database Transaction that writes or drops one of its Server Event Replacements or Resolutions. Such a Calendar is also among those sent "Occurrences changed", for the badge (ticket 136), and "Sync status changed" is sent when its number differs.
+- **"Conflicts changed"** (spec: "Signals") is sent for a Calendar after every Database Transaction that writes, resolves or drops one of its Conflicts. Such a Calendar is also among those sent "Occurrences changed", for the badge (ticket 136), and "Sync status changed" is sent when its number differs.
+- **The Store Check** gains: every Conflict has its Conflict Events; each Last Agreed Version has the Conflict's Calendar, UID and recurrence ID.
 - **Types:** the list's types are interface types; regenerate the TypeScript types (`FREECAL_WRITE_TYPES=1 cargo test -p freecal-core`) and give the fake core its answer. Every field of a version is a stored field and untrusted.
-- **Tests,** through the core interface against Radicale: each of the three kinds is listed with its three versions; a UID both sides created differently; the list for one Calendar and for all; a Resolution written by hand takes it off the list; a second change on the server to the Event afterwards leaves the listed Server Version as it was replaced; the number, the overall status and the Signals for each of these.
+- **Tests,** through the core interface against Radicale: each of the three kinds is listed with its two versions and its Conflict Events; a UID both sides created differently (no Last Agreed Version); a Recurring Event with Exceptions on either side and in the Last Agreed Version; an untrusted base (no Last Agreed Version); the list for one Calendar and for all; a resolved time set by hand takes it off the list, and setting it twice is refused; a row of `conflict` at a Snapshot that isn't an Incoming Sync Snapshot is refused; a second change on the server to the Event afterwards leaves the listed Server Version as it was; an open Conflict older than 90 days is kept, and deleting it is refused; the number, the overall status and the Signals for each of these; the Store Check after each.
 
-Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall status under "Sync engine"; "Untrusted content". ADR 0019 ("Conflicts end at once").
+Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall status under "Sync engine"; "Untrusted content". ADRs 0018 ("Keeping and dropping"), 0019 ("The Conflict tables", "Conflicts end at once").
 
 **Blocked by:** 152
 
@@ -23,11 +26,13 @@ Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall 
 
 **Effort:** S
 
-- [ ] The `resolution` table, written once, cascading with its Server Event Replacement, its CHECK refusing a "kept" with a Snapshot and any other without one
-- [ ] An open Conflict older than 90 days is kept with its User's Version, and so is the Snapshot that ended a kept Server Event Replacement's Conflict; deleting an open Server Event Replacement is refused by the trigger
-- [ ] The core lists the open Conflicts of all Calendars or of one, each with its User's Version, Server Version and kind, read from the Server Event Replacements without a Resolution
+- [ ] The `conflict` and `conflict_event` tables, cascading with the Incoming Sync Snapshot, with the insert trigger and the resolved time set once
+- [ ] The Incoming Sync writes a Conflict with its Conflict Events and Last Agreed Versions for each Event it replaces, in its Database Transaction, and nowhere else
+- [ ] An open Conflict older than 90 days keeps its Incoming Sync Snapshot, the User's Version and its Last Agreed Versions; deleting an open Conflict is refused by the trigger
+- [ ] The core lists the open Conflicts of all Calendars or of one, each with its User's Version, Server Version and kind
 - [ ] "Sync status changed" carries a Calendar's number of open Conflicts, and the overall status is Conflict while any Calendar has one (ticket 15's box ticked)
 - [ ] "Conflicts changed" and "Occurrences changed" are sent when a Conflict arises, is resolved or is dropped
+- [ ] The Store Check's new queries, each with a test that breaks it by hand
 - [ ] The tests listed above, written test-first against Radicale
 
 ## Comments
@@ -39,3 +44,4 @@ Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall 
 - 2026-11-22: Reworded from the grilling on point 2 of `.scratch/freecal-v1/critiques-2.md` (ADR 0019): the Automatic Resolution goes; changes to different field groups are a Server Event Merge (ticket 168), which is no Conflict and writes no row of `resolution`.
 - 2026-11-22: The Last Agreed Version is no longer listed: the Server Event Replacement doesn't name it (point 4 of `.scratch/freecal-v1/critiques-2.md`, ADR 0019); ticket 135 compares the two sides instead.
 - 2026-11-22: From point 4 of `.scratch/freecal-v1/critiques-2.md` (ADR 0018): this ticket adds the open Conflict's root, the Resolution's edge and the trigger guarding an open Conflict to ticket 148's rule.
+- 2026-11-26: Rewritten from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): the `resolution` table goes; a Conflict is a row of `conflict` with a Conflict Event (`GLOSSARY.md`) per single Event, which stores the Last Agreed Version again, now that one row per single Event can name the several Event Versions of a Recurring Event. The Incoming Sync writes them here, not ticket 152, and a resolved Conflict stays with its Incoming Sync Snapshot.
