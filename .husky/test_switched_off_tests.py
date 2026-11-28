@@ -57,9 +57,9 @@ class SwitchedOffTests(unittest.TestCase):
             )
         self.assert_passes()
 
-    def test_a_by_hand_test_passes(self):
+    def test_a_by_hand_note_is_refused(self):
         self.write("src-tauri/src/keyring.rs", '#[test]\n#[ignore = "by hand: needs a desktop session\'s keyring"]\nfn stores() {}\n')
-        self.assert_passes()
+        self.assert_refused("src-tauri/src/keyring.rs:2", "until ticket NN")
 
     def test_a_bare_rust_ignore_is_refused(self):
         self.write("core/src/a.rs", "\n#[test]\n#[ignore]\nfn a() {}\n")
@@ -85,6 +85,10 @@ class SwitchedOffTests(unittest.TestCase):
         self.write("src/a.test.ts", "// until ticket 180: x\n\ntest.skip(\"a\", () => {});\n")
         self.assert_refused("src/a.test.ts:3", "until ticket NN")
 
+    def test_a_frontend_note_left_after_the_skip_is_gone_is_refused(self):
+        self.write("src/a.test.ts", "// until ticket 180: x\nit(\"a\", () => {});\n")
+        self.assert_refused("src/a.test.ts:1", "needs a skipped test on the next line")
+
     def test_a_ticket_with_no_file_is_refused(self):
         self.write("core/src/a.rs", '#[ignore = "until ticket 999: x"]\nfn a() {}\n')
         self.assert_refused("core/src/a.rs:1", "no ticket 999")
@@ -92,6 +96,11 @@ class SwitchedOffTests(unittest.TestCase):
     def test_a_done_ticket_is_refused(self):
         self.write("src/a.test.ts", "// until ticket 173: x\nit.skip(\"a\", () => {});\n")
         self.assert_refused("src/a.test.ts:2", "ticket 173 is done")
+
+    def test_a_wontfix_ticket_is_refused(self):
+        self.ticket("150", "wontfix")
+        self.write("core/src/a.rs", '#[ignore = "until ticket 150: x"]\nfn a() {}\n')
+        self.assert_refused("core/src/a.rs:1", "ticket 150 is wontfix")
 
     def test_every_refusal_is_listed(self):
         self.write("core/src/a.rs", "#[ignore]\nfn a() {}\n")

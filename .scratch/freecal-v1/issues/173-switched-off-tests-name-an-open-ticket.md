@@ -27,3 +27,7 @@ Spec: none (tooling). Plan: decision 1. Layout: "By phase", P0, 173.
   - **Decision, for review: the frontend note is a comment on the line right before the skip** (`// until ticket NN: <why>`), not the first words of the test's name. Switching the test back on deletes the comment and `.skip` and leaves the name as it was; it matches the Rust form, where the note sits apart from the name. Strongest con: a blank or other line slipped between comment and skip makes the note fail the check, though the check then names the line.
   - **Decision, for review: the check runs on every commit**, not only on those staging code: a commit that sets a ticket's Status to done touches only `.scratch/` and can leave a test naming a done ticket. Strongest con: about 0.1 s on doc-only commits.
   - Departures recorded in the layout plan, P0. No new terms.
+- 2026-11-28: After `/code-review`, the user decided:
+  - **No `by hand:` note.** Tests a person runs wait until the redesign is done. The keyring test now reads `#[ignore = "until ticket 28: needs a desktop session's keyring"]`: ticket 28 (packaging) checks the keyring in a real desktop session, so finishing 28 forces a decision on this test.
+  - **A `wontfix` ticket counts as closed**, as in the tickets overview: a test naming one is refused.
+  - **The frontend note stays a comment on the line before the skip**; plan decision 1 now says so. A note with no skip on the next line is refused, so one left over after a test is switched back on fails the check.

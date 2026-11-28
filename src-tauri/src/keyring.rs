@@ -122,7 +122,7 @@ mod secret_service {
         /// Uses the real keyring of the session; run it by hand with
         /// `cargo test -p freecal -- --ignored`.
         #[test]
-        #[ignore = "by hand: needs a desktop session's keyring"]
+        #[ignore = "until ticket 28: needs a desktop session's keyring"]
         fn stores_reads_and_deletes_a_secret() {
             let keyring = SecretService;
             let key = "freecal-test-key";

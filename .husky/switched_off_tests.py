@@ -10,12 +10,10 @@ Searches core/, src-tauri/ and src/ (build output excepted) and accepts:
 
 The frontend note is a comment on the line right before the skip, so
 switching the test back on deletes two lines and leaves its name as it was.
+A frontend note with no skip on the next line is refused too: it is left
+over from a test switched back on.
 Ticket NN has a file .scratch/freecal-v1/issues/NN-*.md whose first Status
-line isn't done.
-
-A test that only a person can run (it needs a desktop session, say) is
-marked `by hand: <why>` in place of `until ticket NN: <why>`: it isn't
-switched off, and no ticket switches it on.
+line is neither done nor wontfix.
 
 Usage: switched_off_tests.py [repo-root]. Prints file:line for each refusal.
 """
@@ -31,9 +29,9 @@ SKIPPED_DIRS = {"target", "node_modules"}
 ISSUES = os.path.join(ROOT, ".scratch", "freecal-v1", "issues")
 
 RUST_SWITCH = re.compile(r"#\[ignore\b")
-RUST_NOTE = re.compile(r'#\[ignore = "(?:until ticket (\d+): \S[^"]*|by hand: \S[^"]*)"\]')
+RUST_NOTE = re.compile(r'#\[ignore = "until ticket (\d+): \S[^"]*"\]')
 FRONT_SWITCH = re.compile(r"\b(?:it|describe|test)\.skip\b")
-FRONT_NOTE = re.compile(r"^\s*// (?:until ticket (\d+): \S.*|by hand: \S.*)$")
+FRONT_NOTE = re.compile(r"^\s*// until ticket (\d+): \S.*$")
 FORM = {
     ".rs": '#[ignore = "until ticket NN: <why>"]',
     "front": "a comment `// until ticket NN: <why>` on the line before",
@@ -46,14 +44,16 @@ def ticket_problem(num):
         return f"no ticket {num} in .scratch/freecal-v1/issues/"
     with open(files[0]) as f:
         status = re.search(r"\*\*Status:\*\*\s*(\S+)", f.read())
-    if status and status.group(1) == "done":
-        return f"ticket {num} is done"
+    if status and status.group(1) in ("done", "wontfix"):
+        return f"ticket {num} is {status.group(1)}"
     return None
 
 
 def problems(path, lines):
     rust = path.endswith(".rs")
     for i, line in enumerate(lines):
+        if not rust and FRONT_NOTE.match(line) and not (i + 1 < len(lines) and FRONT_SWITCH.search(lines[i + 1])):
+            yield i + 1, "a note `// until ticket NN:` needs a skipped test on the next line"
         if rust and RUST_SWITCH.search(line):
             note = RUST_NOTE.search(line)
         elif not rust and FRONT_SWITCH.search(line):
@@ -62,7 +62,7 @@ def problems(path, lines):
             continue
         if not note:
             yield i + 1, f"a switched-off test needs {FORM['.rs' if rust else 'front']}"
-        elif note.group(1) and (problem := ticket_problem(note.group(1))):
+        elif problem := ticket_problem(note.group(1)):
             yield i + 1, problem
 
 
