@@ -118,12 +118,11 @@ impl UnimplementedFields {
         Self { entries }
     }
 
-    #[allow(dead_code, reason = "until ticket 176 writes them")]
     pub(crate) fn entries(&self) -> &[Entry] {
         &self.entries
     }
 
-    #[allow(dead_code, reason = "until ticket 176 writes them")]
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

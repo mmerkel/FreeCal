@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
 use super::*;
@@ -158,10 +158,6 @@ fn revision_of(server: &str) -> Vec<(&'static str, &'static str)> {
         ],
         _ => unreachable!(),
     }
-}
-
-fn wall(text: &str) -> NaiveDateTime {
-    text.parse().unwrap()
 }
 
 #[test]
@@ -468,48 +464,6 @@ fn a_flight_gets_the_vtimezone_of_each_end() {
     assert!(sent.contains("TZID:Europe/Berlin\r\n"));
     assert!(sent.contains("TZID:America/New_York\r\n"));
     assert_reads_back(&sent, rows);
-}
-
-#[test]
-fn a_vtimezone_gives_the_offset_changes_from_the_year_of_its_first_time() {
-    let mut out = Written::new();
-    vtimezone(Tz::Europe__Berlin, wall("2026-10-12T09:00:00"), &mut out);
-    let text = out.into_text();
-
-    assert_well_formed(&text);
-    let lines = content_lines(&text);
-    let observance = |kind: &str, dtstart: &str| {
-        let at = (1..lines.len())
-            .find(|&at| lines[at - 1] == format!("BEGIN:{kind}") && lines[at] == dtstart)
-            .unwrap_or_else(|| panic!("{kind} {dtstart} in {text}"));
-        lines[at..]
-            .iter()
-            .take_while(|line| **line != format!("END:{kind}"))
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    let initial = observance("STANDARD", "DTSTART:20251231T010000");
-    assert!(initial.contains(&"TZOFFSETTO:+0100".to_owned()));
-    let summer = observance("DAYLIGHT", "DTSTART:20260329T020000");
-    assert!(summer[1].starts_with("RDATE:20270328T020000,20280326T020000,"));
-    assert!(summer.contains(&"TZOFFSETFROM:+0100".to_owned()));
-    assert!(summer.contains(&"TZOFFSETTO:+0200".to_owned()));
-    assert!(summer.contains(&"TZNAME:CEST".to_owned()));
-    let winter = observance("STANDARD", "DTSTART:20261025T030000");
-    assert!(winter.contains(&"TZOFFSETFROM:+0200".to_owned()));
-    assert!(winter.contains(&"TZOFFSETTO:+0100".to_owned()));
-
-    let mut tokyo = Written::new();
-    vtimezone(Tz::Asia__Tokyo, wall("2026-10-12T09:00:00"), &mut tokyo);
-    let tokyo = content_lines(&tokyo.into_text());
-    assert_eq!(
-        tokyo
-            .iter()
-            .filter(|line| line.starts_with("BEGIN:STANDARD"))
-            .count(),
-        1
-    );
-    assert!(tokyo.contains(&"TZOFFSETTO:+0900".to_owned()));
 }
 
 #[test]

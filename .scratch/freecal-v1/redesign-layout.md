@@ -37,7 +37,7 @@ Approved by the user on 2026-11-28, with their renames: Event Version Content, E
 | Incoming Sync, First Sync | `sync/caldav/incoming.rs` (326): `sync` :32, `first_sync` :60, `incoming_sync` :103, `mirror_and_propagate` :150, `keep` :236 | 189, 194 |
 | Mirror, Ignored Resources | `sync/caldav/mod.rs` (515): `read_caldav_resource` :125, `mirror` :223, `ignore` :304; SQL `store/sql/mirror/caldav.rs` (221) | 187 (text goes), 189 |
 | Sender | `sync/caldav/sender.rs` (669): `send` :40, `try_send` :132, `sent` :205 | 187, 192, 193 |
-| Patching writer | `sync/caldav/resource/` (`mod.rs` 430, `write.rs` 524, `tests.rs` 928) | 176 (new writer beside it), 187 (patcher goes) |
+| Patching writer | `sync/caldav/resource/` (`mod.rs` 430, `write.rs` 524, `tests.rs` 928) | 176 (new writer beside it; its VTIMEZONE moved to `ical/write/`), 187 (patcher goes) |
 | iCalendar reader | `ical/read/mod.rs`: `read_events`, `read_vcalendars`, `read_vevent`, `DROPPED`; `ImportedEvent` `import/mod.rs:123` (changed in ticket 175: the reader moved out of `import/`) | 175 |
 | Mass-Change Guard | `mass_change_guard.rs:16`, used only by Dangerous Undo (`journal/undo.rs:325`) | 201 |
 | Sync Status | `sync_status.rs`: `OverallState::Conflict` :188 (placeholder), `SyncStatusKeeper` :350 | 190, 194, 202 |
@@ -67,10 +67,10 @@ core/src/
     sql/settings.rs         today's unguarded.rs, renamed when Guards go (196)
     sql/caldav.rs           the CalDAV table and Ignored Resources, visible to the Sync Engine only (187, 192)
   event/                    as today; writes go through SnapshotWriter (178); propagate goes (189)
-  ical/                     the CalDAV reader and writer (175, 176): read/ (mod.rs, tests.rs), write.rs, roundtrip.rs (197);
+  ical/                     the CalDAV reader and writer (175, 176): read/ (mod.rs, tests.rs), write/ (mod.rs, tests.rs), roundtrip.rs (197);
                             server_texts.rs, real servers' texts for the tests of reader, writer and check
                             (changed in ticket 175: clippy wants read/mod.rs beside its tests; the texts
-                            moved out of resource/tests.rs, which 187 deletes)
+                            moved out of resource/tests.rs, which 187 deletes; changed in ticket 176: write/ likewise)
   sync/
     mod.rs                  sync_calendar: one sync activity per Calendar (193)
     plan.rs                 IncomingSyncPlan from compare_event (189)
@@ -155,7 +155,7 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 
 **175.** New `unimplemented.rs`: `UnimplementedFields` (a tree of named entries, serde, canonical form with sorted entries), prefixes per Provider. New `ical/read.rs`: the CalDAV reader, built from `import/mod.rs:402` (`read_events`), returning `ImportedEvent`s with their `UnimplementedFields`; the import reads through it too, so `.ics` files keep `ical:` entries. Its precise rules and what they drop on purpose are listed beside them (ADR 0017). Pure; tests in `ical/read.rs`. (Changed in ticket 175: the reader is `ical/read/mod.rs` with `read/tests.rs`; it fills the tree into a new field `ImportedEvent::unimplemented` and returns the RFC violations in `ReadFile::violations`, which the import and the Incoming Sync write to the Log; `Time`, the zone reading and `windows_zones.rs` moved with it; `rule::imported` returns the rule alone, the reader handling `EXDATE`; the servers' texts are `ical/server_texts.rs`.)
 
-**176.** New `ical/write.rs`: one resource from a UID's single Events as managed fields plus tree, VTIMEZONE (from `resource/write.rs:388`), folding and CRLF, the writer's fresh `DTSTAMP`/`LAST-MODIFIED`; `SEQUENCE` from the tree. Takes over the cases worth keeping from `resource/tests.rs` (hostile Event Rows, folding, VTIMEZONE). Not wired to the Sender yet (187).
+**176.** New `ical/write.rs`: one resource from a UID's single Events as managed fields plus tree, VTIMEZONE (from `resource/write.rs:388`), folding and CRLF, the writer's fresh `DTSTAMP`/`LAST-MODIFIED`; `SEQUENCE` from the tree. Takes over the cases worth keeping from `resource/tests.rs` (hostile Event Rows, folding, VTIMEZONE). Not wired to the Sender yet (187). (Changed in ticket 176: the writer is `ical/write/mod.rs` with `write/tests.rs`, as clippy wants for the reader; its entry is `write_resource(uid, &[(&EventFields, &UnimplementedFields)], now)`, which 187 may feed from 177's `EventVersionContent`; the VTIMEZONE code moved there and the patching writer calls `vtimezone_text` until 187, but keeps its own writing of the managed properties (`Group::write`), which 187 deletes with it.)
 
 **177.** New `comparison.rs` as designed above. Pure.
 

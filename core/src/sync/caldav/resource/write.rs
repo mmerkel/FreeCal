@@ -11,14 +11,15 @@
 //! TEXT are formatted here from parsed times and from rules FreeCal can
 //! expand, never copied from a stored field.
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Offset, TimeDelta, TimeZone, Utc};
-use chrono_tz::{OffsetComponents, OffsetName, Tz, TzOffset};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono_tz::Tz;
 use icalendar::Property;
 use icalendar::parser::unfold;
 
 use crate::Result;
 use crate::event::{EventFields, normal_form, rule};
 use crate::ical::read::Time;
+use crate::ical::write::vtimezone_text;
 use crate::import::ImportedWhen;
 
 /// Content lines written, with the time zones their times are given in,
@@ -373,150 +374,7 @@ pub(super) fn new_vevent(
     Ok(())
 }
 
-/// The last year a `VTIMEZONE` covers: the time zone rules FreeCal is built
-/// with give no changes after it.
-const LAST_COVERED_YEAR: i32 = 2099;
-
-/// Writes the `VTIMEZONE` of `zone` from the time zone rules FreeCal is
-/// built with, so that clients that don't know IANA names read the times
-/// as FreeCal does: each offset change from the start of the year of
-/// `from` to the end of [`LAST_COVERED_YEAR`], those of one kind in one
-/// observance, its first as its `DTSTART` and the others as `RDATE`s, after
-/// an observance for the offset the year starts with.
+/// Writes the `VTIMEZONE` of `zone`, as the CalDAV writer does.
 pub(super) fn vtimezone(zone: Tz, from: NaiveDateTime, out: &mut Written) {
-    let year_start = |year: i32| {
-        NaiveDate::from_ymd_opt(year, 1, 1)
-            .expect("the first of January exists")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight exists")
-    };
-    // A day early, so that the start of the year in the zone is covered.
-    let start = year_start(from.year()).and_utc() - TimeDelta::days(1);
-    let until = year_start(LAST_COVERED_YEAR + 1).and_utc();
-    let first = ZoneOffset::of(zone, start);
-    let mut observances = vec![Observance {
-        from: first.utc_offset,
-        kind: first.clone(),
-        onsets: vec![start.naive_utc() + first.delta()],
-    }];
-    let mut day = start;
-    let mut current = first;
-    // Compared without building a `ZoneOffset`, which is made of it, on
-    // every day: those are tens of thousands.
-    let mut current_raw = zone.offset_from_utc_datetime(&start.naive_utc());
-    while day < until {
-        let next_day = day + TimeDelta::days(1);
-        let next_raw = zone.offset_from_utc_datetime(&next_day.naive_utc());
-        if next_raw == current_raw {
-            day = next_day;
-            continue;
-        }
-        current_raw = next_raw;
-        let next = ZoneOffset::from(next_raw);
-        if next != current {
-            // The first second of the new offset, as no zone changes its
-            // offset twice within a day.
-            let (mut before, mut after) = (day, next_day);
-            while after - before > TimeDelta::seconds(1) {
-                let middle = before + (after - before) / 2;
-                if ZoneOffset::of(zone, middle) == current {
-                    before = middle;
-                } else {
-                    after = middle;
-                }
-            }
-            let onset = after.naive_utc() + current.delta();
-            match observances
-                .iter_mut()
-                .find(|observance| observance.kind == next && observance.from == current.utc_offset)
-            {
-                Some(observance) => observance.onsets.push(onset),
-                None => observances.push(Observance {
-                    kind: next.clone(),
-                    from: current.utc_offset,
-                    onsets: vec![onset],
-                }),
-            }
-            current = next;
-        }
-        day = next_day;
-    }
-    out.begin("VTIMEZONE");
-    out.text_property("TZID", zone.name());
-    for observance in &observances {
-        let kind = if observance.kind.dst {
-            "DAYLIGHT"
-        } else {
-            "STANDARD"
-        };
-        out.begin(kind);
-        let (first, others) = observance
-            .onsets
-            .split_first()
-            .expect("an observance has an onset");
-        out.times("DTSTART", &[Time::Wall(*first, None)]);
-        let others: Vec<Time> = others
-            .iter()
-            .map(|onset| Time::Wall(*onset, None))
-            .collect();
-        out.times("RDATE", &others);
-        out.property(Property::new("TZOFFSETFROM", utc_offset(observance.from)));
-        out.property(Property::new(
-            "TZOFFSETTO",
-            utc_offset(observance.kind.utc_offset),
-        ));
-        if let Some(name) = &observance.kind.name {
-            out.text_property("TZNAME", name);
-        }
-        out.end(kind);
-    }
-    out.end("VTIMEZONE");
-}
-
-/// The offsets of one kind that a zone changes to, from the offset
-/// `from`, with the wall times they start at in the offset before.
-struct Observance {
-    kind: ZoneOffset,
-    from: i32,
-    onsets: Vec<NaiveDateTime>,
-}
-
-/// A zone's offset from UTC at one moment, as a `VTIMEZONE` tells them
-/// apart.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ZoneOffset {
-    utc_offset: i32,
-    dst: bool,
-    name: Option<String>,
-}
-
-impl ZoneOffset {
-    fn of(zone: Tz, at: DateTime<Utc>) -> Self {
-        Self::from(zone.offset_from_utc_datetime(&at.naive_utc()))
-    }
-
-    fn from(offset: TzOffset) -> Self {
-        Self {
-            utc_offset: offset.fix().local_minus_utc(),
-            dst: !offset.dst_offset().is_zero(),
-            name: offset.abbreviation().map(str::to_owned),
-        }
-    }
-
-    fn delta(&self) -> TimeDelta {
-        TimeDelta::seconds(self.utc_offset.into())
-    }
-}
-
-/// An offset in seconds as a `UTC-OFFSET` value, such as `+0100` or
-/// `+005328`.
-fn utc_offset(seconds: i32) -> String {
-    let sign = if seconds < 0 { '-' } else { '+' };
-    let seconds = seconds.unsigned_abs();
-    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
-    if seconds == 0 {
-        format!("{sign}{hours:02}{minutes:02}")
-    } else {
-        format!("{sign}{hours:02}{minutes:02}{seconds:02}")
-    }
+    out.text.push_str(&vtimezone_text(zone.name(), zone, from));
 }

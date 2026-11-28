@@ -12,17 +12,27 @@ Spec: "Local Store"; "Untrusted content". ADR 0017. Layout: "The target module t
 
 **Blocked by:** 175
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] The writer builds a resource for a single Event, a Recurring Event with Exceptions, and Exceptions without their Recurring Event
-- [ ] Round trip from fields and tree, over every kind of property value, parameter and component that 175's tests cover
-- [ ] Round trip from the server texts of `resource/tests.rs`: read, write, read again gives equal fields and trees
-- [ ] The cases carried over from `resource/tests.rs` listed above, as tests in `ical/write.rs`
-- [ ] A `SEQUENCE` in the tree is written back unchanged; none for an Event without one
-- [ ] The same input gives the same text
+- [x] The writer builds a resource for a single Event, a Recurring Event with Exceptions, and Exceptions without their Recurring Event
+- [x] Round trip from fields and tree, over every kind of property value, parameter and component that 175's tests cover
+- [x] Round trip from the server texts of `resource/tests.rs`: read, write, read again gives equal fields and trees
+- [x] The cases carried over from `resource/tests.rs` listed above, as tests in `ical/write.rs`
+- [x] A `SEQUENCE` in the tree is written back unchanged; none for an Event without one
+- [x] The same input gives the same text
 
 ## Comments
 
 - 2026-11-28: From the review of 175: the tree's values are as written, escapes and all (`a\,b,c`), so the writer writes them back as they are, without escaping them again; an `ical:DURATION` parameters entry can come from an end read from `DURATION`.
+- 2026-11-28: Started from commit efde2e5.
+- 2026-11-28: Built `ical/write/mod.rs` (`write_resource`) with its tests in `write/tests.rs`; the patching writer's VTIMEZONE moved there (`vtimezone_text`), and its VTIMEZONE test with it. No switched-off tests; no new terms. Decisions, for review, each with its strongest con:
+  1. **decision, for review:** an end read from `DURATION` whose tree keeps an `ical:DURATION` entry of parameters is written as `DURATION` again (`PT…S`, `P…D`) with them, where both ends share a zone; otherwise as `DTEND`, and the entry is not written. Con: a second way to write the end, for a rare case.
+  2. **decision, for review:** a managed text that is empty but has parameters in the tree is written as an empty property (`SUMMARY;LANGUAGE=de:`), so the parameters read back. Con: an empty line the user didn't write.
+  3. **decision, for review:** a `TZID` in the tree's properties that names a zone FreeCal knows gets a `VTIMEZONE` under that `TZID`'s text, covering from the year of the Event's start. Con: a `TZID` FreeCal doesn't know still loses its definition (the reader drops every `VTIMEZONE`), and the coverage follows the Event's start, not that property's time.
+  4. **decision, for review:** the calendar level is written from the `ical:VCALENDAR` entries of the Event the reader puts them on (the first in the writer's order); several such entries (a text with several `VCALENDAR`s) go into the one `VCALENDAR` and read back as one entry. Con: the round trip is not exact for those texts.
+  5. **decision, for review:** what the tree can't hold safely isn't written: a name other than letters, digits and dashes, a property `BEGIN` or `END`, a calendar-level `VEVENT` or `VTIMEZONE`, and the tree's `DTSTAMP`, `LAST-MODIFIED`, `VERSION` and `PRODID`; parameter values lose `"` and control characters, values their control characters. Con: such an entry is lost without a trace (the reader never makes one).
+  6. **decision, for review:** the round trip compares recurrence IDs by Occurrence (ADR 0012): a floating one of a timed Recurring Event is written in its Event Time Zone, as the patching writer does. `zone_pinned` is not compared, as no text holds it. Con: "the same fields" is by Occurrence there, not as obtained.
+  7. **decision, for review:** several `ical:EXDATE` entries of parameters go on the one `EXDATE` line and read back as one entry. Con: not exact for that rare text.
+  - Trade-off: the patching writer keeps its own `Group::write` until 187 rather than calling the new writer's, which shares only the `VTIMEZONE`; sharing more would rework code 187 deletes.

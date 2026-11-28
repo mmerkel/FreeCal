@@ -771,7 +771,7 @@ impl Zones {
 /// The IANA time zone a `TZID` names: an IANA name, a path ending in one
 /// (`/mozilla.org/20050126_1/Europe/Berlin`) or a Windows name as Outlook
 /// writes it (`W. Europe Standard Time`).
-fn iana_zone(name: &str) -> Option<Tz> {
+pub(crate) fn iana_zone(name: &str) -> Option<Tz> {
     let name = unquoted(name);
     if let Ok(zone) = name.parse() {
         return Some(zone);
@@ -784,7 +784,7 @@ fn iana_zone(name: &str) -> Option<Tz> {
 }
 
 /// A parameter value without the quotes RFC 5545 allows around it.
-fn unquoted(value: &str) -> &str {
+pub(crate) fn unquoted(value: &str) -> &str {
     value.trim().trim_matches('"')
 }
 
