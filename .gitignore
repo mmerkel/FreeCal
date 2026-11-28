@@ -5,3 +5,4 @@
 /node_modules
 /tickets.pdf
 /deepening-workflow.md
+__pycache__/

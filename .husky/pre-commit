@@ -32,6 +32,12 @@ quiet() {
   fi
 }
 
+# Every switched-off test names the open ticket that switches it back on. It
+# runs on every commit: marking a ticket done can break it as well as code.
+quiet python3 .husky/switched_off_tests.py
+if echo "$staged" | grep -q '^\.husky/'; then
+  quiet python3 -m unittest discover -s .husky -p 'test_*.py'
+fi
 if $front; then
   quiet npm run --silent lint
   quiet npm run --silent check

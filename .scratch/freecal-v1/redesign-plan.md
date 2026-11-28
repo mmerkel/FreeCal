@@ -32,6 +32,8 @@ Start of the redesign: tag `design/snapshot-line` (commit `065a8e8`). Diffs and 
 
 Record the commit at the start of each phase here when implementation begins, for the phase's `/simplify` and review.
 
+- P0: started at `366db47` (ticket 173).
+
 ## Batches
 
 - [x] **B1, the ticket plan.** Read `GLOSSARY.md`, ADRs 0017 to 0020, the spec's sections they touch, `CODING_STANDARDS.md`, and the old tickets 133 and later (skim; their "What to build" and boxes, not their comments). Find older tickets that name any of them in `Blocked by` or text (`grep -l`). Sort the existing tests (Rust and frontend) into survive / rewrite / delete-with-their-feature, at the level of files or test modules, via an Explore subagent asked for a list, not contents. Write into this file, under "Ticket plan": every new ticket (number from 173, title, a few sentences of scope, layer, phase, Blocked by, the old tickets it replaces), the table of switched-off tests (test, off in ticket, on in ticket; check the 3 to 4 ticket limit), and the test sorting. Each old ticket in scope maps to new tickets or to "dropped, because …". Don't write ticket files yet.

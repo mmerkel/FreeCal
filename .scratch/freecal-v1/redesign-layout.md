@@ -139,7 +139,7 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 
 ### P0
 
-**173.** A script beside the pre-commit hook (`.husky/pre-commit`, which lists the checks) that greps `#[ignore` and `it.skip` / `describe.skip` / `test.skip` over `core/`, `src-tauri/` and `src/`, and refuses a bare one, a note not of the form `until ticket NN: <why>`, or an NN whose file in `.scratch/freecal-v1/issues/` is missing or `**Status:** done`. No backend module.
+**173.** A script beside the pre-commit hook (`.husky/pre-commit`, which lists the checks) that greps `#[ignore` and `it.skip` / `describe.skip` / `test.skip` over `core/`, `src-tauri/` and `src/`, and refuses a bare one, a note not of the form `until ticket NN: <why>`, or an NN whose file in `.scratch/freecal-v1/issues/` is missing or `**Status:** done`. No backend module. Built as `.husky/switched_off_tests.py`, tested by `.husky/test_switched_off_tests.py`; the frontend note is a comment `// until ticket NN: <why>` on the line right before the skip. A test only a person can run carries `by hand: <why>` in place of the ticket note (changed in ticket 173: the keyring test of `src-tauri/src/keyring.rs` is such a test, not a switched-off one). The check runs on every commit, not only those staging code (changed in ticket 173: marking a ticket done can break it).
 
 ### P1
 
