@@ -27,7 +27,8 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
 use crate::event::{EventFields, Loaded, ServerPairing, as_propagated};
-use crate::import::{ImportedEvent, ImportedWhen, read_events};
+use crate::ical::read::read_events;
+use crate::import::{ImportedEvent, ImportedWhen};
 use crate::{CoreError, Result};
 use write::{Group, Revision, Written, new_vevent, vtimezone, zones_of};
 

@@ -10,6 +10,7 @@ mod clock;
 mod error;
 mod event;
 mod guests;
+mod ical;
 mod import;
 mod journal;
 mod keyring;
@@ -26,6 +27,7 @@ mod sync_scheduler;
 mod sync_status;
 #[cfg(test)]
 mod typescript;
+mod unimplemented;
 mod view;
 
 use std::collections::BTreeSet;

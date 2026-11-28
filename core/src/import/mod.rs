@@ -10,25 +10,19 @@
 //! "Floating" here always means a time in the file that has no time zone.
 //! FreeCal itself has no floating times: they are pinned on reading (ADR 0007).
 
-mod windows_zones;
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Utc};
+use chrono::{NaiveDate, NaiveDateTime};
 use chrono_tz::Tz;
-use icalendar::{
-    CalendarComponent, CalendarDateTime, Component, DatePerhapsTime, EventLike, Property,
-};
 use serde::{Deserialize, Serialize};
 
-use crate::event::{
-    Loaded, RecurrenceId, StoredWhen, in_normal_form, instant, latest, new_uid, rule,
-};
+use crate::event::{Loaded, RecurrenceId, latest, new_uid};
+use crate::ical::read::{ReadFile, log_violations, read_events};
 use crate::journal::{JournalTransaction, JournalTransactionId};
+use crate::unimplemented::UnimplementedFields;
 use crate::{CalendarId, CoreError, Result, StructuredText};
-use windows_zones::WINDOWS_ZONES;
 
 /// The most a file to import may hold, and the most the `.ics` files in a
 /// `.zip` may unpack to together: 128 MiB. A heavy user's Google Takeout
@@ -155,6 +149,8 @@ pub struct ImportedEvent {
     /// For an Exception, the recurrence ID of the Occurrence it changed, as
     /// obtained (ADR 0012); none for every other Event.
     pub(crate) recurrence_id: Option<RecurrenceId>,
+    #[allow(dead_code, reason = "until ticket 186 stores it")]
+    pub(crate) unimplemented: UnimplementedFields,
 }
 
 impl ImportedEvent {
@@ -274,7 +270,11 @@ pub(crate) fn preview(
 ) -> Result<ImportPreview> {
     let read = calendar_files(file)?
         .into_iter()
-        .map(|(name, contents)| read_events(&name, &contents, display))
+        .map(|(name, contents)| {
+            let read = read_events(&name, &contents, display)?;
+            log_violations(&name, &read.violations);
+            Ok(read)
+        })
         .collect::<Result<Vec<_>>>()?;
     let mut events = assemble(read);
     for event in &mut events {
@@ -389,376 +389,12 @@ fn calendar_files(file: &ImportFile) -> Result<Vec<(String, Vec<u8>)>> {
     Ok(files)
 }
 
-/// What an `.ics` file has: its Events, without their `exists` yet, and the
-/// Exceptions of Recurring Events, each with the original start of the
-/// Occurrence it changed.
-pub(crate) struct ReadFile {
-    pub(crate) events: Vec<ImportedEvent>,
-    pub(crate) exceptions: Vec<ImportedEvent>,
-}
-
-/// The Events of the `.ics` file `name`; the CalDAV Sync Engine reads a
-/// resource with it too.
-pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<ReadFile> {
-    let not_calendar = || CoreError::ImportNotCalendar {
-        file: name.to_owned(),
-    };
-    let text = std::str::from_utf8(contents).map_err(|_| not_calendar())?;
-    let calendars = calendars(text).ok_or_else(not_calendar)?;
-    let mut read = ReadFile {
-        events: Vec::new(),
-        exceptions: Vec::new(),
-    };
-    for calendar in &calendars {
-        let zones = Zones::of(calendar);
-        for event in calendar.events() {
-            let start = event.get_start().ok_or_else(not_calendar)?;
-            let end = event.get_end();
-            let duration = event.property_value("DURATION").and_then(duration);
-            let (when, zone_pinned, all_floating) = zones.when(start, end, duration, display);
-            let description = event.get_description().unwrap_or_default();
-            // A `RECURRENCE-ID` that doesn't read makes the file unreadable,
-            // as a start does, rather than its Exception a second Event of
-            // the UID (ticket 215).
-            let recurrence_id = event
-                .property_value("RECURRENCE-ID")
-                .map(|_| {
-                    let original = event.get_recurrence_id();
-                    original.map(|original| RecurrenceId::of_original(zones.time(original)))
-                })
-                .map(|read| read.ok_or_else(not_calendar))
-                .transpose()?;
-            let exdates = event
-                .multi_properties()
-                .get("EXDATE")
-                .into_iter()
-                .flatten()
-                .flat_map(single_values)
-                .filter_map(|exdate| DatePerhapsTime::from_property(&exdate))
-                .map(|exdate| in_normal_form(&zones.time(exdate), &when).into_string());
-            // A rule FreeCal can't expand leaves the Event as its first
-            // Occurrence.
-            let (rule, exdates) = rule::imported(
-                event
-                    .property_value("RRULE")
-                    .filter(|_| recurrence_id.is_none()),
-                exdates,
-                &StoredWhen::imported(&when),
-            );
-            let imported = ImportedEvent {
-                uid: event
-                    .get_uid()
-                    .filter(|uid| !uid.is_empty())
-                    .map_or_else(new_uid, str::to_owned),
-                title: event.get_summary().unwrap_or_default().to_owned(),
-                when,
-                location: event.get_location().unwrap_or_default().to_owned(),
-                description: description.to_owned(),
-                description_html: looks_like_html(description),
-                zone_pinned,
-                all_floating,
-                exists: false,
-                rule,
-                exdates,
-                sequence: event
-                    .property_value("SEQUENCE")
-                    .and_then(|sequence| sequence.trim().parse().ok())
-                    .unwrap_or(0),
-                exceptions: Vec::new(),
-                recurrence_id,
-            };
-            match imported.recurrence_id {
-                None => read.events.push(imported),
-                Some(_) => read.exceptions.push(imported),
-            }
-        }
-    }
-    Ok(read)
-}
-
-/// Gives `read` the `VCALENDAR` components at the top of iCalendar text,
-/// and returns what it makes of them; nothing if the text can't be read.
-/// Every reader of iCalendar text starts here, so that they agree on what
-/// FreeCal can read.
-pub(crate) fn read_vcalendars<R>(
-    text: &str,
-    read: impl FnOnce(Vec<icalendar::parser::Component<'_>>) -> R,
-) -> Option<R> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let unfolded = icalendar::parser::unfold(text);
-    let roots = icalendar::parser::read_components(&unfolded).ok()?;
-    Some(read(
-        roots
-            .into_iter()
-            .filter(|root| root.name.as_str().eq_ignore_ascii_case("VCALENDAR"))
-            .collect(),
-    ))
-}
-
-/// The `VCALENDAR`s of iCalendar text, none if it has none or can't be read.
-fn calendars(text: &str) -> Option<Vec<icalendar::Calendar>> {
-    let calendars: Vec<_> = read_vcalendars(text, |roots| {
-        roots
-            .into_iter()
-            .map(|root| {
-                icalendar::Calendar::from(icalendar::parser::Calendar {
-                    properties: root.properties,
-                    components: root.components,
-                })
-            })
-            .collect()
-    })?;
-    (!calendars.is_empty()).then_some(calendars)
-}
-
-/// The IANA time zone of a CalDAV Calendar's `calendar-timezone` (RFC 4791),
-/// an iCalendar object with one `VTIMEZONE`, if FreeCal can tell.
-pub(crate) fn calendar_zone(text: &str) -> Option<Tz> {
-    calendars(text)?.iter().find_map(|calendar| {
-        let zones = Zones::of(calendar);
-        calendar
-            .components
-            .iter()
-            .find_map(|component| match component {
-                CalendarComponent::Other(other)
-                    if other.component_kind().eq_ignore_ascii_case("VTIMEZONE") =>
-                {
-                    zones.zone(other.property_value("TZID")?)
-                }
-                _ => None,
-            })
-    })
-}
-
-/// A property such as `EXDATE` with one value per property, for each value
-/// of its comma-separated list.
-fn single_values(property: &Property) -> Vec<Property> {
-    property
-        .value()
-        .split(',')
-        .map(|value| {
-            let mut single = Property::new(property.key(), value.trim());
-            for parameter in property.params().values() {
-                single.append_parameter(parameter.clone());
-            }
-            single
-        })
-        .collect()
-}
-
 /// The zone a pinned Event's floating time was pinned to.
 fn pinned_zone(event: &ImportedEvent) -> Option<Tz> {
     match event.when {
         ImportedWhen::Timed { start_zone, .. } if event.zone_pinned => Some(start_zone),
         _ => None,
     }
-}
-
-/// A start or end as a file gives it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Time {
-    Date(NaiveDate),
-    /// A wall time in a zone, or floating when FreeCal has no zone for it.
-    Wall(NaiveDateTime, Option<Tz>),
-}
-
-/// How one `VCALENDAR` names its time zones.
-struct Zones {
-    /// Its `X-WR-TIMEZONE`, which Google writes for the Calendar.
-    calendar: Option<Tz>,
-    /// Each `VTIMEZONE`'s `TZID` with its `X-LIC-LOCATION`.
-    locations: HashMap<String, String>,
-}
-
-impl Zones {
-    fn of(calendar: &icalendar::Calendar) -> Self {
-        let locations = calendar
-            .components
-            .iter()
-            .filter_map(|component| match component {
-                CalendarComponent::Other(other)
-                    if other.component_kind().eq_ignore_ascii_case("VTIMEZONE") =>
-                {
-                    Some((
-                        other.property_value("TZID")?.to_owned(),
-                        other.property_value("X-LIC-LOCATION")?.to_owned(),
-                    ))
-                }
-                _ => None,
-            })
-            .collect();
-        Self {
-            calendar: calendar.property_value("X-WR-TIMEZONE").and_then(iana_zone),
-            locations,
-        }
-    }
-
-    /// The IANA time zone `tzid` stands for, if FreeCal can tell.
-    fn zone(&self, tzid: &str) -> Option<Tz> {
-        let tzid = unquoted(tzid);
-        iana_zone(tzid).or_else(|| {
-            self.locations
-                .iter()
-                .find(|(id, _)| unquoted(id) == tzid)
-                .and_then(|(_, name)| iana_zone(name))
-        })
-    }
-
-    fn time(&self, time: DatePerhapsTime) -> Time {
-        match time {
-            DatePerhapsTime::Date(date) => Time::Date(date),
-            DatePerhapsTime::DateTime(CalendarDateTime::Floating(wall)) => Time::Wall(wall, None),
-            DatePerhapsTime::DateTime(CalendarDateTime::Utc(utc)) => self.utc(utc),
-            DatePerhapsTime::DateTime(CalendarDateTime::WithTimezone { date_time, tzid }) => {
-                Time::Wall(date_time, self.zone(&tzid))
-            }
-        }
-    }
-
-    /// A UTC time in the Calendar's zone if the file names one: the same
-    /// instant, in the zone the user meant.
-    fn utc(&self, utc: DateTime<Utc>) -> Time {
-        let zone = self.calendar.unwrap_or(Tz::UTC);
-        Time::Wall(utc.with_timezone(&zone).naive_local(), Some(zone))
-    }
-
-    /// When an Event takes place, whether a floating time was pinned, and
-    /// whether both were:
-    /// to the zone of the other end if only one end floats, otherwise to
-    /// `display` (ADR 0007). A missing end follows the duration or RFC 5545's
-    /// default, a day for an all-day Event and no length for a timed one.
-    fn when(
-        &self,
-        start: DatePerhapsTime,
-        end: Option<DatePerhapsTime>,
-        duration: Option<TimeDelta>,
-        display: Tz,
-    ) -> (ImportedWhen, bool, bool) {
-        let end = end.map(|end| self.time(end));
-        match self.time(start) {
-            Time::Date(start) => {
-                let end = match end {
-                    Some(Time::Date(end)) => end,
-                    Some(Time::Wall(end, _)) => end.date(),
-                    None => duration.map_or(start, |duration| start + duration),
-                };
-                let end = if end > start {
-                    end
-                } else {
-                    start + TimeDelta::days(1)
-                };
-                (ImportedWhen::AllDay { start, end }, false, false)
-            }
-            Time::Wall(start, start_zone) => {
-                let (end, end_zone) = match end {
-                    Some(Time::Wall(end, zone)) => (end, zone),
-                    Some(Time::Date(end)) => (end.and_time(NaiveTime::MIN), start_zone),
-                    None => (start + duration.unwrap_or_default(), start_zone),
-                };
-                let zone_pinned = start_zone.is_none() || end_zone.is_none();
-                let all_floating = start_zone.is_none() && end_zone.is_none();
-                let start_zone = start_zone.or(end_zone).unwrap_or(display);
-                let end_zone = end_zone.unwrap_or(start_zone);
-                let (end, end_zone) = if instant(end, end_zone) < instant(start, start_zone) {
-                    (start, start_zone)
-                } else {
-                    (end, end_zone)
-                };
-                let when = ImportedWhen::Timed {
-                    start,
-                    start_zone,
-                    end,
-                    end_zone,
-                };
-                (when, zone_pinned, all_floating)
-            }
-        }
-    }
-}
-
-/// The IANA time zone a `TZID` names: an IANA name, a path ending in one
-/// (`/mozilla.org/20050126_1/Europe/Berlin`) or a Windows name as Outlook
-/// writes it (`W. Europe Standard Time`).
-fn iana_zone(name: &str) -> Option<Tz> {
-    let name = unquoted(name);
-    if let Ok(zone) = name.parse() {
-        return Some(zone);
-    }
-    if let Some((_, iana)) = WINDOWS_ZONES.iter().find(|(windows, _)| *windows == name) {
-        return iana.parse().ok();
-    }
-    name.match_indices('/')
-        .find_map(|(index, _)| name[index + 1..].parse().ok())
-}
-
-/// A parameter value without the quotes RFC 5545 allows around it.
-fn unquoted(value: &str) -> &str {
-    value.trim().trim_matches('"')
-}
-
-/// An RFC 5545 duration, such as `PT1H30M` or `P2D`.
-fn duration(text: &str) -> Option<TimeDelta> {
-    let parsed = iso8601::duration(text.trim()).ok()?;
-    TimeDelta::from_std(parsed.into()).ok()
-}
-
-/// The tags whose presence makes a description HTML rather than plain text
-/// that happens to hold a `<`.
-const HTML_TAGS: &[&str] = &[
-    "a",
-    "b",
-    "i",
-    "u",
-    "s",
-    "p",
-    "br",
-    "hr",
-    "em",
-    "strong",
-    "span",
-    "div",
-    "font",
-    "ul",
-    "ol",
-    "li",
-    "img",
-    "html",
-    "body",
-    "script",
-    "style",
-    "table",
-    "tr",
-    "td",
-    "th",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "pre",
-    "code",
-    "blockquote",
-    "sub",
-    "sup",
-    "small",
-    "big",
-    "center",
-];
-
-/// Whether a description is HTML: whether it has an opening or closing tag
-/// of [`HTML_TAGS`], such as `<br>`, `</p>` or `<a href=…>`.
-fn looks_like_html(text: &str) -> bool {
-    text.match_indices('<').any(|(index, _)| {
-        let rest = &text[index + 1..];
-        let rest = rest.strip_prefix('/').unwrap_or(rest);
-        let name_end = rest
-            .find(|c: char| !c.is_ascii_alphanumeric())
-            .unwrap_or(rest.len());
-        let after = rest[name_end..].chars().next();
-        HTML_TAGS.contains(&rest[..name_end].to_ascii_lowercase().as_str())
-            && matches!(after, Some('>' | '/') | Some(' ' | '\t' | '\r' | '\n'))
-    })
 }
 
 #[cfg(test)]
@@ -795,34 +431,5 @@ mod tests {
         let uids = store.event_uids(calendar_id).unwrap();
         assert_eq!(uids.len(), 2);
         assert!(uids.contains("kept"));
-    }
-
-    #[test]
-    fn every_windows_name_maps_to_a_zone_freecal_knows() {
-        for (windows, iana) in WINDOWS_ZONES {
-            assert!(iana.parse::<Tz>().is_ok(), "{windows} → {iana}");
-        }
-    }
-
-    #[test]
-    fn html_is_told_apart_from_plain_text_with_angle_brackets() {
-        for html in [
-            "Agenda<br>Notes",
-            "<p>Agenda</p>",
-            "see <a href=\"https://example.org\">here</a>",
-            "<B>bold</B>",
-            "line<br/>",
-        ] {
-            assert!(looks_like_html(html), "{html:?}");
-        }
-        for plain in [
-            "if a < b and c > d",
-            "Mail <someone@example.org>",
-            "<placeholder>",
-            "x <3 y",
-            "trailing <",
-        ] {
-            assert!(!looks_like_html(plain), "{plain:?}");
-        }
     }
 }

@@ -22,7 +22,7 @@
 //! Addresses compare in one form ([`compared`]): without `mailto:` and in
 //! lower case, as servers and clients write the same address in either.
 
-use crate::import::read_vcalendars;
+use crate::ical::read::read_vcalendars;
 
 /// An address in the form addresses compare in: trimmed, without
 /// surrounding quotes and a `mailto:`, in lower case.

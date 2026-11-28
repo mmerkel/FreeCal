@@ -12,7 +12,8 @@ use chrono_tz::Tz;
 
 use super::rule::start_of_id;
 use super::when::{instant, wall_text};
-use crate::import::{ImportedWhen, Time};
+use crate::ical::read::Time;
+use crate::import::ImportedWhen;
 use crate::{CoreError, Result};
 
 /// A recurrence ID as obtained: from a file or a server, from FreeCal in the

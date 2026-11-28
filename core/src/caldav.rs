@@ -17,7 +17,7 @@ use url::Url;
 use crate::remote::{
     Changes, FIRST_SYNC_PAGE, FetchToo, KnownVersions, Precondition, Put, SyncPoint, WriteOutcome,
 };
-use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject, import};
+use crate::{AvailableCalendar, CalDavLogin, Colour, CoreError, Result, ServerObject};
 
 const DAV: &str = "DAV:";
 const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
@@ -667,7 +667,7 @@ fn stored_url(server: &Url, calendar: &str) -> Result<Url> {
 fn calendar_zone(answer: &Element, display: Tz) -> Tz {
     answer
         .property(CALENDAR_TIMEZONE)
-        .and_then(|zone| import::calendar_zone(&zone.text))
+        .and_then(|zone| crate::ical::read::calendar_zone(&zone.text))
         .unwrap_or(display)
 }
 

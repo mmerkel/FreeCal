@@ -20,7 +20,7 @@ use chrono_tz::Tz;
 use super::WRITE_PERMISSION;
 
 use crate::event::{Loaded, ServerObject};
-use crate::import::read_events;
+use crate::ical::read::{log_violations, read_events};
 use crate::journal::JournalTransaction;
 use crate::store::DatabaseTransaction;
 use crate::{CalendarId, ImportedEvent, Result};
@@ -126,6 +126,7 @@ fn read_caldav_resource(object: &ServerObject, zone: Tz) -> Holds {
     let Ok(read) = read_events(&object.href, object.data.as_bytes(), zone) else {
         return Holds::Unreadable;
     };
+    log_violations(&object.href, &read.violations);
     let events: Vec<ImportedEvent> = read.events.into_iter().chain(read.exceptions).collect();
     let mut uids: Vec<String> = Vec::new();
     for event in &events {

@@ -18,7 +18,8 @@ use icalendar::parser::unfold;
 
 use crate::Result;
 use crate::event::{EventFields, normal_form, rule};
-use crate::import::{ImportedWhen, Time};
+use crate::ical::read::Time;
+use crate::import::ImportedWhen;
 
 /// Content lines written, with the time zones their times are given in,
 /// each with the earliest wall time given in it, from which its

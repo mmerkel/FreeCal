@@ -27,7 +27,7 @@ use super::recurrence_id::recurrence_id_text;
 use super::when::{
     EventFields, StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text,
 };
-use crate::import::Time;
+use crate::ical::read::Time;
 use crate::{CoreError, Result};
 
 /// A repeat rule as the editor sets it.
@@ -165,24 +165,11 @@ pub(super) fn rule_text(repeat: Repeat, kept: Option<&str>, when: &StoredWhen) -
     Ok(text)
 }
 
-/// A rule from a file with the recurrence IDs of its `EXDATE`s, as FreeCal
-/// stores them: the rule as obtained, but with an `UNTIL` in the form RFC 5545
-/// asks for the Event at `when`, where one without a zone is read in the
-/// Event Time Zone; the recurrence IDs sorted, each once. No rule and no
-/// recurrence IDs when there is no rule or FreeCal can't expand it.
-pub(crate) fn imported(
-    text: Option<&str>,
-    exdates: impl IntoIterator<Item = String>,
-    when: &StoredWhen,
-) -> (Option<String>, String) {
-    match text.and_then(|text| imported_rule(text, when)) {
-        Some(rule) => (Some(rule), exdates_of(exdates)),
-        None => (None, String::new()),
-    }
-}
-
-/// The rule of [`imported`].
-fn imported_rule(text: &str, when: &StoredWhen) -> Option<String> {
+/// A rule from a file as FreeCal stores it: the rule as obtained, but with
+/// an `UNTIL` in the form RFC 5545 asks for the Event at `when`, where one
+/// without a zone is read in the Event Time Zone. None when FreeCal can't
+/// expand it.
+pub(crate) fn imported(text: &str, when: &StoredWhen) -> Option<String> {
     let rule = Rule::parse(text)?;
     let mut stored = rule.without(&[]);
     if let Some(until) = rule.until_wall(when) {
@@ -507,7 +494,7 @@ pub(super) fn exdates_where(
 
 /// The recurrence IDs `ids` as a Recurring Event's cancelled Occurrences
 /// are stored: sorted, each once.
-fn exdates_of(ids: impl IntoIterator<Item = String>) -> String {
+pub(crate) fn exdates_of(ids: impl IntoIterator<Item = String>) -> String {
     let mut ids: Vec<String> = ids.into_iter().collect();
     ids.sort_unstable();
     ids.dedup();
