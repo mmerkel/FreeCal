@@ -59,11 +59,11 @@ Written by B1 (2026-11-28). B2 may adjust sizes and order where the layout shows
 | 174 | An Event is identified by its Combined Event Key | 142 as written: the core interface and the window name Events by key; `EventId` leaves the generated types; the row ID stays inside the core. | core + window | P1 | none | 142 |
 | 175 | Unimplemented Fields: the tree, its canonical form and the CalDAV reader | 143 as written. Pure code. | core | P1 | none | 143 |
 | 176 | The CalDAV writer builds a resource from managed fields and the tree | 144 as written. Pure code. Takes over the ideas of the patching writer's tests worth keeping (hostile Event Rows, folding and CRLF, VTIMEZONE), as `resource/tests.rs` is deleted in 186. | core | P1 | 175 | 144 |
-| 177 | The comparison of the two sides, as one function | 167, plus old 21's rule per Occurrence: a change to a Recurring Event counts for every Occurrence, an Exception's for its own; the field groups from one exhaustive function; a winning side for "… all over the later changes". Pure, unit-tested. | core | P1 | 175 | 167, part of 21 |
+| 177 | The comparison of the two sides, as one function | 167, plus old 21's rule per Occurrence: a change to a Recurring Event counts for every Occurrence, an Exception's for its own; the Field Groups from one exhaustive function; a winning side for "… all over the later changes". Pure, unit-tested. | core | P1 | 175 | 167, part of 21 |
 | 178 | Event Versions are rows that never change; `event` becomes a view | 145 as written. The Change Journal keeps recording. | core | P2 | 174 | 145 |
 | 179 | Snapshots on one line, `begin` and `end`, and the Store Check | 146: every write makes one Snapshot with its origin (an action of the user records which), each First Sync page an Incoming Sync Snapshot as any write is (no special case). Adds the core's part of removing a Calendar (ADR 0018, "Removing a Calendar"): its Event Versions go, Snapshots left empty go. | core | P2 | 178 | 146, core part of 172 |
 | 180 | Undo and redo are Snapshots in the core | First half of 147: the Undo through 177's comparison, limited to one UID, Events left out with their reason (Conflict, read-only, removed Calendar), moves with one side unwritable, the next Ctrl+Z's Snapshot and the next redo's Undo, "Undo the others" and "… all over the later changes". The core interface reports what was left out; the window only shows it in plain words. Rewrites the undo tests of `recurrence_scopes.rs`, `recurring_events.rs`, `import_run.rs` and the reusable parts of `undo_per_event.rs`. | core | P2 | 177, 179 | 147 (part) |
-| 181 | The Change Journal goes | Second half of 147: its tables, the hash and its migrations, undo per Event, the listings, the Dangerous Undo and the carried ID column, from the core, the interface and the window (the Undo History dialog, the History button). Keeps `mass_change_guard::exceeded` for 200. Rewrites the server undo tests switched off in 180. `GLOSSARY.md` and `CODING_STANDARDS.md` follow. | core + window | P2 | 180 | 147 (part) |
+| 181 | The Change Journal goes | Second half of 147: its tables, the hash and its migrations, undo per Event, the listings, the Dangerous Undo and the carried ID column, from the core, the interface and the window (the Change Journal's dialog, which today's code calls "Undo History", though the glossary's Undo History is now what Ctrl+Z steps through; and the History button). Keeps `mass_change_guard::exceeded` for 200. Rewrites the server undo tests switched off in 180. `GLOSSARY.md` and `CODING_STANDARDS.md` follow. | core + window | P2 | 180 | 147 (part) |
 | 182 | Ctrl+Z and redo in the window: the toasts and the dialog asking first | 158 as written, on 180's interface. | window | P2 | 181 | 158 |
 | 183 | An Event's History in its details | 160 without its two boxes that need later tickets: "changed in fields FreeCal doesn't show" moves to 185, "since before <date>" to 184. | core + window | P2 | 181 | 160 |
 | 184 | Snapshots dropped after 90 days | 148, with the roots and edges known so far (90 days, Undo → taken back); later tickets add their root or edge (187, 189). An Event's History reads "since before <date>". | core | P2 | 181 | 148 |
@@ -138,7 +138,7 @@ Spans count tickets from off to on; all are within 3. Tests not listed are eithe
 | `core/tests/caldav_first_sync.rs`, the two `comes_back_with_the_undo…` tests | 180 | 181 | same |
 | `core/tests/guests.rs`, `undoing_a_sync_skips_an_event_with_guests` | 180 | 181 | same |
 | `src/lib/UndoDialog.test.ts`, the non-dangerous tests | 181 | 182 | the interface's undo types change; 182 rewrites the toasts and dialog |
-| `src/lib/windowDialogs.test.ts`, the Undo flow outside "the Undo History" | 181 | 182 | same |
+| `src/lib/windowDialogs.test.ts`, the Undo flow outside the describe "the Undo History" (the Change Journal's dialog) | 181 | 182 | same |
 | `src/App.events.test.ts`, the undo toast and Ctrl+Z tests | 181 | 182 | same |
 | `src/App.import.test.ts`, "Undo undoes its Journal Transaction", "offers no Undo" | 181 | 182 | same |
 | the core's tests of `event_history` and `App.events.test.ts`'s "has its History" | 181 | 183 | An Event's History is read from the Calendar History |
@@ -173,6 +173,26 @@ From an Explore subagent's sort by names and keywords, not test bodies; B2 confi
 
 ### Open questions for B2
 
-- **Unsent Changes between 181 and 191.** If the Change Journal's write path records the Unsent Changes, removing it in 181 stops sends until 191, ten tickets later, too long for the switched-off send tests. Proposed: the Calendar History's write path takes over recording `unsent_change` in 181, and 191 removes it with the table. That is code a later ticket deletes, against decision 1; the alternative is to move 187, 188 and 191 before 181. B2 decides from the layout and tells the user.
+- **Unsent Changes between 181 and 191** (decided by the user, 2026-11-28). If the Change Journal's write path records the Unsent Changes, the Calendar History's write path takes over recording `unsent_change` in 181, and 191 removes it with the table: an accepted exception to decision 1, *if it is little code*. B2 checks the size in the layout; if it is more than a small call from the Snapshot write, B2 moves 187, 188 and 191 before 181 instead and tells the user.
 - Whether 180 and 181 fit one context window each, given the undo tests they rewrite; split 180 further (the Undo; then asking first and moves) if not.
 - Whether 177 needs the Event Version's type (178) or can compare a value type of its own.
+
+### Consistency with `GLOSSARY.md` (checked 2026-11-28)
+
+The plan's decisions agree with the glossary's entries; the plan uses no term that is neither there nor in ADRs 0017 to 0020 ("switched-off test" is this plan's process word, not a domain term). Two points to know:
+
+- **The First Sync between 179 and 193.** The glossary (and ADR 0018) has a First Sync take in everything as one Incoming Sync Snapshot. From 179 until 193 replaces the old First Sync, each page it writes is an Incoming Sync Snapshot of its own, as every write makes a Snapshot. That is the old First Sync recorded honestly, not glue; 179's text says so, and no test asserts one Snapshot per First Sync before 193.
+- **"Undo History"** names a dialog in today's code (the Change Journal's) but, in the glossary, what Ctrl+Z steps through. 181 removes the dialog; 182's toasts and 206's window must not take the name back for a dialog.
+
+Entries marked "until the code follows ADR …" are revised by the ticket that makes the change; each such ticket gets a box "`GLOSSARY.md` follows" for these:
+
+| Ticket | Entries |
+|---|---|
+| 178 | Event Row (`event` is a view), Event Version (no longer the Change Journal's), Server Object and Corresponding Server Object (Event Versions), Recurrence ID as obtained |
+| 181 | Change Journal, Journal Transaction, Journal Event Modification, Record a Journal Event Modification, Transaction Origin (a Snapshot's origin), Dangerous Undo go; Database Transaction and Incoming Sync lose the Journal Transaction; First Sync's "the Change Journal doesn't record it" |
+| 185 | Event Version (Unimplemented Fields stored) |
+| 186 | Mirror goes; CalDAV Server Object (no text), Known Server Resources, Ignored Resource ("kept in the CalDAV table"), Database Transaction (the Mirror's writes), Sync Engine ("the only code that writes the Mirror") |
+| 188 | Propagate a Server Object goes |
+| 191 | Unsent Change (derived, no list), Sent Event Rows goes, Sender, Outgoing Sync ("changes the Mirror"), Combined Event Key ("what an Unsent Change is about") |
+| 195 | Write Permission, Guard, Unguarded Write go |
+| 209 | Google Server Object (no JSON) |
