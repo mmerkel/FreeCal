@@ -118,6 +118,7 @@ Written by B1 (2026-11-28). B2 may adjust sizes and order where the layout shows
 | 212 | Add a Google Account's Calendars and pull them, read-only | 25, reworded to the marks (it still names a pointer and a Join). | core | P6 | 194, 208, 210, 211 | 25 |
 | 213 | Write to Google Calendars | 26's boxes on writing: conditional writes from the Event Versions, Google's answer as the server's form, Undo, Conflicts, Mass-Change Guard and offline against the fake Google server, an Exception without its Recurring Event. | core | P6 | 193, 201, 212 | 26 (part) |
 | 214 | Google login expiry; exports keep Google's fields | 26's other boxes: an expired login is a Sync Error asking to log in again; `google:` entries exported as `X-` properties and read back on import. | core + window | P6 | 09, 213 | 26 (part) |
+| 217 | An Exception created on both sides is compared with its Occurrence | From 177's build: two new Exceptions for one Occurrence are compared with the Occurrence the base's Recurring Event gives, by Field Group, instead of always a Conflict. | core | P4 | 198 | none |
 
 Implementation order is the numbering, except 216, which runs after 179 and before 180. 211 has no blocker in the redesign and can go anywhere.
 
