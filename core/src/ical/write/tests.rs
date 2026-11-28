@@ -717,3 +717,129 @@ fn hostile_fields_and_entries_cant_change_the_structure() {
         text("description").replace("\r\n", "\n")
     );
 }
+
+/// A text with the calendar-level content `X-WR-CALNAME` and a `VTODO`, and
+/// a `VEVENT` of UID `a` starting on 5 October 2026 at 7:00 UTC for each of
+/// `events`, with those lines after its start.
+fn calendar(events: &[&str]) -> String {
+    let mut text =
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\nX-WR-CALNAME:Work\r\n".to_owned();
+    for lines in events {
+        text.push_str(&format!(
+            "BEGIN:VEVENT\r\nUID:a\r\n{STAMP}DTSTART:20261005T070000Z\r\n{lines}END:VEVENT\r\n"
+        ));
+    }
+    text.push_str("BEGIN:VTODO\r\nUID:t\r\nEND:VTODO\r\nEND:VCALENDAR\r\n");
+    text
+}
+
+#[test]
+fn exceptions_and_revisions_read_write_and_read_again_equal() {
+    let texts = [
+        // A recurrence ID with unknown parameters, and a rule on an
+        // Exception, which the reader keeps whole.
+        calendar(&[
+            "RRULE:FREQ=DAILY;COUNT=5\r\n",
+            "RECURRENCE-ID;RANGE=THISANDFUTURE;X-P=1:20261006T070000Z\r\nRRULE:FREQ=WEEKLY\r\n",
+        ]),
+        // The calendar level on every revision of the Event.
+        calendar(&["SEQUENCE:1\r\n", "SEQUENCE:2\r\n"]),
+        // Only Exceptions: the calendar level on the earliest, each revision.
+        calendar(&[
+            "RECURRENCE-ID:20261007T070000Z\r\n",
+            "RECURRENCE-ID:20261006T070000Z\r\nSEQUENCE:1\r\n",
+            "RECURRENCE-ID:20261006T070000Z\r\nSEQUENCE:2\r\n",
+        ]),
+    ];
+    for text in &texts {
+        let written = assert_text_round_trip(text);
+        assert_eq!(written.matches("X-WR-CALNAME").count(), 1, "{written}");
+        assert_eq!(written.matches("BEGIN:VTODO").count(), 1, "{written}");
+    }
+}
+
+#[test]
+fn an_entry_without_the_ical_prefix_isnt_written() {
+    let tree = UnimplementedFields::new(vec![
+        whole("google:X-COLOR", Vec::new(), "tomato"),
+        whole("X-BARE", Vec::new(), "bare"),
+        whole("ical:X-KEPT", Vec::new(), "kept"),
+    ]);
+
+    let text = write("a", &[(fields(), tree)]);
+
+    assert!(text.contains("X-KEPT:kept\r\n"), "{text}");
+    assert!(!text.contains("tomato"), "{text}");
+    assert!(!text.contains("bare"), "{text}");
+}
+
+#[test]
+fn a_vevent_nested_in_a_component_stays_in_the_tree() {
+    let text = assert_text_round_trip(&vevent(
+        "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\n\
+         BEGIN:VEVENT\r\nUID:inner\r\nDTSTART:20261005T070000Z\r\nEND:VEVENT\r\nEND:VALARM\r\n",
+    ));
+
+    assert_eq!(events_of(&text).len(), 1, "{text}");
+    assert!(text.contains("UID:inner\r\n"), "{text}");
+}
+
+#[test]
+fn what_the_reader_never_puts_where_it_is_is_reported() {
+    let tree = UnimplementedFields::new(vec![
+        entry(
+            "ical:RRULE",
+            EntryValue::Parameters(vec![parameter("X-P", &["1"])]),
+        ),
+        entry(
+            "ical:X-NOT-MANAGED",
+            EntryValue::Parameters(vec![parameter("X-P", &["1"])]),
+        ),
+    ]);
+    let events = [(&fields(), &tree)];
+
+    let written = write_resource("a", &events, now()).unwrap();
+
+    assert_eq!(written.left_out, [LeftOut::Misplaced], "{}", written.text);
+}
+
+#[test]
+fn a_calendar_level_unlike_the_first_events_is_reported() {
+    let level = |name: &str| {
+        UnimplementedFields::new(vec![entry(
+            "ical:VCALENDAR",
+            EntryValue::Component {
+                properties: vec![property("X-WR-CALNAME", Vec::new(), name)],
+                components: Vec::new(),
+            },
+        )])
+    };
+    let (first, same, other) = (level("Work"), level("Work"), level("Home"));
+    let exception = exception("2026-10-06T07:00:00", "Later");
+
+    let alike = write_resource("a", &[(&fields(), &first), (&exception, &same)], now());
+    let unlike = write_resource("a", &[(&fields(), &first), (&exception, &other)], now());
+
+    assert_eq!(alike.unwrap().left_out, []);
+    let unlike = unlike.unwrap();
+    assert_eq!(unlike.left_out, [LeftOut::Misplaced]);
+    assert!(!unlike.text.contains("Home"), "{}", unlike.text);
+}
+
+#[test]
+fn a_duration_or_the_parameters_of_a_time_in_the_tree_are_set_by_the_writer() {
+    let tree = UnimplementedFields::new(vec![
+        whole("ical:DURATION", Vec::new(), "PT5H"),
+        entry(
+            "ical:DTSTART",
+            EntryValue::Parameters(vec![parameter("TZID", &["Asia/Tokyo"])]),
+        ),
+    ]);
+    let events = [(&fields(), &tree)];
+
+    let written = write_resource("a", &events, now()).unwrap();
+
+    assert_eq!(written.left_out, [LeftOut::SetByWriter]);
+    assert!(!written.text.contains("DURATION"), "{}", written.text);
+    assert!(!written.text.contains("Tokyo"), "{}", written.text);
+}

@@ -10,7 +10,9 @@
 //! - **The tree's entries** go back as properties and components after the
 //!   managed properties, in the tree's order; the `ical:VCALENDAR` entries
 //!   of the Event the reader puts them on go outside the `VEVENT`s. An
-//!   entry without the `ical:` prefix isn't written.
+//!   entry without the `ical:` prefix isn't written, as a Calendar of
+//!   another Provider holds it; what of an `ical:` entry isn't written is
+//!   returned ([`LeftOut`]).
 //! - **Fresh on every write:** `DTSTAMP`, `LAST-MODIFIED`, `VERSION`,
 //!   `PRODID`, and a `VTIMEZONE` for each zone a written time is given in,
 //!   by a managed field or by a `TZID` of the tree that names a zone
@@ -81,6 +83,13 @@ pub(crate) fn write_resource(
     // The reader puts the calendar level on the first Event of this order.
     let level = events.first().map(|(_, tree)| calendar_level(tree));
     let (properties, components) = level.unwrap_or_default();
+    for (_, tree) in events.iter().skip(1) {
+        let other = calendar_level(tree);
+        let held = !other.0.is_empty() || !other.1.is_empty();
+        if held && (&other.0, &other.1) != (&properties, &components) {
+            out.leave_out(LeftOut::Misplaced);
+        }
+    }
     for property in &properties {
         if matches!(property.name.as_str(), "VERSION" | "PRODID") {
             out.leave_out(LeftOut::SetByWriter);
@@ -138,9 +147,14 @@ pub(crate) enum LeftOut {
     /// A property `BEGIN` or `END`, or a `VEVENT` or `VTIMEZONE` at the
     /// calendar level, which would change the text's structure.
     Structure,
-    /// A property the writer sets itself, such as `DTSTAMP`, or a
+    /// A property the writer sets itself, such as `DTSTAMP` or `DURATION`
+    /// (the end is always a `DTEND`), the `TZID` or `VALUE` of a time, or a
     /// `VTIMEZONE` it writes fresh.
     SetByWriter,
+    /// An entry where the reader never puts it: the parameters of a
+    /// property that isn't written, or a calendar level of an Event other
+    /// than the first that differs from the first's.
+    Misplaced,
 }
 
 impl fmt::Display for LeftOut {
@@ -151,6 +165,7 @@ impl fmt::Display for LeftOut {
             LeftOut::NotAName => "a name with characters other than letters, digits and dashes",
             LeftOut::Structure => "a property or component that would change the structure",
             LeftOut::SetByWriter => "a property the writer sets itself",
+            LeftOut::Misplaced => "an entry where the reader never puts it",
         })
     }
 }
@@ -221,9 +236,18 @@ fn vevent(
     now: DateTime<Utc>,
     out: &mut Lines,
 ) -> Result<()> {
+    // The managed properties written, whose parameters the tree may hold.
+    let mut managed = vec![
+        "UID",
+        "DTSTART",
+        "DTEND",
+        "SUMMARY",
+        "LOCATION",
+        "DESCRIPTION",
+    ];
     let unknown = |name: &str| unknown_parameters(tree, name);
     out.begin("VEVENT");
-    out.text("UID", &unknown("UID"), uid);
+    out.escaped_text("UID", &unknown("UID"), uid);
     let now = [Time::Wall(now.naive_utc(), Some(Tz::UTC))];
     out.times("DTSTAMP", &[], &now);
     out.times("LAST-MODIFIED", &[], &now);
@@ -238,6 +262,7 @@ fn vevent(
             (original, _) => original.clone(),
         };
         out.times("RECURRENCE-ID", &unknown("RECURRENCE-ID"), &[original]);
+        managed.push("RECURRENCE-ID");
     }
     let when = fields.when.to_imported()?;
     let (start, end) = match when {
@@ -256,6 +281,7 @@ fn vevent(
     out.times("DTEND", &unknown("DTEND"), &[end]);
     if let Some(rule) = rule::written(fields) {
         out.line("RRULE", &unknown("RRULE"), &rule);
+        managed.push("RRULE");
         let cancelled: Vec<Time> = rule::cancelled_starts(fields)
             .into_iter()
             .map(|start| match when {
@@ -263,19 +289,30 @@ fn vevent(
                 ImportedWhen::Timed { start_zone, .. } => Time::Wall(start, Some(start_zone)),
             })
             .collect();
-        out.times("EXDATE", &unknown("EXDATE"), &cancelled);
+        if !cancelled.is_empty() {
+            out.times("EXDATE", &unknown("EXDATE"), &cancelled);
+            managed.push("EXDATE");
+        }
     }
-    out.text("SUMMARY", &unknown("SUMMARY"), &fields.title);
-    out.text("LOCATION", &unknown("LOCATION"), &fields.location);
-    out.text("DESCRIPTION", &unknown("DESCRIPTION"), &fields.description);
+    out.escaped_text("SUMMARY", &unknown("SUMMARY"), &fields.title);
+    out.escaped_text("LOCATION", &unknown("LOCATION"), &fields.location);
+    out.escaped_text("DESCRIPTION", &unknown("DESCRIPTION"), &fields.description);
     let entries = tree.entries().iter();
     let entries = entries.filter_map(|entry| Some((entry.name.strip_prefix(ICAL)?, &entry.value)));
     let entries: Vec<_> = entries
         .filter(|(name, _)| !matches!(*name, "VCALENDAR" | "VTIMEZONE"))
         .collect();
     for (name, value) in &entries {
+        if let EntryValue::Parameters(parameters) = value
+            && !parameters.is_empty()
+            && !managed.contains(name)
+        {
+            out.leave_out(LeftOut::Misplaced);
+        }
+    }
+    for (name, value) in &entries {
         if let EntryValue::Property { parameters, value } = value {
-            if matches!(*name, "DTSTAMP" | "LAST-MODIFIED") {
+            if matches!(*name, "DTSTAMP" | "LAST-MODIFIED" | "DURATION") {
                 out.leave_out(LeftOut::SetByWriter);
                 continue;
             }
@@ -378,10 +415,7 @@ impl Lines {
     /// `value` without the control characters a content line can't hold,
     /// noted as left out.
     fn without_controls(&mut self, value: &str) -> String {
-        let kept: String = value
-            .chars()
-            .filter(|c| !c.is_control() || *c == '\t')
-            .collect();
+        let kept = without_controls(value);
         if kept.len() != value.len() {
             self.leave_out(LeftOut::ControlCharacter);
         }
@@ -414,9 +448,9 @@ impl Lines {
         self.text.push_str("\r\n");
     }
 
-    /// A TEXT property of a managed field, escaped; none if `value` is empty
+    /// A TEXT property, escaped; none if `value` is empty
     /// and there are no parameters to keep.
-    fn text(&mut self, name: &str, parameters: &[Parameter], value: &str) {
+    fn escaped_text(&mut self, name: &str, parameters: &[Parameter], value: &str) {
         let held = text_value(value);
         if held.chars().count() != value.replace("\r\n", "\n").chars().count() {
             self.leave_out(LeftOut::ControlCharacter);
@@ -465,12 +499,13 @@ impl Lines {
             })
             .into_iter()
             .collect();
-        let unknown = unknown.iter();
-        parameters.extend(
-            unknown
-                .filter(|p| !TIME_PARAMETERS.contains(&p.name.as_str()))
-                .cloned(),
-        );
+        for parameter in unknown {
+            if TIME_PARAMETERS.contains(&parameter.name.as_str()) {
+                self.leave_out(LeftOut::SetByWriter);
+            } else {
+                parameters.push(parameter.clone());
+            }
+        }
         self.line(name, &parameters, &values.join(","));
     }
 
@@ -514,7 +549,7 @@ impl Lines {
             let tzid = without_controls(&tzid).replace('"', "");
             if let Some(zone) = iana_zone(&tzid).filter(|zone| *zone != Tz::UTC) {
                 let from = times.into_iter().fold(start, NaiveDateTime::min);
-                self.zone(unquoted(&tzid), zone, from);
+                self.zone(&tzid, zone, from);
             }
         }
     }
@@ -633,7 +668,7 @@ fn vtimezone(tzid: &str, zone: Tz, from: NaiveDateTime, out: &mut Lines) {
         day = next_day;
     }
     out.begin("VTIMEZONE");
-    out.text("TZID", &[], tzid);
+    out.escaped_text("TZID", &[], tzid);
     for observance in &observances {
         let kind = if observance.kind.dst {
             "DAYLIGHT"
@@ -654,7 +689,7 @@ fn vtimezone(tzid: &str, zone: Tz, from: NaiveDateTime, out: &mut Lines) {
         out.line("TZOFFSETFROM", &[], &utc_offset(observance.from));
         out.line("TZOFFSETTO", &[], &utc_offset(observance.kind.utc_offset));
         if let Some(name) = &observance.kind.name {
-            out.text("TZNAME", &[], name);
+            out.escaped_text("TZNAME", &[], name);
         }
         out.end(kind);
     }
