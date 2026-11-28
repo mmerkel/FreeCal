@@ -27,6 +27,13 @@ Every stored field is untrusted, whatever its origin (spec: "Untrusted content" 
 - Links open in the system browser through the shell (`openLink`), never in the window.
 - A field that gains a new way of being shown, such as links or markup pieces, gets a matching payload and `expected` entry in `fixtures/hostile-event.json`.
 
+## Conformance
+
+- The Local Store holds only values its readers read: every stored field reads back as the type FreeCal stores it as. The schema enforces what it can (`STRICT` tables, `CHECK`s); the Store Check (`core/src/store/check.rs`) checks the rest.
+- What FreeCal writes conforms to RFC 5545, and a CalDAV resource to RFC 4791 too. The writer leaves out what would break them and returns it (`LeftOut`).
+- The one exception is the content of properties and components FreeCal doesn't manage, which the Unimplemented Fields keep as received and the writer writes back unchanged. What the Unimplemented Fields keep of a managed property (its unknown parameters, a second copy, a value form FreeCal doesn't model) is no exception.
+- A change that lets the Local Store or a writer break these, on purpose or as the price of a trade-off, is a Conformance Breach: the ticket comment names it, and `.scratch/freecal-v1/conformance.md` lists it until a ticket ends it.
+
 ## Local Store
 
 - SQL lives only in `core/src/store/`: `schema.rs` holds the schema and its migrations, and `sql/` every query and write. The guards (the Change Journal in `core/src/journal/`, the Sync Engine in `core/src/sync/`) hold no SQL. The Sync Engine keeps each Provider's code in a module of its own (CalDAV's in `sync/caldav/`, with CalDAV's Incoming Sync in `sync/caldav/incoming.rs`), and what every Provider shares in `sync/mod.rs`: the entry that picks the Provider's Sync Engine by an exhaustive `match` on the Provider, the recorder it opens Journal Transactions through, and the Write Permission (ADR 0015). The core interface names no Provider's Sync Engine.

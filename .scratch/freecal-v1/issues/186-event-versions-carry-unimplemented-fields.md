@@ -14,7 +14,7 @@
 
 Spec: US-148; "Local Store"; "Untrusted content"; "Moves across Accounts"; "Import/export". ADR 0017 ("What is in the tree", "Part of the version"). Layout: "Tables (end state)" (`event_version.unimplemented`); "By phase", P2, 186.
 
-**Blocked by:** 175, 184
+**Blocked by:** 175, 184, 216
 
 **Status:** ready-for-agent
 
@@ -28,4 +28,5 @@ Spec: US-148; "Local Store"; "Untrusted content"; "Moves across Accounts"; "Impo
 - [ ] A move between CalDAV Calendars, into a Local Calendar and out of one carries the tree
 - [ ] An Event's History reads "changed in fields FreeCal doesn't show" for a change to the tree alone
 - [ ] The tree isn't in any type of the core interface; the Store Check passes after every scenario
+- [ ] 216's Store Check also reads each Event Version's tree: it deserialises and is already in canonical form; a test breaks each by hand and sees it reported
 - [ ] `GLOSSARY.md` follows (Event Version: Unimplemented Fields stored)

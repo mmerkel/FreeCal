@@ -9,7 +9,7 @@ Review the one ticket the user names, from `.scratch/freecal-v1/issues/`, after 
 ## Steps
 
 1. **Pin the start.** The fixed point is the commit in the ticket's first `Started from commit <sha>` comment. Without one, ask the user.
-2. **Review.** Run the `code-review` skill from that commit, with the ticket as the spec. Give the Spec sub-agent the layout plan's sections the ticket cites and the ticket's comments, so a recorded departure or decision reads as intended; give the Standards sub-agent `CODING_STANDARDS.md` and `docs/agents/redesign-tickets.md`. Leave `GLOSSARY.md` as it is: new terms stay marked "(new term)" for the user.
+2. **Review.** Run the `code-review` skill from that commit, with the ticket as the spec. Give the Spec sub-agent the layout plan's sections the ticket cites and the ticket's comments, so a recorded departure or decision reads as intended; give the Standards sub-agent `CODING_STANDARDS.md`, `docs/agents/redesign-tickets.md` and `.scratch/freecal-v1/conformance.md`, and ask it for every Conformance Breach the diff adds or ends that the ticket's `Conformance Breaches:` line doesn't name. Leave `GLOSSARY.md` as it is: new terms stay marked "(new term)" for the user.
 3. **Settle every finding** as exactly one of:
    - **fixed**: hard violations, missing or partial boxes, and code that looks wrong are always fixed;
    - **declined**: a judgement call or scope-creep finding you weighed and rejected, with the reason;
@@ -25,6 +25,7 @@ Review the one ticket the user names, from `.scratch/freecal-v1/issues/`, after 
    - every finding with its outcome;
    - the decisions for review, this review's and the ticket's open ones from `/implement-redesign`;
    - the new terms, to approve or rename;
+   - the Conformance Breaches the ticket and the review added or ended, or none;
    - the follow-up tickets, to promote;
    - a finding whose kind an earlier redesign ticket's review comment already records: name both, and suggest `/retro` on them;
    - the next command. When this ticket closes a phase in `redesign-plan.md`: the phase's `/simplify` (and, after P3 and P6, `/improve-codebase-architecture`) from the phase's start commit, given the layout plan. Otherwise `/implement-redesign` with the next ticket that is `ready-for-agent` and unblocked.

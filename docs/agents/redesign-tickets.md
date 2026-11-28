@@ -17,9 +17,10 @@ Done when each line holds:
 1. **Switched-off tests:** `grep -rn "until ticket <this>"` finds nothing the ticket should have turned on, and each test switched off in this session names the ticket that turns it back on.
 2. **Layout plan:** every module, type, table or seam the session's diff changed matches its section, or the section carries the `(changed in ticket NN: …)` note.
 3. **Boxes:** each ticked box was checked as done, ticked boxes the session's diff touched included (untick one the change undid). A box partly done or waiting on another ticket stays open with a comment naming what is left and which ticket finishes it. Boxes for `GLOSSARY.md` or `CODING_STANDARDS.md` entries are done in this ticket. `**Status:** done` once every box is ticked. After a change to any ticket's Status or Blocked by, or a new ticket, run the `tickets-pdf` skill.
-4. **Commit** to the current branch once the pre-commit hook passes; a failing hook means the work isn't done. The title says which step it is:
+4. **Conformance Breaches:** the ticket comment has a line `Conformance Breaches:` naming each one the diff adds or ends (`CODING_STANDARDS.md`, "Conformance"), or `none`, and `.scratch/freecal-v1/conformance.md` follows: a breach added gets a line, one ended is struck with the ticket's number. Look for them where the diff stores a field, reads one back, or writes iCalendar or another Provider's format.
+5. **Commit** to the current branch once the pre-commit hook passes; a failing hook means the work isn't done. The title says which step it is:
    - `Ticket NN written: <title>` for a ticket file committed on its own;
    - `Ticket NN: <outcome>` for the implementation;
    - `Ticket NN review: <outcome>` for the review's fixes, follow-up tickets included.
 
-   The body says what changed in `GLOSSARY.md` terms.
+   The body says what changed in `GLOSSARY.md` terms, and repeats the `Conformance Breaches:` line.

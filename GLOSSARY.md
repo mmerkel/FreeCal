@@ -170,6 +170,10 @@ _Avoid_: Opened event, full event
 What a server holds about one Event beyond the fields FreeCal manages, such as alarms, attachments, custom properties and unknown parameters. FreeCal keeps them without showing them.
 _Avoid_: Unknown fields, unmanaged fields, not-yet-implemented fields, server data (on its own)
 
+**Conformance Breach**:
+A way a change lets the Local Store hold a value its readers can't read, or lets a writer produce text that breaks RFC 5545 or RFC 4791 (`CODING_STANDARDS.md`, "Conformance"). The content of properties and components FreeCal doesn't manage, kept as received, is the one exception. The open ones are listed in `.scratch/freecal-v1/conformance.md`.
+_Avoid_: Violation (an RFC Violation is one the reader notices in a text it reads), RFC breach
+
 **Incoming Sync Snapshot**:
 The Snapshot in which an Incoming Sync takes in what it fetched from one Calendar. The server's versions of Events only the server changed, or in Conflict (a Server Event Replacement), become current; those of Events merged are zero-length Event Versions beside the combination (a Server Event Merge). Each Event's part can be undone alone. A First Sync's takes in everything. Ctrl+Z passes over it.
 _Avoid_: Server Intake, Join, pull, fetch (both name the Incoming Sync)

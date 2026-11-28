@@ -57,6 +57,7 @@ Record the commit at the start of each phase here when implementation begins, fo
 Tickets that reviews found outside their ticket, with the review that found them. `/code-review-redesign` writes them as `needs-triage`; the user promotes them.
 
 - 215, every recurrence ID is readable: from the review of 174. Blocked by none. Done.
+- 216, the Store Check reads every Event Version; the writer reads its own text back: from the conformance discussion of 2026-11-28 (`conformance.md`). Blocked by 179; runs after 179 and before 180, out of number order. 186 is blocked by it.
 
 ## Ticket plan
 
@@ -118,7 +119,7 @@ Written by B1 (2026-11-28). B2 may adjust sizes and order where the layout shows
 | 213 | Write to Google Calendars | 26's boxes on writing: conditional writes from the Event Versions, Google's answer as the server's form, Undo, Conflicts, Mass-Change Guard and offline against the fake Google server, an Exception without its Recurring Event. | core | P6 | 193, 201, 212 | 26 (part) |
 | 214 | Google login expiry; exports keep Google's fields | 26's other boxes: an expired login is a Sync Error asking to log in again; `google:` entries exported as `X-` properties and read back on import. | core + window | P6 | 09, 213 | 26 (part) |
 
-Implementation order is the numbering. 211 has no blocker in the redesign and can go anywhere.
+Implementation order is the numbering, except 216, which runs after 179 and before 180. 211 has no blocker in the redesign and can go anywhere.
 
 ### Old tickets in scope
 

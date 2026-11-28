@@ -13,4 +13,4 @@ Implement the one ticket the user names, from `.scratch/freecal-v1/issues/`. Fou
 3. **Record the start.** Write `Started from commit <sha>.`, the commit before your first change, into a ticket comment. If the ticket opens a phase in `redesign-plan.md`, write that commit under the phase table too.
 4. **Build**, one layer as the ticket says, test first with /tdd at the seams the layout plan names, following "While building" in `docs/agents/redesign-tickets.md`. Run typechecking and single test files as you go.
 5. **Finish** per "Finishing" in `docs/agents/redesign-tickets.md`, with the title `Ticket NN: <outcome>`.
-6. **Report**: what was built, the switched-off tests turned off and on, the departures from the layout plan, the new terms, the decisions for review, and the next command: `/code-review-redesign NN` in a fresh session.
+6. **Report**: what was built, the switched-off tests turned off and on, the departures from the layout plan, the new terms, the decisions for review, the Conformance Breaches added or ended (or none), and the next command: `/code-review-redesign NN` in a fresh session.

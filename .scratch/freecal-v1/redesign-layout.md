@@ -113,7 +113,7 @@ Decision 8 of the plan asks for "design it twice" on three interfaces. Each name
 
 ## Tables (end state)
 
-All in `store/schema.rs`; each ticket appends a migration to `MIGRATIONS`. No migration converts old rows (no real Local Store exists): a table that changes shape is dropped and created. Each constraint carries a comment naming its rule; the Store Check holds the rest (ADR 0018, "Where the invariants are recorded").
+All in `store/schema.rs`; each ticket appends a migration to `MIGRATIONS`. No migration converts old rows (no real Local Store exists): a table that changes shape is dropped and created. Each constraint carries a comment naming its rule; the Store Check holds the rest (ADR 0018, "Where the invariants are recorded"). Every table a redesign ticket creates is `STRICT`, so a value of the wrong type is refused when written (`CODING_STANDARDS.md`, "Conformance"; decided 2026-11-28).
 
 | Table | Columns, constraints | Ticket |
 |---|---|---|
@@ -166,6 +166,8 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 **178.** New `history/` with `SnapshotWriter`: `event_version` the table, `event` a view, and a bare `snapshot` table (`id`, `made_at`) so that `begin` and `end` refer to a Snapshot from the first row on. Every write through the `SnapshotWriter` makes one Snapshot and ends the rows it replaces; a placeholder for `end` would be glue that 179 deletes. The `JournalTransaction` (`journal/mod.rs:338`) calls the `SnapshotWriter` for its row writes, and the Change Journal keeps recording beside it. `EventId` is the Event Version's row ID and changes with every write; callers in `event/` reload by key. (B2 moved `begin`/`end` here from 179; see the plan's "Changes to the draft phases".)
 
 **179.** The Snapshot's origin and the line's rules: the insert and update triggers on `event_version`; `TransactionOrigin` (`journal/mod.rs:98`) becomes the Snapshot's origin type in `history/mod.rs`, First Sync pages write Incoming Sync Snapshots. `store/check.rs`, the Store Check, and the Harness running it. The core's part of removing a Calendar (`Core::remove_calendar`, `lib.rs` :693–804; `delete_local_copy` :753) deletes its Event Versions and empty Snapshots.
+
+**216.** (added 2026-11-28, runs after 179) `store/check.rs` gains a check in Rust that every Event Version's fields read; `ical/write/mod.rs`'s `write_resource` reads its text back in tests and debug builds; the reader leaves out a second copy of a once-only property (`DROPPED`). See `CODING_STANDARDS.md`, "Conformance".
 
 **180.** `history/undo.rs`: `Core::undo_snapshot`, `Core::ctrl_z`, `Core::redo` (names for 180 to settle), using `compare_event` with `Base` = what the taken-back Snapshot left, `Ours` = current, `Theirs` = what it ended. New interface types, added to `typescript.rs:33` beside the old ones; the window doesn't call them until 183. Today's `Core::undo` (`lib.rs:1013`) and `journal/undo.rs` stay until 182.
 
