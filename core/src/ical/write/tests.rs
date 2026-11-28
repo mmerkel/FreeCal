@@ -817,7 +817,8 @@ fn a_calendar_level_unlike_the_first_events_is_reported() {
     let (first, same, other) = (level("Work"), level("Work"), level("Home"));
     let exception = exception("2026-10-06T07:00:00", "Later");
 
-    let alike = write_resource("a", &[(&fields(), &first), (&exception, &same)], now());
+    // The reader puts the calendar level on every revision of the first.
+    let alike = write_resource("a", &[(&fields(), &first), (&fields(), &same)], now());
     let unlike = write_resource("a", &[(&fields(), &first), (&exception, &other)], now());
 
     assert_eq!(alike.unwrap().left_out, []);
@@ -842,4 +843,152 @@ fn a_duration_or_the_parameters_of_a_time_in_the_tree_are_set_by_the_writer() {
     assert_eq!(written.left_out, [LeftOut::SetByWriter]);
     assert!(!written.text.contains("DURATION"), "{}", written.text);
     assert!(!written.text.contains("Tokyo"), "{}", written.text);
+}
+
+/// The single Events of a UID that the enumeration places entries on, in
+/// the writer's order.
+/// In UTC, so that a case writes no `VTIMEZONE` but the one its entry
+/// asks for.
+fn shapes() -> Vec<(&'static str, Vec<EventFields>)> {
+    let utc = |fields: EventFields| EventFields {
+        when: StoredWhen {
+            start_zone: Some("UTC".to_owned()),
+            end_zone: Some("UTC".to_owned()),
+            ..fields.when
+        },
+        recurrence_id: fields.recurrence_id.map(|id| {
+            let Time::Wall(wall, _) = id.original().clone() else {
+                unreachable!("the Exceptions are timed")
+            };
+            RecurrenceId::of_original(Time::Wall(wall, Some(Tz::UTC)))
+        }),
+        ..fields
+    };
+    let fields = || utc(fields());
+    let exception = |id, title| utc(exception(id, title));
+    let recurring = EventFields {
+        rule: Some("FREQ=DAILY;COUNT=5".to_owned()),
+        ..fields()
+    };
+    vec![
+        ("a single Event", vec![fields()]),
+        (
+            "a Recurring Event and an Exception",
+            vec![recurring, exception("2026-10-13T09:00:00", "Later")],
+        ),
+        (
+            "Exceptions only",
+            vec![
+                exception("2026-10-13T09:00:00", "Earlier"),
+                exception("2026-10-14T09:00:00", "Later"),
+            ],
+        ),
+        ("two revisions of an Event", vec![fields(), fields()]),
+    ]
+}
+
+/// Every entry of the enumeration: each kind of entry under each name, with
+/// each kind of content. Its `TZID` names a zone FreeCal doesn't know, as a
+/// known one's `VTIMEZONE` (to 2099) would make the run slow; the
+/// `VTIMEZONE` tests above cover known zones.
+fn enumerated_entries() -> Vec<Entry> {
+    let names = [
+        "ical:UID",
+        "ical:SUMMARY",
+        "ical:DTSTART",
+        "ical:DTEND",
+        "ical:RRULE",
+        "ical:RECURRENCE-ID",
+        "ical:EXDATE",
+        "ical:DURATION",
+        "ical:DTSTAMP",
+        "ical:VCALENDAR",
+        "ical:VTIMEZONE",
+        "ical:VEVENT",
+        "ical:BEGIN",
+        "ical:X-UNKNOWN",
+        "ical:X-B:AD",
+        "google:X-G",
+    ];
+    let contents: [(Vec<Parameter>, &str); 5] = [
+        (vec![parameter("X-P", &["1"])], "v"),
+        (vec![parameter("X-P", &["1"])], "v\u{7}"),
+        (vec![parameter("X-P", &["a\"b"])], "v"),
+        (vec![parameter("TZID", &["Custom/Zone"])], "20261012T090000"),
+        (Vec::new(), "FREQ=DAILY;COUNT=2"),
+    ];
+    let mut entries = Vec::new();
+    for name in names {
+        for (parameters, value) in &contents {
+            entries.push(whole(name, parameters.clone(), value));
+            if !parameters.is_empty() {
+                entries.push(entry(name, EntryValue::Parameters(parameters.clone())));
+            }
+            entries.push(entry(
+                name,
+                EntryValue::Component {
+                    properties: vec![
+                        property("TZID", Vec::new(), "Custom/Zone"),
+                        property("X-A", parameters.clone(), value),
+                    ],
+                    components: Vec::new(),
+                },
+            ));
+        }
+    }
+    entries
+}
+
+/// Each entry of [`enumerated_entries`] on each Event of each of
+/// [`shapes`], and on all of them: what the writer doesn't report reads
+/// back, in the tree and the managed fields alike. An entry without the
+/// `ical:` prefix isn't written, and isn't a loss.
+#[test]
+fn whatever_doesnt_read_back_is_reported() {
+    let mut silent = Vec::new();
+    for (shape, events) in shapes() {
+        let placements = (0..events.len()).map(|i| vec![i]);
+        let placements = placements.chain([(0..events.len()).collect()]);
+        for on in placements {
+            for placed in enumerated_entries() {
+                let trees: Vec<UnimplementedFields> = (0..events.len())
+                    .map(|i| match on.contains(&i) {
+                        true => UnimplementedFields::new(vec![placed.clone()]),
+                        false => UnimplementedFields::default(),
+                    })
+                    .collect();
+                let pairs: Vec<_> = events.iter().zip(&trees).collect();
+                let written = write_resource("a", &pairs, now()).unwrap();
+                if !written.left_out.is_empty() {
+                    continue;
+                }
+                let Ok(read) = read_events("test.ics", written.text.as_bytes(), Tz::UTC) else {
+                    silent.push(format!("{shape}, on {on:?}, unreadable: {placed:?}"));
+                    continue;
+                };
+                let read: Vec<_> = read.events.into_iter().chain(read.exceptions).collect();
+                let lost = read.len() != events.len()
+                    || trees
+                        .iter()
+                        .zip(&read)
+                        .zip(&events)
+                        .any(|((tree, read), fields)| {
+                            let kept = tree.entries().iter().filter(|e| e.name.starts_with(ICAL));
+                            let mut kept = kept.map(|e| UnimplementedFields::new(vec![e.clone()]));
+                            let read_tree = read.unimplemented.entries();
+                            kept.any(|e| !read_tree.contains(&e.entries()[0]))
+                                || compared(&[(fields_of(read), Default::default())], "a")
+                                    != compared(&[(fields.clone(), Default::default())], "a")
+                        });
+                if lost {
+                    silent.push(format!("{shape}, on {on:?}: {placed:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        silent.is_empty(),
+        "lost without a report:\n{}",
+        silent.join("\n")
+    );
 }

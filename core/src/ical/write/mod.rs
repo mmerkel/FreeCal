@@ -44,7 +44,9 @@ use super::{is_name, tree_tzids};
 use crate::Result;
 use crate::event::{EventFields, rule};
 use crate::import::ImportedWhen;
-use crate::unimplemented::{Component, EntryValue, ICAL, Parameter, Property, UnimplementedFields};
+use crate::unimplemented::{
+    Component, Entry, EntryValue, ICAL, Parameter, Property, UnimplementedFields,
+};
 
 /// The `PRODID` of every resource FreeCal writes.
 const PRODID: &str = "-//FreeCal//FreeCal//EN";
@@ -83,10 +85,16 @@ pub(crate) fn write_resource(
     // The reader puts the calendar level on the first Event of this order.
     let level = events.first().map(|(_, tree)| calendar_level(tree));
     let (properties, components) = level.unwrap_or_default();
-    for (_, tree) in events.iter().skip(1) {
+    let occurrence = |fields: &EventFields| {
+        let id = fields.recurrence_id.as_ref();
+        id.map(|id| id.normal_form(None).into_string())
+    };
+    let first = events.first().map(|(fields, _)| occurrence(fields));
+    for (fields, tree) in events.iter().skip(1) {
         let other = calendar_level(tree);
         let held = !other.0.is_empty() || !other.1.is_empty();
-        if held && (&other.0, &other.1) != (&properties, &components) {
+        let revision = Some(occurrence(fields)) == first;
+        if held && (!revision || (&other.0, &other.1) != (&properties, &components)) {
             out.leave_out(LeftOut::Misplaced);
         }
     }
@@ -152,8 +160,13 @@ pub(crate) enum LeftOut {
     /// `VTIMEZONE` it writes fresh.
     SetByWriter,
     /// An entry where the reader never puts it: the parameters of a
-    /// property that isn't written, or a calendar level of an Event other
-    /// than the first that differs from the first's.
+    /// property that isn't written; a property the reader would read as a
+    /// managed field (a `RECURRENCE-ID` on an Event that isn't an
+    /// Exception, a rule FreeCal can expand, a readable `EXDATE` of a
+    /// Recurring Event); a calendar level other than on the revisions of
+    /// the first Event, or unlike the first's; a `VCALENDAR` or
+    /// `VTIMEZONE` that isn't a component; or a `VTIMEZONE` of a `TZID` the
+    /// tree doesn't use.
     Misplaced,
 }
 
@@ -179,13 +192,20 @@ fn kept_vtimezones(
     out: &mut Lines,
 ) -> Vec<Component> {
     let mut kept: BTreeMap<String, Component> = BTreeMap::new();
-    let entries = events.iter().flat_map(|(_, tree)| tree.entries());
-    for entry in entries.filter(|entry| entry.name.strip_prefix(ICAL) == Some("VTIMEZONE")) {
+    let is_zone = |entry: &&Entry| entry.name.strip_prefix(ICAL) == Some("VTIMEZONE");
+    let zones = events.iter().flat_map(|(_, tree)| {
+        let others = tree.entries().iter().filter(|entry| !is_zone(entry));
+        let used = tree_tzids(&UnimplementedFields::new(others.cloned().collect()));
+        let zones = tree.entries().iter().filter(is_zone);
+        zones.map(move |zone| (zone, used.clone()))
+    });
+    for (entry, used) in zones {
         let EntryValue::Component {
             properties,
             components,
         } = &entry.value
         else {
+            out.leave_out(LeftOut::Misplaced);
             continue;
         };
         let tzid = properties
@@ -195,6 +215,9 @@ fn kept_vtimezones(
             .unwrap_or_default();
         if fresh.iter().any(|(written, ..)| *written == tzid) {
             out.leave_out(LeftOut::SetByWriter);
+        } else if !used.iter().any(|(named, _)| *named == tzid) {
+            // The reader keeps only the VTIMEZONE of a TZID the tree uses.
+            out.leave_out(LeftOut::Misplaced);
         } else {
             kept.entry(tzid).or_insert_with(|| Component {
                 name: "VTIMEZONE".to_owned(),
@@ -299,9 +322,15 @@ fn vevent(
     out.escaped_text("DESCRIPTION", &unknown("DESCRIPTION"), &fields.description);
     let entries = tree.entries().iter();
     let entries = entries.filter_map(|entry| Some((entry.name.strip_prefix(ICAL)?, &entry.value)));
-    let entries: Vec<_> = entries
-        .filter(|(name, _)| !matches!(*name, "VCALENDAR" | "VTIMEZONE"))
-        .collect();
+    let (entries, outside): (Vec<_>, Vec<_>) =
+        entries.partition(|(name, _)| !matches!(*name, "VCALENDAR" | "VTIMEZONE"));
+    for (_, value) in outside {
+        if !matches!(value, EntryValue::Component { .. }) {
+            out.leave_out(LeftOut::Misplaced);
+        }
+    }
+    let exception = fields.recurrence_id.is_some();
+    let ruled = managed.contains(&"RRULE");
     for (name, value) in &entries {
         if let EntryValue::Parameters(parameters) = value
             && !parameters.is_empty()
@@ -314,6 +343,18 @@ fn vevent(
         if let EntryValue::Property { parameters, value } = value {
             if matches!(*name, "DTSTAMP" | "LAST-MODIFIED" | "DURATION") {
                 out.leave_out(LeftOut::SetByWriter);
+                continue;
+            }
+            // What the reader would read as a managed field, where the
+            // managed property doesn't come first.
+            let read_as_managed = match *name {
+                "RECURRENCE-ID" => !exception,
+                "RRULE" => !exception && !ruled && rule::imported(value, &fields.when).is_some(),
+                "EXDATE" => ruled && value.split(',').all(is_time),
+                _ => false,
+            };
+            if read_as_managed {
+                out.leave_out(LeftOut::Misplaced);
                 continue;
             }
             out.tree_property(&Property {
@@ -561,6 +602,13 @@ impl Lines {
             None => self.zones.push((tzid.to_owned(), zone, wall)),
         }
     }
+}
+
+/// Whether `value` is a date or a date-time as iCalendar writes them.
+fn is_time(value: &str) -> bool {
+    let value = value.strip_suffix('Z').unwrap_or(value);
+    NaiveDate::parse_from_str(value, "%Y%m%d").is_ok()
+        || NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S").is_ok()
 }
 
 /// `value` without the control characters a content line can't hold.
