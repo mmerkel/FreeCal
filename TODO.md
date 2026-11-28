@@ -21,7 +21,7 @@ Human adds items here. Remove when a ticket was created or otherwise the work is
 - [ ] code base architecture
 - [ ] simplify
 - [ ] code base architecture
-- [ ] ticket 25 -> first split
+- [x] ticket 25 -> first split (done: 210 to 214)
 - [ ] database:
   - [ ] document all invariants, if possible and reasonable directly in sql schema, otherwise as comments
   - [ ] all invariants within and across tables are secured by changes through single transactions
@@ -104,7 +104,7 @@ Possible bugs, found by reading the code, not run:
 - [ ] an `EXDATE` or `RECURRENCE-ID` in UTC for an Occurrence in a DST gap doesn't match it: for a rule at 02:30 `Europe/Berlin`, `EXDATE:20260329T013000Z` becomes wall time 03:30 (`recurrence_id_of` in `core/src/import/mod.rs`), but the expansion gives 02:30 (wall times dressed as UTC, `core/src/event/rule.rs`), so the Occurrence stays and an Exception doesn't attach. Start with a failing test
 - [ ] a Recurring Event whose `DTSTART` is in UTC, in a file with `X-WR-TIMEZONE`, gets that zone (`utc` in `core/src/import/mod.rs`) and its rule then runs in that zone's wall time: weekly 07:00Z from October shows at 09:00 Berlin in winter, where RFC 5545 says 08:00 (the rule runs in UTC). The spec chose `X-WR-TIMEZONE` for Google's exports; decide whether it should also apply to Recurring Events
 
-## Tickets 25 and 26: Google Recurring Events (from the recurrence lessons)
+## Tickets 212 and 213: Google Recurring Events (from the recurrence lessons)
 
 - [ ] decide the sync mode: `singleEvents=false` (masters and Exceptions; FreeCal expands rules itself, as for CalDAV, works offline for any range, can write the rule back) or `singleEvents=true` (Google expands; no rules). Strongest con of `false`: where FreeCal's expansion differs from Google's (a `DTSTART` off its rule, ticket 73; `RSCALE`), FreeCal shows other Occurrences than Google, and an Exception's `originalStartTime` can match no Occurrence
 - [ ] cancelled Exceptions are stubs (only `id`, `recurringEventId`, `originalStartTime` guaranteed; other fields may be empty): store them as cancelled Exceptions "for the lifetime of the parent recurring event", never show or drop them; with `singleEvents=false` they come even without `showDeleted`
@@ -114,7 +114,7 @@ Possible bugs, found by reading the code, not run:
 - [ ] `start.timeZone` is required on Recurring Events and is the zone the rule is expanded in (the Event Time Zone)
 - [ ] an Exception may arrive on an earlier page than its master: check that the pairing of tickets 87/88 covers it
 - [ ] `syncToken` can't be combined with `timeMin`/`timeMax`, `orderBy`, `q`, `iCalUID`, `updatedMin`
-- [ ] unknown, test against a real account: what Google's own app writes when cancelling one Occurrence (`EXDATE` or stub) and for "this and following"; whether the fake Google server (ticket 25) should mimic it
+- [ ] unknown, test against a real account: what Google's own app writes when cancelling one Occurrence (`EXDATE` or stub) and for "this and following"; whether the fake Google server (ticket 211) should mimic it
 
 ## Ticket 17: writing to CalDAV (from the recurrence lessons)
 

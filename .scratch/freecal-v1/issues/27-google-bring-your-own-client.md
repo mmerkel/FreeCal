@@ -2,7 +2,7 @@
 
 **What to build:** For the public 1.0, the user can connect Google through a guided "bring your own client" setup instead of FreeCal's shared unverified client.
 
-**Blocked by:** 25
+**Blocked by:** 211
 
 **Status:** ready-for-agent
 

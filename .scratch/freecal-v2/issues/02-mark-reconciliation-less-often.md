@@ -1,6 +1,6 @@
 # 02: Run Mark Reconciliation less often
 
-**Idea:** v1 runs a Full Fetch of every server Calendar once a week as Mark Reconciliation (ADR 0019, ticket 171 of `.scratch/freecal-v1`), to find a server's Current-Version Mark that doesn't match what the server holds. If that fault never shows, make the interval longer (monthly, say), or run it only after a sync-token reset.
+**Idea:** v1 runs a Full Fetch of every server Calendar once a week as Mark Reconciliation (ADR 0019, ticket 195 of `.scratch/freecal-v1`), to find a server's Current-Version Mark that doesn't match what the server holds. If that fault never shows, make the interval longer (monthly, say), or run it only after a sync-token reset.
 
 **Where it came from:** the grilling of point 5 of `.scratch/freecal-v1/critiques.md` (2026-11-22). Weekly was chosen while it is unknown whether the fault happens at all; it costs a few MB a week for a large Calendar.
 

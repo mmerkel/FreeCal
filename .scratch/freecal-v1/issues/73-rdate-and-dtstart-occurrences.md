@@ -2,13 +2,13 @@
 
 **What to build:** A Recurring Event's Occurrences are its whole RFC 5545 recurrence set: `DTSTART`, the starts its `RRULE` gives and its `RDATE` dates, less its `EXDATE` dates. Import carries `RDATE`, and the start of the Event is always its first Occurrence, even when the rule wouldn't give it.
 
-**Blocked by:** 84, 149
+**Blocked by:** 84, 186
 
 **Status:** ready-for-agent
 
 **Effort:** M
 
-- [ ] Import keeps `RDATE` (dates, date-times in any zone, and comma-separated lists, as `EXDATE` does) as extra Occurrences, as a managed field of the Event Version, in its own column like `exdates`. Until this ticket an `RDATE` sits among the Unimplemented Fields (ticket 149) and is written back untouched. A migration, in Rust, moves it from the tree to the column in every Event Version (ADR 0017), from its `ical:` name or from its neutral name if ticket 163 gave it one; the reader and the writer (tickets 143 and 144) then read and write the column, so CalDAV and export carry it
+- [ ] Import keeps `RDATE` (dates, date-times in any zone, and comma-separated lists, as `EXDATE` does) as extra Occurrences, as a managed field of the Event Version, in its own column like `exdates`. Until this ticket an `RDATE` sits among the Unimplemented Fields (ticket 186) and is written back untouched. A migration, in Rust, moves it from the tree to the column in every Event Version (ADR 0017), from its `ical:` name or from its neutral name if ticket 210 gave it one; the reader and the writer (tickets 175 and 176) then read and write the column, so CalDAV and export carry it
 - [ ] An Event with `RDATE` and no `RRULE` is a Recurring Event: today it imports as its first Occurrence only
 - [ ] An `RDATE` with `VALUE=PERIOD` gives an Occurrence with that period's own length; every other extra Occurrence lasts as long as the Event, as rule Occurrences do
 - [ ] The start of a Recurring Event is always its first Occurrence (RFC 5545, 3.3.10: "The DTSTART property value always counts as the first occurrence"), and it counts toward `COUNT`. Today the `rrule` crate leaves out a start its rule wouldn't give, so `DTSTART` on a Tuesday with `FREQ=WEEKLY;BYDAY=MO;COUNT=3` shows three Mondays and no Tuesday; Google Calendar, Apple Calendar and Thunderbird show the Tuesday
@@ -26,3 +26,4 @@ Out of scope: splitting extra dates when a Recurring Event is split at an Occurr
 - 2026-10-18 (from ticket 08): Splitting a Recurring Event lives in `following` in `core/src/scope.rs`: it ends the rule with `recurrence::rule_until` and splits `exdates` with `recurrence::exdates_where`. Extra dates split the same way there, and "all" moves them with `recurrence::moved_id` as it moves `exdates`.
 - 2026-10-24: Blocked by 84 after an architecture review: the rule and scope changes go into the core's Event module (tickets 83 and 84) rather than the six places that rebuild a Recurring Event today.
 - 2026-11-16: Reworded from the triage against ADRs 0017 to 0020. The hash clause is gone with the Change Journal. Until this ticket is built `RDATE` is an Unimplemented Field; the ticket moves it to a column. Writing it on export is no longer out of scope, as the export uses the same writer (ticket 09). Blocked by 149 as well.
+- 2026-11-28: References in the body renumbered for the redesign (new tickets 173 to 214). Comments above this one cite the old numbers; `redesign-plan.md`, "Old tickets in scope", maps them.

@@ -4,14 +4,14 @@
 
 Everything here is built except the overall status's Conflict. What the ticked boxes describe has since moved on, in other tickets:
 
-- **The overall status is Conflict** while any Calendar has an open Conflict (ADR 0019). Ticket 133 reads that from the rows of `conflict` without a resolved time, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 133.
-- **"Sync status changed"** for a Calendar carries whether it has unsent changes (no longer how many), its number of Conflicts, and how far a long sync has come. Ticket 161 changes the Signal; the count of Conflicts is filled by ticket 133.
-- **The first-sync marker** (`SyncStatus::Syncing { first_sync }`) goes with ticket 155: whether a Calendar's First Sync has finished is read from its last finished sync, none yet, which the report already carries.
-- **The sidebar** shows Status Marks and the Unsent Mark instead of text and a count (ticket 161).
+- **The overall status is Conflict** while any Calendar has an open Conflict (ADR 0019). Ticket 190 reads that from the rows of `conflict` without a resolved time, feeds it into the overall status and ticks the open box below. Nothing else is left for this ticket: set it to done with ticket 190.
+- **"Sync status changed"** for a Calendar carries whether it has unsent changes (no longer how many), its number of Conflicts, and how far a long sync has come. Ticket 202 changes the Signal; the count of Conflicts is filled by ticket 190.
+- **The first-sync marker** (`SyncStatus::Syncing { first_sync }`) goes with ticket 194: whether a Calendar's First Sync has finished is read from its last finished sync, none yet, which the report already carries.
+- **The sidebar** shows Status Marks and the Unsent Mark instead of text and a count (ticket 202).
 
 Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Conflicts end at once").
 
-**Blocked by:** 133, 153
+**Blocked by:** 190, 192
 
 **Status:** ready-for-agent
 
@@ -20,7 +20,7 @@ Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Conflict
 - [x] The core sends "Sync status changed" separately for Accounts and Calendars, carrying the new state, the time and outcome of the last finished sync, the number of unsent local changes, and a first-sync marker; the Local Account never sends it
 - [x] A network-level failure (DNS, connection refused, timeout) makes that Account Offline; an error response from the server is a Sync Error with a clear message, on the Account or Calendar where it happened
 - [x] Account-level states appear once on the Account row, not repeated on every Calendar
-- [ ] Overall status: Conflict (a Calendar has an open Conflict), else Sync Error, else Offline (at least one server Account and every server Account Offline), else Syncing, else Online and synced; correct with no server Accounts (ticked by ticket 133)
+- [ ] Overall status: Conflict (a Calendar has an open Conflict), else Sync Error, else Offline (at least one server Account and every server Account Offline), else Syncing, else Online and synced; correct with no server Accounts (ticked by ticket 190)
 - [x] "Syncing" is displayed only after a sync has run for about 1 second, or immediately if the user started it; the Signals are still sent straight away
 - [x] Component tests check that the indicator and sidebar markers follow "Sync status changed"
 
@@ -51,3 +51,4 @@ Spec: US-68, US-69, US-79, US-109; "Signals"; "Sync engine". ADR 0019 ("Conflict
 - 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): Tracking is gone; Conflict means an open Conflict.
 - 2026-11-22: Reworded from the grilling on point 4 of `.scratch/freecal-v1/critiques.md` (ADR 0018): no "First Sync progress" Signal; "not loaded yet" is read from the last finished sync.
 - 2026-11-26: Reworded from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): a Conflict is a row of `conflict`.
+- 2026-11-28: References in the body renumbered for the redesign (new tickets 173 to 214). Comments above this one cite the old numbers; `redesign-plan.md`, "Old tickets in scope", maps them.

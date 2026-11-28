@@ -294,7 +294,7 @@ fn an_event_moved_to_another_calendar_moves_on_the_server() {
 }
 
 /// ADR 0014: a server change met while sending is the Conflict code's
-/// (tickets 20 and 21), so the Sender writes nothing over it.
+/// (ticket 190), so the Sender writes nothing over it.
 #[test]
 fn an_edit_is_not_written_over_a_newer_server_version() {
     let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);

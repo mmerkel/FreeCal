@@ -89,7 +89,7 @@ pub(crate) struct CalendarSyncResult {
 /// then could it send. Trade-off, named: this rule exists because
 /// reading a CalDAV Calendar's privileges costs one request per Calendar,
 /// so a CalDAV cost rule lives in Provider-neutral code; with one Provider,
-/// a rule per Provider would be a seam for a hypothetical (ticket 26 may
+/// a rule per Provider would be a seam for a hypothetical (ticket 213 may
 /// move it into the Provider).
 pub(crate) fn sync_calendar(
     remote: &dyn Remote,
@@ -221,7 +221,7 @@ fn read_server_read_only(
 pub enum SendFailure {
     /// An update or a delete failed its precondition: the server holds a
     /// version FreeCal hasn't read yet, which the Incoming Sync brings in
-    /// (a Conflict once tickets 20 and 21 raise them).
+    /// (a Conflict once ticket 190 raises them).
     ServerChanged,
     /// A create failed its precondition: something already is at the
     /// address of the new resource, maybe holding another UID.

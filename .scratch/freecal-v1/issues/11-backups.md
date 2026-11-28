@@ -2,21 +2,21 @@
 
 **What to build:** FreeCal takes a compressed Backup of each changed Calendar once a day, keeps the last 14, skips Calendars unchanged since their last Backup, and lets the user restore Calendars from their Backups, each into a Target Calendar.
 
-- **What a Backup holds:** the Calendar's Events as the user has them (its current Event Versions), with their managed fields and Unimplemented Fields, as one compressed `.ics` written by ticket 144's writer, as the export's is (ticket 09). A Backup without the Unimplemented Fields would strip them from the server when it is restored.
+- **What a Backup holds:** the Calendar's Events as the user has them (its current Event Versions), with their managed fields and Unimplemented Fields, as one compressed `.ics` written by ticket 176's writer, as the export's is (ticket 09). A Backup without the Unimplemented Fields would strip them from the server when it is restored.
 - **Changed since the last Backup** (agreed 2026-11-22): an Event Version of the Calendar began or ended with a Snapshot newer than the newest Snapshot when the last Backup was taken. FreeCal keeps that Snapshot's ID with the Backup and only compares it, so it doesn't matter that the Snapshot is dropped after 90 days.
 - **Choosing what to restore:** the user picks a date, and the dialog lists, for each Calendar with a Backup, its newest Backup from that date or before, Calendars that are gone included. Each has a Target Calendar select over the writable Calendars, in ticket 71's list: by default its own Calendar while it exists, otherwise the writable Calendar with the same name, otherwise none. Opened from a Calendar's menu, only that Calendar's Backup has a Target Calendar at first; from the app menu, every Calendar that still exists has its own. A Calendar can be the Target Calendar of one Backup only: the select disables Calendars another line uses.
 - **A restore never creates a Calendar** (ADR 0018, decided 2026-11-21). For a Backup whose Calendar is gone, the user cancels, creates a Calendar and restores again.
-- **A restore is one Snapshot** on the user's side spanning its Target Calendars, whose recorded origin is the restore of a Backup (ADR 0018; the origin exists since ticket 146). After it each Target Calendar holds its Backup's Events and no others. An Event that reads the same as in the Backup keeps its Event Version, so only what differs is a change.
-- **Reading the Backup** goes through the reader an import uses (tickets 143 and 149), and every field is untrusted. Entries with a prefix the Target Calendar's Provider doesn't hold are dropped, as for an import (ADR 0017).
+- **A restore is one Snapshot** on the user's side spanning its Target Calendars, whose recorded origin is the restore of a Backup (ADR 0018; the origin exists since ticket 179). After it each Target Calendar holds its Backup's Events and no others. An Event that reads the same as in the Backup keeps its Event Version, so only what differs is a change.
+- **Reading the Backup** goes through the reader an import uses (tickets 175 and 186), and every field is untrusted. Entries with a prefix the Target Calendar's Provider doesn't hold are dropped, as for an import (ADR 0017).
 - **Before it runs,** a confirmation names, for each Target Calendar, how many Events the restore adds, changes and removes. It runs under the modal "Working…" dialog and sends "Occurrences changed".
-- **In a server Calendar** the difference is then sent like any other change (ticket 153). The Mass-Change Guard doesn't count it while the server's side hasn't reached the restore's Snapshot, as the confirmation was the approval (ticket 22). Whichever of this ticket and 22 is built second adds the restore's origin to the ones the guard reads, with a test.
-- **A Calendar with a Conflict** can be restored. The two sides are then compared again (ticket 138's rule; until 138 is built, at the next Incoming Sync).
-- **Undone like any change:** Ctrl+Z takes the restore back whole, and the Calendar's History lists it as a restore (ticket 159).
+- **In a server Calendar** the difference is then sent like any other change (ticket 192). The Mass-Change Guard doesn't count it while the server's side hasn't reached the restore's Snapshot, as the confirmation was the approval (ticket 201). Whichever of this ticket and 201 is built second adds the restore's origin to the ones the guard reads, with a test.
+- **A Calendar with a Conflict** can be restored. The two sides are then compared again at the next Incoming Sync.
+- **Undone like any change:** Ctrl+Z takes the restore back whole, and the Calendar's History lists it as a restore (ticket 207).
 - **Read-only Calendars** can't be Target Calendars, as for an import.
 
 Spec: US-88, US-89, US-90; "Backups"; "Calendar History"; "Untrusted content". ADRs 0017, 0018, 0019 (the Mass-Change Guard).
 
-**Blocked by:** 03, 71, 144, 147, 149
+**Blocked by:** 03, 71, 176, 182, 186
 
 **Status:** ready-for-agent
 
@@ -38,3 +38,4 @@ Spec: US-88, US-89, US-90; "Backups"; "Calendar History"; "Untrusted content". A
 - 2026-11-21: Decided in a grilling: a restore replaces Events with guests like any other, although the user can't edit them, until the attendee features (ticket 126). Its confirmation counts them with the rest.
 - 2026-11-22: Reworded from the grilling on critique 2 (ADRs 0018 to 0020 rewritten): no User's Pointer; "changed since" compares Snapshot IDs on the one line.
 - 2026-11-22: Agreed by the user: "changed since the last Backup" compares Snapshot IDs on the one line.
+- 2026-11-28: References in the body renumbered for the redesign (new tickets 173 to 214). Comments above this one cite the old numbers; `redesign-plan.md`, "Old tickets in scope", maps them.

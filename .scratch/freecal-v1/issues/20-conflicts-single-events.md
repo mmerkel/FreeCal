@@ -6,7 +6,7 @@
 
 **Status:** wontfix
 
-**Split into:** 133, 134, 135, 136, 137, 138
+**Split into:** 190, 191, 199, 204, 205
 
 - [ ] Edit/edit: both versions shown, the user chooses one
 - [ ] Local edit vs remote delete: "restore with my changes" or "accept the delete"

@@ -14,7 +14,7 @@
 //! `calendar-user-address-set` of the user's principal (RFC 6638 §2.4.1),
 //! read with its `calendar-home-set` in the same request, and the username
 //! too when it is an email address, as some servers, such as Radicale,
-//! give only the principal's path. For Google (ticket 26), the address of
+//! give only the principal's path. For Google (ticket 211), the address of
 //! the Google account, which names its primary calendar. An address the
 //! server adds later isn't noticed until the Account is added again; the
 //! Event then stays read-only, which errs on the safe side.
