@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::*;
 use crate::ical::server_texts::SERVER_TEXTS;
@@ -61,13 +61,12 @@ fn every_kind_of_property_value_goes_into_the_tree_as_read() {
         ("RDATE", "20261010T070000Z,20261011T070000Z"),
         ("EXRULE", "FREQ=WEEKLY;COUNT=2"),
         ("X-MICROSOFT-CDO-BUSYSTATUS", "BUSY"),
-        ("COMMENT", "a, b; c\nd"),
+        ("COMMENT", "a\\, b\\; c\\nd"),
         ("CATEGORIES", "one,two"),
     ];
     let mut lines = String::new();
     for (name, value) in values {
-        let written = value.replace('\n', "\\n");
-        lines.push_str(&format!("{name}:{written}\r\n"));
+        lines.push_str(&format!("{name}:{value}\r\n"));
     }
     lines.push_str("ATTACH;ENCODING=BASE64;VALUE=BINARY:SGVsbG8=\r\n");
     lines.push_str("X-FLAG;VALUE=BOOLEAN:TRUE\r\n");
@@ -398,6 +397,23 @@ fn calendar_level_content_sits_on_the_single_or_recurring_event_or_the_earliest_
 }
 
 #[test]
+fn calendar_level_content_sits_on_every_revision_of_its_occurrence() {
+    let revisions = read(&calendar(&[
+        ("a", "SEQUENCE:1\r\n"),
+        ("a", "SEQUENCE:2\r\n"),
+    ]));
+    assert_eq!(holders(&revisions), [None, None]);
+
+    let exceptions = read(&calendar(&[
+        ("a", "RECURRENCE-ID:20261007T070000Z\r\n"),
+        ("a", "RECURRENCE-ID:20261006T070000Z\r\nSEQUENCE:1\r\n"),
+        ("a", "RECURRENCE-ID:20261006T070000Z\r\nSEQUENCE:2\r\n"),
+    ]));
+    let earliest = Some("2026-10-06T07:00:00[UTC]".to_owned());
+    assert_eq!(holders(&exceptions), [earliest.clone(), earliest]);
+}
+
+#[test]
 fn order_folding_letter_case_and_line_endings_make_no_difference() {
     let one_way = vevent(
         "SUMMARY;LANGUAGE=de:Title\r\nX-A:1\r\nX-B;X-P=a:2\r\nX-A:3\r\n\
@@ -423,49 +439,132 @@ fn order_folding_letter_case_and_line_endings_make_no_difference() {
     assert_ne!(changed.unimplemented, one_way.unimplemented);
 }
 
-/// Each part of `text` as a path of [`DROPPED`]'s form: `VCALENDAR.NAME`
-/// for its calendar-level properties and components, `VEVENT.NAME` and
-/// `VEVENT.NAME;PARAMETER` for its Events' properties, `VEVENT.NAME` for
-/// their components.
-fn paths_in(text: &str) -> BTreeSet<String> {
+#[test]
+fn values_keep_their_escapes_in_the_tree_whatever_the_case_of_names() {
+    let upper = one(&vevent(
+        "SUMMARY:a\\, b\\nc\r\nCOMMENT:a\\, b\r\nCATEGORIES:a\\,b,c\r\n\
+         X-A;VALUE=TEXT:a\\;b\r\n",
+    ));
+    let lower = one(&vevent(
+        "summary:a\\, b\\nc\r\ncomment:a\\, b\r\ncategories:a\\,b,c\r\n\
+         x-a;value=TEXT:a\\;b\r\n",
+    ));
+
+    assert_eq!(upper.title, "a, b\nc");
+    assert_eq!(lower.title, "a, b\nc");
+    assert_eq!(
+        entries(&upper, "ical:COMMENT"),
+        [&whole(Vec::new(), "a\\, b")]
+    );
+    assert_eq!(
+        entries(&upper, "ical:CATEGORIES"),
+        [&whole(Vec::new(), "a\\,b,c")]
+    );
+    assert_eq!(
+        entries(&upper, "ical:X-A"),
+        [&whole(vec![parameter("VALUE", &["TEXT"])], "a\\;b")]
+    );
+    assert_eq!(
+        upper.unimplemented.canonical(),
+        lower.unimplemented.canonical()
+    );
+    let unescaped = one(&vevent("CATEGORIES:a,b,c\r\n"));
+    assert_ne!(
+        entries(&unescaped, "ical:CATEGORIES"),
+        entries(&upper, "ical:CATEGORIES")
+    );
+}
+
+/// What a test counts as one part of a text: its path, of [`DROPPED`]'s
+/// form, and the part itself in canonical form.
+type Part = (String, String);
+
+/// A part `name` whole, `value`, in canonical form.
+fn whole_form(name: &str, value: EntryValue) -> String {
+    let entry = Entry {
+        name: format!("{ICAL}{name}"),
+        value,
+    };
+    UnimplementedFields::new(vec![entry]).canonical()
+}
+
+fn property_form(property: &Property) -> String {
+    let value = EntryValue::Property {
+        parameters: property.parameters.clone(),
+        value: property.value.clone(),
+    };
+    whole_form(&property.name, value)
+}
+
+fn component_form(component: &Component) -> String {
+    let value = EntryValue::Component {
+        properties: component.properties.clone(),
+        components: component.components.clone(),
+    };
+    whole_form(&component.name, value)
+}
+
+/// Each part of `text`, with how often it occurs: its calendar-level
+/// properties and components whole as `VCALENDAR.NAME`, its Events'
+/// properties whole and components whole as `VEVENT.NAME`. A managed
+/// property, the first of its name in its Event (each `EXDATE`), counts by
+/// name, with each of its parameters as `VEVENT.NAME;PARAMETER`: the tests
+/// of the managed fields check their values.
+fn parts_in(text: &str) -> BTreeMap<Part, usize> {
     read_vcalendars(text, |roots| {
-        let mut paths = BTreeSet::new();
+        let mut parts = BTreeMap::new();
+        let mut count = |path: String, form: String| *parts.entry((path, form)).or_default() += 1;
         for root in &roots {
             for property in root.properties.iter().map(tree_property) {
-                paths.insert(format!("VCALENDAR.{}", property.name));
+                count(
+                    format!("VCALENDAR.{}", property.name),
+                    property_form(&property),
+                );
             }
             for component in root.components.iter().map(tree_component) {
                 if component.name != "VEVENT" {
-                    paths.insert(format!("VCALENDAR.{}", component.name));
+                    count(
+                        format!("VCALENDAR.{}", component.name),
+                        component_form(&component),
+                    );
                     continue;
                 }
+                let mut seen = HashSet::new();
                 for property in &component.properties {
-                    property_paths(&mut paths, &property.name, &property.parameters);
+                    let name = property.name.as_str();
+                    let path = format!("VEVENT.{name}");
+                    let managed =
+                        MANAGED.contains(&name) && (seen.insert(name) || name == "EXDATE");
+                    if !managed {
+                        count(path, property_form(property));
+                        continue;
+                    }
+                    count(path.clone(), path);
+                    for parameter in &property.parameters {
+                        let path = format!("VEVENT.{name};{}", parameter.name);
+                        count(path.clone(), path);
+                    }
                 }
                 for inner in &component.components {
-                    paths.insert(format!("VEVENT.{}", inner.name));
+                    count(format!("VEVENT.{}", inner.name), component_form(inner));
                 }
             }
         }
-        paths
+        parts
     })
     .unwrap()
 }
 
-fn property_paths(paths: &mut BTreeSet<String>, name: &str, parameters: &[Parameter]) {
-    paths.insert(format!("VEVENT.{name}"));
-    for parameter in parameters {
-        paths.insert(format!("VEVENT.{name};{}", parameter.name));
+/// The parts, as [`parts_in`] gives them, that `read`'s trees hold, with
+/// how often; its managed fields count as holding each managed property's
+/// part by name.
+fn parts_kept(read: &ReadFile) -> BTreeMap<Part, usize> {
+    let mut parts = BTreeMap::new();
+    for name in MANAGED {
+        let path = format!("VEVENT.{name}");
+        parts.insert((path.clone(), path), usize::MAX);
     }
-}
-
-/// The paths, as [`paths_in`] gives them, of what `read`'s trees and
-/// managed fields hold.
-fn paths_kept(read: &ReadFile) -> BTreeSet<String> {
-    let mut paths: BTreeSet<String> = MANAGED
-        .iter()
-        .map(|name| format!("VEVENT.{name}"))
-        .collect();
+    let mut count = |path: String, form: String| *parts.entry((path, form)).or_default() += 1;
     for event in read.events.iter().chain(&read.exceptions) {
         for entry in event.unimplemented.entries() {
             let name = entry.name.strip_prefix(ICAL).unwrap();
@@ -475,27 +574,40 @@ fn paths_kept(read: &ReadFile) -> BTreeSet<String> {
                     components,
                 } if name == "VCALENDAR" => {
                     for property in properties {
-                        paths.insert(format!("VCALENDAR.{}", property.name));
+                        count(
+                            format!("VCALENDAR.{}", property.name),
+                            property_form(property),
+                        );
                     }
                     for component in components {
-                        paths.insert(format!("VCALENDAR.{}", component.name));
+                        count(
+                            format!("VCALENDAR.{}", component.name),
+                            component_form(component),
+                        );
                     }
-                }
-                EntryValue::Component { .. } => {
-                    paths.insert(format!("VEVENT.{name}"));
-                }
-                EntryValue::Property { parameters, .. } => {
-                    property_paths(&mut paths, name, parameters)
                 }
                 EntryValue::Parameters(parameters) => {
                     for parameter in parameters {
-                        paths.insert(format!("VEVENT.{name};{}", parameter.name));
+                        let path = format!("VEVENT.{name};{}", parameter.name);
+                        count(path.clone(), path);
                     }
                 }
+                value => count(format!("VEVENT.{name}"), whole_form(name, value.clone())),
             }
         }
     }
-    paths
+    parts
+}
+
+/// The paths of the parts of `text` that `read` holds fewer of than it.
+fn left_out(text: &str, read: &ReadFile) -> Vec<String> {
+    let kept = parts_kept(read);
+    let left_out: BTreeSet<String> = parts_in(text)
+        .into_iter()
+        .filter(|(part, count)| kept.get(part).copied().unwrap_or(0) < *count)
+        .map(|((path, _), _)| path)
+        .collect();
+    left_out.into_iter().collect()
 }
 
 /// The properties whose values are managed fields.
@@ -515,11 +627,7 @@ const MANAGED: &[&str] = &[
 fn the_server_texts_are_read_without_loss_but_what_dropped_lists() {
     let left_out: Vec<Vec<String>> = SERVER_TEXTS
         .iter()
-        .map(|text| {
-            let read = read(text);
-            let kept = paths_kept(&read);
-            paths_in(text).difference(&kept).cloned().collect()
-        })
+        .map(|text| left_out(text, &read(text)))
         .collect();
 
     let dropped: BTreeSet<&str> = DROPPED.iter().map(|(path, _)| *path).collect();

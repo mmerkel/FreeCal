@@ -22,3 +22,7 @@ Spec: "Local Store"; "Untrusted content". ADR 0017. Layout: "The target module t
 - [ ] The cases carried over from `resource/tests.rs` listed above, as tests in `ical/write.rs`
 - [ ] A `SEQUENCE` in the tree is written back unchanged; none for an Event without one
 - [ ] The same input gives the same text
+
+## Comments
+
+- 2026-11-28: From the review of 175: the tree's values are as written, escapes and all (`a\,b,c`), so the writer writes them back as they are, without escaping them again; an `ical:DURATION` parameters entry can come from an end read from `DURATION`.

@@ -29,7 +29,7 @@ use std::fmt;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Utc};
 use chrono_tz::Tz;
 use icalendar::parser::{
-    Component as Parsed, Parameter as ParsedParameter, Property as ParsedProperty,
+    Component as Parsed, Parameter as ParsedParameter, ParseString, Property as ParsedProperty,
 };
 use icalendar::{CalendarDateTime, DatePerhapsTime, Property as IcalProperty};
 
@@ -42,10 +42,15 @@ use crate::unimplemented::{
 use crate::{CoreError, Result};
 
 /// What the reader's precise rules leave out on purpose, each with the
-/// rule, as `COMPONENT.PROPERTY` or `COMPONENT.PROPERTY;PARAMETER`. The
+/// rule, as `COMPONENT.PROPERTY` or `COMPONENT.PROPERTY;PARAMETER`, or
+/// `*` for a component outside every `VCALENDAR`. The
 /// round-trip check (ticket 197) accepts these as missing.
 #[allow(dead_code, reason = "until ticket 197's round-trip check reads it")]
 pub(crate) const DROPPED: &[(&str, &str)] = &[
+    (
+        "*",
+        "a component outside every VCALENDAR, which holds no Event",
+    ),
     ("VCALENDAR.VERSION", "the writer sets it"),
     ("VCALENDAR.PRODID", "the writer sets it"),
     (
@@ -156,7 +161,7 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
 /// FreeCal can read.
 pub(crate) fn read_vcalendars<R>(text: &str, read: impl FnOnce(Vec<Parsed<'_>>) -> R) -> Option<R> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let unfolded = icalendar::parser::unfold(text);
+    let unfolded = names_in_lower_case(&icalendar::parser::unfold(text));
     let roots = icalendar::parser::read_components(&unfolded).ok()?;
     Some(read(
         roots
@@ -164,6 +169,55 @@ pub(crate) fn read_vcalendars<R>(text: &str, read: impl FnOnce(Vec<Parsed<'_>>) 
             .filter(|root| is(&root.name, "VCALENDAR"))
             .collect(),
     ))
+}
+
+/// The unfolded text `unfolded` with the names of its properties and their
+/// parameters in lower case, `BEGIN` and `END` lines as they are. The
+/// parser unescapes the values of the text properties it knows, but only of
+/// a name in upper case; given none, it unescapes no value, so that every
+/// value is as written, whatever the case of its name, and the reader
+/// unescapes those it manages ([`unescaped`]).
+fn names_in_lower_case(unfolded: &str) -> String {
+    let mut text = String::with_capacity(unfolded.len());
+    for line in unfolded.split_inclusive('\n') {
+        let head = line.get(..6).unwrap_or(line).to_ascii_uppercase();
+        if head.starts_with("BEGIN:") || head.starts_with("END:") {
+            text.push_str(line);
+            continue;
+        }
+        let mut in_name = true;
+        let mut quoted = false;
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => quoted = !quoted,
+                ':' if !quoted => {
+                    text.push(c);
+                    text.push_str(chars.as_str());
+                    break;
+                }
+                ';' if !quoted => in_name = true,
+                '=' if !quoted => in_name = false,
+                _ => {}
+            }
+            text.push(if in_name { c.to_ascii_lowercase() } else { c });
+        }
+    }
+    text
+}
+
+/// The value `value` of a text property, as written, unescaped (RFC 5545,
+/// 3.3.11).
+fn unescaped(value: &str) -> String {
+    ParseString::from(value).unescape_text().into_owned().into()
+}
+
+/// The first property `name` of `component`, whatever the case of names.
+fn first_named<'c>(component: &'c Parsed<'_>, name: &str) -> Option<&'c ParsedProperty<'c>> {
+    component
+        .properties
+        .iter()
+        .find(|property| is(&property.name, name))
 }
 
 /// The IANA time zone of a CalDAV Calendar's `calendar-timezone` (RFC 4791),
@@ -175,7 +229,7 @@ pub(crate) fn calendar_zone(text: &str) -> Option<Tz> {
             root.components
                 .iter()
                 .filter(|component| is(&component.name, "VTIMEZONE"))
-                .find_map(|zone| zones.zone(zone.find_prop("TZID")?.val.as_ref()))
+                .find_map(|zone| zones.zone(&unescaped(first_named(zone, "TZID")?.val.as_ref())))
         })
     })
     .flatten()
@@ -221,13 +275,13 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
             calendar_level.push(level);
         }
     }
-    if let Some(holder) = calendar_level_holder(&mut read) {
-        for level in calendar_level {
+    for holder in calendar_level_holders(&mut read) {
+        for level in &calendar_level {
             holder.unimplemented.push(Entry {
                 name: format!("{ICAL}VCALENDAR"),
                 value: EntryValue::Component {
-                    properties: level.properties,
-                    components: level.components,
+                    properties: level.properties.clone(),
+                    components: level.components.clone(),
                 },
             });
         }
@@ -235,10 +289,11 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
     Some(read)
 }
 
-/// The Event that holds the calendar-level content of `read`: its single
-/// Event or Recurring Event, or the Exception with the earliest recurrence
-/// ID; none when it holds several UIDs.
-fn calendar_level_holder(read: &mut ReadFile) -> Option<&mut ImportedEvent> {
+/// The Events that hold the calendar-level content of `read`: every
+/// revision of its single Event or Recurring Event, or of the Exception
+/// with the earliest recurrence ID, so that whichever revision is kept
+/// holds it (`event::latest`); none when it holds several UIDs.
+fn calendar_level_holders(read: &mut ReadFile) -> Vec<&mut ImportedEvent> {
     let uids: HashSet<&str> = read
         .events
         .iter()
@@ -246,15 +301,20 @@ fn calendar_level_holder(read: &mut ReadFile) -> Option<&mut ImportedEvent> {
         .map(|event| event.uid.as_str())
         .collect();
     if uids.len() != 1 {
-        return None;
+        return Vec::new();
     }
     if !read.events.is_empty() {
-        return read.events.first_mut();
+        return read.events.iter_mut().collect();
     }
-    read.exceptions.iter_mut().min_by_key(|exception| {
+    let occurrence = |exception: &ImportedEvent| {
         let id = exception.recurrence_id.as_ref();
         id.map(|id| id.normal_form(None).into_string())
-    })
+    };
+    let earliest = read.exceptions.iter().map(occurrence).min();
+    read.exceptions
+        .iter_mut()
+        .filter(|exception| Some(occurrence(exception)) == earliest)
+        .collect()
 }
 
 /// The `VEVENT` `vevent` of a `VCALENDAR` naming its zones `zones`, with
@@ -313,13 +373,13 @@ fn read_vevent(
         }),
         None => Vec::new(),
     };
-    let uid = properties.read("UID", &[], |uid| Some(uid.value().to_owned()));
+    let uid = properties.read("UID", &[], |uid| Some(unescaped(uid.value())));
     if uid.is_none() {
         properties.violations.push(RfcViolation::Missing("UID"));
     }
     let text = |properties: &mut Properties, name| {
         properties
-            .read(name, &[], |text| Some(text.value().to_owned()))
+            .read(name, &[], |text| Some(unescaped(text.value())))
             .unwrap_or_default()
     };
     let title = text(&mut properties, "SUMMARY");
@@ -601,14 +661,14 @@ impl Zones {
             .filter(|component| is(&component.name, "VTIMEZONE"))
             .filter_map(|zone| {
                 Some((
-                    zone.find_prop("TZID")?.val.to_string(),
-                    zone.find_prop("X-LIC-LOCATION")?.val.to_string(),
+                    unescaped(first_named(zone, "TZID")?.val.as_ref()),
+                    unescaped(first_named(zone, "X-LIC-LOCATION")?.val.as_ref()),
                 ))
             })
             .collect();
-        let calendar = calendar.find_prop("X-WR-TIMEZONE");
+        let calendar = first_named(calendar, "X-WR-TIMEZONE");
         Self {
-            calendar: calendar.and_then(|zone| iana_zone(zone.val.as_ref())),
+            calendar: calendar.and_then(|zone| iana_zone(&unescaped(zone.val.as_ref()))),
             locations,
         }
     }

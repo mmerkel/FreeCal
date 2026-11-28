@@ -10,8 +10,9 @@
 //!
 //! An entry holds an iCalendar property whole, the parameters FreeCal
 //! doesn't know of a managed property without its value, or a component
-//! whole, with its own properties and components. Values are kept as the
-//! `icalendar` parser gives them: text values unescaped, others as written.
+//! whole, with its own properties and components. Values are kept as
+//! written, escapes and all (`a\,b,c` is not `a,b,c`), whatever the case
+//! of their names.
 //!
 //! **Canonical form.** Two trees are equal exactly when their serialised
 //! forms ([`UnimplementedFields::canonical`]) are. Every tree is canonical
@@ -27,8 +28,9 @@
 //! Folding and line endings are gone before the tree is made: the reader
 //! builds it from unfolded content lines.
 //!
-//! The tree is server data (spec: "Untrusted content"): it is never shown
-//! and never crosses the core interface.
+//! The tree is untrusted content read from a server or a file (spec:
+//! "Untrusted content"): it is never shown and never crosses the core
+//! interface.
 
 use serde::{Deserialize, Serialize};
 
@@ -128,9 +130,11 @@ impl UnimplementedFields {
 
     /// Adds `entry`, after any of the same name.
     pub(crate) fn push(&mut self, entry: Entry) {
-        let mut entries = std::mem::take(&mut self.entries);
-        entries.push(entry);
-        *self = Self::new(entries);
+        let entry = entry.canonical();
+        let at = self
+            .entries
+            .partition_point(|known| known.name <= entry.name);
+        self.entries.insert(at, entry);
     }
 
     /// The serialised form, which the Local Store holds; equal for two
