@@ -27,10 +27,11 @@ mod unguarded;
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::types::Value;
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, Value, ValueRef};
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 use super::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::error::UnreadableStoredTime;
 use crate::event::{EventFields, RecurrenceId, ServerObject, StoredRange, StoredWhen};
 use crate::guests;
 use crate::journal::{JournalEventModification, JournalTransactionId, TransactionOrigin};
@@ -80,6 +81,21 @@ fn text(row: &Row, index: usize) -> rusqlite::Result<Option<String>> {
         Value::Text(value) => Some(value),
         _ => None,
     })
+}
+
+/// A stored recurrence ID, untrusted: one that doesn't read, or isn't text,
+/// fails the read as an unreadable stored time does (ticket 215).
+impl FromSql for RecurrenceId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let text = match value {
+            ValueRef::Text(text) => String::from_utf8_lossy(text).into_owned(),
+            other => format!("{other:?}"),
+        };
+        match RecurrenceId::read(text.as_str()) {
+            Some(read) => Ok(read),
+            None => Err(FromSqlError::Other(Box::new(UnreadableStoredTime(text)))),
+        }
+    }
 }
 
 /// The Sync Record in columns 1 to 3 of `row`; a part with a value of
@@ -149,9 +165,7 @@ fn event_fields(row: &Row, first: usize) -> rusqlite::Result<EventFields> {
         zone_pinned: row.get(first + 9)?,
         rule: row.get(first + 10)?,
         exdates: row.get(first + 11)?,
-        recurrence_id: row
-            .get::<_, Option<String>>(first + 12)?
-            .map(RecurrenceId::obtained),
+        recurrence_id: row.get(first + 12)?,
     })
 }
 
@@ -597,7 +611,8 @@ impl Store {
 
     /// The Unsent Changes that `filter`, a `WHERE` clause on `params`,
     /// selects, with their Calendar and UID, in the order they were added. A
-    /// recurrence ID or Send Failure that isn't text counts as none.
+    /// Send Failure that isn't text counts as none; a recurrence ID that
+    /// doesn't read fails the read.
     fn kept_unsent_changes(
         &self,
         filter: &str,
@@ -614,7 +629,7 @@ impl Store {
                 Ok((
                     key,
                     KeptUnsentChange {
-                        recurrence_id: text(row, 2)?.map(RecurrenceId::obtained),
+                        recurrence_id: row.get(2)?,
                         since: integer(row, 3)?,
                         send_failure: text(row, 4)?,
                     },

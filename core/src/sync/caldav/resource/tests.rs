@@ -618,7 +618,7 @@ fn an_edited_exception_changes_only_its_vevent_matched_by_occurrence() {
         .find(|row| row.fields.recurrence_id.is_some())
         .unwrap();
     // The same Occurrence, obtained in another form (ADR 0012).
-    exception.fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-19T09:00:00"));
+    exception.fields.recurrence_id = RecurrenceId::read("2026-10-19T09:00:00");
     exception.fields.title = "Standup (later)".to_owned();
 
     let sent = send(rows.clone(), Some(NEXTCLOUD));
@@ -649,7 +649,7 @@ fn an_exception_whose_recurring_event_moved_keeps_its_vevent() {
         .iter_mut()
         .find(|row| row.fields.recurrence_id.is_some())
         .unwrap();
-    exception.fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-19T10:00:00"));
+    exception.fields.recurrence_id = RecurrenceId::read("2026-10-19T10:00:00");
 
     let sent = send(rows.clone(), Some(NEXTCLOUD));
 
@@ -673,7 +673,7 @@ fn an_exception_the_event_rows_add_gets_a_vevent_after_the_last() {
     let mut fields = recurring.fields.clone();
     fields.rule = None;
     fields.exdates = String::new();
-    fields.recurrence_id = Some(RecurrenceId::obtained("2026-10-21T09:00:00"));
+    fields.recurrence_id = RecurrenceId::read("2026-10-21T09:00:00");
     fields.when = StoredWhen {
         start: "2026-10-21T11:00:00".to_owned(),
         end: "2026-10-21T11:30:00".to_owned(),

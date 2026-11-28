@@ -922,6 +922,26 @@ mod server_objects {
         ])
     }
 
+    /// A `RECURRENCE-ID` FreeCal can't read, a UTC time with a zone, which
+    /// Radicale takes, makes the resource one FreeCal can't read, as an
+    /// unreadable start does, not a second Event of the UID (ticket 215).
+    #[test]
+    fn a_resource_with_a_recurrence_id_freecal_cannot_read_is_not_read() {
+        let unreadable = moved("Moved").replace(
+            "RECURRENCE-ID:20261012T080000Z",
+            "RECURRENCE-ID;TZID=Europe/Berlin:20261012T080000Z",
+        );
+        captured_log::start();
+
+        let synced = OnServer::with_files(&[(
+            "weekly",
+            ics(&format!("{}{unreadable}", recurring("Weekly"))),
+        )]);
+
+        assert_eq!(synced.titles(), Vec::<String>::new());
+        assert_eq!(captured_log::count(), 1);
+    }
+
     /// ADR 0015: of two resources alike holding one UID, the First Sync
     /// keeps the lower href; the other is an Ignored Resource, whose
     /// changes change no Event Row.

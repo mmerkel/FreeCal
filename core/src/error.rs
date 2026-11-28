@@ -5,7 +5,7 @@ use crate::{AccountId, CalendarId, JournalTransactionId, KeyringError};
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("the Local Store failed: {0}")]
-    Store(#[from] rusqlite::Error),
+    Store(#[source] rusqlite::Error),
     #[error("the data directory failed: {0}")]
     DataDirectory(#[from] std::io::Error),
     #[error("another running FreeCal has the Local Store open")]
@@ -98,6 +98,24 @@ pub enum CoreError {
     /// Only redirects within the server the user named are followed.
     #[error("the server redirected to another server: {0}")]
     RedirectedElsewhere(url::Url),
+}
+
+/// A stored time that doesn't read, met while the Local Store reads a row,
+/// such as a recurrence ID (ticket 215); it becomes
+/// [`CoreError::UnreadableEventTime`], as an unreadable start or end does.
+#[derive(Debug, thiserror::Error)]
+#[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
+pub(crate) struct UnreadableStoredTime(pub String);
+
+impl From<rusqlite::Error> for CoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        if let rusqlite::Error::FromSqlConversionFailure(_, _, cause) = &error
+            && let Some(UnreadableStoredTime(text)) = cause.downcast_ref()
+        {
+            return CoreError::UnreadableEventTime(text.clone());
+        }
+        CoreError::Store(error)
+    }
 }
 
 impl CoreError {

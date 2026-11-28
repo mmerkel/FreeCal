@@ -135,15 +135,24 @@ impl Serialize for CombinedEventKey {
     }
 }
 
+/// The window's key, untrusted: one whose recurrence ID doesn't read is
+/// refused, as a malformed key is (ticket 215).
 impl<'de> Deserialize<'de> for CombinedEventKey {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
             serde_json::from_str(&text).map_err(serde::de::Error::custom)?;
+        let recurrence_id = match recurrence_id {
+            None => None,
+            Some(text) => Some(
+                RecurrenceId::read(text)
+                    .ok_or_else(|| serde::de::Error::custom("a recurrence ID that doesn't read"))?,
+            ),
+        };
         Ok(Self {
             calendar_id: CalendarId(calendar_id),
             uid,
-            recurrence_id: recurrence_id.map(RecurrenceId::obtained),
+            recurrence_id,
         })
     }
 }
@@ -269,7 +278,7 @@ mod tests {
         let key = super::CombinedEventKey {
             calendar_id: crate::CalendarId(2),
             uid: "a\"],[1,\"b\u{0}\n<script>".to_owned(),
-            recurrence_id: Some(crate::event::RecurrenceId::obtained("2026-10-05T9:0:0")),
+            recurrence_id: crate::event::RecurrenceId::read("2026-10-05T9:0:0"),
         };
 
         let text = serde_json::to_string(&key).unwrap();
@@ -277,6 +286,20 @@ mod tests {
 
         assert_eq!(back, key);
         assert!(serde_json::from_str::<super::CombinedEventKey>("\"[2,\\\"a\\\"]\"").is_err());
+    }
+
+    /// The window's recurrence ID is untrusted: a key with one that doesn't
+    /// read is refused, as a malformed key is (ticket 215).
+    #[test]
+    fn a_combined_event_key_whose_recurrence_id_does_not_read_is_refused() {
+        for recurrence_id in ["not a time", "2026-10-05T09:00:00[Nowhere/Else]"] {
+            let text = serde_json::to_string(&(2, "a", recurrence_id)).unwrap();
+            let key = serde_json::to_string(&text).unwrap();
+            assert!(
+                serde_json::from_str::<super::CombinedEventKey>(&key).is_err(),
+                "{recurrence_id}"
+            );
+        }
     }
 
     use std::fs;

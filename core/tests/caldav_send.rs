@@ -940,6 +940,62 @@ mod recurrence {
         )
     }
 
+    /// An Exception whose stored recurrence ID doesn't read fails sending
+    /// its Calendar as a Sync Error, and its Unsent Change stays (ticket
+    /// 215).
+    #[test]
+    fn an_exception_with_an_unreadable_recurrence_id_is_a_sync_error() {
+        let on_server = OnServer::writable_with(&[("yoga", server_yoga())]);
+        on_server.rename("2026-10-19", Scope::This, "Yoga late");
+        on_server.harness.arrange_local_store(
+            "UPDATE event SET recurrence_id = 'not a time' WHERE recurrence_id IS NOT NULL",
+        );
+
+        let synced = on_server
+            .core
+            .sync_account(on_server.account, StartedBy::FreeCal);
+
+        assert_eq!(synced.unwrap_err().code(), ErrorCode::UnreadableEventTime);
+        assert_eq!(
+            on_server.status(on_server.work),
+            SyncStatus::SyncError {
+                error: ErrorCode::UnreadableEventTime
+            }
+        );
+        assert_eq!(on_server.unsent(on_server.work), 1);
+        assert!(!on_server.on_server("yoga").contains("Yoga late"));
+    }
+
+    /// A kept Unsent Change whose recurrence ID doesn't read is an error on
+    /// reading its Event and listing its range (ticket 215).
+    #[test]
+    fn an_unsent_change_with_an_unreadable_recurrence_id_is_an_error_not_a_crash() {
+        let on_server = OnServer::writable_with(&[("yoga", server_yoga())]);
+        let late = on_server
+            .rename("2026-10-19", Scope::This, "Yoga late")
+            .value;
+        on_server
+            .harness
+            .arrange_local_store("UPDATE unsent_change SET recurrence_id = 'not a time'");
+
+        assert_eq!(
+            on_server
+                .core
+                .event(&late.combined_event_key)
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnreadableEventTime
+        );
+        assert_eq!(
+            on_server
+                .core
+                .occurrences(date("2026-10-19"), date("2026-10-20"))
+                .unwrap_err()
+                .code(),
+            ErrorCode::UnreadableEventTime
+        );
+    }
+
     /// Ticket 122 tests the text; this, that it survives the round trip.
     #[test]
     fn unknown_fields_survive_scope_edits_on_the_server() {

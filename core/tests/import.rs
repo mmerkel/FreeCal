@@ -480,6 +480,26 @@ mod failures {
         }
     }
 
+    /// An Exception whose `RECURRENCE-ID` FreeCal can't read is no second
+    /// Event of its UID: the file is one FreeCal can't read, as with an
+    /// unreadable start (ticket 215).
+    #[test]
+    fn a_file_with_a_recurrence_id_freecal_cannot_read_is_not_a_calendar() {
+        let weekly = ics(
+            "BEGIN:VEVENT\nUID:weekly\nSUMMARY:Weekly\nDTSTART:20261005T080000Z\n\
+             DTEND:20261005T090000Z\nRRULE:FREQ=WEEKLY;COUNT=3\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:weekly\nSUMMARY:Moved\nRECURRENCE-ID:not a time\n\
+             DTSTART:20261012T090000Z\nDTEND:20261012T100000Z\nEND:VEVENT\n",
+        );
+
+        assert_eq!(
+            failure("weekly.ics", weekly),
+            ErrorCode::ImportNotCalendar {
+                file: "weekly.ics".to_owned()
+            }
+        );
+    }
+
     #[test]
     fn a_broken_ics_file_in_a_zip_is_named_inside_the_zip() {
         let contents = zip(&[

@@ -9,7 +9,7 @@ use freecal_core::{
     CalendarId, CombinedEventKey, Core, CoreError, EventDraft, ExceptionCounts, ExistingEvents,
     Frequency, ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
 };
-use support::{Harness, all_day, calendar, draft, ics, on, timed, titles, weekly, yoga};
+use support::{Harness, all_day, calendar, date, draft, ics, on, timed, titles, weekly, yoga};
 
 fn occurrences(core: &Core, from: &str, to: &str) -> Vec<Occurrence> {
     core.occurrences(from.parse().unwrap(), to.parse().unwrap())
@@ -211,6 +211,9 @@ fn this_event_cant_change_the_repeat_rule() {
     assert_eq!(shown(&core).len(), 3);
 }
 
+/// The window's recurrence ID is untrusted: one that doesn't read, such as
+/// one in a zone FreeCal doesn't know, answers as an unknown Occurrence
+/// does (ticket 215).
 #[test]
 fn a_recurrence_id_the_recurring_event_doesnt_have_is_refused() {
     let harness = Harness::new();
@@ -220,7 +223,12 @@ fn a_recurrence_id_the_recurring_event_doesnt_have_is_refused() {
     let when = timed("2026-10-13T18:00:00", "2026-10-13T19:00:00");
 
     for scope in [Scope::This, Scope::ThisAndFollowing, Scope::All] {
-        for recurrence_id in ["2026-10-13T18:00:00", "2026-10-26T18:00:00", "<b>"] {
+        for recurrence_id in [
+            "2026-10-13T18:00:00",
+            "2026-10-26T18:00:00",
+            "<b>",
+            "2026-10-12T18:00:00[Nowhere/Else]",
+        ] {
             assert!(matches!(
                 core.reschedule_occurrence(&id, recurrence_id, scope, false, when),
                 Err(CoreError::OccurrenceNotFound)
@@ -1618,10 +1626,11 @@ fn a_lone_exception_moved_into_a_calendar_with_its_uid_stays_an_event_of_its_own
     );
 }
 
-/// An Exception whose stored recurrence ID can't be read names no
-/// Occurrence, so it is an Event of its own; its key still names it.
+/// A stored recurrence ID is untrusted: one that doesn't read is an error
+/// on reading the Event and listing its range, as an unreadable stored time
+/// is, not an Event of its own (ticket 215).
 #[test]
-fn an_exception_with_an_unreadable_recurrence_id_is_found_by_its_key() {
+fn an_exception_with_an_unreadable_recurrence_id_is_an_error_not_a_crash() {
     let harness = Harness::new();
     let core = harness.open();
     let home = calendar(&core, "Home");
@@ -1642,10 +1651,57 @@ fn an_exception_with_an_unreadable_recurrence_id_is_found_by_its_key() {
         harness.event_row(&moved.combined_event_key)
     ));
 
-    let alone = on(&core, "2026-10-13");
-    assert_eq!(alone.recurrence_id, None);
-    assert_eq!(
-        core.event(&alone.combined_event_key).unwrap().when,
-        timed("2026-10-13T08:00:00", "2026-10-13T09:00:00")
+    for key in [&id, &moved.combined_event_key] {
+        assert!(matches!(
+            core.event(key),
+            Err(CoreError::UnreadableEventTime(_))
+        ));
+    }
+    assert!(matches!(
+        core.occurrences(date("2026-10-13"), date("2026-10-14")),
+        Err(CoreError::UnreadableEventTime(_))
+    ));
+}
+
+/// A recurrence ID that doesn't read in a Journal Event Modification is an
+/// error on undoing it, as in an Event Row (ticket 215).
+#[test]
+fn an_unreadable_recurrence_id_in_the_change_journal_is_an_error_not_a_crash() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = yoga(&core, home.id, RepeatEnd::Count { count: 3 });
+    let second = on(&core, "2026-10-12");
+    let moved = core
+        .reschedule_occurrence(
+            &id,
+            rid(&second),
+            Scope::This,
+            false,
+            timed("2026-10-13T08:00:00", "2026-10-13T09:00:00"),
+        )
+        .unwrap()
+        .value;
+    // Moved again, its earlier version, with its recurrence ID, is kept.
+    let moved_again = core
+        .reschedule_occurrence(
+            &moved.combined_event_key,
+            rid(&moved),
+            Scope::This,
+            false,
+            timed("2026-10-14T08:00:00", "2026-10-14T09:00:00"),
+        )
+        .unwrap()
+        .journal_transaction
+        .unwrap();
+    harness.arrange_local_store(
+        "UPDATE journal_event_modification SET recurrence_id = 'not a time' \
+         WHERE recurrence_id IS NOT NULL",
+    );
+
+    let undone = core.undo_approved(moved_again);
+    assert!(
+        matches!(undone, Err(CoreError::UnreadableEventTime(_))),
+        "{undone:?}"
     );
 }

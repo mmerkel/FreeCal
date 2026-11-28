@@ -331,7 +331,7 @@ fn assemble(files: impl IntoIterator<Item = ReadFile>) -> Vec<ImportedEvent> {
     }
     let alone = latest(without_recurring.iter().map(|exception| {
         let obtained = exception.recurrence_id.as_ref();
-        let rid = obtained.and_then(|obtained| obtained.normal_form(None));
+        let rid = obtained.map(|obtained| obtained.normal_form(None));
         ((exception.uid.as_str(), rid), exception)
     }));
     events.extend(alone.into_iter().map(|(_, exception)| exception.clone()));
@@ -417,9 +417,16 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
             let duration = event.property_value("DURATION").and_then(duration);
             let (when, zone_pinned, all_floating) = zones.when(start, end, duration, display);
             let description = event.get_description().unwrap_or_default();
-            let recurrence_id = event
-                .get_recurrence_id()
-                .map(|time| RecurrenceId::of_original(zones.time(time)));
+            // A `RECURRENCE-ID` that doesn't read makes the file unreadable,
+            // as a start does, rather than its Exception a second Event of
+            // the UID (ticket 215).
+            let recurrence_id = match event.property_value("RECURRENCE-ID") {
+                None => None,
+                Some(_) => {
+                    let original = event.get_recurrence_id().ok_or_else(not_calendar)?;
+                    Some(RecurrenceId::of_original(zones.time(original)))
+                }
+            };
             let exdates = event
                 .multi_properties()
                 .get("EXDATE")

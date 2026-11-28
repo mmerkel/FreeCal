@@ -158,8 +158,7 @@ repeat: Repeat | null,
 customRepeat: boolean,
 /**
  * For an Exception, the recurrence ID of the Occurrence of its Recurring
- * Event that it changed, in the Normal Form, or as stored when it isn't
- * one; none for every other Event.
+ * Event that it changed, in the Normal Form; none for every other Event.
  */
 recurrenceId: string | null,
 /**

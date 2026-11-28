@@ -16,9 +16,9 @@ use chrono_tz::{OffsetComponents, OffsetName, Tz, TzOffset};
 use icalendar::Property;
 use icalendar::parser::unfold;
 
+use crate::Result;
 use crate::event::{EventFields, normal_form, rule};
 use crate::import::{ImportedWhen, Time};
-use crate::{CoreError, Result};
 
 /// Content lines written, with the time zones their times are given in,
 /// each with the earliest wall time given in it, from which its
@@ -259,10 +259,7 @@ impl Group {
         match self {
             Group::RecurrenceId => {
                 if let Some(recurrence_id) = &row.recurrence_id {
-                    let original = recurrence_id.original().ok_or_else(|| {
-                        CoreError::UnreadableEventTime(recurrence_id.as_obtained().to_owned())
-                    })?;
-                    let original = match (original, recurring) {
+                    let original = match (recurrence_id.original(), recurring) {
                         (
                             &Time::Wall(wall, None),
                             Some(&ImportedWhen::Timed { start_zone, .. }),
