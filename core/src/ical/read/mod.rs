@@ -23,7 +23,7 @@
 //! violations the reader notices come back with what it read, for the
 //! caller's Log.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Utc};
@@ -34,6 +34,7 @@ use icalendar::parser::{
 use icalendar::{CalendarDateTime, DatePerhapsTime, Property as IcalProperty};
 
 use super::windows_zones::WINDOWS_ZONES;
+use super::{is_name, tree_tzids};
 use crate::event::{RecurrenceId, StoredWhen, in_normal_form, instant, new_uid, rule};
 use crate::import::{ImportedEvent, ImportedWhen};
 use crate::unimplemented::{
@@ -59,7 +60,8 @@ pub(crate) const DROPPED: &[(&str, &str)] = &[
     ),
     (
         "VCALENDAR.VTIMEZONE",
-        "time zone definitions: the writer writes those its times need",
+        "time zone definitions: the writer writes those its times need; one whose \
+         TZID FreeCal doesn't know is kept on each Event whose tree uses it",
     ),
     (
         "VCALENDAR",
@@ -69,7 +71,8 @@ pub(crate) const DROPPED: &[(&str, &str)] = &[
     ("VEVENT.LAST-MODIFIED", "the writer sets it fresh"),
     (
         "VEVENT.DURATION",
-        "read as the end, which the writer writes as DTEND",
+        "read as the end, which the writer writes as DTEND; its parameters, \
+         a second one, one FreeCal can't read and one beside a DTEND are left out",
     ),
     ("VEVENT.DTSTART;TZID", TIME_RULE),
     ("VEVENT.DTSTART;VALUE", TIME_RULE),
@@ -112,6 +115,11 @@ pub(crate) enum RfcViolation {
     EndAndDuration,
     /// An end before its start, or for an all-day Event not after it.
     EndBeforeStart,
+    /// A control character other than a tab, which the reader leaves out.
+    ControlCharacter,
+    /// A property, parameter or component whose name has characters other
+    /// than letters, digits and dashes, which the reader leaves out.
+    NotAName,
 }
 
 impl fmt::Display for RfcViolation {
@@ -121,6 +129,14 @@ impl fmt::Display for RfcViolation {
             RfcViolation::Missing(name) => write!(f, "a VEVENT has no {name}"),
             RfcViolation::EndAndDuration => write!(f, "a VEVENT has both DTEND and DURATION"),
             RfcViolation::EndBeforeStart => write!(f, "a VEVENT ends before it starts"),
+            RfcViolation::ControlCharacter => {
+                write!(f, "the text holds control characters, left out")
+            }
+            RfcViolation::NotAName => write!(
+                f,
+                "a name holds characters other than letters, digits and dashes; \
+                 left out with what it names"
+            ),
         }
     }
 }
@@ -150,9 +166,19 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
         file: name.to_owned(),
     };
     let text = std::str::from_utf8(contents).map_err(|_| not_calendar())?;
-    read_vcalendars(text, |roots| read_roots(&roots, display))
+    let mut read = read_vcalendars(text, |roots| read_roots(&roots, display))
         .flatten()
-        .ok_or_else(not_calendar)
+        .ok_or_else(not_calendar)?;
+    if text.chars().any(stray_control) {
+        read.violations.push(RfcViolation::ControlCharacter);
+    }
+    Ok(read)
+}
+
+/// Whether `c` is a control character no content line holds: any but a tab
+/// and the line ends.
+fn stray_control(c: char) -> bool {
+    c.is_control() && !matches!(c, '\t' | '\r' | '\n')
 }
 
 /// Gives `read` the `VCALENDAR` components at the top of iCalendar text,
@@ -161,7 +187,8 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
 /// FreeCal can read.
 pub(crate) fn read_vcalendars<R>(text: &str, read: impl FnOnce(Vec<Parsed<'_>>) -> R) -> Option<R> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let unfolded = names_in_lower_case(&icalendar::parser::unfold(text));
+    let text: String = text.chars().filter(|&c| !stray_control(c)).collect();
+    let unfolded = names_in_lower_case(&icalendar::parser::unfold(&text));
     let roots = icalendar::parser::read_components(&unfolded).ok()?;
     Some(read(
         roots
@@ -242,6 +269,9 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
         return None;
     }
     let mut read = ReadFile::default();
+    if !roots.iter().all(all_named) {
+        read.violations.push(RfcViolation::NotAName);
+    }
     let mut calendar_level = Vec::new();
     for root in roots {
         let zones = Zones::of(root);
@@ -250,7 +280,7 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
             properties: Vec::new(),
             components: Vec::new(),
         };
-        for property in root.properties.iter().map(tree_property) {
+        for property in root.properties.iter().filter(named).map(tree_property) {
             let set_by_writer = match property.name.as_str() {
                 "VERSION" | "PRODID" => true,
                 "CALSCALE" => property.value.eq_ignore_ascii_case("GREGORIAN"),
@@ -267,7 +297,7 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
                     None => read.events.push(event),
                     Some(_) => read.exceptions.push(event),
                 }
-            } else if !is(&component.name, "VTIMEZONE") {
+            } else if !is(&component.name, "VTIMEZONE") && is_name(component.name.as_ref()) {
                 level.components.push(tree_component(component));
             }
         }
@@ -286,7 +316,45 @@ fn read_roots(roots: &[Parsed<'_>], display: Tz) -> Option<ReadFile> {
             });
         }
     }
+    let unknown_zones = unknown_zones(roots);
+    for event in read.events.iter_mut().chain(&mut read.exceptions) {
+        let used: HashSet<String> = tree_tzids(&event.unimplemented)
+            .into_iter()
+            .map(|(tzid, _)| tzid)
+            .collect();
+        for (_, zone) in unknown_zones
+            .iter()
+            .filter(|(tzid, _)| used.contains(*tzid))
+        {
+            event.unimplemented.push(Entry {
+                name: format!("{ICAL}VTIMEZONE"),
+                value: EntryValue::Component {
+                    properties: zone.properties.clone(),
+                    components: zone.components.clone(),
+                },
+            });
+        }
+    }
     Some(read)
+}
+
+/// The `VTIMEZONE`s of `roots` whose `TZID` FreeCal doesn't know, by
+/// `TZID`; the first of each.
+fn unknown_zones(roots: &[Parsed<'_>]) -> BTreeMap<String, Component> {
+    let mut zones = BTreeMap::new();
+    for root in roots {
+        let vtimezones = root.components.iter();
+        for zone in vtimezones.filter(|component| is(&component.name, "VTIMEZONE")) {
+            let Some(tzid) = first_named(zone, "TZID") else {
+                continue;
+            };
+            let tzid = unquoted(&unescaped(tzid.val.as_ref())).to_owned();
+            if iana_zone(&tzid).is_none() {
+                zones.entry(tzid).or_insert_with(|| tree_component(zone));
+            }
+        }
+    }
+    zones
 }
 
 /// The Events that hold the calendar-level content of `read`: every
@@ -329,14 +397,16 @@ fn read_vevent(
     let mut properties = Properties::of(vevent);
     let start = properties.read("DTSTART", TIME_PARAMETERS, DatePerhapsTime::from_property)?;
     let end = properties.read("DTEND", TIME_PARAMETERS, DatePerhapsTime::from_property);
+    // `DURATION` is only another way to give the end, which the writer
+    // writes as `DTEND`: none is kept, nor its parameters.
     let duration = match end {
-        Some(_) if properties.has("DURATION") => {
-            properties.violations.push(RfcViolation::EndAndDuration);
-            None
-        }
         Some(_) => None,
         None => properties.read("DURATION", &[], |property| duration(property.value())),
     };
+    properties.forget_parameters("DURATION");
+    if properties.drop_all("DURATION") && end.is_some() {
+        properties.violations.push(RfcViolation::EndAndDuration);
+    }
     let read_when = zones.when(start, end, duration, display);
     if read_when.end_before_start {
         properties.violations.push(RfcViolation::EndBeforeStart);
@@ -428,6 +498,7 @@ impl Properties {
             left: vevent
                 .properties
                 .iter()
+                .filter(named)
                 .map(tree_property)
                 .map(Some)
                 .collect(),
@@ -494,6 +565,13 @@ impl Properties {
         Some(value)
     }
 
+    /// Leaves out the parameters a read property `name` put into the tree.
+    fn forget_parameters(&mut self, name: &str) {
+        let entry = format!("{ICAL}{name}");
+        self.tree
+            .retain(|kept| kept.name != entry || !matches!(kept.value, EntryValue::Parameters(_)));
+    }
+
     /// Leaves out every property `name`; whether there was one.
     fn drop_all(&mut self, name: &str) -> bool {
         let mut dropped = false;
@@ -554,20 +632,46 @@ fn is(name: &impl AsRef<str>, expected: &str) -> bool {
     name.as_ref().eq_ignore_ascii_case(expected)
 }
 
+/// The component `parsed`, but for what has a name that isn't one.
 fn tree_component(parsed: &Parsed<'_>) -> Component {
+    let properties = parsed.properties.iter().filter(named);
+    let components = parsed.components.iter();
+    let components = components.filter(|component| is_name(component.name.as_ref()));
     Component {
         name: parsed.name.as_ref().to_ascii_uppercase(),
-        properties: parsed.properties.iter().map(tree_property).collect(),
-        components: parsed.components.iter().map(tree_component).collect(),
+        properties: properties.map(tree_property).collect(),
+        components: components.map(tree_component).collect(),
     }
 }
 
+/// The property `parsed`, but for the parameters whose name isn't one.
 fn tree_property(parsed: &ParsedProperty<'_>) -> Property {
+    let parameters = parsed.params.iter();
+    let parameters = parameters.filter(|parameter| is_name(parameter.key.as_ref()));
     Property {
         name: parsed.name.as_ref().to_ascii_uppercase(),
-        parameters: parsed.params.iter().map(tree_parameter).collect(),
+        parameters: parameters.map(tree_parameter).collect(),
         value: parsed.val.as_ref().to_owned(),
     }
+}
+
+/// Whether the property `parsed` has a name that is one.
+fn named(parsed: &&ParsedProperty<'_>) -> bool {
+    is_name(parsed.name.as_ref())
+}
+
+/// Whether every name in `parsed` is one: of it, its properties, their
+/// parameters and its components.
+fn all_named(parsed: &Parsed<'_>) -> bool {
+    is_name(parsed.name.as_ref())
+        && parsed.properties.iter().all(|property| {
+            is_name(property.name.as_ref())
+                && property
+                    .params
+                    .iter()
+                    .all(|parameter| is_name(parameter.key.as_ref()))
+        })
+        && parsed.components.iter().all(all_named)
 }
 
 /// A parameter with its values: those of a quoted list, such as

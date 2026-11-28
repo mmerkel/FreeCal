@@ -197,7 +197,10 @@ fn unknown_parameters_of_each_managed_property_go_into_the_tree_without_its_valu
     let start = one(&vevent("").replace("DTSTART:", &format!("DTSTART{unknown}:")));
     assert_eq!(names(&start), ["ical:DTSTART"]);
     let duration = one(&vevent(&format!("DURATION{unknown}:PT1H\r\n")));
-    assert_eq!(names(&duration), ["ical:DURATION"]);
+    assert!(
+        names(&duration).is_empty(),
+        "a DURATION's parameters are left out"
+    );
     assert!(
         matches!(duration.when, ImportedWhen::Timed { end, .. } if end.format("%H").to_string() == "08")
     );
@@ -314,7 +317,48 @@ fn the_rfc_violations_noticed_come_back_with_the_result() {
     );
     let both = read(&vevent("DTEND:20261005T080000Z\r\nDURATION:PT2H\r\n"));
     assert_eq!(both.violations, [RfcViolation::EndAndDuration]);
-    assert_eq!(names(&both.events[0]), ["ical:DURATION"]);
+    assert!(names(&both.events[0]).is_empty(), "the DTEND is the end");
+}
+
+#[test]
+fn names_that_arent_and_control_characters_are_left_out_and_reported() {
+    let read = read(&vevent(
+        "SUMMARY:Ti\u{7}tle\r\nX-A_B:v\r\nX-C;X_Q=1;X-R=2:w\r\nX-D:a\u{1}b\r\n\
+         BEGIN:VALARM\r\nX_E:1\r\nACTION:DISPLAY\r\nEND:VALARM\r\n",
+    ));
+    assert_eq!(
+        read.violations,
+        [RfcViolation::NotAName, RfcViolation::ControlCharacter]
+    );
+    let event = &read.events[0];
+    assert_eq!(event.title, "Title");
+    assert_eq!(
+        event.unimplemented.entries(),
+        [
+            Entry {
+                name: "ical:VALARM".to_owned(),
+                value: EntryValue::Component {
+                    properties: vec![property("ACTION", Vec::new(), "DISPLAY")],
+                    components: Vec::new(),
+                },
+            },
+            Entry {
+                name: "ical:X-C".to_owned(),
+                value: EntryValue::Property {
+                    parameters: vec![parameter("X-R", &["2"])],
+                    value: "w".to_owned(),
+                },
+            },
+            Entry {
+                name: "ical:X-D".to_owned(),
+                value: EntryValue::Property {
+                    parameters: Vec::new(),
+                    value: "ab".to_owned(),
+                },
+            },
+        ]
+    );
+    assert!(read_events("t.ics", vevent("X-\u{1}A:v\r\n").as_bytes(), Tz::UTC).is_ok());
 }
 
 #[test]

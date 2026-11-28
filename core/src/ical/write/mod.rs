@@ -5,9 +5,8 @@
 //! and an equal tree.
 //!
 //! - **Managed properties** are written from the managed fields, each with
-//!   the unknown parameters the tree holds under its name. An end read from
-//!   `DURATION` whose tree keeps that property's parameters is written as a
-//!   `DURATION` again, where the times allow one; any other end as `DTEND`.
+//!   the unknown parameters the tree holds under its name. The end is
+//!   always a `DTEND`, also one read from `DURATION`.
 //! - **The tree's entries** go back as properties and components after the
 //!   managed properties, in the tree's order; the `ical:VCALENDAR` entries
 //!   of the Event the reader puts them on go outside the `VEVENT`s. An
@@ -15,8 +14,10 @@
 //! - **Fresh on every write:** `DTSTAMP`, `LAST-MODIFIED`, `VERSION`,
 //!   `PRODID`, and a `VTIMEZONE` for each zone a written time is given in,
 //!   by a managed field or by a `TZID` of the tree that names a zone
-//!   FreeCal knows. `SEQUENCE` is an entry like any other, written back
-//!   unchanged.
+//!   FreeCal knows, covering from the earliest time given in it. The
+//!   `VTIMEZONE` of a `TZID` FreeCal doesn't know is the one the tree keeps
+//!   (an `ical:VTIMEZONE` entry), written at the calendar level, once.
+//!   `SEQUENCE` is an entry like any other, written back unchanged.
 //! - **Order:** the Event that isn't an Exception first, then its
 //!   Exceptions by recurrence ID, so that the same input gives the same
 //!   text.
@@ -33,7 +34,11 @@
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Offset, TimeDelta, TimeZone, Utc};
 use chrono_tz::{OffsetComponents, OffsetName, Tz, TzOffset};
 
+use std::collections::BTreeMap;
+use std::fmt;
+
 use super::read::{Time, iana_zone, unquoted};
+use super::{is_name, tree_tzids};
 use crate::Result;
 use crate::event::{EventFields, rule};
 use crate::import::ImportedWhen;
@@ -54,7 +59,7 @@ pub(crate) fn write_resource(
     uid: &str,
     events: &[(&EventFields, &UnimplementedFields)],
     now: DateTime<Utc>,
-) -> Result<String> {
+) -> Result<Written> {
     let mut events = events.to_vec();
     // Stable, so that revisions of one Occurrence keep their order.
     events.sort_by_cached_key(|(fields, _)| {
@@ -77,21 +82,113 @@ pub(crate) fn write_resource(
     let level = events.first().map(|(_, tree)| calendar_level(tree));
     let (properties, components) = level.unwrap_or_default();
     for property in &properties {
-        if !matches!(property.name.as_str(), "VERSION" | "PRODID") {
+        if matches!(property.name.as_str(), "VERSION" | "PRODID") {
+            out.leave_out(LeftOut::SetByWriter);
+        } else {
             out.tree_property(property);
         }
     }
     for (tzid, zone, from) in &vevents.zones {
         vtimezone(tzid, *zone, *from, &mut out);
     }
+    for kept in kept_vtimezones(&events, &vevents.zones, &mut out) {
+        out.tree_component(&kept);
+    }
     for component in &components {
-        if !matches!(component.name.as_str(), "VEVENT" | "VTIMEZONE") {
+        if matches!(component.name.as_str(), "VEVENT" | "VTIMEZONE") {
+            out.leave_out(LeftOut::Structure);
+        } else {
             out.tree_component(component);
         }
     }
     out.text.push_str(&vevents.text);
     out.end("VCALENDAR");
-    Ok(out.text)
+    for left_out in vevents.left_out {
+        out.leave_out(left_out);
+    }
+    Ok(Written {
+        text: out.text,
+        left_out: out.left_out,
+    })
+}
+
+/// The text of a resource, and what of its fields and trees isn't in it.
+#[allow(
+    dead_code,
+    reason = "until ticket 187 sends the text and logs the rest"
+)]
+pub(crate) struct Written {
+    pub(crate) text: String,
+    /// For the sender's Log; none unless the Local Store holds what the
+    /// reader never makes.
+    pub(crate) left_out: Vec<LeftOut>,
+}
+
+/// What of the fields or the tree the writer leaves out. It names no
+/// untrusted content, so a Log line may hold it as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum LeftOut {
+    /// A control character other than a tab.
+    ControlCharacter,
+    /// A quote in a parameter value.
+    Quote,
+    /// A property, parameter or component whose name has characters other
+    /// than letters, digits and dashes.
+    NotAName,
+    /// A property `BEGIN` or `END`, or a `VEVENT` or `VTIMEZONE` at the
+    /// calendar level, which would change the text's structure.
+    Structure,
+    /// A property the writer sets itself, such as `DTSTAMP`, or a
+    /// `VTIMEZONE` it writes fresh.
+    SetByWriter,
+}
+
+impl fmt::Display for LeftOut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            LeftOut::ControlCharacter => "control characters",
+            LeftOut::Quote => "quotes in a parameter value",
+            LeftOut::NotAName => "a name with characters other than letters, digits and dashes",
+            LeftOut::Structure => "a property or component that would change the structure",
+            LeftOut::SetByWriter => "a property the writer sets itself",
+        })
+    }
+}
+
+/// The `ical:VTIMEZONE` entries of the trees of `events`, those of the
+/// `TZID`s FreeCal doesn't know: one per `TZID`, the first, by `TZID`, none
+/// for a zone written fresh.
+fn kept_vtimezones(
+    events: &[(&EventFields, &UnimplementedFields)],
+    fresh: &[(String, Tz, NaiveDateTime)],
+    out: &mut Lines,
+) -> Vec<Component> {
+    let mut kept: BTreeMap<String, Component> = BTreeMap::new();
+    let entries = events.iter().flat_map(|(_, tree)| tree.entries());
+    for entry in entries.filter(|entry| entry.name.strip_prefix(ICAL) == Some("VTIMEZONE")) {
+        let EntryValue::Component {
+            properties,
+            components,
+        } = &entry.value
+        else {
+            continue;
+        };
+        let tzid = properties
+            .iter()
+            .find(|property| property.name.eq_ignore_ascii_case("TZID"))
+            .map(|property| unquoted(&property.value).to_owned())
+            .unwrap_or_default();
+        if fresh.iter().any(|(written, ..)| *written == tzid) {
+            out.leave_out(LeftOut::SetByWriter);
+        } else {
+            kept.entry(tzid).or_insert_with(|| Component {
+                name: "VTIMEZONE".to_owned(),
+                properties: properties.clone(),
+                components: components.clone(),
+            });
+        }
+    }
+    kept.into_values().collect()
 }
 
 /// The properties and components of the `ical:VCALENDAR` entries of `tree`.
@@ -156,10 +253,7 @@ fn vevent(
         ),
     };
     out.times("DTSTART", &unknown("DTSTART"), &[start]);
-    match duration(&when).filter(|_| has_entry(tree, "DURATION")) {
-        Some(duration) => out.line("DURATION", &unknown("DURATION"), &duration),
-        None => out.times("DTEND", &unknown("DTEND"), &[end]),
-    }
+    out.times("DTEND", &unknown("DTEND"), &[end]);
     if let Some(rule) = rule::written(fields) {
         out.line("RRULE", &unknown("RRULE"), &rule);
         let cancelled: Vec<Time> = rule::cancelled_starts(fields)
@@ -176,11 +270,15 @@ fn vevent(
     out.text("DESCRIPTION", &unknown("DESCRIPTION"), &fields.description);
     let entries = tree.entries().iter();
     let entries = entries.filter_map(|entry| Some((entry.name.strip_prefix(ICAL)?, &entry.value)));
-    let entries: Vec<_> = entries.filter(|(name, _)| *name != "VCALENDAR").collect();
+    let entries: Vec<_> = entries
+        .filter(|(name, _)| !matches!(*name, "VCALENDAR" | "VTIMEZONE"))
+        .collect();
     for (name, value) in &entries {
-        if let EntryValue::Property { parameters, value } = value
-            && !matches!(*name, "DTSTAMP" | "LAST-MODIFIED")
-        {
+        if let EntryValue::Property { parameters, value } = value {
+            if matches!(*name, "DTSTAMP" | "LAST-MODIFIED") {
+                out.leave_out(LeftOut::SetByWriter);
+                continue;
+            }
             out.tree_property(&Property {
                 name: (*name).to_owned(),
                 parameters: parameters.clone(),
@@ -219,28 +317,6 @@ fn unknown_parameters(tree: &UnimplementedFields, name: &str) -> Vec<Parameter> 
     .collect()
 }
 
-/// Whether `tree` holds parameters for the managed property `name`.
-fn has_entry(tree: &UnimplementedFields, name: &str) -> bool {
-    tree.entries().iter().any(|entry| {
-        entry.name.strip_prefix(ICAL) == Some(name)
-            && matches!(entry.value, EntryValue::Parameters(_))
-    })
-}
-
-/// The length of `when` as a `DURATION` value, which the reader adds to the
-/// start's wall time or date; none when its ends are in different zones.
-fn duration(when: &ImportedWhen) -> Option<String> {
-    match *when {
-        ImportedWhen::AllDay { start, end } => Some(format!("P{}D", (end - start).num_days())),
-        ImportedWhen::Timed {
-            start,
-            start_zone,
-            end,
-            end_zone,
-        } => (start_zone == end_zone).then(|| format!("PT{}S", (end - start).num_seconds())),
-    }
-}
-
 /// Content lines written, with the zones their times are given in: each
 /// `TZID` with its zone and the earliest wall time given in it, from which
 /// its `VTIMEZONE` covers.
@@ -248,6 +324,7 @@ fn duration(when: &ImportedWhen) -> Option<String> {
 struct Lines {
     text: String,
     zones: Vec<(String, Tz, NaiveDateTime)>,
+    left_out: Vec<LeftOut>,
 }
 
 impl Lines {
@@ -263,13 +340,22 @@ impl Lines {
     /// for the characters a line can't hold; folded.
     fn line(&mut self, name: &str, parameters: &[Parameter], value: &str) {
         let mut line = name.to_owned();
-        for parameter in parameters.iter().filter(|p| is_name(&p.name)) {
+        for parameter in parameters {
+            if !is_name(&parameter.name) {
+                self.leave_out(LeftOut::NotAName);
+                continue;
+            }
             line.push(';');
             line.push_str(&parameter.name);
             let values: Vec<String> = parameter
                 .values
                 .iter()
-                .map(|value| without_controls(value).replace('"', ""))
+                .map(|value| {
+                    if value.contains('"') {
+                        self.leave_out(LeftOut::Quote);
+                    }
+                    self.without_controls(value).replace('"', "")
+                })
                 .collect();
             match values.as_slice() {
                 [] => {}
@@ -285,8 +371,28 @@ impl Lines {
             }
         }
         line.push(':');
-        line.push_str(&without_controls(value));
+        line.push_str(&self.without_controls(value));
         self.folded(&line);
+    }
+
+    /// `value` without the control characters a content line can't hold,
+    /// noted as left out.
+    fn without_controls(&mut self, value: &str) -> String {
+        let kept: String = value
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\t')
+            .collect();
+        if kept.len() != value.len() {
+            self.leave_out(LeftOut::ControlCharacter);
+        }
+        kept
+    }
+
+    /// Notes that something of the fields or the tree isn't written.
+    fn leave_out(&mut self, left_out: LeftOut) {
+        if !self.left_out.contains(&left_out) {
+            self.left_out.push(left_out);
+        }
     }
 
     /// `line`, folded to lines of at most 75 octets, between characters.
@@ -311,7 +417,11 @@ impl Lines {
     /// A TEXT property of a managed field, escaped; none if `value` is empty
     /// and there are no parameters to keep.
     fn text(&mut self, name: &str, parameters: &[Parameter], value: &str) {
-        let value = escaped(&text_value(value));
+        let held = text_value(value);
+        if held.chars().count() != value.replace("\r\n", "\n").chars().count() {
+            self.leave_out(LeftOut::ControlCharacter);
+        }
+        let value = escaped(&held);
         if !value.is_empty() || !parameters.is_empty() {
             self.line(name, parameters, &value);
         }
@@ -366,7 +476,11 @@ impl Lines {
 
     /// A property of the tree, as held; none if its name isn't one.
     fn tree_property(&mut self, property: &Property) {
-        if is_name(&property.name) && !matches!(property.name.as_str(), "BEGIN" | "END") {
+        if !is_name(&property.name) {
+            self.leave_out(LeftOut::NotAName);
+        } else if matches!(property.name.as_str(), "BEGIN" | "END") {
+            self.leave_out(LeftOut::Structure);
+        } else {
             self.line(&property.name, &property.parameters, &property.value);
         }
     }
@@ -375,6 +489,7 @@ impl Lines {
     /// its name isn't one.
     fn tree_component(&mut self, component: &Component) {
         if !is_name(&component.name) {
+            self.leave_out(LeftOut::NotAName);
             return;
         }
         self.begin(&component.name);
@@ -388,41 +503,17 @@ impl Lines {
     }
 
     /// Notes the zones the `TZID`s of `tree`'s properties name, where
-    /// FreeCal knows them, as given from the start of `when`.
+    /// FreeCal knows them, as given from the start of `when` or the
+    /// property's own earliest time.
     fn tree_zones(&mut self, tree: &UnimplementedFields, when: &ImportedWhen) {
-        let from = match *when {
+        let start = match *when {
             ImportedWhen::AllDay { start, .. } => start.and_time(Default::default()),
             ImportedWhen::Timed { start, .. } => start,
         };
-        let mut properties: Vec<&Property> = Vec::new();
-        let mut components: Vec<&Component> = Vec::new();
-        for entry in tree.entries() {
-            match &entry.value {
-                EntryValue::Property { parameters, .. } => self.tzids(parameters, from),
-                EntryValue::Parameters(_) => {}
-                EntryValue::Component {
-                    properties: p,
-                    components: c,
-                } => {
-                    properties.extend(p);
-                    components.extend(c);
-                }
-            }
-        }
-        while let Some(component) = components.pop() {
-            properties.extend(&component.properties);
-            components.extend(&component.components);
-        }
-        for property in properties {
-            self.tzids(&property.parameters, from);
-        }
-    }
-
-    fn tzids(&mut self, parameters: &[Parameter], from: NaiveDateTime) {
-        let tzids = parameters.iter().filter(|p| p.name == "TZID");
-        for tzid in tzids.flat_map(|p| &p.values) {
-            let tzid = without_controls(tzid).replace('"', "");
+        for (tzid, times) in tree_tzids(tree) {
+            let tzid = without_controls(&tzid).replace('"', "");
             if let Some(zone) = iana_zone(&tzid).filter(|zone| *zone != Tz::UTC) {
+                let from = times.into_iter().fold(start, NaiveDateTime::min);
                 self.zone(unquoted(&tzid), zone, from);
             }
         }
@@ -435,12 +526,6 @@ impl Lines {
             None => self.zones.push((tzid.to_owned(), zone, wall)),
         }
     }
-}
-
-/// Whether `name` can name a property, parameter or component: an
-/// iCalendar name of letters, digits and dashes.
-fn is_name(name: &str) -> bool {
-    !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// `value` without the control characters a content line can't hold.

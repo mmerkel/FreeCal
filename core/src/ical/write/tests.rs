@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 
+use std::collections::HashSet;
+
 use super::*;
 use crate::event::{RecurrenceId, StoredWhen};
 use crate::guests;
@@ -49,11 +51,14 @@ fn fields_of(event: &ImportedEvent) -> EventFields {
     }
 }
 
-/// The resource of `uid` with `events`, each as fields and tree.
+/// The resource of `uid` with `events`, each as fields and tree, of which
+/// nothing is left out.
 fn write(uid: &str, events: &[(EventFields, UnimplementedFields)]) -> String {
     let pairs: Vec<(&EventFields, &UnimplementedFields)> =
         events.iter().map(|(fields, tree)| (fields, tree)).collect();
-    write_resource(uid, &pairs, now()).unwrap()
+    let written = write_resource(uid, &pairs, now()).unwrap();
+    assert_eq!(written.left_out, [], "{}", written.text);
+    written.text
 }
 
 /// The resource of the Events read from `text`, all of one UID.
@@ -465,13 +470,20 @@ fn the_same_input_gives_the_same_text_in_any_order() {
 }
 
 #[test]
-fn an_end_read_from_duration_with_parameters_is_a_duration_again() {
-    let text = rewritten(&vevent("DURATION;X-P=1:PT1H30M\r\n"));
-    assert!(text.contains("DURATION;X-P=1:PT5400S\r\n"), "{text}");
-    assert!(!text.contains("DTEND"));
+fn an_end_read_from_duration_is_a_dtend() {
+    for given in [
+        "DURATION:PT1H30M\r\n",
+        "DURATION;X-P=1:PT1H30M\r\n",
+        "DURATION:PT1H30M\r\nDURATION:PT2H\r\n",
+    ] {
+        let text = rewritten(&vevent(given));
+        assert!(text.contains("DTEND:20261005T083000Z\r\n"), "{text}");
+        assert!(!text.contains("DURATION"), "{text}");
+    }
 
-    let plain = rewritten(&vevent("DURATION:PT1H30M\r\n"));
-    assert!(plain.contains("DTEND:20261005T083000Z\r\n"), "{plain}");
+    let both = rewritten(&vevent("DTEND:20261005T080000Z\r\nDURATION:PT2H\r\n"));
+    assert!(both.contains("DTEND:20261005T080000Z\r\n"), "{both}");
+    assert!(!both.contains("DURATION"), "{both}");
 }
 
 #[test]
@@ -525,6 +537,53 @@ fn a_tzid_of_the_tree_gets_its_vtimezone() {
         text.contains("BEGIN:VTIMEZONE\r\nTZID:W. Europe Standard Time\r\n"),
         "{text}"
     );
+}
+
+#[test]
+fn a_tzid_of_the_tree_gets_a_vtimezone_from_its_own_time() {
+    let text = rewritten(&vevent(
+        "RRULE:FREQ=FORTNIGHTLY\r\nEXDATE;TZID=Europe/Berlin:20100301T090000\r\n",
+    ));
+    assert!(text.contains("DTSTART:20091231T"), "{text}");
+}
+
+/// A text whose tree gives a time in `Custom`, a zone only its `VTIMEZONE`
+/// defines.
+const CUSTOM_ZONE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n\
+     BEGIN:VTIMEZONE\r\nTZID:Unused\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\n\
+     TZOFFSETFROM:+0300\r\nTZOFFSETTO:+0300\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n\
+     BEGIN:VTIMEZONE\r\nTZID:Custom\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\n\
+     TZOFFSETFROM:+0130\r\nTZOFFSETTO:+0130\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n\
+     BEGIN:VTIMEZONE\r\nTZID:Europe/Berlin\r\nBEGIN:STANDARD\r\n\
+     DTSTART:19700101T000000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\n\
+     END:VTIMEZONE\r\n\
+     BEGIN:VEVENT\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20261005T070000Z\r\n\
+     RRULE:FREQ=FORTNIGHTLY\r\nEXDATE;TZID=Custom:20261006T090000\r\n\
+     X-AT;TZID=Europe/Berlin:20261007T090000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+#[test]
+fn a_tzid_freecal_doesnt_know_keeps_its_vtimezone() {
+    let events = events_of(CUSTOM_ZONE);
+    let kept: Vec<_> = events[0]
+        .unimplemented
+        .entries()
+        .iter()
+        .filter(|entry| entry.name == "ical:VTIMEZONE")
+        .collect();
+    assert_eq!(
+        kept.len(),
+        1,
+        "only Custom: Unused isn't used, Berlin is known"
+    );
+
+    let text = assert_text_round_trip(CUSTOM_ZONE);
+    assert_eq!(text.matches("TZID:Custom\r\n").count(), 1, "{text}");
+    assert!(
+        text.find("TZID:Custom\r\n") < text.find("BEGIN:VEVENT"),
+        "at the calendar level: {text}"
+    );
+    assert!(!text.contains("Unused"), "{text}");
+    assert_eq!(text.matches("TZID:Europe/Berlin\r\n").count(), 1, "{text}");
 }
 
 #[test]
@@ -596,13 +655,14 @@ fn hostile_fields_and_entries_cant_change_the_structure() {
     let tree = UnimplementedFields::new(vec![
         whole(
             "ical:X-A",
-            vec![parameter("X-P", &[breakout, "\"q\""])],
+            vec![parameter("X-P", &[breakout, "a\"q"])],
             breakout,
         ),
         whole("ical:BEGIN", Vec::new(), "VEVENT"),
         whole("ical:END", Vec::new(), "VEVENT"),
         whole("ical:X-B:ATTENDEE", Vec::new(), "mailto:name@example.com"),
         whole("ical:X-\u{7}C", Vec::new(), "c"),
+        whole("ical:DTSTAMP", Vec::new(), "20200101T000000Z"),
         entry(
             "ical:SUMMARY",
             EntryValue::Parameters(vec![parameter("X-Q\r\nATTENDEE", &["v"])]),
@@ -627,8 +687,21 @@ fn hostile_fields_and_entries_cant_change_the_structure() {
         ),
     ]);
 
-    let sent = write(&uid, &[(fields, tree)]);
+    let written = write_resource(&uid, &[(&fields, &tree)], now()).unwrap();
+    let sent = written.text;
 
+    let left_out: HashSet<LeftOut> = written.left_out.into_iter().collect();
+    assert_eq!(
+        left_out,
+        HashSet::from([
+            LeftOut::ControlCharacter,
+            LeftOut::Quote,
+            LeftOut::NotAName,
+            LeftOut::Structure,
+            LeftOut::SetByWriter,
+        ]),
+        "every kind is reported"
+    );
     assert_well_formed(&sent);
     assert_eq!(guests::attendees(&sent), Vec::<String>::new(), "{sent}");
     assert!(!sent.contains("FREQ=DAILY"));

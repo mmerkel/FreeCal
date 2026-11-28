@@ -70,7 +70,9 @@ core/src/
   ical/                     the CalDAV reader and writer (175, 176): read/ (mod.rs, tests.rs), write/ (mod.rs, tests.rs), roundtrip.rs (197);
                             server_texts.rs, real servers' texts for the tests of reader, writer and check
                             (changed in ticket 175: clippy wants read/mod.rs beside its tests; the texts
-                            moved out of resource/tests.rs, which 187 deletes; changed in ticket 176: write/ likewise)
+                            moved out of resource/tests.rs, which 187 deletes; changed in ticket 176: write/ likewise;
+                            mod.rs holds what both share: is_name, tree_tzids; write_resource returns
+                            Written, whose left_out the sender (187) logs)
   sync/
     mod.rs                  sync_calendar: one sync activity per Calendar (193)
     plan.rs                 IncomingSyncPlan from compare_event (189)

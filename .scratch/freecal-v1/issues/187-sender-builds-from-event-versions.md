@@ -26,3 +26,7 @@ Spec: "Local Store"; "Sync engine"; "Moves across Accounts"; "Untrusted content"
 - [ ] The showing of the server's original text is gone from the core interface and the window
 - [ ] The tests above deleted or rewritten; the other send and sync tests pass, changed only where they asserted the Mirror's text or a skipped request
 - [ ] `GLOSSARY.md` follows: Mirror goes; CalDAV Server Object (no text), Known Server Resources, Ignored Resource ("kept in the CalDAV table"), Database Transaction (the Mirror's writes), Sync Engine ("the only code that writes the Mirror"), Server Object and Sender where they speak of the text received
+
+## Comments
+
+- 2026-11-28: From the review of 176: the writer (`write_resource`) returns, with the text, what of the fields and trees it left out (`Written::left_out`); the sender writes each distinct one to the Log with the href, as `log_violations` does for the reader. It is empty unless the Local Store holds what the reader never makes.
