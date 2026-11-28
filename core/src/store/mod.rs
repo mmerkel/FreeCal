@@ -142,13 +142,12 @@ impl<'de> Deserialize<'de> for CombinedEventKey {
         let text = String::deserialize(deserializer)?;
         let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
             serde_json::from_str(&text).map_err(serde::de::Error::custom)?;
-        let recurrence_id = match recurrence_id {
-            None => None,
-            Some(text) => Some(
+        let recurrence_id = recurrence_id
+            .map(|text| {
                 RecurrenceId::read(text)
-                    .ok_or_else(|| serde::de::Error::custom("a recurrence ID that doesn't read"))?,
-            ),
-        };
+                    .ok_or_else(|| serde::de::Error::custom("a recurrence ID that doesn't read"))
+            })
+            .transpose()?;
         Ok(Self {
             calendar_id: CalendarId(calendar_id),
             uid,
@@ -278,7 +277,7 @@ mod tests {
         let key = super::CombinedEventKey {
             calendar_id: crate::CalendarId(2),
             uid: "a\"],[1,\"b\u{0}\n<script>".to_owned(),
-            recurrence_id: crate::event::RecurrenceId::read("2026-10-05T9:0:0"),
+            recurrence_id: Some(crate::event::RecurrenceId::read("2026-10-05T9:0:0").unwrap()),
         };
 
         let text = serde_json::to_string(&key).unwrap();

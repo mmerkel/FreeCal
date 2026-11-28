@@ -25,7 +25,7 @@ mod mirror {
 }
 mod unguarded;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, Value, ValueRef};
 use rusqlite::{OptionalExtension, Row, params, params_from_iter};
@@ -89,7 +89,8 @@ impl FromSql for RecurrenceId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let text = match value {
             ValueRef::Text(text) => String::from_utf8_lossy(text).into_owned(),
-            other => format!("{other:?}"),
+            // Not its content, which can be any size.
+            _ => "a value that isn't text".to_owned(),
         };
         match RecurrenceId::read(text.as_str()) {
             Some(read) => Ok(read),
@@ -580,60 +581,26 @@ impl Store {
     }
 
     /// The Unsent Changes of the UID `uid` in a Calendar, whatever their
-    /// recurrence IDs, as the Local Store keeps them, untrusted
-    /// ([`Self::kept_unsent_changes`]).
+    /// recurrence IDs, as the Local Store keeps them, untrusted, in the
+    /// order they were added. A Send Failure that isn't text counts as none;
+    /// a recurrence ID that doesn't read fails the read.
     pub(crate) fn unsent_changes_of(
         &self,
         calendar_id: CalendarId,
         uid: &str,
     ) -> Result<Vec<KeptUnsentChange>> {
-        Ok(self
-            .kept_unsent_changes(
-                "WHERE calendar_id = ?1 AND uid = ?2",
-                params![calendar_id.0, uid],
-            )?
-            .into_iter()
-            .map(|(_, kept)| kept)
-            .collect())
-    }
-
-    /// Every Unsent Change, by Calendar and UID, as the Local Store keeps
-    /// them, untrusted ([`Self::kept_unsent_changes`]).
-    pub(crate) fn unsent_changes_by_uid(
-        &self,
-    ) -> Result<HashMap<(CalendarId, String), Vec<KeptUnsentChange>>> {
-        let mut by_uid: HashMap<_, Vec<_>> = HashMap::new();
-        for (key, kept) in self.kept_unsent_changes("", params![])? {
-            by_uid.entry(key).or_default().push(kept);
-        }
-        Ok(by_uid)
-    }
-
-    /// The Unsent Changes that `filter`, a `WHERE` clause on `params`,
-    /// selects, with their Calendar and UID, in the order they were added. A
-    /// Send Failure that isn't text counts as none; a recurrence ID that
-    /// doesn't read fails the read.
-    fn kept_unsent_changes(
-        &self,
-        filter: &str,
-        params: &[&dyn rusqlite::ToSql],
-    ) -> Result<Vec<((CalendarId, String), KeptUnsentChange)>> {
         let kept = self
             .conn
-            .prepare_cached(&format!(
-                "SELECT calendar_id, uid, recurrence_id, since, send_failure \
-                 FROM unsent_change {filter} ORDER BY rowid"
-            ))?
-            .query_map(params, |row| {
-                let key = (CalendarId(row.get(0)?), row.get(1)?);
-                Ok((
-                    key,
-                    KeptUnsentChange {
-                        recurrence_id: row.get(2)?,
-                        since: integer(row, 3)?,
-                        send_failure: text(row, 4)?,
-                    },
-                ))
+            .prepare_cached(
+                "SELECT recurrence_id, since, send_failure FROM unsent_change \
+                 WHERE calendar_id = ?1 AND uid = ?2 ORDER BY rowid",
+            )?
+            .query_map(params![calendar_id.0, uid], |row| {
+                Ok(KeptUnsentChange {
+                    recurrence_id: row.get(0)?,
+                    since: integer(row, 1)?,
+                    send_failure: text(row, 2)?,
+                })
             })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(kept)

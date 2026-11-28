@@ -74,7 +74,7 @@ impl RecurrenceId {
 
 /// The text of a recurrence ID naming `original`, as
 /// [`RecurrenceId::of_original`] writes it.
-fn recurrence_id_text(original: &Time) -> String {
+pub(super) fn recurrence_id_text(original: &Time) -> String {
     match original {
         Time::Date(date) => date.to_string(),
         Time::Wall(wall, None) => wall_text(*wall),

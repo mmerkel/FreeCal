@@ -402,14 +402,14 @@ impl Loaded {
     }
 
     /// Writes the Exceptions whose recurrence IDs `carried` says as the
-    /// Exceptions of `new`, the
-    /// Recurring Event that this one became from the Occurrence `first` on.
-    /// Each keeps what it changed on its own and follows `changes` in the
-    /// rest; the one that was changed, `changing`, takes them all. With
-    /// `changes.exceptions_too`, each with values of its own takes them all,
-    /// its time shifted by as much as the changed Occurrence's. One whose Occurrence `new` doesn't
-    /// have is deleted; with a rule FreeCal can't read, each is kept. Returns
-    /// the new ID of `changing`, if it is kept.
+    /// Exceptions of `new`, the Recurring Event that this one became from
+    /// the Occurrence `first` on. Each keeps what it changed on its own and
+    /// follows `changes` in the rest; the one that was changed, `changing`,
+    /// takes them all. With `changes.exceptions_too`, each with values of
+    /// its own takes them all, its time shifted by as much as the changed
+    /// Occurrence's. One whose Occurrence `new` doesn't have is deleted;
+    /// with a rule FreeCal can't read, each is kept. Returns the new ID of
+    /// `changing`, if it is kept.
     fn carry_exceptions(
         &self,
         journal_transaction: &mut JournalTransaction,
@@ -423,7 +423,9 @@ impl Loaded {
         let (_, now) = new.recurring_event();
         let mut kept = None;
         for exception in &self.exceptions {
-            let Exception { id, rid, fields } = exception;
+            let Exception {
+                id, rid, fields, ..
+            } = exception;
             if !carried(rid.as_str()) {
                 continue;
             }

@@ -420,13 +420,14 @@ pub(crate) fn read_events(name: &str, contents: &[u8], display: Tz) -> Result<Re
             // A `RECURRENCE-ID` that doesn't read makes the file unreadable,
             // as a start does, rather than its Exception a second Event of
             // the UID (ticket 215).
-            let recurrence_id = match event.property_value("RECURRENCE-ID") {
-                None => None,
-                Some(_) => {
-                    let original = event.get_recurrence_id().ok_or_else(not_calendar)?;
-                    Some(RecurrenceId::of_original(zones.time(original)))
-                }
-            };
+            let recurrence_id = event
+                .property_value("RECURRENCE-ID")
+                .map(|_| {
+                    let original = event.get_recurrence_id();
+                    original.map(|original| RecurrenceId::of_original(zones.time(original)))
+                })
+                .map(|read| read.ok_or_else(not_calendar))
+                .transpose()?;
             let exdates = event
                 .multi_properties()
                 .get("EXDATE")

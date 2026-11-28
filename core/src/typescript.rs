@@ -191,7 +191,7 @@ fn samples_file() -> (String, Vec<String>) {
         recurrence_id: None,
     };
     let exception_key = CombinedEventKey {
-        recurrence_id: RecurrenceId::read("2026-10-19T09:30:00[Europe/Berlin]"),
+        recurrence_id: Some(RecurrenceId::read("2026-10-19T09:30:00[Europe/Berlin]").unwrap()),
         ..key.clone()
     };
     let event = Event {

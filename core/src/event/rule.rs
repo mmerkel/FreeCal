@@ -23,9 +23,11 @@ use rrule::{RRule, RRuleSet, Unvalidated};
 use serde::{Deserialize, Serialize};
 
 use super::NormalForm;
+use super::recurrence_id::recurrence_id_text;
 use super::when::{
     EventFields, StoredRange, StoredWhen, WALL_TIME, date_seconds, instant, wall_text,
 };
+use crate::import::Time;
 use crate::{CoreError, Result};
 
 /// A repeat rule as the editor sets it.
@@ -471,11 +473,17 @@ pub(super) fn shifted_or_moved(
 /// The recurrence ID `id` of a Recurring Event whose first Occurrence moved
 /// from `from` to `to`, moved by as much; none when `id` isn't one.
 pub(super) fn moved_id(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<String> {
+    moved_original(id, from, to).map(|original| recurrence_id_text(&original))
+}
+
+/// The original start the recurrence ID `id` names, moved as
+/// [`moved_id`] moves it; none when `id` isn't one.
+pub(super) fn moved_original(id: &str, from: &StoredWhen, to: &StoredWhen) -> Option<Time> {
     let start = start_of_id(id)? + (first_start(to).ok()? - first_start(from).ok()?);
     Some(if to.all_day {
-        start.date().to_string()
+        Time::Date(start.date())
     } else {
-        wall_text(start)
+        Time::Wall(start, None)
     })
 }
 

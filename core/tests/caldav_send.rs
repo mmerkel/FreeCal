@@ -967,7 +967,9 @@ mod recurrence {
     }
 
     /// A kept Unsent Change whose recurrence ID doesn't read is an error on
-    /// reading its Event and listing its range (ticket 215).
+    /// reading its Event and listing a range that shows its UID, and only
+    /// those. The Sender doesn't read it: sending its UID succeeds and
+    /// deletes it (ticket 215).
     #[test]
     fn an_unsent_change_with_an_unreadable_recurrence_id_is_an_error_not_a_crash() {
         let on_server = OnServer::writable_with(&[("yoga", server_yoga())]);
@@ -993,6 +995,28 @@ mod recurrence {
                 .unwrap_err()
                 .code(),
             ErrorCode::UnreadableEventTime
+        );
+        // A week without the UID lists.
+        assert!(
+            on_server
+                .core
+                .occurrences(date("2026-09-21"), date("2026-09-28"))
+                .unwrap()
+                .is_empty()
+        );
+
+        on_server
+            .core
+            .sync_account(on_server.account, StartedBy::FreeCal)
+            .unwrap();
+
+        assert_eq!(on_server.unsent(on_server.work), 0);
+        assert!(on_server.on_server("yoga").contains("Yoga late"));
+        assert!(
+            on_server
+                .core
+                .occurrences(date("2026-10-19"), date("2026-10-20"))
+                .is_ok()
         );
     }
 

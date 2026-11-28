@@ -114,9 +114,10 @@ impl UnsentChange {
         recurring: Option<&ImportedWhen>,
     ) -> Option<Self> {
         let key = exception.map(|exception| &exception.rid);
-        let found = kept
-            .iter()
-            .find(|kept| occurrence_key(kept.recurrence_id.as_ref(), recurring).as_ref() == key)?;
+        let found = kept.iter().find(|kept| {
+            let rid = kept.recurrence_id.as_ref();
+            rid.map(|rid| rid.normal_form(recurring)).as_ref() == key
+        })?;
         Some(Self {
             since: found
                 .since
@@ -203,6 +204,10 @@ type Stored = (EventId, EventFields);
 /// obtained.
 struct Exception {
     id: EventId,
+    /// Its recurrence ID as obtained, the one `fields` holds.
+    obtained: RecurrenceId,
+    /// The Normal Form of `obtained` against the Recurring Event loaded
+    /// with it.
     rid: NormalForm,
     fields: EventFields,
 }
@@ -259,12 +264,17 @@ impl Loaded {
 
     /// `events`, those of a Calendar with one UID, sorted.
     fn sorted(calendar_id: CalendarId, uid: String, events: Vec<UidEvent>) -> Self {
-        let (exceptions, mut events): (Vec<_>, Vec<_>) = events
-            .into_iter()
-            .map(|event| (event.id, event.fields))
-            .partition(|(_, fields)| fields.recurrence_id.is_some());
-        let event = events.pop();
-        debug_assert!(events.is_empty(), "one Event that isn't an Exception");
+        let mut event = None;
+        let mut exceptions = Vec::new();
+        for UidEvent { id, fields, .. } in events {
+            match fields.recurrence_id.clone() {
+                None => {
+                    debug_assert!(event.is_none(), "one Event that isn't an Exception");
+                    event = Some((id, fields));
+                }
+                Some(obtained) => exceptions.push((id, obtained, fields)),
+            }
+        }
         let mut loaded = Self {
             calendar_id,
             uid,
@@ -274,9 +284,11 @@ impl Loaded {
         let recurring = loaded.recurring_when();
         loaded.exceptions = exceptions
             .into_iter()
-            .filter_map(|(id, fields)| {
-                let rid = normal_form(&fields, recurring.as_ref())?;
-                Some(Exception { id, rid, fields })
+            .map(|(id, obtained, fields)| Exception {
+                rid: obtained.normal_form(recurring.as_ref()),
+                id,
+                obtained,
+                fields,
             })
             .collect();
         loaded
@@ -368,13 +380,11 @@ impl Loaded {
         let mut exceptions: Vec<_> = self
             .exceptions
             .iter()
-            .map(|stored| (normal_form(&stored.fields, recurring), stored))
+            .map(|stored| (stored.obtained.normal_form(recurring), stored))
             .collect();
         let incoming = incoming.into_iter().map(|incoming| {
-            (
-                occurrence_key(incoming.recurrence_id.as_ref(), recurring),
-                incoming,
-            )
+            let rid = incoming.recurrence_id.as_ref();
+            (rid.map(|rid| rid.normal_form(recurring)), incoming)
         });
         let paired = latest(incoming)
             .into_iter()
@@ -383,7 +393,7 @@ impl Loaded {
                     None => event.take().map(|(id, fields)| (*id, fields)),
                     Some(rid) => exceptions
                         .iter()
-                        .position(|(stored, _)| stored.as_ref() == Some(&rid))
+                        .position(|(stored, _)| *stored == rid)
                         .map(|index| exceptions.remove(index).1)
                         .map(|stored| (stored.id, &stored.fields)),
                 };
@@ -572,11 +582,13 @@ impl Loaded {
 /// moving a Recurring Event's time moves its Exceptions' (ADR 0012); as it
 /// is when it isn't an Exception, or the move can't be told.
 fn moved_with(event: &ImportedEvent, from: &ImportedWhen, to: &StoredWhen) -> ImportedEvent {
-    let moved = occurrence_key(event.recurrence_id.as_ref(), Some(from))
-        .and_then(|was| rule::moved_id(was.as_str(), &StoredWhen::imported(from), to));
+    let moved = event.recurrence_id.as_ref().and_then(|was| {
+        let was = was.normal_form(Some(from));
+        rule::moved_original(was.as_str(), &StoredWhen::imported(from), to)
+    });
     ImportedEvent {
         recurrence_id: moved
-            .and_then(RecurrenceId::read)
+            .map(RecurrenceId::of_original)
             .or(event.recurrence_id.clone()),
         ..event.clone()
     }
@@ -833,10 +845,18 @@ pub(crate) fn occurrences(
     let mut occurrences = Vec::new();
     // The Events with each UID, loaded once.
     let mut loaded = HashMap::new();
-    let unsent = store.unsent_changes_by_uid()?;
+    // The Unsent Changes of each UID, read once, only for the UIDs shown,
+    // so that one that doesn't read fails only the ranges that show it.
+    let mut unsent = HashMap::new();
     for event in store.shown_events_in(&range)? {
         let mut recurrence_id = None;
-        let kept = unsent.get(&(event.calendar_id, event.uid.clone()));
+        let kept = match unsent.entry((event.calendar_id, event.uid.clone())) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                entry.insert(store.unsent_changes_of(event.calendar_id, &event.uid)?)
+            }
+        };
+        let kept: &[KeptUnsentChange] = kept;
         let mut unsent_since = None;
         if event.fields.recurrence_id.is_some() {
             let with_uid = with_uid_of(&mut loaded, store, &event)?;
@@ -845,10 +865,8 @@ pub(crate) fn occurrences(
                 .iter()
                 .find(|exception| exception.id == event.id);
             if let Some(own) = own {
-                unsent_since = kept.and_then(|kept| {
-                    let recurring = with_uid.recurring_when();
-                    UnsentChange::of_event_row(kept, Some(own), recurring.as_ref())
-                });
+                let recurring = with_uid.recurring_when();
+                unsent_since = UnsentChange::of_event_row(kept, Some(own), recurring.as_ref());
                 let first = with_uid.exception_at(&own.rid);
                 if first.is_some_and(|first| first.id != own.id) {
                     continue;
@@ -857,7 +875,7 @@ pub(crate) fn occurrences(
                     recurrence_id = Some(own.rid.clone().into_string());
                 }
             }
-        } else if let Some(kept) = kept {
+        } else {
             unsent_since = UnsentChange::of_event_row(kept, None, None);
         }
         let unsent_since = unsent_since.map(|unsent| unsent.since);
@@ -949,16 +967,6 @@ pub(crate) fn propagate_to_event_rows(
     Ok(())
 }
 
-/// Which Occurrence an Event with the recurrence ID `obtained` stands for,
-/// of a Recurring Event at `recurring`: none for an Event that isn't an
-/// Exception, the Normal Form for an Exception.
-fn occurrence_key(
-    obtained: Option<&RecurrenceId>,
-    recurring: Option<&ImportedWhen>,
-) -> Option<NormalForm> {
-    obtained.map(|obtained| obtained.normal_form(recurring))
-}
-
 /// The Normal Form of the recurrence ID of an Exception with `fields`
 /// against a Recurring Event at `recurring`; none for an Event that isn't
 /// an Exception.
@@ -966,7 +974,8 @@ pub(crate) fn normal_form(
     fields: &EventFields,
     recurring: Option<&ImportedWhen>,
 ) -> Option<NormalForm> {
-    occurrence_key(fields.recurrence_id.as_ref(), recurring)
+    let obtained = fields.recurrence_id.as_ref();
+    obtained.map(|obtained| obtained.normal_form(recurring))
 }
 
 /// Of `versions`, each with the Occurrence it is for, the latest for each

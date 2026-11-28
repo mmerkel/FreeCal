@@ -675,7 +675,7 @@ mod tests {
     fn exception(event: &StoredEvent, rid: &str) -> StoredEvent {
         let mut exception = event.clone();
         exception.fields.rule = None;
-        exception.fields.recurrence_id = RecurrenceId::read(rid);
+        exception.fields.recurrence_id = Some(RecurrenceId::read(rid).unwrap());
         exception
     }
 
