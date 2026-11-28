@@ -436,6 +436,44 @@ fn a_winner_takes_the_whole_uid_in_its_conflict() {
 }
 
 #[test]
+fn a_winner_decides_one_exception_and_leaves_another_combined() {
+    let base = series(&[(TUESDAY, "Yoga"), (WEDNESDAY, "Yoga")]);
+    let ours = versions([
+        recurring(),
+        exception(TUESDAY, "Pilates"),
+        content(EventFields {
+            location: "Hall".to_owned(),
+            ..exception(WEDNESDAY, "Yoga").fields
+        }),
+    ]);
+    let theirs = series(&[(TUESDAY, "Tai chi"), (WEDNESDAY, "Run")]);
+    let mut decided = decided_all(compare_event(
+        &base,
+        &ours,
+        &theirs,
+        OnConflict::Win(Side::Ours),
+    ));
+    assert!(matches!(
+        decided.remove(&key(TUESDAY)),
+        Some(OccurrenceOutcome::Ours)
+    ));
+    let Some(OccurrenceOutcome::Combined(wednesday)) = decided.remove(&key(WEDNESDAY)) else {
+        panic!("Wednesday not combined");
+    };
+    assert_eq!(
+        (
+            wednesday.fields.title.as_str(),
+            wednesday.fields.location.as_str()
+        ),
+        ("Run", "Hall")
+    );
+    assert!(matches!(
+        decided.remove(&None),
+        Some(OccurrenceOutcome::Unchanged)
+    ));
+}
+
+#[test]
 fn the_same_change_to_the_recurring_event_on_both_sides_leaves_exceptions_free() {
     let base = series(&[(TUESDAY, "Yoga")]);
     let renamed = || {
@@ -553,6 +591,9 @@ fn every_managed_property_has_its_group() {
         ("ical:SUMMARY", FieldGroup::Title),
         ("ical:LOCATION", FieldGroup::Location),
         ("ical:DESCRIPTION", FieldGroup::Description),
+        // The description as HTML, which Outlook and Thunderbird show in
+        // its place.
+        ("ical:X-ALT-DESC", FieldGroup::Description),
         // Identity and what the writer makes fresh have no field.
         ("ical:UID", FieldGroup::Unimplemented),
         ("ical:SEQUENCE", FieldGroup::Unimplemented),
@@ -565,6 +606,39 @@ fn every_managed_property_has_its_group() {
     for (name, group) in groups {
         assert_eq!(entry_group(name), group, "{name}");
     }
+}
+
+#[test]
+fn an_entrys_group_ignores_the_case_of_its_name() {
+    // The canonical form compares names in upper case; a stored tree is
+    // read back as it is.
+    assert_eq!(entry_group("ical:summary"), FieldGroup::Title);
+    assert_eq!(entry_group("ical:x-alt-desc"), FieldGroup::Description);
+}
+
+fn html_description(html: &str) -> Entry {
+    Entry {
+        name: "ical:X-ALT-DESC".to_owned(),
+        value: EntryValue::Property {
+            parameters: vec![parameter("FMTTYPE", &["text/html"])],
+            value: html.to_owned(),
+        },
+    }
+}
+
+#[test]
+fn the_html_description_goes_with_the_description() {
+    let base = with(event(), html_description("<p>Bring a mat</p>"));
+    // One side edits the description, which drops its HTML; the other
+    // adds an alarm.
+    let ours = content(EventFields {
+        description: "Bring a towel".to_owned(),
+        ..fields()
+    });
+    let theirs = with(base.clone(), alarm("-PT5M"));
+    let combined = combination(single(Some(base), Some(ours), Some(theirs), REPORT));
+    assert_eq!(combined.fields.description, "Bring a towel");
+    assert_eq!(combined.unimplemented.entries(), &[alarm("-PT5M")]);
 }
 
 #[test]

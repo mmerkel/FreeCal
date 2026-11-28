@@ -51,7 +51,7 @@ No Conflict code exists today: the Sender's `SendFailure::ServerChanged` (`sende
 core/src/
   lib.rs                    Core: the interface; Events by Combined Event Key (174)
   unimplemented.rs          the tree of Unimplemented Fields, canonical form, prefixes per Provider (175)
-  comparison.rs             EventVersionContent, Field Groups, compare_event (177)
+  comparison/               EventVersionContent, Field Groups, compare_event (177; mod.rs and tests.rs)
   history/                  the Calendar History: the only writer of the user's side (178–185)
     mod.rs                  SnapshotWriter, Snapshot origins, reading a Snapshot's state
     versions.rs             SQL of event_version and snapshot (moved from store/sql/journal.rs)

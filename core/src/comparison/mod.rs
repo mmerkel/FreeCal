@@ -33,9 +33,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
-use crate::event::rule::exdates_of;
+use crate::event::rule::{exdates_of, split_ids};
 use crate::event::{EventFields, NormalForm, RecurrenceId, StoredWhen};
-use crate::unimplemented::{ICAL, UnimplementedFields};
+use crate::unimplemented::{Entry, ICAL, UnimplementedFields};
 
 /// What one Event Version holds that the comparison reads: the managed
 /// fields and the Unimplemented Fields, without its row ID, Calendar or
@@ -71,14 +71,7 @@ impl EventVersionContent {
             description,
         } = grouped(self.fields.clone());
         let entries = ByGroup::from_fn(|group| {
-            let entries = self
-                .unimplemented
-                .entries()
-                .iter()
-                .filter(|entry| entry_group(&entry.name) == group)
-                .cloned()
-                .collect();
-            UnimplementedFields::new(entries).canonical()
+            UnimplementedFields::new(self.entries_of(group).collect()).canonical()
         });
         ByGroup {
             times: json!([times.form(), entries.times]),
@@ -87,6 +80,15 @@ impl EventVersionContent {
             description: json!([description.text, description.html, entries.description]),
             unimplemented: json!([entries.unimplemented]),
         }
+    }
+
+    /// The entries of the Unimplemented Fields that belong to `group`.
+    fn entries_of(&self, group: FieldGroup) -> impl Iterator<Item = Entry> + '_ {
+        self.unimplemented
+            .entries()
+            .iter()
+            .filter(move |entry| entry_group(&entry.name) == group)
+            .cloned()
     }
 }
 
@@ -188,17 +190,19 @@ pub(crate) fn compare_event(
     let changed_alone = |side: &UidVersions, other: &UidVersions, key: &Option<NormalForm>| {
         !same(base.get(key), side.get(key)) && !same(other.get(key), side.get(key))
     };
-    let whole = |side, other| changed_alone(side, other, &None);
-    let one = |side, other| {
+    let recurring_changed = |side, other| changed_alone(side, other, &None);
+    let an_exception_changed = |side, other| {
         keys.iter()
             .any(|key| key.is_some() && changed_alone(side, other, key))
     };
-    if (whole(ours, theirs) && one(theirs, ours)) || (whole(theirs, ours) && one(ours, theirs)) {
+    if (recurring_changed(ours, theirs) && an_exception_changed(theirs, ours))
+        || (recurring_changed(theirs, ours) && an_exception_changed(ours, theirs))
+    {
         return conflict(&keys, on_conflict);
     }
     let mut decided = BTreeMap::new();
     for key in keys.iter().copied() {
-        let outcome = occurrence(base.get(key), ours.get(key), theirs.get(key));
+        let outcome = occurrence_outcome(base.get(key), ours.get(key), theirs.get(key));
         let outcome = match (outcome, on_conflict) {
             (Some(outcome), _) => outcome,
             (None, OnConflict::Report) => return UidOutcome::Conflict,
@@ -232,7 +236,7 @@ fn conflict(keys: &BTreeSet<&Option<NormalForm>>, on_conflict: OnConflict) -> Ui
 }
 
 /// The outcome for one Occurrence; none for a Conflict.
-fn occurrence(
+fn occurrence_outcome(
     base: Option<&EventVersionContent>,
     ours: Option<&EventVersionContent>,
     theirs: Option<&EventVersionContent>,
@@ -371,14 +375,7 @@ impl ByGroup<&EventVersionContent> {
             location,
             description,
             unimplemented,
-        } = ByGroup::from_fn(|group| {
-            self.get(group)
-                .unimplemented
-                .entries()
-                .iter()
-                .filter(move |entry| entry_group(&entry.name) == group)
-                .cloned()
-        });
+        } = ByGroup::from_fn(|group| self.get(group).entries_of(group));
         let entries = times
             .chain(title)
             .chain(location)
@@ -429,13 +426,7 @@ impl Times {
             .as_ref()
             .map(|id| id.normal_form(None).into_string());
         // A set: their order and repeats in the stored text mean nothing.
-        let exdates = exdates_of(
-            exdates
-                .split(',')
-                .map(str::trim)
-                .filter(|exdate| !exdate.is_empty())
-                .map(str::to_owned),
-        );
+        let exdates = exdates_of(split_ids(exdates).map(str::to_owned));
         json!([
             all_day,
             start,
@@ -527,7 +518,9 @@ pub(crate) fn entry_group(name: &str) -> FieldGroup {
     let Some(name) = name.strip_prefix(ICAL) else {
         return FieldGroup::Unimplemented;
     };
-    match name {
+    // In upper case, as the canonical form compares names: a stored tree
+    // is read back as it is.
+    match name.to_ascii_uppercase().as_str() {
         // A rule FreeCal can't expand stays whole in the tree with its
         // excluded dates; a kept `VTIMEZONE` gives the times' zones.
         "DTSTART" | "DTEND" | "DURATION" | "RRULE" | "EXDATE" | "RECURRENCE-ID" | "VTIMEZONE" => {
@@ -535,7 +528,9 @@ pub(crate) fn entry_group(name: &str) -> FieldGroup {
         }
         "SUMMARY" => FieldGroup::Title,
         "LOCATION" => FieldGroup::Location,
-        "DESCRIPTION" => FieldGroup::Description,
+        // The description as HTML, which Outlook and Thunderbird show in
+        // its place.
+        "DESCRIPTION" | "X-ALT-DESC" => FieldGroup::Description,
         _ => FieldGroup::Unimplemented,
     }
 }

@@ -554,7 +554,8 @@ pub(super) fn with_exdate(exdates: &str, id: &str) -> String {
     ids.join(",")
 }
 
-fn split_ids(text: &str) -> impl Iterator<Item = &str> {
+/// The recurrence IDs in a Recurring Event's stored excluded dates.
+pub(crate) fn split_ids(text: &str) -> impl Iterator<Item = &str> {
     text.split(',').map(str::trim).filter(|id| !id.is_empty())
 }
 

@@ -42,3 +42,18 @@ Spec: "Calendar History"; "Sync engine". ADRs 0017 ("Part of the version"), 0019
   - Departures from the layout plan, recorded there: the module is `comparison/mod.rs` with `tests.rs`; `UidOutcome`'s variants; `UidVersions::new` returns `Option`; `NormalForm` derives `Ord`.
   - Switched-off tests: none turned off; none named this ticket (the `dead_code` allow on `UnimplementedFields::canonical` that named it is gone).
   - Conformance Breaches: item 4 ended (a combination can contradict itself); none added.
+- 2026-11-28: Review of `c1ea7b5..9ec24d7`.
+  - Fixed: the description as HTML (`ical:X-ALT-DESC`, which Outlook and Thunderbird show in the description's place) goes with the description, not the Unimplemented Fields (`entry_group`), as the patching writer already groups it (ticket 122). So one side's edited description, without its HTML, combines with the other side's alarm instead of clashing in the Unimplemented Fields. Test `the_html_description_goes_with_the_description`; `every_managed_property_has_its_group` lists it. Con: one property outside RFC 5545's managed set the comparison knows by name.
+  - Fixed: an entry's group reads its name in upper case, as the tree's canonical form compares names, so a stored tree read back with `ical:summary` groups it with the title, not the Unimplemented Fields. Test `an_entrys_group_ignores_the_case_of_its_name`.
+  - Fixed: "the entries of one group" is one method, `EventVersionContent::entries_of`, used by the comparison of groups and the combination, where it was written out twice.
+  - Fixed: the times' excluded dates split through the Recurring Event's own `split_ids` (`event/rule.rs`), not a copy.
+  - Fixed: names in `compare_event`: `recurring_changed` and `an_exception_changed` (were `whole`, `one`), `occurrence_outcome` (was `occurrence`, which gave no Occurrence).
+  - Fixed: the layout plan's module tree names `comparison/` with `mod.rs` and `tests.rs`.
+  - Fixed: a test that `Win(side)` decides one Exception's Conflict and leaves another Exception's combination combined, in one UID (`a_winner_decides_one_exception_and_leaves_another_combined`).
+  - Declined: a test of its own for "an alarm against the times combined": `the_times_against_the_unimplemented_fields_are_combined` changes an alarm. Con: the box's words aren't in a test name.
+  - Declined: `UidVersions::new` keys a side's Exceptions as obtained when its Recurring Event's stored start doesn't read (`.ok()`). It fails safe (the Exceptions show as removed and created, so a Conflict, nothing lost), and an unreadable stored time is the Store Check's to report (216). Con: the Conflict doesn't say why.
+  - Declined: `ical:DURATION` in the times though the box doesn't name it: it is a managed property's other form, and the reader keeps no such entry today. Con: a name no test reaches through the reader.
+  - Declined: the repeated destructuring of `ByGroup` and `EventFields`: it is the compiler's check the ticket asks for.
+  - Follow-up: 218, an edited description drops its HTML (122's rule lives only in the patching writer, which 187 deletes).
+  - New terms, besides Occurrence Outcome and By Group above: **Grouped** (new term, `Grouped`), the managed fields split by Field Group; **Times** (new term, `Times`), the managed fields of the times group; **Description** (new term, the struct `Description`), the description text with whether it is HTML; **Entry Group** (new term, `entry_group`), the Field Group of one entry of the Unimplemented Fields. "Canonical form" of an Event Version Content is the layout plan's and ADR 0018's; `GLOSSARY.md` avoids it only as a name for the Normal Form.
+  - Conformance Breaches: none added or ended by the review.
