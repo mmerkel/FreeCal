@@ -28,7 +28,7 @@ Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall 
 
 - [ ] The `conflict` and `conflict_event` tables, cascading with the Incoming Sync Snapshot, with the insert trigger and the resolved time set once
 - [ ] The Incoming Sync writes a Conflict with its Conflict Events and Last Agreed Versions for each Event it replaces, in its Database Transaction, and nowhere else
-- [ ] An open Conflict older than 90 days keeps its Incoming Sync Snapshot, the User's Version and its Last Agreed Versions; deleting an open Conflict is refused by the trigger
+- [ ] An open Conflict older than 90 days keeps its Incoming Sync Snapshot, the User's Version and its Last Agreed Versions; deleting an open Conflict is refused by the trigger, except in the removal of its Calendar, which deletes its Conflicts (ADR 0018, "Removing a Calendar")
 - [ ] The core lists the open Conflicts of all Calendars or of one, each with its User's Version, Server Version and kind
 - [ ] "Sync status changed" carries a Calendar's number of open Conflicts, and the overall status is Conflict while any Calendar has one (ticket 15's box ticked)
 - [ ] "Conflicts changed" and "Occurrences changed" are sent when a Conflict arises, is resolved or is dropped
@@ -45,3 +45,4 @@ Spec: US-33, US-71, US-77; "Core application interface"; "Signals"; the overall 
 - 2026-11-22: The Last Agreed Version is no longer listed: the Server Event Replacement doesn't name it (point 4 of `.scratch/freecal-v1/critiques-2.md`, ADR 0019); ticket 135 compares the two sides instead.
 - 2026-11-22: From point 4 of `.scratch/freecal-v1/critiques-2.md` (ADR 0018): this ticket adds the open Conflict's root, the Resolution's edge and the trigger guarding an open Conflict to ticket 148's rule.
 - 2026-11-26: Rewritten from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): the `resolution` table goes; a Conflict is a row of `conflict` with a Conflict Event (`GLOSSARY.md`) per single Event, which stores the Last Agreed Version again, now that one row per single Event can name the several Event Versions of a Recurring Event. The Incoming Sync writes them here, not ticket 152, and a resolved Conflict stays with its Incoming Sync Snapshot.
+- 2026-11-28: Reworded from the grilling on point 5 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018, 0020): removing a Calendar deletes its Conflicts, open ones too; the trigger lets that through.

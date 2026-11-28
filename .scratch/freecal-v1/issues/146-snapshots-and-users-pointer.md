@@ -10,7 +10,8 @@
 - **Old rows stay:** ticket 145's deletion of unmarked rows goes. Nothing is dropped until ticket 148.
 - **The Calendar History's module** (`core/src/calendar_history/`): the functions that write Event Versions, Snapshots and marks are visible only to it. The Write Permissions stay until their own ticket; the Change Journal's code calls into the module.
 - **The Store Check** (ADR 0018, "Where the invariants are recorded"): a function beside the schema in which each invariant is a named query with one line stating the rule and its ADR, reporting every violation. The test support (`core/tests/support`) runs it after each scenario of every test through the core interface. Its queries now: `end` is after `begin`; every Snapshot has an Event Version beginning or ending with it. It states that it doesn't cover ADR 0019's invariant on the Incoming Sync. Foreign keys and indexes carry a comment naming their rule.
-- Deleting a Calendar removes its Event Versions; a Snapshot left with none is removed with them.
+- Deleting a Calendar removes its Event Versions; a Snapshot left with none is removed with them (ADR 0018, "Removing a Calendar").
+- An action of the user records which it was: create, edit, delete or move (ADR 0018, "Snapshots"), as an Undo needs to know a move after one of its Calendars was removed (ticket 147).
 - No change to the core interface or to what the user sees.
 
 Spec: US-81; "Calendar History"; "Local Store". ADR 0018.
@@ -37,3 +38,4 @@ Spec: US-81; "Calendar History"; "Local Store". ADR 0018.
 - 2026-11-22: Reworded from the grilling on point 4 of `.scratch/freecal-v1/critiques.md` (ADR 0018): ticket 155 no longer holds the First Sync in memory; a server Calendar stays stored when added, and only the glue for an unfinished First Sync goes with 155.
 - 2026-11-22: `end` is `ON DELETE CASCADE`, not `RESTRICT` (point 4 of `.scratch/freecal-v1/critiques-2.md`, ADR 0018 "Keeping and dropping"): what is kept is decided for Snapshots, and a kept Snapshot keeps the Event Versions ending with it.
 - 2026-11-26: Reworded from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): Server Event Replacements are no longer Snapshots of their own.
+- 2026-11-28: Reworded from the grilling on point 5 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018, 0020): the Snapshot of an action of the user records which it was, a move among them.

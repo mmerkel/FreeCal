@@ -119,7 +119,7 @@ One Event at one moment: the fields FreeCal manages and its Unimplemented Fields
 _Avoid_: Version (on its own), revision, snapshot (a Snapshot is a whole Calendar's state)
 
 **Undo**:
-A Snapshot that takes back one earlier Snapshot: what that Snapshot changed goes back to how it was before, and everything else stays. It is refused whole when something it would take back has changed since. A redo is an Undo of an Undo.
+A Snapshot that takes back one earlier Snapshot: what that Snapshot changed goes back to how it was before, and everything else stays. It takes back every Event it can; where it would leave some out, because something it would take back has changed since or their Calendar is read-only or removed, it asks first. A redo is an Undo of an Undo.
 _Avoid_: Reverting Undo, revert, rollback
 
 **Undo History**:
