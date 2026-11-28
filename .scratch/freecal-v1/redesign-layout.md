@@ -2,16 +2,18 @@
 
 The target layout of `core/` (and what `src-tauri/` and the window follow) for tickets 173 to 214 of `redesign-plan.md`: modules and files, main types and tables, the seams where `/tdd` tests sit, and the tests through the core interface that survive the whole redesign. Written by B2 (2026-11-28) from a map of the code at commit `9090586`. A target that tickets may amend, not a contract: a ticket that departs from it edits the section here and adds `(changed in ticket NN: <why>)` (see `.claude/skills/implement-redesign/SKILL.md`).
 
-Pointers are `file:line` at `9090586`, relative to `core/src/` unless they say otherwise. They locate. Read only the lines you change. Names marked **(new term)** are proposals for the user's approval (CLAUDE.md, "Talking to the user"); until approved, tickets use them as written and list them in their report.
+Pointers are `file:line` at `9090586`, relative to `core/src/` unless they say otherwise. They locate. Read only the lines you change. The names under "New terms" are approved; a ticket that needs another proposes it as CLAUDE.md says.
 
-## New terms proposed
+## New terms
 
-- **Version Content** (new term): what one Event Version holds that the comparison reads: the managed fields and the Unimplemented Fields, without its row ID, Calendar or Snapshots. Two Event Versions are equal when their Version Contents' canonical forms are (ADR 0018, "Event Versions"). Type `VersionContent`.
-- **UID Comparison** (new term): the comparison per Occurrence, three ways and by Field Group (ADR 0019, "Whether the server changed"; ADR 0020, "Where both changed"), run over every single Event of one UID at once, with the outcome for that UID. Incoming Sync and Undo both call it. Module `comparison`, function `compare_uid`.
-- **Snapshot Writer** (new term): the handle through which one Database Transaction makes one Snapshot: Event Versions begin and end through it, and the Snapshot row is written with its first change, never for a step that changes nothing. It replaces the Journal Transaction as the only writer of the user's side. Type `SnapshotWriter`.
-- **Incoming Sync Plan** (new term): what one Incoming Sync will write, decided from the fetched Server Objects, the versions with the server's mark and the current ones, before anything is written: per UID, follow the server, keep the user's, agree, Server Event Merge or Server Event Replacement, and the marks and ETags to move. Type `IncomingSyncPlan`.
+Approved by the user on 2026-11-28, with their renames: Event Version Content, Event Comparison, and `MovedBetweenCalendars` beside `Moved`. Not yet in `GLOSSARY.md`.
+
+- **Event Version Content**: what one Event Version holds that the comparison reads: the managed fields and the Unimplemented Fields, without its row ID, Calendar or Snapshots. Two Event Versions are equal when their Event Version Contents' canonical forms are (ADR 0018, "Event Versions"). Type `EventVersionContent`.
+- **Event Comparison**: the comparison per Occurrence, three ways and by Field Group (ADR 0019, "Whether the server changed"; ADR 0020, "Where both changed"), run over every single Event of one UID at once, with the outcome for that UID. Incoming Sync and Undo both call it. Module `comparison`, function `compare_event`.
+- **Snapshot Writer**: the handle through which one Database Transaction makes one Snapshot: Event Versions begin and end through it, and the Snapshot row is written with its first change, never for a step that changes nothing. It replaces the Journal Transaction as the only writer of the user's side. Type `SnapshotWriter`.
+- **Incoming Sync Plan**: what one Incoming Sync will write, decided from the fetched Server Objects, the versions with the server's mark and the current ones, before anything is written: per UID, follow the server, keep the user's, agree, Server Event Merge or Server Event Replacement, and the marks and ETags to move. Type `IncomingSyncPlan`.
 - **Sides** of the comparison, as type names: `Base` (what both last agreed on: the versions with the server's mark, or what a taken-back Snapshot left), `Ours` (the current versions on the user's side) and `Theirs` (the fetched versions, or the versions a taken-back Snapshot ended). Proposed as plain names inside `comparison`, not glossary entries.
-- **`UserAction` values**: today `Moved` means a drag or resize in the grid (`journal/mod.rs:119`), and ADR 0018's "move" is to another Calendar. Proposed: `Rescheduled` for the drag (as `Core::reschedule_event` already says) and `Moved` for the move between Calendars, in 180, which first needs the move (ADR 0020, "A move with one side that can't be written").
+- **`UserAction` values**: `Moved` stays a drag or resize in the grid (`journal/mod.rs:119`), with a doc comment saying it isn't ADR 0018's move; `MovedBetweenCalendars` is added for the move to another Calendar, in 180, which first needs it (ADR 0020, "A move with one side that can't be written").
 
 ## Today's code, in brief
 
@@ -20,7 +22,7 @@ Pointers are `file:line` at `9090586`, relative to `core/src/` unless they say o
 | Core interface `Core` | `lib.rs:90`, `impl` :112; events :805–973, undo and journal :1013–1057, `record` :1058, `after_local_change` :1099 | throughout |
 | Interface types for TypeScript | each module's `#[cfg_attr(test, derive(ts_rs::TS))]`; collected in `typescript.rs:33` | 174, 180–182, 187, 190, 194 |
 | `EventId` | `event/when.rs:18`; 21 files (13 in `core/src`, 7 in `core/tests`, `src-tauri/src/main.rs`) | 174 (interface), 178 (inside) |
-| Managed fields | `EventFields` `event/when.rs:249` (no `PartialEq`); `StoredEvent` `store/mod.rs:32`; `RecurrenceId` `event/recurrence_id.rs:22`, compared through `NormalForm` :92 | 177 (`VersionContent`) |
+| Managed fields | `EventFields` `event/when.rs:249` (no `PartialEq`); `StoredEvent` `store/mod.rs:32`; `RecurrenceId` `event/recurrence_id.rs:22`, compared through `NormalForm` :92 | 177 (`EventVersionContent`) |
 | Change Journal | `journal/mod.rs` (1337): `record` :202, `JournalTransaction` :338 (`create` :369, `replace` :384, `delete` :403, `put_back` :418, `writable` :458), `record_journal_event_modification` :486, `hash` :579; `TransactionOrigin` :98, `UserAction` :119 | 178–182 |
 | Undo per Event, Dangerous Undo | `journal/undo.rs` (664): `undo` :145, `Plan` :214, `danger` :281, `Planner` :505 | 180–182 |
 | Listings, Event History | `journal/list.rs` (311): `event_history` :256 | 182, 184 |
@@ -49,7 +51,7 @@ No Conflict code exists today: the Sender's `SendFailure::ServerChanged` (`sende
 core/src/
   lib.rs                    Core: the interface; Events by Combined Event Key (174)
   unimplemented.rs          the tree of Unimplemented Fields, canonical form, prefixes per Provider (175)
-  comparison.rs             VersionContent, Field Groups, compare_uid (177)
+  comparison.rs             EventVersionContent, Field Groups, compare_event (177)
   history/                  the Calendar History: the only writer of the user's side (178–185)
     mod.rs                  SnapshotWriter, Snapshot origins, reading a Snapshot's state
     versions.rs             SQL of event_version and snapshot (moved from store/sql/journal.rs)
@@ -68,7 +70,7 @@ core/src/
   ical/                     the CalDAV reader and writer (175, 176): read.rs, write.rs, roundtrip.rs (197)
   sync/
     mod.rs                  sync_calendar: one sync activity per Calendar (193)
-    plan.rs                 IncomingSyncPlan from compare_uid (189)
+    plan.rs                 IncomingSyncPlan from compare_event (189)
     caldav/incoming.rs      fetch; Full Fetch; Mark Reconciliation (189, 194, 195)
     caldav/sender.rs        Outgoing Sync from the Current-Version Marks (192, 193)
     caldav/mod.rs           Known Server Resources, Ignored Resources (stays)
@@ -84,22 +86,22 @@ Decision 8 of the plan asks for "design it twice" on three interfaces. Each name
 
 ### The store of Event Versions: `SnapshotWriter`
 
-- **A, a handle like today's Journal Transaction.** `history::write(core, origin, |w| …)` opens the Database Transaction and gives a `SnapshotWriter` with `put(key, VersionContent)`, `remove(key)`, `current(key)` and the reads the edit needs; the Snapshot row is inserted with the first change; nothing changed means no Snapshot. `event/scope.rs` and `import/` keep their shape, calling `w` where they call the `JournalTransaction` today.
-- **B, a list of changes.** Callers compute every change up front and call `history::apply(origin, Vec<(CombinedEventKey, Option<VersionContent>)>)`.
+- **A, a handle like today's Journal Transaction.** `history::write(core, origin, |w| …)` opens the Database Transaction and gives a `SnapshotWriter` with `put(key, EventVersionContent)`, `remove(key)`, `current(key)` and the reads the edit needs; the Snapshot row is inserted with the first change; nothing changed means no Snapshot. `event/scope.rs` and `import/` keep their shape, calling `w` where they call the `JournalTransaction` today.
+- **B, a list of changes.** Callers compute every change up front and call `history::apply(origin, Vec<(CombinedEventKey, Option<EventVersionContent>)>)`.
 - **Chosen: A.** B is purer, but the scope edits read and write in turns (`Loaded::write_paired`), and rewriting them all is scope no ticket carries. A keeps one writer for every origin, the way the Journal Transaction is today. Con: the order of `put`s inside one Snapshot is free, so the Store Check (not the type) catches a key written twice in one Snapshot.
 - Visibility: `SnapshotWriter`'s SQL lives in `history/versions.rs`, `pub(super)`; nothing outside `history` writes `event_version`, `snapshot` or `conflict` (ADR 0018, "Who may write"). Incoming Sync gets its own handle, `IncomingSyncWriter` (189), because only it moves the server's marks and writes Conflicts: it has no operation that moves marks alone.
 
-### The comparison: `compare_uid`
+### The comparison: `compare_event`
 
 - **A, per single Event.** `compare(base, ours, theirs) -> Outcome` per Occurrence, with the caller handling a Recurring Event against its Exceptions.
-- **B, per UID.** `compare_uid(base: &UidVersions, ours: &UidVersions, theirs: &UidVersions, on_conflict: OnConflict) -> UidOutcome`, where `UidVersions` maps a recurrence ID (`NormalForm`) to a `VersionContent`, and `OnConflict` is `Report` or `Win(Side)` ("… all over the later changes", ADR 0020). The rule that a change to the Recurring Event counts for every Occurrence, and that a Conflict covers the whole UID, live inside.
+- **B, per UID.** `compare_event(base: &UidVersions, ours: &UidVersions, theirs: &UidVersions, on_conflict: OnConflict) -> UidOutcome`, where `UidVersions` maps a recurrence ID (`NormalForm`) to a `EventVersionContent`, and `OnConflict` is `Report` or `Win(Side)` ("… all over the later changes", ADR 0020). The rule that a change to the Recurring Event counts for every Occurrence, and that a Conflict covers the whole UID, live inside.
 - **Chosen: B.** Both callers (Incoming Sync and Undo) need the UID-level rules (ADR 0019: "a Conflict on the whole Recurring Event, never combined"), and with A each would rewrite them. Con: the simplest test still builds three maps; 177 adds a helper for one single Event.
 - `UidOutcome` (177 settles the variants): per recurrence ID, the version to make current (`Theirs`, `Ours`, a combination) or none, or `Conflict` for the UID. One exhaustive function `field_group(field) -> FieldGroup` over every managed field, without a catch-all (ADR 0019).
-- 177 needs neither 178 nor the store: `VersionContent` is a value type (managed fields + 175's tree), and 178's row stores it. `EventFields` has no `PartialEq` (`RecurrenceId` hasn't one), so `VersionContent` compares through `NormalForm` and the tree's canonical form, never by `derive`.
+- 177 needs neither 178 nor the store: `EventVersionContent` is a value type (managed fields + 175's tree), and 178's row stores it. `EventFields` has no `PartialEq` (`RecurrenceId` hasn't one), so `EventVersionContent` compares through `NormalForm` and the tree's canonical form, never by `derive`.
 
 ### The Incoming Sync: `IncomingSyncPlan`
 
-- **A, plan then write.** Inside the Database Transaction, read the server's marks and the current versions of the fetched UIDs, compute a pure `IncomingSyncPlan` with `compare_uid`, then `IncomingSyncWriter` writes it.
+- **A, plan then write.** Inside the Database Transaction, read the server's marks and the current versions of the fetched UIDs, compute a pure `IncomingSyncPlan` with `compare_event`, then `IncomingSyncWriter` writes it.
 - **B, write per resource.** The writer compares and writes as each fetched resource comes.
 - **Chosen: A.** The plan is a seam the tests reach without a server: each case of ADR 0019's list (server alone, merge, replacement, agree, untrusted base) becomes a unit test of `sync/plan.rs`, and the Radicale tests check the wiring only. Con: two shapes for one step; the plan's types are internal and never reach the interface.
 - Both are in one Database Transaction with the fetch's outcome (ADR 0019, "The invariant"); the fetch itself runs before it, as today (`incoming.rs:84`).
@@ -155,9 +157,9 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 
 **179.** The Snapshot's origin and the line's rules: the insert and update triggers on `event_version`; `TransactionOrigin` (`journal/mod.rs:98`) becomes the Snapshot's origin type in `history/mod.rs`, First Sync pages write Incoming Sync Snapshots. `store/check.rs`, the Store Check, and the Harness running it. The core's part of removing a Calendar (`Core::remove_calendar`, `lib.rs` :693–804; `delete_local_copy` :753) deletes its Event Versions and empty Snapshots.
 
-**180.** `history/undo.rs`: `Core::undo_snapshot`, `Core::ctrl_z`, `Core::redo` (names for 180 to settle), using `compare_uid` with `Base` = what the taken-back Snapshot left, `Ours` = current, `Theirs` = what it ended. New interface types, added to `typescript.rs:33` beside the old ones; the window doesn't call them until 183. Today's `Core::undo` (`lib.rs:1013`) and `journal/undo.rs` stay until 182.
+**180.** `history/undo.rs`: `Core::undo_snapshot`, `Core::ctrl_z`, `Core::redo` (names for 180 to settle), using `compare_event` with `Base` = what the taken-back Snapshot left, `Ours` = current, `Theirs` = what it ended. New interface types, added to `typescript.rs:33` beside the old ones; the window doesn't call them until 183. Today's `Core::undo` (`lib.rs:1013`) and `journal/undo.rs` stay until 182.
 
-**181.** `history/undo.rs` grows the left-out Events (`LeftOut { key, reason }`), limits to one UID (`snapshot.undo_uid`), moves with one side unwritable (the Snapshot's `UserAction::Moved`), and `OnConflict::Win`.
+**181.** `history/undo.rs` grows the left-out Events (`LeftOut { key, reason }`), limits to one UID (`snapshot.undo_uid`), moves with one side unwritable (the Snapshot's `UserAction::MovedBetweenCalendars`), and `OnConflict::Win`.
 
 **182.** Delete `journal/` (`mod.rs`, `undo.rs`, `list.rs`), `store/sql/journal.rs`'s journal parts, the journal tables, `Core::undo`/`change_journal`/`journal_transaction_events`/`undo_history` (`lib.rs:1013–1057`) and their commands (`src-tauri/src/main.rs:518–553`), the window's Change Journal dialog and History button. **Unsent Changes until 192** (the plan's open question): the write is today one call in `record_journal_event_modification` (`journal/mod.rs:497–509`, about 12 lines), computed from the previous and new versions, not from journal rows. 182 moves it into the `SnapshotWriter`: each Event Version begun or ended by a Snapshot whose origin isn't an Incoming Sync adds its Combined Event Key to `unsent_change`. `sending`/`sent`/`not_sent` (`journal/mod.rs:284–335`, about 50 lines) move to `sync/caldav/sender.rs` and compare the Event Versions' row IDs in place of the hash, since a row never changes. Little code, moved rather than written: the exception to decision 1 holds, and 192 deletes it with the table.
 
@@ -195,7 +197,7 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 
 ### P4
 
-**198.** `sync/plan.rs`: the merge branch, with `compare_uid`'s combination; zero-length Event Versions through `IncomingSyncWriter`.
+**198.** `sync/plan.rs`: the merge branch, with `compare_event`'s combination; zero-length Event Versions through `IncomingSyncWriter`.
 
 **199.** `history/conflict.rs`: what each side changed, per Field Group, from `last_agreed`.
 
