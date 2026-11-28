@@ -38,3 +38,4 @@ Spec: "Local Store"; "Untrusted content". ADR 0017. Layout: "The target module t
     7. RFC violations are logged at info level, one line per text with each kind once. Con: the Incoming Sync logs a resource again each time it changes.
   - **New terms:** **RFC Violation** (`RfcViolation`, new term): a breach of RFC 5545 the reader notices in a text, returned for the caller's Log. **Server Texts** (`ical/server_texts.rs`, new term): real servers' and clients' iCalendar texts the tests of the reader and writer read.
   - Switched-off tests: none off, none on (the plan names none for 175).
+- 2026-11-28: The user approved the new terms (RFC Violation, Server Texts) and decisions 1 to 7.
