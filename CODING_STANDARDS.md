@@ -21,7 +21,7 @@ The rules a review checks a diff against. They are judgement calls; mechanical r
 
 Every stored field is untrusted, whatever its origin (spec: "Untrusted content" in `.scratch/freecal-v1/spec.md`):
 
-- `.ics`, XML and SQL are produced only through a library's writer or bound parameters.
+- `.ics`, XML and SQL are produced only through a library's writer or bound parameters; `.ics` also through FreeCal's iCalendar writer (`core/src/ical/write/`), which checks every name and value it writes. Nothing else builds them as strings.
 - The CSP never gets looser for scripts or remote content.
 - Links open in the system browser through the shell (`openLink`), never in the window.
 - A field that gains a new way of being shown, such as links or markup pieces, gets a matching payload and `expected` entry in `fixtures/hostile-event.json`.
