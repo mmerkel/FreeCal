@@ -946,7 +946,7 @@ impl Core {
         let (combined_event_key, unsent_change) = {
             let store = self.store();
             let opened = Opened::load_row(&*store, occurrence.id)?;
-            (opened.key(), opened.unsent_change(&store)?)
+            (opened.combined_event_key(), opened.unsent_change(&store)?)
         };
         Ok(Changed {
             journal_transaction: edited.journal_transaction,

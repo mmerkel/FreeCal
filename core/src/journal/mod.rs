@@ -495,11 +495,8 @@ impl JournalTransaction<'_> {
                 self.calendars.push(event.calendar_id);
             }
             if !self.origin.is_incoming_sync() {
-                let combined_event_key = CombinedEventKey {
-                    calendar_id: event.calendar_id,
-                    uid: uid.to_owned(),
-                    recurrence_id: event.fields.recurrence_id.clone(),
-                };
+                let combined_event_key =
+                    CombinedEventKey::of(event.calendar_id, uid, &event.fields);
                 self.database_transaction.add_unsent_change(
                     WRITE_PERMISSION,
                     &combined_event_key,

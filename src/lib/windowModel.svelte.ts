@@ -54,6 +54,12 @@ interface Directory {
 
 /** The Event whose details are open, as the window told the model (Open Details, new term). */
 interface OpenDetails {
+  /**
+   * The window's only copy of the open Event's Combined Event Key: the one
+   * the details were opened with until a read answers the Event, then the
+   * key the core answered last, which a change of its recurrence ID's
+   * written form may have changed.
+   */
   combinedEventKey: CombinedEventKey;
   /** Runs when the Event can't be read any more, as when it was deleted. */
   ongone: () => void;
@@ -87,7 +93,7 @@ export class WindowModel {
   #readFailure = $state<string>();
   #range: VisibleRange | undefined;
   #occurrences = $state<Occurrence[]>([]);
-  #details: OpenDetails | undefined;
+  #details = $state<OpenDetails>();
   #opened = $state<Event>();
 
   readonly #directoryRead = new NewestRead();
@@ -157,6 +163,10 @@ export class WindowModel {
   /** The Event whose details are open, as last read. */
   get opened() {
     return this.#opened;
+  }
+  /** The Combined Event Key of the Event whose details are open, as the core answered it last. */
+  get openedCombinedEventKey() {
+    return this.#details?.combinedEventKey;
   }
 
   /**
@@ -388,7 +398,9 @@ export class WindowModel {
       await this.#eventRead.run(
         () => this.#core.event(details.combinedEventKey),
         (event) => {
-          if (this.#details === details) this.#opened = event;
+          if (this.#details !== details) return;
+          this.#opened = event;
+          details.combinedEventKey = event.combinedEventKey;
         },
       );
     } catch {

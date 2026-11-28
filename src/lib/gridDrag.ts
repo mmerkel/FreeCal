@@ -11,7 +11,7 @@ export interface GridEvent {
   allDay: boolean;
   start: Date | null;
   end: Date | null;
-  /** The grid gives each Occurrence its key, `recurrenceId` and `when` here. */
+  /** The grid gives each Occurrence its Combined Event Key, `recurrenceId` and `when` here. */
   extendedProps: Record<string, unknown>;
 }
 
@@ -23,16 +23,17 @@ export interface Reschedule {
 }
 
 /**
- * The ID FullCalendar keeps for an Occurrence: its Event's key with its
- * recurrence ID, so that each Occurrence is told apart. The only place the
- * window makes a string of a key; nothing reads it back.
+ * The ID FullCalendar keeps for an Occurrence: its Event's Combined Event
+ * Key with its recurrence ID, so that each Occurrence is told apart. The
+ * only place the window makes a string of a Combined Event Key; nothing
+ * reads it back.
  */
 export function gridId(occurrence: Occurrence): string {
   return JSON.stringify([occurrence.combinedEventKey, occurrence.recurrenceId]);
 }
 
-/** The Event of an Occurrence; the grid gives its key in `extendedProps`. */
-export function keyOf(event: Pick<GridEvent, 'extendedProps'>): CombinedEventKey {
+/** The Combined Event Key of an Occurrence's Event; the grid gives it in `extendedProps`. */
+export function combinedEventKeyOf(event: Pick<GridEvent, 'extendedProps'>): CombinedEventKey {
   return event.extendedProps.combinedEventKey as CombinedEventKey;
 }
 
@@ -70,5 +71,5 @@ function reschedule(event: GridEvent, oldEvent: GridEvent, startBy: Shift, endBy
     startBy,
     endBy,
   });
-  return { combinedEventKey: keyOf(event), recurrenceId: recurrenceIdOf(event), when };
+  return { combinedEventKey: combinedEventKeyOf(event), recurrenceId: recurrenceIdOf(event), when };
 }

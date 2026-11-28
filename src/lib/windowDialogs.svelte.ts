@@ -20,11 +20,13 @@ import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
 
 /**
  * What is open over the grid, if anything. The Event of `details` and
- * `editing` is the selected one, which the grid marks. `recurrenceId` says
- * which Occurrence of a Recurring Event was opened, none for the whole.
+ * `editing` is the selected one, which the grid marks; the Window Model
+ * holds the Combined Event Key of the Event whose details are open.
+ * `recurrenceId` says which Occurrence of a Recurring Event was opened,
+ * none for the whole.
  */
 type Open =
-  | { kind: 'details'; combinedEventKey: CombinedEventKey; recurrenceId: string | null }
+  | { kind: 'details'; recurrenceId: string | null }
   | {
       kind: 'editing';
       combinedEventKey: CombinedEventKey;
@@ -188,7 +190,8 @@ export class WindowDialogs {
   /** The Event whose details or editor are open, which the grid marks. */
   get selectedEventKey() {
     const open = this.#open;
-    return open?.kind === 'details' || open?.kind === 'editing' ? open.combinedEventKey : undefined;
+    if (open?.kind === 'details') return this.#model.openedCombinedEventKey;
+    return open?.kind === 'editing' ? open.combinedEventKey : undefined;
   }
   get selectedRecurrenceId() {
     const open = this.#open;
@@ -199,8 +202,10 @@ export class WindowDialogs {
   /** The Occurrence of a Recurring Event whose details are open, as the grid shows it. */
   get openedOccurrence() {
     const open = this.#open;
-    if (open?.kind !== 'details' || open.recurrenceId === null) return undefined;
-    return this.#occurrence(open.combinedEventKey, open.recurrenceId);
+    const combinedEventKey = this.#model.openedCombinedEventKey;
+    if (open?.kind !== 'details' || open.recurrenceId === null || !combinedEventKey)
+      return undefined;
+    return this.#occurrence(combinedEventKey, open.recurrenceId);
   }
   /** The Occurrence in view of the Event with key `combinedEventKey` with `recurrenceId`. */
   #occurrence(combinedEventKey: CombinedEventKey, recurrenceId: string | null) {
@@ -251,7 +256,7 @@ export class WindowDialogs {
   /** Opens the details of the Event with key `combinedEventKey`, or of its Occurrence `recurrenceId`. */
   openDetails(combinedEventKey: CombinedEventKey, recurrenceId: string | null = null) {
     this.#failure = undefined;
-    this.#show({ kind: 'details', combinedEventKey, recurrenceId });
+    this.#show({ kind: 'details', recurrenceId });
     this.#model.openDetails(combinedEventKey, () => this.close());
   }
 
@@ -384,15 +389,17 @@ export class WindowDialogs {
 
   /** Deletes the Event whose details are open, all its Occurrences. */
   async remove() {
-    if (this.#open?.kind !== 'details') return;
-    const { combinedEventKey } = this.#open;
+    const combinedEventKey = this.#model.openedCombinedEventKey;
+    if (this.#open?.kind !== 'details' || !combinedEventKey) return;
     await this.#deleting(() => this.#core.deleteEvent(combinedEventKey));
   }
 
   /** Deletes the Occurrence of a Recurring Event whose details are open. */
   async removeOccurrence() {
-    if (this.#open?.kind !== 'details' || this.#open.recurrenceId === null) return;
-    const { combinedEventKey, recurrenceId } = this.#open;
+    const combinedEventKey = this.#model.openedCombinedEventKey;
+    if (this.#open?.kind !== 'details' || this.#open.recurrenceId === null || !combinedEventKey)
+      return;
+    const { recurrenceId } = this.#open;
     await this.#deleting(() => this.#core.deleteOccurrence(combinedEventKey, recurrenceId));
   }
 

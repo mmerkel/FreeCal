@@ -286,11 +286,10 @@ fn listed_journal_event_modification(
         if undone_per_event(modification.origin) {
             UndoTarget::Event {
                 journal_transaction: modification.journal_transaction,
-                combined_event_key: CombinedEventKey {
+                combined_event_key: CombinedEventKey::without_recurrence_id(
                     calendar_id,
-                    uid: modification.uid.clone(),
-                    recurrence_id: None,
-                },
+                    &modification.uid,
+                ),
             }
         } else {
             UndoTarget::JournalTransaction {

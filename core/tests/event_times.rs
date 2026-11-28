@@ -46,7 +46,7 @@ fn utc_instants_from_other_time_zone_rules_are_recomputed_on_opening() {
     harness.arrange_local_store(&format!(
         "UPDATE app_state SET time_zone_rules = '2020a';
          UPDATE event SET start_utc = 0, end_utc = 60 WHERE {};",
-        support::event_row(&call.combined_event_key)
+        harness.event_row(&call.combined_event_key)
     ));
 
     let core = harness.open();

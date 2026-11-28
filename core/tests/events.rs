@@ -622,7 +622,7 @@ fn arrange_html_description(harness: &Harness, key: &CombinedEventKey, html: &st
     harness.arrange_local_store(&format!(
         "UPDATE event SET description = '{}', description_html = 1 WHERE {}",
         html.replace('\'', "''"),
-        support::event_row(key)
+        harness.event_row(key)
     ));
 }
 
@@ -735,7 +735,7 @@ fn an_unreadable_stored_time_is_an_error_not_a_crash() {
         .value;
     harness.arrange_local_store(&format!(
         "UPDATE event SET end_at = '2026-10-05T99:00' WHERE {}",
-        support::event_row(&created.combined_event_key)
+        harness.event_row(&created.combined_event_key)
     ));
 
     assert!(matches!(

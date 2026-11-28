@@ -1639,7 +1639,7 @@ fn an_exception_with_an_unreadable_recurrence_id_is_found_by_its_key() {
         .value;
     harness.arrange_local_store(&format!(
         "UPDATE event SET recurrence_id = 'not a time' WHERE {}",
-        support::event_row(&moved.combined_event_key)
+        harness.event_row(&moved.combined_event_key)
     ));
 
     let alone = on(&core, "2026-10-13");

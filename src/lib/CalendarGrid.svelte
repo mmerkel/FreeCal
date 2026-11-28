@@ -31,7 +31,7 @@
   import { canEdit, whyReadOnly } from './windowModel.svelte';
   import {
     gridId,
-    keyOf,
+    combinedEventKeyOf,
     recurrenceIdOf,
     rescheduleOfDrop,
     rescheduleOfResize,
@@ -247,7 +247,7 @@
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
         if (refused) return;
-        onopenevent?.(keyOf(clicked.event), recurrenceIdOf(clicked.event));
+        onopenevent?.(combinedEventKeyOf(clicked.event), recurrenceIdOf(clicked.event));
       },
       // For a refused drag, which FullCalendar doesn't report.
       eventDidMount: (mounted) => (mounted.el.dataset.occurrence = mounted.event.id),

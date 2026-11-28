@@ -695,8 +695,8 @@ impl Opened {
             .is_some_and(|exception| self.loaded.of_its_own(exception))
     }
 
-    /// The key the window names it by.
-    pub fn key(&self) -> CombinedEventKey {
+    /// The Combined Event Key the window names it by.
+    pub fn combined_event_key(&self) -> CombinedEventKey {
         CombinedEventKey::of(self.loaded.calendar_id, &self.loaded.uid, self.fields())
     }
 
@@ -736,7 +736,7 @@ impl Opened {
         };
         let (repeat, custom_repeat) = rule::repeat_of(repeats);
         Ok(Event {
-            combined_event_key: self.key(),
+            combined_event_key: self.combined_event_key(),
             calendar_id: self.loaded.calendar_id,
             title: fields.title.clone(),
             when: fields.when.to_when(zone)?,

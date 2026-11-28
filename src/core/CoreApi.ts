@@ -129,7 +129,7 @@ export interface CoreApi {
    */
   listOccurrences(from: Temporal.PlainDate, to: Temporal.PlainDate): Promise<Occurrence[]>;
   /** An Event with everything its details and editor show. */
-  event(key: CombinedEventKey): Promise<Event>;
+  event(combinedEventKey: CombinedEventKey): Promise<Event>;
   /**
    * Creates an Event in a writable Calendar. Each change to Events comes
    * back with its Journal Transaction, which undoes it, or `null` when it
@@ -141,14 +141,14 @@ export interface CoreApi {
    * repeat rule left as the Event's `repeat` keeps its stored rule. A
    * Recurring Event changes as a whole, an Exception alone.
    */
-  editEvent(key: CombinedEventKey, draft: EventDraft): Promise<Changed<Event>>;
+  editEvent(combinedEventKey: CombinedEventKey, draft: EventDraft): Promise<Changed<Event>>;
   /**
    * Moves an Event to another time, as a drag or a resize in the grid does,
    * and leaves everything else as it is.
    */
-  rescheduleEvent(key: CombinedEventKey, when: When): Promise<Changed<Event>>;
+  rescheduleEvent(combinedEventKey: CombinedEventKey, when: When): Promise<Changed<Event>>;
   /**
-   * Changes one Occurrence of a Recurring Event, given by its Event's key and
+   * Changes one Occurrence of a Recurring Event, given by its Event's Combined Event Key and
    * `recurrenceId`, in `scope`: alone, with every later one, or with all of
    * them. What the user changed is what differs from the Occurrence as it
    * was. Exceptions in the scope keep what they changed on their own, unless
@@ -156,7 +156,7 @@ export interface CoreApi {
    * Occurrence as it is now.
    */
   editOccurrence(
-    key: CombinedEventKey,
+    combinedEventKey: CombinedEventKey,
     recurrenceId: string,
     scope: Scope,
     exceptionsToo: boolean,
@@ -164,7 +164,7 @@ export interface CoreApi {
   ): Promise<Changed<Occurrence>>;
   /** Moves one Occurrence of a Recurring Event to another time in `scope`, as a drag or a resize does. */
   rescheduleOccurrence(
-    key: CombinedEventKey,
+    combinedEventKey: CombinedEventKey,
     recurrenceId: string,
     scope: Scope,
     exceptionsToo: boolean,
@@ -176,17 +176,23 @@ export interface CoreApi {
    * Occurrence itself: those whose title, location, description or time
    * differs from what the Recurring Event gives them.
    */
-  exceptionCounts(key: CombinedEventKey, recurrenceId: string): Promise<ExceptionCounts>;
+  exceptionCounts(
+    combinedEventKey: CombinedEventKey,
+    recurrenceId: string,
+  ): Promise<ExceptionCounts>;
   /**
    * Deletes an Event; for a Recurring Event or one of its Exceptions, the
    * whole Recurring Event.
    */
-  deleteEvent(key: CombinedEventKey): Promise<Changed<null>>;
+  deleteEvent(combinedEventKey: CombinedEventKey): Promise<Changed<null>>;
   /**
-   * Deletes one Occurrence of a Recurring Event, given by its Event's key and
+   * Deletes one Occurrence of a Recurring Event, given by its Event's Combined Event Key and
    * `recurrenceId`, and leaves the rest of the Recurring Event in place.
    */
-  deleteOccurrence(key: CombinedEventKey, recurrenceId: string): Promise<Changed<null>>;
+  deleteOccurrence(
+    combinedEventKey: CombinedEventKey,
+    recurrenceId: string,
+  ): Promise<Changed<null>>;
   /**
    * Asks the user for an `.ics` or `.zip` file to import through the system's
    * file dialog, with the dialog's `title` and the name of its file `filter`,
@@ -221,7 +227,7 @@ export interface CoreApi {
    * An Event's History: the changes to it, a Recurring Event with its
    * Exceptions, newest first, each with what its Undo undoes.
    */
-  eventHistory(key: CombinedEventKey): Promise<ListedJournalEventModification[]>;
+  eventHistory(combinedEventKey: CombinedEventKey): Promise<ListedJournalEventModification[]>;
   /**
    * What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo History,
    * each step with the user change it is about.

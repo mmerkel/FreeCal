@@ -95,11 +95,8 @@ describe('the Scope Prompt of an edit', () => {
       [sampleEvent.combinedEventKey, recurrenceId, 'thisAndFollowing', true, draft],
     ]);
     expect(dialogs.scopePrompt).toBeUndefined();
-    expect(dialogs.open).toEqual({
-      kind: 'details',
-      combinedEventKey: recurring.combinedEventKey,
-      recurrenceId,
-    });
+    expect(dialogs.open).toEqual({ kind: 'details', recurrenceId });
+    expect(dialogs.selectedEventKey).toBe(recurring.combinedEventKey);
   });
 
   test('Cancel leaves the editor open and saves nothing', async () => {
@@ -140,13 +137,33 @@ describe('the Scope Prompt of an edit', () => {
       ...changedEvent,
       value: { ...sampleEvent, combinedEventKey: moved },
     });
+    core.answer('event', { ...sampleEvent, combinedEventKey: moved });
     core.calls.splice(0);
 
     await dialogs.save(draftOf(dialogs));
     await settled();
 
-    expect(dialogs.open).toMatchObject({ kind: 'details', combinedEventKey: moved });
+    expect(dialogs.open?.kind).toBe('details');
+    expect(dialogs.selectedEventKey).toBe(moved);
     expect(core.callsOf('event')).toContainEqual([moved]);
+  });
+
+  test('the open details follow the key a read answers, as when a sync rewrites a recurrence ID', async () => {
+    const { core, dialogs } = await started();
+    dialogs.openDetails(combinedEventKey('event-3'));
+    await settled();
+    const rewritten = combinedEventKey('event-3-rewritten');
+    core.answer('event', { ...sampleEvent, combinedEventKey: rewritten });
+    core.calls.splice(0);
+
+    core.emit({ kind: 'occurrencesChanged', calendarIds: [sampleEvent.calendarId] });
+    await settled();
+    const selected = dialogs.selectedEventKey;
+    core.answer('deleteEvent', { journalTransaction: null, value: null });
+    await dialogs.remove();
+
+    expect(selected).toBe(rewritten);
+    expect(core.callsOf('deleteEvent')).toEqual([[rewritten]]);
   });
 });
 
@@ -342,12 +359,14 @@ describe('writes', () => {
   test('a failed delete says why and leaves the details open', async () => {
     const { core, dialogs } = await started();
     core.answer('deleteOccurrence', failure({ code: 'localStoreFailed' }));
-    dialogs.openDetails(combinedEventKey('event-3'), recurrenceId);
+    dialogs.openDetails(sampleEvent.combinedEventKey, recurrenceId);
     await settled();
 
     await dialogs.removeOccurrence();
 
-    expect(core.callsOf('deleteOccurrence')).toEqual([[combinedEventKey('event-3'), recurrenceId]]);
+    expect(core.callsOf('deleteOccurrence')).toEqual([
+      [sampleEvent.combinedEventKey, recurrenceId],
+    ]);
     expect(dialogs.failure).toBeTruthy();
     expect(dialogs.open?.kind).toBe('details');
   });

@@ -74,6 +74,28 @@ impl Harness {
             .expect("arrange the Local Store");
     }
 
+    /// An SQL condition on the `event` table that picks the Event Row
+    /// `combined_event_key` names, by its ID, for arranging the Local Store.
+    /// Only test support reads a key's parts, from its serialized form; the
+    /// window treats it as opaque.
+    pub fn event_row(&self, combined_event_key: &CombinedEventKey) -> String {
+        let text = serde_json::to_value(combined_event_key).unwrap();
+        let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
+            serde_json::from_str(text.as_str().unwrap()).unwrap();
+        let path = self.data_dir.path().join("freecal.sqlite3");
+        let id: i64 = rusqlite::Connection::open(path)
+            .and_then(|conn| {
+                conn.query_row(
+                    "SELECT id FROM event
+                     WHERE calendar_id = ?1 AND uid = ?2 AND recurrence_id IS ?3",
+                    rusqlite::params![calendar_id, uid, recurrence_id],
+                    |row| row.get(0),
+                )
+            })
+            .expect("find the Event Row");
+        format!("id = {id}")
+    }
+
     /// Like [`Harness::arrange_local_store`], for SQL the Local Store is
     /// expected to refuse.
     pub fn try_arrange_local_store(&self, sql: &str) -> rusqlite::Result<()> {
@@ -299,21 +321,6 @@ pub fn weekly(end: RepeatEnd) -> Repeat {
         interval: 1,
         end,
     }
-}
-
-/// An SQL condition on the `event` table that picks the Event Row `key`
-/// names, for arranging the Local Store. Only test support reads a key's
-/// parts, from its serialized form; the window treats it as opaque.
-pub fn event_row(key: &CombinedEventKey) -> String {
-    let text = serde_json::to_value(key).unwrap();
-    let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
-        serde_json::from_str(text.as_str().unwrap()).unwrap();
-    let quoted = |text: &str| format!("'{}'", text.replace('\'', "''"));
-    format!(
-        "calendar_id = {calendar_id} AND uid = {} AND recurrence_id IS {}",
-        quoted(&uid),
-        recurrence_id.as_deref().map_or("NULL".to_owned(), quoted),
-    )
 }
 
 /// Yoga on Mondays from 5 October 2026, 18:00 to 19:00 in Berlin.

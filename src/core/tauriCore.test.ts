@@ -140,14 +140,14 @@ test('the Event commands pass their arguments under the names the shell expects'
 
   expect(invoked).toEqual([
     ['list_occurrences', { from: '2026-09-28', to: '2026-11-09' }],
-    ['event', { key: combinedEventKey('event-7') }],
+    ['event', { combinedEventKey: combinedEventKey('event-7') }],
     ['create_event', { draft }],
-    ['edit_event', { key: combinedEventKey('event-7'), draft }],
-    ['reschedule_event', { key: combinedEventKey('event-7'), when: draft.when }],
+    ['edit_event', { combinedEventKey: combinedEventKey('event-7'), draft }],
+    ['reschedule_event', { combinedEventKey: combinedEventKey('event-7'), when: draft.when }],
     [
       'edit_occurrence',
       {
-        key: combinedEventKey('event-7'),
+        combinedEventKey: combinedEventKey('event-7'),
         recurrenceId: '2026-10-12T09:00:00',
         scope: 'all',
         exceptionsToo: true,
@@ -157,18 +157,21 @@ test('the Event commands pass their arguments under the names the shell expects'
     [
       'reschedule_occurrence',
       {
-        key: combinedEventKey('event-7'),
+        combinedEventKey: combinedEventKey('event-7'),
         recurrenceId: '2026-10-12T09:00:00',
         scope: 'this',
         exceptionsToo: false,
         when: draft.when,
       },
     ],
-    ['exception_counts', { key: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' }],
-    ['delete_event', { key: combinedEventKey('event-7') }],
+    [
+      'exception_counts',
+      { combinedEventKey: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' },
+    ],
+    ['delete_event', { combinedEventKey: combinedEventKey('event-7') }],
     [
       'delete_occurrence',
-      { key: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' },
+      { combinedEventKey: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' },
     ],
     ['open_link', { url: 'https://example.com' }],
   ]);
@@ -199,7 +202,7 @@ test('the import commands pass their arguments under the names the shell expects
     ['undo', { target: { kind: 'journalTransaction', id: 4 }, approved: null }],
     ['change_journal', {}],
     ['journal_transaction_events', { id: 4 }],
-    ['event_history', { key: combinedEventKey('event-3') }],
+    ['event_history', { combinedEventKey: combinedEventKey('event-3') }],
     ['undo_history', {}],
   ]);
 });

@@ -279,7 +279,7 @@ fn a_sync_replaces_a_changed_occurrence_whose_recurrence_id_is_written_different
     // Another form of the same time, as a stored field may have it.
     synced.harness.arrange_local_store(&format!(
         "UPDATE event SET recurrence_id = '2026-10-12T8:0:0' WHERE {}",
-        support::event_row(&id)
+        synced.harness.event_row(&id)
     ));
     synced.put("weekly", weekly("Moved again"));
 

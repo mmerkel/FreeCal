@@ -31,8 +31,8 @@ pub enum UndoTarget {
     /// One Event of an import's or an Incoming Sync's Journal Transaction,
     /// with the Event Rows of its UID that the Journal Transaction changed
     /// too: a Recurring Event with its Exceptions. As the UID goes whole, the
-    /// listings name it by the key of its Event that isn't an Exception, and
-    /// only the key's UID counts.
+    /// listings name it by the Combined Event Key of its Event that isn't an
+    /// Exception, and only that key's UID counts.
     #[serde(rename_all = "camelCase")]
     Event {
         journal_transaction: JournalTransactionId,

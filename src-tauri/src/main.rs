@@ -350,8 +350,8 @@ fn list_occurrences(
 }
 
 #[tauri::command]
-fn event(core: State<Core>, key: CombinedEventKey) -> CommandResult<Event> {
-    core.event(&key).map_err(ErrorCode::from)
+fn event(core: State<Core>, combined_event_key: CombinedEventKey) -> CommandResult<Event> {
+    core.event(&combined_event_key).map_err(ErrorCode::from)
 }
 
 #[tauri::command]
@@ -362,69 +362,87 @@ fn create_event(core: State<Core>, draft: EventDraft) -> CommandResult<Changed<E
 #[tauri::command]
 fn edit_event(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     draft: EventDraft,
 ) -> CommandResult<Changed<Event>> {
-    core.edit_event(&key, draft).map_err(ErrorCode::from)
+    core.edit_event(&combined_event_key, draft)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn reschedule_event(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     when: When,
 ) -> CommandResult<Changed<Event>> {
-    core.reschedule_event(&key, when).map_err(ErrorCode::from)
+    core.reschedule_event(&combined_event_key, when)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn edit_occurrence(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     recurrence_id: String,
     scope: Scope,
     exceptions_too: bool,
     draft: EventDraft,
 ) -> CommandResult<Changed<Occurrence>> {
-    core.edit_occurrence(&key, &recurrence_id, scope, exceptions_too, draft)
-        .map_err(ErrorCode::from)
+    core.edit_occurrence(
+        &combined_event_key,
+        &recurrence_id,
+        scope,
+        exceptions_too,
+        draft,
+    )
+    .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn reschedule_occurrence(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     recurrence_id: String,
     scope: Scope,
     exceptions_too: bool,
     when: When,
 ) -> CommandResult<Changed<Occurrence>> {
-    core.reschedule_occurrence(&key, &recurrence_id, scope, exceptions_too, when)
-        .map_err(ErrorCode::from)
+    core.reschedule_occurrence(
+        &combined_event_key,
+        &recurrence_id,
+        scope,
+        exceptions_too,
+        when,
+    )
+    .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn exception_counts(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     recurrence_id: String,
 ) -> CommandResult<ExceptionCounts> {
-    core.exception_counts(&key, &recurrence_id)
+    core.exception_counts(&combined_event_key, &recurrence_id)
         .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
-fn delete_event(core: State<Core>, key: CombinedEventKey) -> CommandResult<Changed<()>> {
-    core.delete_event(&key).map_err(ErrorCode::from)
+fn delete_event(
+    core: State<Core>,
+    combined_event_key: CombinedEventKey,
+) -> CommandResult<Changed<()>> {
+    core.delete_event(&combined_event_key)
+        .map_err(ErrorCode::from)
 }
 
 #[tauri::command]
 fn delete_occurrence(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
     recurrence_id: String,
 ) -> CommandResult<Changed<()>> {
-    core.delete_occurrence(&key, &recurrence_id)
+    core.delete_occurrence(&combined_event_key, &recurrence_id)
         .map_err(ErrorCode::from)
 }
 
@@ -551,9 +569,10 @@ fn journal_transaction_events(
 #[tauri::command]
 fn event_history(
     core: State<Core>,
-    key: CombinedEventKey,
+    combined_event_key: CombinedEventKey,
 ) -> CommandResult<Vec<ListedJournalEventModification>> {
-    core.event_history(&key).map_err(ErrorCode::from)
+    core.event_history(&combined_event_key)
+        .map_err(ErrorCode::from)
 }
 
 /// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo History.

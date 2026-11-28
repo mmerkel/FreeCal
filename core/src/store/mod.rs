@@ -81,7 +81,9 @@ pub enum Uid<'a> {
 pub struct CombinedEventKey {
     pub(crate) calendar_id: CalendarId,
     pub(crate) uid: String,
-    /// As obtained (ADR 0012): compared by Occurrence, never as text.
+    /// As obtained (ADR 0012). Whether two keys name the same Occurrence is
+    /// for [`crate::event::Opened::load`] to find, by Occurrence; `==` only
+    /// tells whether two keys are the same string, as the window compares them.
     pub(crate) recurrence_id: Option<RecurrenceId>,
 }
 
@@ -92,6 +94,16 @@ impl CombinedEventKey {
             calendar_id,
             uid: uid.to_owned(),
             recurrence_id: fields.recurrence_id.clone(),
+        }
+    }
+
+    /// The key of the Event with `uid` in `calendar_id` that isn't an
+    /// Exception, whether or not such an Event is there.
+    pub(crate) fn without_recurrence_id(calendar_id: CalendarId, uid: &str) -> Self {
+        Self {
+            calendar_id,
+            uid: uid.to_owned(),
+            recurrence_id: None,
         }
     }
 

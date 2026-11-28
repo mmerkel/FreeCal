@@ -608,7 +608,7 @@ fn an_import_update_replaces_a_changed_occurrence_whose_recurrence_id_is_written
     // Another form of the same time, as a stored field may have it.
     harness.arrange_local_store(&format!(
         "UPDATE event SET recurrence_id = '2026-10-26T9:0:0' WHERE {}",
-        support::event_row(&moved.combined_event_key)
+        harness.event_row(&moved.combined_event_key)
     ));
     let again = WEEKLY_FROM_A_FILE.replace("Team (moved)", "Team (moved again)");
 
