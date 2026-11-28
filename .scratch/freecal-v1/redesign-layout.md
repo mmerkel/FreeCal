@@ -6,14 +6,14 @@ Pointers are `file:line` at `9090586`, relative to `core/src/` unless they say o
 
 ## New terms
 
-Approved by the user on 2026-11-28, with their renames: Event Version Content, Event Comparison, and `MovedBetweenCalendars` beside `Moved`. Not yet in `GLOSSARY.md`.
+Approved by the user on 2026-11-28, with their renames: Event Version Content, Event Comparison, `Rescheduled` and `MovedBetweenCalendars`. Not yet in `GLOSSARY.md`.
 
 - **Event Version Content**: what one Event Version holds that the comparison reads: the managed fields and the Unimplemented Fields, without its row ID, Calendar or Snapshots. Two Event Versions are equal when their Event Version Contents' canonical forms are (ADR 0018, "Event Versions"). Type `EventVersionContent`.
 - **Event Comparison**: the comparison per Occurrence, three ways and by Field Group (ADR 0019, "Whether the server changed"; ADR 0020, "Where both changed"), run over every single Event of one UID at once, with the outcome for that UID. Incoming Sync and Undo both call it. Module `comparison`, function `compare_event`.
 - **Snapshot Writer**: the handle through which one Database Transaction makes one Snapshot: Event Versions begin and end through it, and the Snapshot row is written with its first change, never for a step that changes nothing. It replaces the Journal Transaction as the only writer of the user's side. Type `SnapshotWriter`.
 - **Incoming Sync Plan**: what one Incoming Sync will write, decided from the fetched Server Objects, the versions with the server's mark and the current ones, before anything is written: per UID, follow the server, keep the user's, agree, Server Event Merge or Server Event Replacement, and the marks and ETags to move. Type `IncomingSyncPlan`.
 - **Sides** of the comparison, as type names: `Base` (what both last agreed on: the versions with the server's mark, or what a taken-back Snapshot left), `Ours` (the current versions on the user's side) and `Theirs` (the fetched versions, or the versions a taken-back Snapshot ended). Proposed as plain names inside `comparison`, not glossary entries.
-- **`UserAction` values**: `Moved` stays a drag or resize in the grid (`journal/mod.rs:119`), with a doc comment saying it isn't ADR 0018's move; `MovedBetweenCalendars` is added for the move to another Calendar, in 180, which first needs it (ADR 0020, "A move with one side that can't be written").
+- **`UserAction` values**: `Moved` (a drag or resize in the grid, `journal/mod.rs:119`) is renamed `Rescheduled`, as `Core::reschedule_event` already says, and `MovedBetweenCalendars` is added for the move to another Calendar; both in 180, which first needs the move (ADR 0020, "A move with one side that can't be written").
 
 ## Today's code, in brief
 
