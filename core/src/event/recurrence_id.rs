@@ -89,7 +89,7 @@ pub(super) fn recurrence_id_text(original: &Time) -> String {
 /// Recurring Event, so two compare by Occurrence when they were computed
 /// against the same one. FreeCal writes the recurrence IDs of the
 /// Exceptions it makes in it, and the window gets an Occurrence's as its ID.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct NormalForm(String);
 
 impl NormalForm {

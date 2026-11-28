@@ -7,6 +7,8 @@ mod account;
 mod caldav;
 mod calendar;
 mod clock;
+#[allow(dead_code, reason = "until tickets 180 and 189 compare by it")]
+mod comparison;
 mod error;
 mod event;
 mod guests;

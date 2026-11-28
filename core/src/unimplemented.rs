@@ -138,7 +138,6 @@ impl UnimplementedFields {
 
     /// The serialised form, which the Local Store holds; equal for two
     /// trees exactly when they are equal.
-    #[allow(dead_code, reason = "until ticket 177 compares by it")]
     pub(crate) fn canonical(&self) -> String {
         serde_json::to_string(self).expect("a tree of strings serialises")
     }

@@ -13,15 +13,32 @@ Spec: "Calendar History"; "Sync engine". ADRs 0017 ("Part of the version"), 0019
 
 **Blocked by:** 175
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] `EventVersionContent` and `compare_event` in `comparison.rs`, pure and unit-tested
-- [ ] `Win(side)` decides every Occurrence changed on both sides
-- [ ] Each outcome for an edit, a creation and a deletion on either side; the Unimplemented Fields changed on one side and on both
-- [ ] Pairs of groups: the title against the Location combined; the times against the Unimplemented Fields combined; the times against the title, the same group on both, the Unimplemented Fields on both: Conflicts
-- [ ] Recurring Events: changes to different Exceptions both kept; the Recurring Event changed on one side alone followed for every Occurrence; the Recurring Event against one Occurrence a Conflict of the UID; an Exception removed on one side and edited on the other; an excluded date against an Exception; an Exception's title against an alarm added to the same Exception combined
-- [ ] Entries go with their field: an unknown parameter of the title on one side against the Location on the other combined, with the parameter staying with its title; a rule FreeCal can't expand changed on one side against the times on the other a Conflict; an alarm against the times combined; a test lists every managed property's name with its group
-- [ ] ADR 0017 ("Part of the version"), ADR 0019 ("Whether the server changed") and the spec's "Sync engine" say that the Unimplemented Fields group holds only what FreeCal doesn't manage, and the entries of a managed property go with its field; `conformance.md` strikes item 4
-- [ ] The group function fails to compile when a managed field has no group (a comment shows how; no compile-fail test needed)
+- [x] `EventVersionContent` and `compare_event` in `comparison.rs`, pure and unit-tested
+- [x] `Win(side)` decides every Occurrence changed on both sides
+- [x] Each outcome for an edit, a creation and a deletion on either side; the Unimplemented Fields changed on one side and on both
+- [x] Pairs of groups: the title against the Location combined; the times against the Unimplemented Fields combined; the times against the title, the same group on both, the Unimplemented Fields on both: Conflicts
+- [x] Recurring Events: changes to different Exceptions both kept; the Recurring Event changed on one side alone followed for every Occurrence; the Recurring Event against one Occurrence a Conflict of the UID; an Exception removed on one side and edited on the other; an excluded date against an Exception; an Exception's title against an alarm added to the same Exception combined
+- [x] Entries go with their field: an unknown parameter of the title on one side against the Location on the other combined, with the parameter staying with its title; a rule FreeCal can't expand changed on one side against the times on the other a Conflict; an alarm against the times combined; a test lists every managed property's name with its group
+- [x] ADR 0017 ("Part of the version"), ADR 0019 ("Whether the server changed") and the spec's "Sync engine" say that the Unimplemented Fields group holds only what FreeCal doesn't manage, and the entries of a managed property go with its field; `conformance.md` strikes item 4
+- [x] The group function fails to compile when a managed field has no group (a comment shows how; no compile-fail test needed)
+
+## Comments
+
+- 2026-11-28: Started from commit `c1ea7b5`.
+- 2026-11-28: Built the Event Comparison in `core/src/comparison/mod.rs` with its tests in `comparison/tests.rs` (29 unit tests, one or more per box). Nothing calls it yet (180, 189); the module carries `allow(dead_code)` until then. Decisions, for review, each with its strongest con:
+  1. **decision, for review:** `Win(side)` settles only what would be a Conflict, with the winner's version whole; an Occurrence whose groups combine stays combined under `Win` too. Con: ADR 0020 says the earlier state wins "in every Occurrence changed on both sides", which read literally includes the combinable ones.
+  2. **decision, for review:** a Conflict of the whole UID (the Recurring Event against an Exception) under `Win(side)` gives the winner's versions of every Occurrence of the UID, never a mix of one side's Recurring Event and the other's Exceptions. Con: where the winner changed only an Exception, the loser's change to the whole series is lost with it.
+  3. **decision, for review:** a change to the Recurring Event both sides made to the same result doesn't count against the other side's change to an Exception (it agrees, and the Exceptions are compared on their own). Con: a rule one could read as "the Recurring Event changed on both, so every Occurrence changed on both".
+  4. **decision, for review:** each side's Exceptions are keyed by the Normal Form against that side's own Recurring Event (`UidVersions::new`); where the Recurring Event's zone or all-day changed, an Exception shows as removed and created on that side, which the change to the Recurring Event already makes a change to every Occurrence. Two versions of one side for one Occurrence refuse the side (`None`), left to the caller. Con: the caller must handle a side that doesn't key.
+  5. **decision, for review:** an Event Version Content's canonical form compares the recurrence ID by its Normal Form without a Recurring Event (as obtained, normalised), the excluded dates as stored text, and `zone_pinned` and `description_html` as fields of the times and the description. Con: two lists of excluded dates in a different order count as a change.
+  6. **decision, for review:** two different creations of one Occurrence (no base) are a Conflict, as every group counts as changed on both. Con: none known beyond the extra Conflict.
+  - Entries go with their field, everywhere the rule applies: the comparison of groups (`EventVersionContent::forms`) and the combination (`ByGroup::combination`) both take an entry's group from `entry_group`, so a group's form and its combination hold the field with its entries; `ical:DURATION` goes to the times, `ical:UID`, `ical:SEQUENCE` and every prefix other than `ical:` to the Unimplemented Fields. 180, 181 and 198 combine through these. ADRs 0017 ("Part of the version") and 0019 ("Whether the server changed") and the spec's "Sync engine" say so.
+  - Trade-off: the managed fields' groups are decided in one function, `grouped`, which destructures `EventFields` without `..`; `ungrouped` and `Times::form` destructure too, so a new field fails to compile in all three, but only `grouped` decides a group. `ByGroup<T>` is built and read without `..` either, so a new `FieldGroup` fails to compile until each use handles it.
+  - New terms: **Occurrence Outcome** (new term, `OccurrenceOutcome`), what one Occurrence becomes in an Event Comparison: unchanged, one side's, agreed, or combined; **By Group** (new term, `ByGroup<T>`), one value per Field Group, private to `comparison`. `UidVersions`, `UidOutcome`, `OnConflict` and `Side` are the layout plan's.
+  - Departures from the layout plan, recorded there: the module is `comparison/mod.rs` with `tests.rs`; `UidOutcome`'s variants; `UidVersions::new` returns `Option`; `NormalForm` derives `Ord`.
+  - Switched-off tests: none turned off; none named this ticket (the `dead_code` allow on `UnimplementedFields::canonical` that named it is gone).
+  - Conformance Breaches: item 4 ended (a combination can contradict itself); none added.
