@@ -10,7 +10,7 @@ Spec: "Sync engine". ADRs 0019 ("Whether the server changed"), 0020 ("Where both
 
 **Blocked by:** 198
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Effort:** S
 
