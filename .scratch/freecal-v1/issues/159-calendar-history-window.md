@@ -4,7 +4,7 @@
 
 - **The core lists Snapshots** of all Calendars together, newest first, or of one Calendar, or only the user's own (ticket 147's rule): each with its time, its origin (an action of the user, an import, a Backup restore, an Incoming Sync Snapshot, shown as "changes from the server", naming inside it the Events "replaced by the server's version" and those "combined with a change on the server" (ticket 168), "Stop waiting", an Undo naming what it took back), its description, its Calendars, how many Events it changed in each, read from the Event Versions that begin and end with it, and whether Undos in effect have taken it back, wholly or for some of its Events. The list is read in pages, as 90 days of Polls can be long.
 - **The menus:** the ⋮ main menu offers "History…", which opens a dialog with the list of all Calendars; a Calendar's menu in the sidebar (`src/lib/Sidebar.svelte`) offers "History", for Local Calendars too, which opens it filtered to that Calendar. The filters are "All Calendars" or one, and "Only my changes". The dialog is read again on "Occurrences changed".
-- **Each line** shows the time (`src/lib/when.ts`), what made it, the number of Events ("Change on the server · 3 Events", "Import · 120 Events", "You · 1 Event") and the Calendars. It offers "Undo", except on a Calendar's first Snapshot, on a Snapshot an Undo in effect has taken back, and on one of which every Event still in effect is in a Calendar marked read-only or removed, as its Undo could do nothing (ADR 0020, "Read-only Calendars"). A line taken back shows it.
+- **Each line** shows the time (`src/lib/when.ts`), what made it, the number of Events ("Change on the server · 3 Events", "Import · 120 Events", "You · 1 Event") and the Calendars. It offers "Undo", a First Sync's too (ADR 0018), except on a Snapshot an Undo in effect has taken back, and on one of which every Event still in effect is in a Calendar marked read-only or removed, as its Undo could do nothing (ADR 0020, "Read-only Calendars"). A line taken back shows it.
 - **"Undo this Event"**, on an Event of a line, makes the Undo of ticket 147 limited to that Event, in every Calendar the Snapshot spans; for an Event in Conflict it is the restore (ticket 134).
 - **"Undo"** makes the Undo of ticket 147 at once, whole, in all Calendars the Snapshot spans, a change on the server too, with ticket 158's toasts and dialog: no question where it can be done whole, "Redo" in the toast, and the dialog asking first where it would leave Events out.
 - **Not here:** an Event's History (ticket 160).
@@ -21,7 +21,7 @@ Spec: US-83, US-84, US-155; "Calendar History"; "Toasts". ADRs 0018, 0020.
 - [ ] The main menu offers "History…" and a Calendar's menu opens it filtered; both filters work
 - [ ] "Undo" on a line undoes that Snapshot whole, also a change on the server, and the toast offers "Redo"; an Undo leaving Events out asks as with Ctrl+Z
 - [ ] "Undo this Event" undoes the Snapshot for that Event alone
-- [ ] No "Undo" on a first Snapshot, a taken-back one, or one left only in read-only or removed Calendars
+- [ ] "Undo" on a First Sync's Incoming Sync Snapshot too; none on a taken-back one or one left only in read-only or removed Calendars
 - [ ] The dialog follows "Occurrences changed"
 - [ ] Core tests through the core interface, with the Store Check after each; component tests on the fake core
 
@@ -36,3 +36,4 @@ Spec: US-83, US-84, US-155; "Calendar History"; "Toasts". ADRs 0018, 0020.
 - 2026-11-22: Reworded from the grilling on point 2 of `.scratch/freecal-v1/critiques-2.md` (ADR 0019): the Server Event Merge replaces the Automatic Resolution as an origin.
 - 2026-11-26: Reworded from the discussion of point 7 of `.scratch/freecal-v1/critiques-2.md` (ADRs 0018 to 0020): the Server Event Replacement and Merge are no longer origins but shown inside their Incoming Sync Snapshot's line; "Undo this Event" offers ADR 0020's limited Undo for any Snapshot.
 - 2026-11-28: Reworded from the grilling on point 5 of `.scratch/freecal-v1/critiques-2.md` (ADR 0020): "Undo" is offered unless nothing left can be written; an Undo leaving Events out asks first, as with Ctrl+Z.
+- 2026-11-28: Reworded from point 6 of `.scratch/freecal-v1/critiques-2.md`: a First Sync's Incoming Sync Snapshot offers "Undo", as the spec and ADR 0018 say; US-83 now asks to see the Calendar History, and US-155 to undo from it.

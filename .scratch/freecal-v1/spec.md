@@ -8,7 +8,9 @@ I keep my calendars in several places: Google, one or more CalDAV servers (Nextc
 
 ## Solution
 
-FreeCal is a desktop calendar app for one local user, mainly for Linux. It shows Calendars from many Accounts (Local, CalDAV and Google) in one Google-Calendar-like view with day, week and month views, drag-to-create, drag-to-move/resize and keyboard shortcuts. It is offline-first: every synced Calendar is held locally, can be viewed and edited without a network, and syncs two ways when a connection is available. When a local and a remote change can't both be kept, FreeCal takes the server's version, keeps the user's, and shows what it decided until the user has looked. Every change to a Calendar, made in FreeCal or pulled from a server, is recorded in its Calendar History and can be undone. A Mass-Change Guard asks before FreeCal sends an unusually large change to a server. Daily Backups are the last resort. FreeCal runs in the background where a system tray exists, shows reminder notifications, and reports Conflicts and Sync Errors through a tray icon.
+FreeCal is a desktop calendar app for one local user, mainly for Linux. It shows Calendars from many Accounts (Local, CalDAV and Google) in one Google-Calendar-like view with day, week and month views, drag-to-create, drag-to-move/resize and keyboard shortcuts. It is offline-first: every synced Calendar is held locally, can be viewed and edited without a network, and syncs two ways when a connection is available. When a local and a remote change can't both be kept, FreeCal takes the server's version, keeps the user's, and shows what it decided until the user has looked. Every change to a Calendar, made in FreeCal or pulled from a server, is recorded in the Calendar History and can be undone. A Mass-Change Guard asks before FreeCal sends an unusually large change to a server. Daily Backups are the last resort. FreeCal runs in the background where a system tray exists, shows reminder notifications, and reports Conflicts and Sync Errors through a tray icon.
+
+What this costs the user, stated plainly: an edit that collides with a change on the server, such as an Event moved while offline, leaves the grid, replaced by the server's version, until the user restores it; an Undo can't always take back everything and then asks first, in a dialog; a server Calendar being added shows empty until its First Sync has finished, and an Event created there meanwhile may duplicate one not loaded yet; removing a Calendar deletes its history and can't be undone.
 
 The domain vocabulary is defined in the glossary; architecture decisions are in ADRs 0001–0004 (Tauri + Svelte 5 + FullCalendar behind `CalendarGrid`, Google via REST, GPLv3, SQLite).
 
@@ -118,8 +120,8 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - **US-71** As a user, I want new Conflicts and Sync Errors to appear in the window as soon as they happen, so that I don't have to reopen anything to see them.
 - **US-72** As a user, I want to see which of my changes haven't reached the server yet (an Unsent Mark on the Event and on its Calendar in the sidebar, and the reason in the Event's details), so that I know whether my edits made offline have gone out.
 - **US-73** As a user, when FreeCal and the server changed different parts of an Event, I want both changes combined and to be told so, with a way to undo the combination; when they changed the same part, I want FreeCal to show the server's version, keep mine and let me restore it, so that no change is lost silently.
-- **US-74** As a user, when I edited an Event that was deleted on the server, I want to choose "restore with my changes" or "accept the delete", so that I decide.
-- **US-75** As a user, when I deleted an Event that was edited on the server, I want to choose "delete anyway" or "keep the server version", so that I decide.
+- **US-74** As a user, when I edited an Event that was deleted on the server, I want FreeCal to take the delete for now, keep my version and let me restore it, so that I decide.
+- **US-75** As a user, when I deleted an Event that was edited on the server, I want FreeCal to show the server's version and let me delete it again, so that I decide.
 - **US-76** As a user, when a change to a whole Recurring Event collides with a remote change to one Occurrence, I want a Conflict on the whole Recurring Event showing both versions, so that I can resolve it as one decision.
 - **US-77** As a user, I want a list of all open Conflicts, so that I can work through them.
 - **US-153** As a user, when the server's version replaced a change of mine, I want a bar in the window until I've resolved it, so that I never miss a change of mine that is no longer in my Calendar.
@@ -129,8 +131,8 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 
 ### Safety
 
-- **US-81** As a user, I want every change to a Calendar recorded as a Snapshot of its Events, whether I made it in FreeCal or a sync pulled it from a server, so that I can go back to an earlier state exactly.
-- **US-83** As a user, I want to see a Calendar's History and take the Calendar back to before any change in it, so that I can recover from a bad sync session.
+- **US-81** As a user, I want every change to my Events recorded as a Snapshot of all Calendars, whether I made it in FreeCal or a sync pulled it from a server, so that any change can be seen and undone exactly.
+- **US-83** As a user, I want to see the Calendar History of all Calendars or of one, with what made each change, so that I can find what went wrong after a bad sync session.
 - **US-84** As a user, I want a Calendar's History kept for 90 days, so that I have time to notice problems.
 - **US-85** As a user, if FreeCal would delete or change more than 10 Events and more than 5% of a Calendar on its server in one Outgoing Sync, I want that Calendar paused and myself asked first, so that neither a bug nor a slip can wipe a Calendar.
 - **US-86** As a user, I want a paused Calendar to show as a Sync Error with an explanation ("Paused: 120 Events would be deleted on the server. Send?"), so that I understand what happened.
@@ -280,7 +282,7 @@ The domain vocabulary is defined in the glossary; architecture decisions are in 
 - **Import/export**:
   - Import accepts `.ics` and `.zip` of `.ics` files; CSV is not supported.
   - Time zone names in imported and synced data that aren't IANA names are mapped to IANA names: a path ending in one (`/mozilla.org/20050126_1/Europe/Berlin`), a Windows name as Outlook writes it (`W. Europe Standard Time`, through CLDR's `windowsZones` table), or a custom `VTIMEZONE`'s `X-LIC-LOCATION`. A time whose zone can't be mapped is treated like a floating time: pinned by ADR 0007 and counted in the import preview. UTC times keep their instant and get the file's `X-WR-TIMEZONE` when it names one, as Google's exports do, otherwise UTC.
-  - Running an import looks up again which Events the Calendar has, by UID: "update" gives them the imported version (a version that still has no time zone at either end keeps the zone pinned before, ADR 0007 rule 2), "skip" leaves them, "copy" adds the imported version with a new UID. An import is one Snapshot, undone with Ctrl+Z while it is the newest; later, a Calendar's History goes back to before it, which takes that Calendar's later changes with it. An Event the user changes the time of loses its pinned mark (ADR 0007 rule 4).
+  - Running an import looks up again which Events the Calendar has, by UID: "update" gives them the imported version (a version that still has no time zone at either end keeps the zone pinned before, ADR 0007 rule 2), "skip" leaves them, "copy" adds the imported version with a new UID. An import is one Snapshot, undone with Ctrl+Z while it is the newest; later, it is undone from the Calendar History, and the changes since stay. An Event the user changes the time of loses its pinned mark (ADR 0007 rule 4).
   - Export produces a single `.ics`, or for everything a `.zip` with one `.ics` per Calendar organised by Account.
   - Google-only fields are written as `X-` properties and read back on import.
   - Existing UIDs trigger one update / skip / copy choice per import; "update" is chosen by default.

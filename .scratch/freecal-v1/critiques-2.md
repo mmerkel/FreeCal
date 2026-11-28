@@ -2,7 +2,7 @@
 
 A second review of 2026-11-22 compared the documents (`GLOSSARY.md`, ADRs, spec, tickets) of three versions: `design/change-journal` (`main` at `4857548`, ADRs 0009, 0014, 0015), `design/snapshot-tree` (`e7b3e45`, ADRs 0017 to 0020 as a tree with two pointers) and the branch at `2f24150` (ADRs 0017 to 0020 as one line of Snapshots with the server's marks). It follows the first review, `.scratch/freecal-v1/critiques.md`, and uses the same form: each numbered point is one critique together with the alternative proposed for it, to be grilled in a session of its own. Read "Shared context" first, then only your point.
 
-**Status (2026-11-26):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); points 2 and 3 decided together (outcome under point 2); point 4 decided (outcome there; its Last Agreed Version reversed by point 7); point 7, raised by the user on 2026-11-26, decided (outcome there); point 5 decided on 2026-11-28 (outcome there); point 6 open; the scorecard is updated for point 3 of `critiques.md` and points 2 and 3 here. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
+**Status (2026-11-26):** point 1 decided with point 5 of `critiques.md` (outcome recorded there); points 2 and 3 decided together (outcome under point 2); point 4 decided (outcome there; its Last Agreed Version reversed by point 7); point 7, raised by the user on 2026-11-26, decided (outcome there); point 5 decided on 2026-11-28 (outcome there); point 6 done on 2026-11-28 (outcome there); the scorecard is updated for point 3 of `critiques.md` and points 2 and 3 here. Two findings of this review belong to points of the first review and were added there instead of here: the round-trip check on reading (to point 3 of `critiques.md`) and running checks before an Outgoing Sync (to point 5). Point 1 below should be grilled together with point 5 of `critiques.md`.
 
 How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2.md`." The outcome of a point is a decision. If the alternative is taken, the affected ADRs, the spec, `GLOSSARY.md` and the tickets listed under the point are reworded. If it is rejected, the reason goes into the ADR's "Considered Options".
 
@@ -136,7 +136,15 @@ How to start a session: "Grill me on point N of `.scratch/freecal-v1/critiques-2
 
 ---
 
-## 6. The spec and the glossary lag behind the ADRs → reword them
+## 6. The spec and the glossary lag behind the ADRs → reword them (done: reworded as proposed)
+
+**Outcome (2026-11-28).** Checked again after all other points were decided, so the con below no longer held; the user agreed to every wording proposed. Recorded in the spec, `GLOSSARY.md` and tickets 126, 146, 151, 152, 159 and 162:
+
+- **US-83** now asks to see the Calendar History of all Calendars or of one; undoing from it is US-155. **US-81** says a Snapshot of all Calendars, so that any change can be seen and undone. **US-74 and US-75** say what FreeCal does first and how the user decides afterwards; US-73 was already reworded by point 2, and US-76 and US-77 needed nothing.
+- **What C costs the user** is a paragraph after the Solution: an edit colliding with a server change leaves the grid until restored; an Undo can ask first; a Calendar being added shows empty until its First Sync, and an Event created meanwhile may duplicate one; removing a Calendar can't be undone. The window lock and Ctrl+Z stopping at a read-only Calendar were already gone (point 4 of `critiques.md`, point 5 here).
+- **Also lagging, found while checking:** the spec's import paragraph still took a Calendar back to before an import, and the Solution spoke of "its Calendar History"; ticket 159 offered no "Undo" on a Calendar's first Snapshot, against the spec and ADR 0018; ticket 126 still named "Go back to before this".
+- **`GLOSSARY.md`:** the Snapshot entry was already right (points 2 and 7). Entries of the old design say "Goes when the code follows ADR 0018" (0019, 0020): the Change Journal's seven, Record a Journal Event Modification, Sent Event Rows and Propagate a Server Object. Those revised say "Until the code follows ADR …" and what follows: Event Row, Server Object and its CalDAV and Google forms, Mirror, Ignored Resource, Known Server Resources, Corresponding Server Object and Sender. Unsent Change is defined by the difference from the server's version, stored as a list only until ADR 0019 is built.
+- **Ticket files renamed:** `146-snapshots-on-one-line-and-store-check`, `151-servers-current-version-mark`, `152-comparison-and-incoming-sync-snapshots`, `162-conflict-bar-and-toast`. No ticket linked them by file name.
 
 **Critique.** Found while comparing; none of it needs a grilling, only agreement on the wording.
 

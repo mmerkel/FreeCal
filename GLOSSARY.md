@@ -89,7 +89,7 @@ How a Conflict ends: by the user keeping the server's version, restoring their o
 _Avoid_: Merge (a Server Event Merge ends no Conflict), Automatic Resolution, conflict decision
 
 **Unsent Change**:
-A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server, kept until a send succeeds. Each counts once per Event, however often it changed meanwhile.
+A change to an Event in a writable server Calendar that FreeCal has made in the Local Store but not yet sent to the server: the user's current version of the Event differs from the one the server holds. Each counts once per Event, however often it changed meanwhile. Until the code follows ADR 0019, they are stored as a list until a send succeeds.
 _Avoid_: Pending change, queued change, outbox entry
 
 **Sync Error**:
@@ -103,15 +103,15 @@ _Avoid_: Connection state, health
 ## Safety
 
 **Change Journal**:
-The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Journal Event Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin.
+The local record of every change to an Event, whether made in FreeCal or pulled from a server. Each change is a Journal Event Modification holding the Event's previous Event Version, so that the change can be reversed exactly. Changes made together, such as an import or one sync of a Calendar, form one Journal Transaction, which records its Transaction Origin. Goes when the code follows ADR 0018.
 _Avoid_: History, audit trail, undo stack
 
 **Journal Transaction**:
-Changes recorded together in the Change Journal, such as one user action, an import or one sync of a Calendar, with their Transaction Origin. It runs as one database transaction, and all writes to Event Rows go through one.
+Changes recorded together in the Change Journal, such as one user action, an import or one sync of a Calendar, with their Transaction Origin. It runs as one database transaction, and all writes to Event Rows go through one. Goes when the code follows ADR 0018.
 _Avoid_: Unit, transaction (on its own: a plain database transaction), batch, change set
 
 **Journal Event Modification**:
-One change to one Event inside a Journal Transaction, holding the Event's previous Event Version and the hash of its new one. Creating and deleting an Event are Journal Event Modifications too.
+One change to one Event inside a Journal Transaction, holding the Event's previous Event Version and the hash of its new one. Creating and deleting an Event are Journal Event Modifications too. Goes when the code follows ADR 0018.
 _Avoid_: Modification (on its own), entry, journal entry, change (on its own: Unsent Change and Change Journal use it)
 
 **Event Version**:
@@ -159,7 +159,7 @@ The hourglass on an Event, and on its Calendar's line in the sidebar, while the 
 _Avoid_: Pending icon, dashed outline, unsent count
 
 **Event Row**:
-One stored Event in the `event` table: a single Event, a Recurring Event or one Exception. A Recurring Event with Exceptions is several Event Rows.
+One stored Event in the `event` table: a single Event, a Recurring Event or one Exception. A Recurring Event with Exceptions is several Event Rows. Until the code follows ADR 0018; then `event` is a view of the user's current Event Versions.
 _Avoid_: Row (on its own), event table row, record
 
 **Loaded Event**:
@@ -211,23 +211,23 @@ The function that asks a Local Store whether its stored invariants hold, each as
 _Avoid_: Integrity check (SQLite's own, of the file), validation, fsck
 
 **Server Object**:
-What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows.
+What a server stores as one piece and FreeCal writes back: one CalDAV resource at its href, or one Google event resource. It can hold several Event Rows. Until the code follows ADR 0018 it holds Event Rows; then Event Versions.
 _Avoid_: Resource (on its own), remote event, original server data
 
 **CalDAV Server Object**:
-A Server Object of a CalDAV Calendar: one resource, holding the components of exactly one UID, kept as the iCalendar text received. It is the Server Object of its Calendar and UID, whichever href holds it, so a move to another href doesn't make it another one.
+A Server Object of a CalDAV Calendar: one resource, holding the components of exactly one UID, kept as the iCalendar text received. It is the Server Object of its Calendar and UID, whichever href holds it, so a move to another href doesn't make it another one. Until the code follows ADR 0017; then it is kept as the Event Versions read from it, with no text.
 _Avoid_: Calendar object resource, CalDAV event
 
 **Google Server Object**:
-A Server Object of a Google Calendar: one Google event resource, a single Event, a Recurring Event or one Exception, kept as the JSON received.
+A Server Object of a Google Calendar: one Google event resource, a single Event, a Recurring Event or one Exception, kept as the JSON received. Until the code follows ADR 0017; then it is kept as the Event Versions read from it, with no JSON.
 _Avoid_: Google event (on its own)
 
 **Mirror**:
-FreeCal's copy of every Server Object as the server last had it, in tables of its Provider. Only the Sync Engine writes it, and it goes with its Calendar.
+FreeCal's copy of every Server Object as the server last had it, in tables of its Provider. Only the Sync Engine writes it, and it goes with its Calendar. Until the code follows ADRs 0017 and 0019; then the server's content is held as the Event Versions with the server's Current-Version Mark, and the CalDAV table keeps only each resource's href and ETag.
 _Avoid_: Cache, server copy
 
 **Ignored Resource**:
-A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs or one it couldn't read. It is remembered with its ETag, so that it isn't fetched again until it changes; one it couldn't read is remembered without, so that it is fetched on every Incoming Sync until it reads. It is not part of the Mirror and has no Event Rows.
+A CalDAV resource the Sync Engine fetched but doesn't mirror, such as one holding several UIDs or one it couldn't read. It is remembered with its ETag, so that it isn't fetched again until it changes; one it couldn't read is remembered without, so that it is fetched on every Incoming Sync until it reads. It is not part of the Mirror and has no Event Rows. Until the code follows ADR 0019; then "mirror" reads "keep in the CalDAV table", and it has no Event Versions.
 _Avoid_: Skipped object, rejected resource
 
 **Forget an Ignored Resource**:
@@ -239,7 +239,7 @@ A UID that more than one CalDAV resource of a Calendar holds, which RFC 4791 §4
 _Avoid_: Duplicate UID, shared UID
 
 **Known Server Resources**:
-The Server Objects FreeCal holds and the Ignored Resources it remembers in a Calendar, by address, with their versions: what an Incoming Sync compares the server's listing with, so that it fetches only what changed and finds what went.
+The Server Objects FreeCal holds and the Ignored Resources it remembers in a Calendar, by address, with their versions: what an Incoming Sync compares the server's listing with, so that it fetches only what changed and finds what went. Until the code follows ADR 0019; then the resources the CalDAV table keeps and the Ignored Resources.
 _Avoid_: Known set, known objects
 
 **Combined Event Key**:
@@ -255,11 +255,11 @@ The form of a recurrence ID that names its Occurrence against the Recurring Even
 _Avoid_: Normalised recurrence ID, canonical form
 
 **Corresponding Server Object**:
-The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, the one CalDAV Server Object holding that UID, as any other resource holding it is an Ignored Resource; on Google, the Google Server Object holding that UID and Occurrence.
+The one Server Object of a Calendar that a UID's Event Rows belong to. On CalDAV, the one CalDAV Server Object holding that UID, as any other resource holding it is an Ignored Resource; on Google, the Google Server Object holding that UID and Occurrence. Until the code follows ADR 0018 it is of Event Rows; then of Event Versions.
 _Avoid_: Owner, primary object, home object
 
 **Propagate a Server Object**:
-Bring what a Server Object holds into the Event Rows of its UID, as part of its Server Version: each Occurrence is replaced, added or deleted to match, unless an Unsent Change about it keeps the User's Version or raises a Conflict. Always "to its Event Rows", from the server inwards.
+Bring what a Server Object holds into the Event Rows of its UID, as part of its Server Version: each Occurrence is replaced, added or deleted to match, unless an Unsent Change about it keeps the User's Version or raises a Conflict. Always "to its Event Rows", from the server inwards. Goes when the code follows ADR 0019.
 _Avoid_: Take, apply, reconcile, rewrite Combined Event Keys
 
 **Database Transaction**:
@@ -267,19 +267,19 @@ One SQLite transaction on the Local Store, committed all or nothing. Every write
 _Avoid_: Transaction (on its own), db transaction
 
 **Write Permission**:
-A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts; the Sync Engine's covers the Mirror and the Ignored Resources.
+A value that only one module can make and that every write to the tables it guards takes, so the compiler keeps other code from writing them. The Change Journal's covers Event Rows, the Change Journal, Unsent Changes, Conflicts and deleting Calendars and accounts; the Sync Engine's covers the Mirror and the Ignored Resources. Goes when the code follows ADR 0018.
 _Avoid_: Token, Journaled, owner
 
 **Guard**:
-The module that alone writes a set of tables, by holding their Write Permission: the Change Journal or the Sync Engine. Not the Mass-Change Guard, which is user-facing.
+The module that alone writes a set of tables, by holding their Write Permission: the Change Journal or the Sync Engine. Not the Mass-Change Guard, which is user-facing. Goes when the code follows ADR 0018.
 _Avoid_: Owner, gatekeeper
 
 **Unguarded Write**:
-A write to the Local Store that no Guard's Write Permission covers, such as to accounts, Calendars, settings, the sidebar, the view or the time zone rules. It still runs in a Database Transaction.
+A write to the Local Store that no Guard's Write Permission covers, such as to accounts, Calendars, settings, the sidebar, the view or the time zone rules. It still runs in a Database Transaction. Goes when the code follows ADR 0018.
 _Avoid_: Free write, open write
 
 **Record a Journal Event Modification**:
-Store one Journal Event Modification in the Change Journal, starting the Journal Transaction with its first one.
+Store one Journal Event Modification in the Change Journal, starting the Journal Transaction with its first one. Goes when the code follows ADR 0018.
 _Avoid_: Entry, add entry
 
 **Sync Engine**:
@@ -295,11 +295,11 @@ The Sync Engine sending a Calendar's Unsent Changes through its Sender; each one
 _Avoid_: Send (on its own), push, upload
 
 **Sender**:
-The code that sends the Unsent Changes, comparing the Event Rows they are about with their Corresponding Server Object to decide between create, update and delete. On CalDAV it sends per Calendar and UID, one resource for all its Unsent Changes, whatever their recurrence IDs.
+The code that sends the Unsent Changes, comparing the Event Rows they are about with their Corresponding Server Object to decide between create, update and delete. On CalDAV it sends per Calendar and UID, one resource for all its Unsent Changes, whatever their recurrence IDs. Until the code follows ADR 0019; then it sends the Events whose user's current version differs from the one with the server's mark, built from the user's Event Versions alone, and reads no Unsent Changes.
 _Avoid_: Uploader, pusher, outbox
 
 **Sent Event Rows**:
-The Event Rows of one Calendar and UID as the Sender read them to send them, each Event Version by its hash. A send that succeeds removes the UID's Unsent Changes only while its Event Rows still are the Sent Event Rows, so that a change made while it ran is sent next time.
+The Event Rows of one Calendar and UID as the Sender read them to send them, each Event Version by its hash. A send that succeeds removes the UID's Unsent Changes only while its Event Rows still are the Sent Event Rows, so that a change made while it ran is sent next time. Goes when the code follows ADR 0019.
 _Avoid_: Snapshot (a Snapshot is a state in the Calendar History), sent version
 
 **Sync Scheduler**:
@@ -315,7 +315,7 @@ One sync of a server Account or Calendar while it runs, from its start, which sh
 _Avoid_: Sync job, sync handle, active sync
 
 **Transaction Origin**:
-Where a Journal Transaction's changes came from: a user action, an import, an undo, a First Sync or an Incoming Sync.
+Where a Journal Transaction's changes came from: a user action, an import, an undo, a First Sync or an Incoming Sync. Goes when the code follows ADR 0018.
 _Avoid_: Origin (on its own), source, cause
 
 **First Sync**:
@@ -323,7 +323,7 @@ A Calendar's first Incoming Sync, a Full Fetch with no server's marks yet, after
 _Avoid_: Baseline (that word is the squashed schema migration, ADR 0008), initial import
 
 **Dangerous Undo**:
-An undo that also undoes later changes, reverts a change from a server, or exceeds the Mass-Change Guard's thresholds, and so asks first. Every other undo is benign and runs at once.
+An undo that also undoes later changes, reverts a change from a server, or exceeds the Mass-Change Guard's thresholds, and so asks first. Every other undo is benign and runs at once. Goes when the code follows ADR 0020.
 _Avoid_: Risky undo, unsafe undo
 
 **Pinned Zone**:
