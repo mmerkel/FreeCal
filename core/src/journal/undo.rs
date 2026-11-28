@@ -18,11 +18,11 @@ use super::{
     JournalEventModification, JournalTransaction, JournalTransactionId, Recorded,
     TransactionOrigin, WRITE_PERMISSION, hash, record,
 };
-use crate::store::{Store, StoredEvent};
+use crate::store::{CombinedEventKey, Store, StoredEvent};
 use crate::{CalendarId, CoreError, EventId, Result, mass_change_guard};
 
 /// What an undo picks (new term: Undo Target).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum UndoTarget {
@@ -30,11 +30,13 @@ pub enum UndoTarget {
     JournalTransaction { id: JournalTransactionId },
     /// One Event of an import's or an Incoming Sync's Journal Transaction,
     /// with the Event Rows of its UID that the Journal Transaction changed
-    /// too: a Recurring Event with its Exceptions.
+    /// too: a Recurring Event with its Exceptions. As the UID goes whole, the
+    /// listings name it by the key of its Event that isn't an Exception, and
+    /// only the key's UID counts.
     #[serde(rename_all = "camelCase")]
     Event {
         journal_transaction: JournalTransactionId,
-        event_id: EventId,
+        combined_event_key: CombinedEventKey,
     },
     /// Every change made at `since` (Unix seconds) or later to an Event of
     /// the Calendar `calendar_id`, or that put one into it, each with what
@@ -48,8 +50,8 @@ pub enum UndoTarget {
 impl UndoTarget {
     /// The Journal Transaction it picks from, none for a Calendar since a
     /// given time.
-    fn journal_transaction(self) -> Option<JournalTransactionId> {
-        match self {
+    fn journal_transaction(&self) -> Option<JournalTransactionId> {
+        match *self {
             UndoTarget::JournalTransaction { id } => Some(id),
             UndoTarget::Event {
                 journal_transaction,
@@ -154,7 +156,7 @@ pub(crate) fn undo(
         made_at,
         |journal_transaction| {
             journal_transaction.undoes = target.journal_transaction();
-            let plan = Plan::make(journal_transaction, target)?;
+            let plan = Plan::make(journal_transaction, target.clone())?;
             let skipped = plan.skipped_events();
             if let Some(danger) = plan.danger(journal_transaction)?
                 && approved != Some(&danger)
@@ -392,7 +394,7 @@ fn picked(
         ),
         UndoTarget::Event {
             journal_transaction: id,
-            event_id,
+            combined_event_key,
         } => {
             let modifications = journal_transaction
                 .database_transaction
@@ -402,8 +404,8 @@ fn picked(
             }
             let uid = modifications
                 .iter()
-                .find(|modification| modification.event_id == event_id)
-                .ok_or(CoreError::EventNotFound(event_id))?
+                .find(|modification| modification.uid == combined_event_key.uid)
+                .ok_or(CoreError::EventNotFound)?
                 .uid
                 .clone();
             let of_uid = modifications

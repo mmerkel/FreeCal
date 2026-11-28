@@ -6,8 +6,8 @@ mod support;
 use support::UndoApproved;
 
 use freecal_core::{
-    CalendarId, Core, CoreError, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
-    ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
+    CalendarId, CombinedEventKey, Core, CoreError, EventDraft, ExceptionCounts, ExistingEvents,
+    Frequency, ImportFile, Occurrence, Repeat, RepeatEnd, Scope, When,
 };
 use support::{Harness, all_day, calendar, draft, ics, on, timed, titles, weekly, yoga};
 
@@ -38,7 +38,7 @@ fn moving_this_event_changes_only_that_occurrence() {
 
     let moved = core
         .reschedule_occurrence(
-            id,
+            &id,
             rid(&second),
             Scope::This,
             false,
@@ -64,10 +64,12 @@ fn moving_this_event_changes_only_that_occurrence() {
         ]
     );
     let exception = on(&core, "2026-10-13");
-    assert_ne!(exception.event_id, id);
+    assert_ne!(exception.combined_event_key, id);
     assert_eq!(moved.value, exception);
     assert_eq!(
-        core.event(exception.event_id).unwrap().recurrence_id,
+        core.event(&exception.combined_event_key)
+            .unwrap()
+            .recurrence_id,
         second.recurrence_id
     );
 
@@ -79,7 +81,7 @@ fn moving_this_event_changes_only_that_occurrence() {
 /// The draft the editor starts from for an Occurrence: its Event's fields
 /// with the Occurrence's time.
 fn draft_of(core: &Core, occurrence: &Occurrence) -> EventDraft {
-    let event = core.event(occurrence.event_id).unwrap();
+    let event = core.event(&occurrence.combined_event_key).unwrap();
     EventDraft {
         calendar_id: event.calendar_id,
         title: event.title,
@@ -99,7 +101,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
     let second = on(&core, "2026-10-12");
     let renamed = core
         .edit_occurrence(
-            id,
+            &id,
             rid(&second),
             Scope::This,
             false,
@@ -114,7 +116,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
 
     let moved = core
         .edit_occurrence(
-            renamed.event_id,
+            &renamed.combined_event_key,
             rid(&renamed),
             Scope::This,
             false,
@@ -126,7 +128,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
         .unwrap()
         .value;
 
-    assert_eq!(moved.event_id, renamed.event_id);
+    assert_eq!(moved.combined_event_key, renamed.combined_event_key);
     assert_eq!(
         shown(&core),
         [
@@ -144,7 +146,7 @@ fn editing_this_event_again_changes_its_exception_and_keeps_the_rest() {
             ),
         ]
     );
-    let exception = core.event(moved.event_id).unwrap();
+    let exception = core.event(&moved.combined_event_key).unwrap();
     assert_eq!(exception.location.text, "Park");
     // An Exception shows the repeat rule of its Recurring Event.
     assert_eq!(
@@ -164,7 +166,7 @@ fn this_event_in_another_calendar_leaves_the_recurring_event() {
 
     let moved = core
         .edit_occurrence(
-            id,
+            &id,
             rid(&second),
             Scope::This,
             false,
@@ -181,7 +183,7 @@ fn this_event_in_another_calendar_leaves_the_recurring_event() {
         (work.id, None)
     );
     assert_eq!(on(&core, "2026-10-12"), moved);
-    let single = core.event(moved.event_id).unwrap();
+    let single = core.event(&moved.combined_event_key).unwrap();
     assert_eq!((single.repeat, single.recurrence_id), (None, None));
     assert_eq!(shown(&core).len(), 3);
 }
@@ -195,7 +197,7 @@ fn this_event_cant_change_the_repeat_rule() {
     let second = on(&core, "2026-10-12");
 
     let refused = core.edit_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -220,8 +222,8 @@ fn a_recurrence_id_the_recurring_event_doesnt_have_is_refused() {
     for scope in [Scope::This, Scope::ThisAndFollowing, Scope::All] {
         for recurrence_id in ["2026-10-13T18:00:00", "2026-10-26T18:00:00", "<b>"] {
             assert!(matches!(
-                core.reschedule_occurrence(id, recurrence_id, scope, false, when),
-                Err(CoreError::OccurrenceNotFound(_))
+                core.reschedule_occurrence(&id, recurrence_id, scope, false, when),
+                Err(CoreError::OccurrenceNotFound)
             ));
         }
     }
@@ -229,11 +231,11 @@ fn a_recurrence_id_the_recurring_event_doesnt_have_is_refused() {
 
 /// Yoga as [`yoga`] with four Occurrences, the second renamed, the third
 /// moved to 20:00 and the fourth cancelled.
-fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> EventId {
+fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> CombinedEventKey {
     let id = yoga(core, calendar_id, RepeatEnd::Count { count: 4 });
     let second = on(core, "2026-10-12");
     core.edit_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -245,7 +247,7 @@ fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> EventId {
     .unwrap();
     let third = on(core, "2026-10-19");
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&third),
         Scope::This,
         false,
@@ -253,7 +255,7 @@ fn yoga_with_exceptions(core: &Core, calendar_id: CalendarId) -> EventId {
     )
     .unwrap();
     let fourth = on(core, "2026-10-26");
-    core.delete_occurrence(id, rid(&fourth)).unwrap();
+    core.delete_occurrence(&id, rid(&fourth)).unwrap();
     id
 }
 
@@ -268,7 +270,7 @@ fn moving_all_events_moves_every_occurrence_by_as_much_and_keeps_the_exceptions(
     // A day later and an hour earlier.
     let moved = core
         .reschedule_occurrence(
-            id,
+            &id,
             rid(&first),
             Scope::All,
             false,
@@ -312,7 +314,7 @@ fn editing_all_events_from_an_exception_changes_only_what_was_changed() {
 
     let edited = core
         .edit_occurrence(
-            outside.event_id,
+            &outside.combined_event_key,
             rid(&outside),
             Scope::All,
             false,
@@ -346,11 +348,14 @@ fn editing_all_events_from_an_exception_changes_only_what_was_changed() {
     assert_eq!(edited, on(&core, "2026-10-12"));
     for occurrence in occurrences(&core, "2026-10-01", "2026-12-01") {
         assert_eq!(
-            core.event(occurrence.event_id).unwrap().location.text,
+            core.event(&occurrence.combined_event_key)
+                .unwrap()
+                .location
+                .text,
             "Gym"
         );
     }
-    assert_eq!(core.event(id).unwrap().title, "Yoga");
+    assert_eq!(core.event(&id).unwrap().title, "Yoga");
 }
 
 #[test]
@@ -364,7 +369,7 @@ fn all_events_into_another_calendar_takes_the_exceptions_along() {
     let third = on(&core, "2026-10-19");
 
     core.edit_occurrence(
-        third.event_id,
+        &third.combined_event_key,
         rid(&third),
         Scope::All,
         false,
@@ -391,7 +396,7 @@ fn a_new_repeat_rule_for_all_events_keeps_the_exceptions_on_dates_it_still_has()
 
     // Every two weeks: 5 and 19 October, 2 and 16 November.
     core.edit_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -438,7 +443,7 @@ fn all_events_without_a_repeat_rule_is_the_first_event_alone() {
 
     let single = core
         .edit_occurrence(
-            third.event_id,
+            &third.combined_event_key,
             rid(&third),
             Scope::All,
             false,
@@ -457,7 +462,10 @@ fn all_events_without_a_repeat_rule_is_the_first_event_alone() {
             timed("2026-10-05T18:00:00", "2026-10-05T19:00:00")
         )]
     );
-    assert_eq!((single.event_id, single.recurrence_id), (id, None));
+    assert_eq!(
+        (single.combined_event_key, single.recurrence_id),
+        (id, None)
+    );
 }
 
 #[test]
@@ -471,7 +479,7 @@ fn moving_this_and_following_events_splits_the_recurring_event() {
     // From the second on, a day later and an hour earlier.
     let moved = core
         .reschedule_occurrence(
-            second.event_id,
+            &second.combined_event_key,
             rid(&second),
             Scope::ThisAndFollowing,
             false,
@@ -497,7 +505,7 @@ fn moving_this_and_following_events_splits_the_recurring_event() {
         ]
     );
     assert_eq!(moved.value, on(&core, "2026-10-13"));
-    let first = core.event(id).unwrap();
+    let first = core.event(&id).unwrap();
     assert_eq!(
         first.repeat.unwrap().end,
         RepeatEnd::Until {
@@ -505,8 +513,8 @@ fn moving_this_and_following_events_splits_the_recurring_event() {
         }
     );
     let following = occurrences(&core, "2026-10-10", "2026-12-01");
-    let new = following[0].event_id;
-    assert_ne!(new, id);
+    let new = &following[0].combined_event_key;
+    assert_ne!(new, &id);
     assert_eq!(
         core.event(new).unwrap().repeat.map(|repeat| repeat.end),
         Some(RepeatEnd::Count { count: 3 })
@@ -528,7 +536,7 @@ fn editing_this_and_following_events_changes_only_those() {
     let third = on(&core, "2026-10-19");
 
     core.edit_occurrence(
-        third.event_id,
+        &third.combined_event_key,
         rid(&third),
         Scope::ThisAndFollowing,
         false,
@@ -567,7 +575,7 @@ fn this_and_following_from_the_first_occurrence_changes_all_events() {
 
     let moved = core
         .reschedule_occurrence(
-            id,
+            &id,
             rid(&first),
             Scope::ThisAndFollowing,
             false,
@@ -576,15 +584,21 @@ fn this_and_following_from_the_first_occurrence_changes_all_events() {
         .unwrap()
         .value;
 
-    assert_eq!(moved.event_id, id);
+    assert_eq!(moved.combined_event_key, id);
     assert_eq!(
         occurrences(&core, "2026-10-01", "2026-12-01")
             .into_iter()
-            .map(|occurrence| (occurrence.event_id, occurrence.when))
+            .map(|occurrence| (occurrence.combined_event_key, occurrence.when))
             .collect::<Vec<_>>(),
         [
-            (id, timed("2026-10-05T17:00:00", "2026-10-05T18:00:00")),
-            (id, timed("2026-10-12T17:00:00", "2026-10-12T18:00:00")),
+            (
+                id.clone(),
+                timed("2026-10-05T17:00:00", "2026-10-05T18:00:00")
+            ),
+            (
+                id.clone(),
+                timed("2026-10-12T17:00:00", "2026-10-12T18:00:00")
+            ),
             (id, timed("2026-10-19T17:00:00", "2026-10-19T18:00:00")),
         ]
     );
@@ -597,7 +611,7 @@ fn editing_the_whole_recurring_event_takes_its_exceptions_along_or_removes_them(
     let home = calendar(&core, "Home");
     let work = calendar(&core, "Work");
     let id = yoga_with_exceptions(&core, home.id);
-    let event = core.event(id).unwrap();
+    let event = core.event(&id).unwrap();
     let whole = EventDraft {
         calendar_id: event.calendar_id,
         title: event.title,
@@ -607,14 +621,16 @@ fn editing_the_whole_recurring_event_takes_its_exceptions_along_or_removes_them(
         repeat: event.repeat,
     };
 
-    core.edit_event(
-        id,
-        EventDraft {
-            calendar_id: work.id,
-            ..whole.clone()
-        },
-    )
-    .unwrap();
+    let moved = core
+        .edit_event(
+            &id,
+            EventDraft {
+                calendar_id: work.id,
+                ..whole.clone()
+            },
+        )
+        .unwrap()
+        .value;
     assert!(
         occurrences(&core, "2026-10-01", "2026-12-01")
             .iter()
@@ -622,7 +638,7 @@ fn editing_the_whole_recurring_event_takes_its_exceptions_along_or_removes_them(
     );
 
     core.edit_event(
-        id,
+        &moved.combined_event_key,
         EventDraft {
             calendar_id: work.id,
             repeat: None,
@@ -655,13 +671,13 @@ fn an_all_day_recurring_event_splits_with_its_cancelled_days() {
         })
         .unwrap()
         .value
-        .id;
-    core.delete_occurrence(id, "2026-10-08").unwrap();
+        .combined_event_key;
+    core.delete_occurrence(&id, "2026-10-08").unwrap();
     let third = on(&core, "2026-10-07");
 
     // From the third day on, two days later.
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&third),
         Scope::ThisAndFollowing,
         false,
@@ -702,7 +718,7 @@ fn moving_all_events_to_another_weekday_moves_the_weekdays_of_the_rule() {
     );
     let wednesday = on(&core, "2026-10-14");
     core.edit_occurrence(
-        wednesday.event_id,
+        &wednesday.combined_event_key,
         rid(&wednesday),
         Scope::This,
         false,
@@ -713,13 +729,13 @@ fn moving_all_events_to_another_weekday_moves_the_weekdays_of_the_rule() {
     )
     .unwrap();
     let cancelled = on(&core, "2026-10-19");
-    core.delete_occurrence(cancelled.event_id, rid(&cancelled))
+    core.delete_occurrence(&cancelled.combined_event_key, rid(&cancelled))
         .unwrap();
     let first = on(&core, "2026-10-05");
 
     // A day later: Tuesdays and Thursdays.
     core.reschedule_occurrence(
-        first.event_id,
+        &first.combined_event_key,
         rid(&first),
         Scope::All,
         false,
@@ -772,7 +788,7 @@ fn moving_all_events_a_day_later_moves_the_end_date_of_their_rule_too() {
     let first = on(&core, "2026-10-05");
 
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -789,7 +805,7 @@ fn moving_all_events_a_day_later_moves_the_end_date_of_their_rule_too() {
         ]
     );
     assert_eq!(
-        core.event(id).unwrap().repeat.unwrap().end,
+        core.event(&id).unwrap().repeat.unwrap().end,
         until("2026-10-20")
     );
 }
@@ -803,7 +819,7 @@ fn moving_all_events_a_week_earlier_adds_no_occurrence_before_their_end() {
     let first = on(&core, "2026-10-05");
 
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -839,7 +855,7 @@ fn moving_all_events_later_in_the_day_keeps_the_last_occurrence_of_an_end_at_its
     let first = on(&core, "2026-10-05");
 
     core.reschedule_occurrence(
-        first.event_id,
+        &first.combined_event_key,
         rid(&first),
         Scope::All,
         false,
@@ -873,11 +889,11 @@ fn moving_all_day_events_moves_the_end_date_of_their_rule_by_as_many_days() {
         })
         .unwrap()
         .value
-        .id;
+        .combined_event_key;
     let first = on(&core, "2026-10-05");
 
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -890,7 +906,7 @@ fn moving_all_day_events_moves_the_end_date_of_their_rule_by_as_many_days() {
         ["2026-10-07", "2026-10-08", "2026-10-09"]
     );
     assert_eq!(
-        core.event(id).unwrap().repeat.unwrap().end,
+        core.event(&id).unwrap().repeat.unwrap().end,
         until("2026-10-09")
     );
 }
@@ -904,7 +920,7 @@ fn moving_this_and_following_events_a_day_later_keeps_their_last_occurrence() {
     let second = on(&core, "2026-10-12");
 
     core.reschedule_occurrence(
-        second.event_id,
+        &second.combined_event_key,
         rid(&second),
         Scope::ThisAndFollowing,
         false,
@@ -934,7 +950,7 @@ fn an_edit_that_moves_all_events_keeps_the_end_date_the_editor_shows() {
     let first = on(&core, "2026-10-05");
 
     core.edit_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -950,7 +966,7 @@ fn an_edit_that_moves_all_events_keeps_the_end_date_the_editor_shows() {
         ["2026-10-06 18:00:00", "2026-10-13 18:00:00"]
     );
     assert_eq!(
-        core.event(id).unwrap().repeat.unwrap().end,
+        core.event(&id).unwrap().repeat.unwrap().end,
         until("2026-10-19")
     );
 }
@@ -972,7 +988,7 @@ fn an_edit_later_in_the_day_keeps_the_last_occurrence_of_an_end_at_its_start() {
     let first = on(&core, "2026-10-05");
 
     core.edit_occurrence(
-        first.event_id,
+        &first.combined_event_key,
         rid(&first),
         Scope::All,
         false,
@@ -992,7 +1008,11 @@ fn an_edit_later_in_the_day_keeps_the_last_occurrence_of_an_end_at_its_start() {
         ]
     );
     assert_eq!(
-        core.event(first.event_id).unwrap().repeat.unwrap().end,
+        core.event(&first.combined_event_key)
+            .unwrap()
+            .repeat
+            .unwrap()
+            .end,
         until("2026-10-19")
     );
 }
@@ -1006,7 +1026,7 @@ fn this_event_moved_in_the_editor_leaves_the_end_date_of_the_rule() {
     let second = on(&core, "2026-10-12");
 
     core.edit_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -1026,7 +1046,7 @@ fn this_event_moved_in_the_editor_leaves_the_end_date_of_the_rule() {
         ]
     );
     assert_eq!(
-        core.event(id).unwrap().repeat.unwrap().end,
+        core.event(&id).unwrap().repeat.unwrap().end,
         until("2026-10-19")
     );
 }
@@ -1039,7 +1059,7 @@ fn a_rule_freecal_cant_read_keeps_its_exceptions_through_an_edit() {
     let id = yoga(&core, home.id, RepeatEnd::Count { count: 3 });
     let second = on(&core, "2026-10-12");
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -1051,10 +1071,10 @@ fn a_rule_freecal_cant_read_keeps_its_exceptions_through_an_edit() {
         "UPDATE event SET rrule = 'FREQ=WEEKLY;BYDAY=<img src=x>' WHERE rrule IS NOT NULL",
     );
     let core = harness.open();
-    let event = core.event(id).unwrap();
+    let event = core.event(&id).unwrap();
 
     core.edit_event(
-        id,
+        &id,
         EventDraft {
             calendar_id: event.calendar_id,
             title: "Pilates".into(),
@@ -1093,7 +1113,7 @@ fn all_events_at_a_time_set_from_a_moved_exception_are_at_that_time() {
 
     let edited = core
         .reschedule_occurrence(
-            moved.event_id,
+            &moved.combined_event_key,
             rid(&moved),
             Scope::All,
             false,
@@ -1134,7 +1154,7 @@ fn exception_counts_are_the_exceptions_with_values_of_their_own_in_each_scope() 
 
     // The renamed one and the moved one; the cancelled one has no values.
     assert_eq!(
-        core.exception_counts(id, rid(&first)).unwrap(),
+        core.exception_counts(&id, rid(&first)).unwrap(),
         ExceptionCounts {
             this_and_following: 2,
             all: 2
@@ -1142,7 +1162,7 @@ fn exception_counts_are_the_exceptions_with_values_of_their_own_in_each_scope() 
     );
     // The Exception being changed takes the change anyway.
     assert_eq!(
-        core.exception_counts(outside.event_id, rid(&outside))
+        core.exception_counts(&outside.combined_event_key, rid(&outside))
             .unwrap(),
         ExceptionCounts {
             this_and_following: 1,
@@ -1150,7 +1170,8 @@ fn exception_counts_are_the_exceptions_with_values_of_their_own_in_each_scope() 
         }
     );
     assert_eq!(
-        core.exception_counts(moved.event_id, rid(&moved)).unwrap(),
+        core.exception_counts(&moved.combined_event_key, rid(&moved))
+            .unwrap(),
         ExceptionCounts {
             this_and_following: 0,
             all: 1
@@ -1181,7 +1202,8 @@ fn an_exception_with_the_values_of_its_recurring_event_isnt_counted() {
     let first = on(&core, "2026-10-05");
 
     assert_eq!(
-        core.exception_counts(first.event_id, rid(&first)).unwrap(),
+        core.exception_counts(&first.combined_event_key, rid(&first))
+            .unwrap(),
         ExceptionCounts {
             this_and_following: 1,
             all: 1
@@ -1200,7 +1222,7 @@ fn exceptions_too_for_all_events_take_the_change_and_shift_by_as_much() {
     // Renamed, an hour later, and 30 minutes longer.
     let edited = core
         .edit_occurrence(
-            id,
+            &id,
             rid(&first),
             Scope::All,
             true,
@@ -1249,7 +1271,7 @@ fn exceptions_too_for_this_and_following_changes_only_those_from_it_on() {
     // One before the change, with a location of its own.
     let first = on(&core, "2026-10-05");
     core.edit_occurrence(
-        first.event_id,
+        &first.combined_event_key,
         rid(&first),
         Scope::This,
         false,
@@ -1263,7 +1285,7 @@ fn exceptions_too_for_this_and_following_changes_only_those_from_it_on() {
 
     // From the renamed one on: another location, an hour earlier.
     core.edit_occurrence(
-        outside.event_id,
+        &outside.combined_event_key,
         rid(&outside),
         Scope::ThisAndFollowing,
         true,
@@ -1278,7 +1300,11 @@ fn exceptions_too_for_this_and_following_changes_only_those_from_it_on() {
     let shown: Vec<_> = occurrences(&core, "2026-10-01", "2026-12-01")
         .into_iter()
         .map(|occurrence| {
-            let location = core.event(occurrence.event_id).unwrap().location.text;
+            let location = core
+                .event(&occurrence.combined_event_key)
+                .unwrap()
+                .location
+                .text;
             (occurrence.title, occurrence.when, location)
         })
         .collect();
@@ -1313,7 +1339,7 @@ fn exceptions_too_unchecked_leaves_their_own_values() {
     let outside = on(&core, "2026-10-12");
 
     core.edit_occurrence(
-        outside.event_id,
+        &outside.combined_event_key,
         rid(&outside),
         Scope::ThisAndFollowing,
         false,
@@ -1361,10 +1387,10 @@ fn an_all_day_recurring_event_made_timed_takes_its_exceptions_and_cancelled_days
         })
         .unwrap()
         .value
-        .id;
+        .combined_event_key;
     let second = on(&core, "2026-10-06");
     core.edit_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -1374,12 +1400,12 @@ fn an_all_day_recurring_event_made_timed_takes_its_exceptions_and_cancelled_days
         },
     )
     .unwrap();
-    core.delete_occurrence(id, "2026-10-07").unwrap();
+    core.delete_occurrence(&id, "2026-10-07").unwrap();
     let first = on(&core, "2026-10-05");
 
     // It gains the Event Time Zone: the Display Time Zone.
     core.edit_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         false,
@@ -1424,7 +1450,7 @@ fn exceptions_too_keep_their_length_where_the_shift_would_end_them_before_they_s
     let id = yoga(&core, home.id, RepeatEnd::Count { count: 2 });
     let second = on(&core, "2026-10-12");
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&second),
         Scope::This,
         false,
@@ -1435,7 +1461,7 @@ fn exceptions_too_keep_their_length_where_the_shift_would_end_them_before_they_s
 
     // 45 minutes shorter: the Exception's end would come before its start.
     core.reschedule_occurrence(
-        id,
+        &id,
         rid(&first),
         Scope::All,
         true,
@@ -1521,7 +1547,7 @@ fn an_event_moved_into_a_calendar_with_its_uid_gets_a_new_one() {
     let at_home = both.first_at_home("2026-10-05", "2026-10-06");
 
     let moved = core
-        .edit_event(at_home.event_id, both.moved_to_work(&at_home))
+        .edit_event(&at_home.combined_event_key, both.moved_to_work(&at_home))
         .unwrap();
 
     assert_eq!(titles(core, home), Vec::<String>::new());
@@ -1545,7 +1571,7 @@ fn a_recurring_event_moved_into_a_calendar_with_its_uid_takes_its_exceptions_to_
 
     both.core
         .edit_occurrence(
-            first.event_id,
+            &first.combined_event_key,
             rid(&first),
             Scope::All,
             false,
@@ -1582,12 +1608,44 @@ fn a_lone_exception_moved_into_a_calendar_with_its_uid_stays_an_event_of_its_own
     let lone = both.first_at_home("2026-10-12", "2026-10-13");
 
     both.core
-        .edit_event(lone.event_id, both.moved_to_work(&lone))
+        .edit_event(&lone.combined_event_key, both.moved_to_work(&lone))
         .unwrap();
 
     assert_eq!(titles(&both.core, both.home), Vec::<String>::new());
     assert_eq!(
         titles(&both.core, both.work),
         ["Yoga", "Yoga", "Yoga outside", "Yoga", "Yoga"]
+    );
+}
+
+/// An Exception whose stored recurrence ID can't be read names no
+/// Occurrence, so it is an Event of its own; its key still names it.
+#[test]
+fn an_exception_with_an_unreadable_recurrence_id_is_found_by_its_key() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let id = yoga(&core, home.id, RepeatEnd::Count { count: 3 });
+    let second = on(&core, "2026-10-12");
+    let moved = core
+        .reschedule_occurrence(
+            &id,
+            rid(&second),
+            Scope::This,
+            false,
+            timed("2026-10-13T08:00:00", "2026-10-13T09:00:00"),
+        )
+        .unwrap()
+        .value;
+    harness.arrange_local_store(&format!(
+        "UPDATE event SET recurrence_id = 'not a time' WHERE {}",
+        support::event_row(&moved.combined_event_key)
+    ));
+
+    let alone = on(&core, "2026-10-13");
+    assert_eq!(alone.recurrence_id, None);
+    assert_eq!(
+        core.event(&alone.combined_event_key).unwrap().when,
+        timed("2026-10-13T08:00:00", "2026-10-13T09:00:00")
     );
 }

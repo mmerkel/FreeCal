@@ -33,6 +33,7 @@ Start of the redesign: tag `design/snapshot-line` (commit `065a8e8`). Diffs and 
 Record the commit at the start of each phase here when implementation begins, for the phase's `/simplify` and review.
 
 - P0: started at `366db47` (ticket 173).
+- P1: started at `219b694` (ticket 174).
 
 ## Batches
 

@@ -220,14 +220,14 @@
         {today}
         occurrences={model.occurrences}
         calendars={directory.calendars}
-        selectedEventId={dialogs.selectedEventId}
+        selectedEventKey={dialogs.selectedEventKey}
         selectedRecurrenceId={dialogs.selectedRecurrenceId}
         onrangechange={(range) => model.showRange(range)}
         onselectslot={(when) => dialogs.startCreating(when)}
-        onopenevent={(id, recurrenceId) => dialogs.openDetails(id, recurrenceId)}
+        onopenevent={(key, recurrenceId) => dialogs.openDetails(key, recurrenceId)}
         onopenday={(date) => model.navigate(openDay(date))}
-        onreschedule={(id, recurrenceId, when) => dialogs.reschedule(id, recurrenceId, when)}
-        onrefusedrag={(id, recurrenceId) => dialogs.refuseDrag(id, recurrenceId)}
+        onreschedule={(key, recurrenceId, when) => dialogs.reschedule(key, recurrenceId, when)}
+        onrefusedrag={(key, recurrenceId) => dialogs.refuseDrag(key, recurrenceId)}
         {oninteract}
         held={dialogs.dropHeld}
         offlineAccounts={offline}
@@ -251,7 +251,7 @@
         : () => dialogs.removeOccurrence()}
       onclose={() => dialogs.close()}
       onopenlink={(url) => dialogs.openLink(url)}
-      onhistory={() => core.eventHistory(event.id)}
+      onhistory={() => core.eventHistory(event.combinedEventKey)}
       onundo={(undoing) => dialogs.undoChange(undoing)}
     />
   {:else if dialogs.open?.kind === 'creating' || dialogs.open?.kind === 'editing'}

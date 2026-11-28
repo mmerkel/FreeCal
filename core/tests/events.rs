@@ -1,9 +1,10 @@
 mod support;
 
 use freecal_core::{
-    Calendar, CalendarId, Colour, Core, CoreError, EventDraft, EventId, Piece, Signal, link_allowed,
+    Calendar, CalendarId, Colour, CombinedEventKey, Core, CoreError, EventDraft, ExistingEvents,
+    ImportFile, Piece, Signal, link_allowed,
 };
-use support::{Harness, all_day, date, draft, timed};
+use support::{Harness, all_day, date, draft, event, ics, timed};
 
 fn calendar(core: &Core, name: &str) -> Calendar {
     let local = core.list_accounts().unwrap()[0].id;
@@ -45,7 +46,7 @@ fn a_created_event_can_be_read_back_and_is_signalled() {
         .unwrap()
         .value;
 
-    assert_eq!(core.event(created.id).unwrap(), created);
+    assert_eq!(core.event(&created.combined_event_key).unwrap(), created);
     assert_eq!(created.calendar_id, home.id);
     assert_eq!(created.title, "Dentist");
     assert_eq!(
@@ -190,7 +191,7 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
 
     let edited = core
         .edit_event(
-            created.id,
+            &created.combined_event_key,
             EventDraft {
                 calendar_id: home.id,
                 title: "Long lunch".to_owned(),
@@ -205,7 +206,7 @@ fn editing_changes_every_field_and_survives_a_relaunch() {
     drop(core);
     let relaunch = harness.open();
 
-    assert_eq!(relaunch.event(created.id).unwrap(), edited);
+    assert_eq!(relaunch.event(&created.combined_event_key).unwrap(), edited);
     assert_eq!(edited.title, "Long lunch");
     assert_eq!(edited.when, all_day("2026-10-06", "2026-10-08"));
     assert_eq!(edited.location.text, "Café");
@@ -230,7 +231,7 @@ fn moving_an_event_to_another_calendar_signals_both() {
     let signals_before = harness.signals.received().len();
 
     let moved = core
-        .edit_event(created.id, draft(work.id, "Review", day))
+        .edit_event(&created.combined_event_key, draft(work.id, "Review", day))
         .unwrap()
         .value;
 
@@ -261,7 +262,7 @@ fn rescheduling_changes_only_the_time_and_is_signalled() {
 
     let moved = core
         .reschedule_event(
-            created.id,
+            &created.combined_event_key,
             timed("2026-10-06T14:00:00", "2026-10-06T15:30:00"),
         )
         .unwrap()
@@ -269,7 +270,7 @@ fn rescheduling_changes_only_the_time_and_is_signalled() {
     drop(core);
     let relaunch = harness.open();
 
-    assert_eq!(relaunch.event(created.id).unwrap(), moved);
+    assert_eq!(relaunch.event(&created.combined_event_key).unwrap(), moved);
     assert_eq!(
         moved.when,
         timed("2026-10-06T14:00:00", "2026-10-06T15:30:00")
@@ -309,12 +310,15 @@ fn rescheduling_can_make_a_timed_event_all_day_and_back() {
         .value;
 
     let all_day_now = core
-        .reschedule_event(created.id, all_day("2026-10-07", "2026-10-08"))
+        .reschedule_event(
+            &created.combined_event_key,
+            all_day("2026-10-07", "2026-10-08"),
+        )
         .unwrap()
         .value;
     let timed_again = core
         .reschedule_event(
-            created.id,
+            &created.combined_event_key,
             timed("2026-10-08T08:00:00", "2026-10-08T09:00:00"),
         )
         .unwrap()
@@ -346,24 +350,94 @@ fn rescheduling_is_refused_for_read_only_events_and_backwards_times() {
         "UPDATE calendar SET read_only = 1 WHERE id = {}",
         work.id.0
     ));
+    let missing = gone(&core, home.id);
     let signals_before = harness.signals.received().len();
 
-    let read_only = core.reschedule_event(in_work.id, all_day("2026-10-07", "2026-10-08"));
+    let read_only = core.reschedule_event(
+        &in_work.combined_event_key,
+        all_day("2026-10-07", "2026-10-08"),
+    );
     let backwards = core.reschedule_event(
-        in_home.id,
+        &in_home.combined_event_key,
         timed("2026-10-05T10:00:00", "2026-10-05T09:00:00"),
     );
-    let missing = core.reschedule_event(EventId(999), day);
+    let missing = core.reschedule_event(&missing, day);
 
     assert!(matches!(read_only, Err(CoreError::CalendarReadOnly(id)) if id == work.id));
     assert!(matches!(backwards, Err(CoreError::EndBeforeStart)));
-    assert!(matches!(
-        missing,
-        Err(CoreError::EventNotFound(EventId(999)))
-    ));
-    assert_eq!(core.event(in_work.id).unwrap().when, day);
-    assert_eq!(core.event(in_home.id).unwrap().when, day);
+    assert!(matches!(missing, Err(CoreError::EventNotFound)));
+    assert_eq!(core.event(&in_work.combined_event_key).unwrap().when, day);
+    assert_eq!(core.event(&in_home.combined_event_key).unwrap().when, day);
     assert_eq!(harness.signals.received().len(), signals_before);
+}
+
+/// ADR 0018: an Event's row ID changes with every edit, its Combined Event
+/// Key doesn't.
+#[test]
+fn an_event_is_edited_twice_through_the_key_it_got_at_creation() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let day = all_day("2026-10-05", "2026-10-06");
+    let key = core
+        .create_event(draft(home.id, "Draft", day))
+        .unwrap()
+        .value
+        .combined_event_key;
+
+    core.edit_event(&key, draft(home.id, "First", day)).unwrap();
+    let second = core
+        .edit_event(&key, draft(home.id, "Second", day))
+        .unwrap()
+        .value;
+
+    assert_eq!(second.combined_event_key, key);
+    assert_eq!(core.event(&key).unwrap(), second);
+}
+
+/// The key is the Event's identity: an Event deleted and made again with
+/// its UID is the one its key names.
+#[test]
+fn a_key_whose_event_was_deleted_and_made_again_names_the_new_event() {
+    let harness = Harness::new();
+    let core = harness.open();
+    let home = calendar(&core, "Home");
+    let file = ImportFile::new(
+        "events.ics",
+        ics(&event(
+            "standup",
+            "DTSTART:20261005T070000Z",
+            "DTEND:20261005T080000Z",
+        )),
+    );
+    let preview = core.preview_import(&file, home.id).unwrap();
+    core.run_import(&preview, ExistingEvents::Skip).unwrap();
+    let key = support::on(&core, "2026-10-05").combined_event_key;
+    core.delete_event(&key).unwrap();
+
+    let preview = core.preview_import(&file, home.id).unwrap();
+    core.run_import(&preview, ExistingEvents::Skip).unwrap();
+
+    assert_eq!(
+        core.event(&key).unwrap(),
+        core.event(&support::on(&core, "2026-10-05").combined_event_key)
+            .unwrap()
+    );
+}
+
+/// The key of an Event that was deleted.
+fn gone(core: &Core, calendar_id: CalendarId) -> CombinedEventKey {
+    let gone = core
+        .create_event(draft(
+            calendar_id,
+            "Gone",
+            all_day("2026-10-05", "2026-10-06"),
+        ))
+        .unwrap()
+        .value
+        .combined_event_key;
+    core.delete_event(&gone).unwrap();
+    gone
 }
 
 #[test]
@@ -379,12 +453,12 @@ fn deleting_an_event_removes_it_and_is_signalled() {
     core.create_event(draft(home.id, "Kept", day)).unwrap();
     let signals_before = harness.signals.received().len();
 
-    core.delete_event(doomed.id).unwrap();
+    core.delete_event(&doomed.combined_event_key).unwrap();
 
     assert_eq!(titles(&core, "2026-10-05", "2026-10-06"), ["Kept"]);
     assert!(matches!(
-        core.event(doomed.id),
-        Err(CoreError::EventNotFound(id)) if id == doomed.id
+        core.event(&doomed.combined_event_key),
+        Err(CoreError::EventNotFound)
     ));
     assert_eq!(
         harness.signals.received()[signals_before..],
@@ -405,8 +479,8 @@ fn deleting_a_calendar_deletes_its_events() {
     core.delete_calendar(home.id).unwrap();
 
     assert!(matches!(
-        core.event(created.id),
-        Err(CoreError::EventNotFound(_))
+        core.event(&created.combined_event_key),
+        Err(CoreError::EventNotFound)
     ));
 }
 
@@ -459,13 +533,13 @@ fn events_of_read_only_calendars_cannot_be_changed() {
     );
     let refused = [
         core.create_event(draft(work.id, "New", day)).map(|_| ()),
-        core.edit_event(in_work.id, draft(work.id, "Changed", day))
+        core.edit_event(&in_work.combined_event_key, draft(work.id, "Changed", day))
             .map(|_| ()),
-        core.edit_event(in_home.id, draft(work.id, "Mine", day))
+        core.edit_event(&in_home.combined_event_key, draft(work.id, "Mine", day))
             .map(|_| ()),
-        core.edit_event(in_work.id, draft(home.id, "Theirs", day))
+        core.edit_event(&in_work.combined_event_key, draft(home.id, "Theirs", day))
             .map(|_| ()),
-        core.delete_event(in_work.id).map(|_| ()),
+        core.delete_event(&in_work.combined_event_key).map(|_| ()),
     ];
 
     for result in refused {
@@ -488,24 +562,27 @@ fn changing_a_missing_event_or_calendar_is_refused_without_a_signal() {
         .create_event(draft(home.id, "Here", day))
         .unwrap()
         .value;
+    let missing = gone(&core, home.id);
     let signals_before = harness.signals.received().len();
-    let missing = EventId(999);
 
     assert!(matches!(
         core.create_event(draft(CalendarId(999), "Lost", day)),
         Err(CoreError::CalendarNotFound(_))
     ));
     assert!(matches!(
-        core.edit_event(created.id, draft(CalendarId(999), "Lost", day)),
+        core.edit_event(
+            &created.combined_event_key,
+            draft(CalendarId(999), "Lost", day)
+        ),
         Err(CoreError::CalendarNotFound(_))
     ));
     assert!(matches!(
-        core.edit_event(missing, draft(home.id, "Lost", day)),
-        Err(CoreError::EventNotFound(_))
+        core.edit_event(&missing, draft(home.id, "Lost", day)),
+        Err(CoreError::EventNotFound)
     ));
     assert!(matches!(
-        core.delete_event(missing),
-        Err(CoreError::EventNotFound(_))
+        core.delete_event(&missing),
+        Err(CoreError::EventNotFound)
     ));
     assert_eq!(harness.signals.received().len(), signals_before);
 }
@@ -524,25 +601,28 @@ fn an_untouched_time_keeps_the_time_zone_it_was_made_in() {
         .unwrap()
         .value;
     harness.clock.set_time_zone("America/New_York");
-    let shown_in_new_york = core.event(created.id).unwrap().when;
+    let shown_in_new_york = core.event(&created.combined_event_key).unwrap().when;
 
-    core.edit_event(created.id, draft(home.id, "Call Berlin", shown_in_new_york))
-        .unwrap();
+    core.edit_event(
+        &created.combined_event_key,
+        draft(home.id, "Call Berlin", shown_in_new_york),
+    )
+    .unwrap();
     harness.clock.set_time_zone("Europe/Berlin");
 
     assert_eq!(
-        core.event(created.id).unwrap().when,
+        core.event(&created.combined_event_key).unwrap().when,
         timed("2026-10-05T09:00:00", "2026-10-05T10:00:00")
     );
 }
 
 /// Arranges an Event whose description came in as HTML, as from Google or an
 /// import, which the interface can't create yet.
-fn arrange_html_description(harness: &Harness, id: EventId, html: &str) {
+fn arrange_html_description(harness: &Harness, key: &CombinedEventKey, html: &str) {
     harness.arrange_local_store(&format!(
-        "UPDATE event SET description = '{}', description_html = 1 WHERE id = {}",
+        "UPDATE event SET description = '{}', description_html = 1 WHERE {}",
         html.replace('\'', "''"),
-        id.0
+        support::event_row(key)
     ));
 }
 
@@ -558,16 +638,17 @@ fn an_untouched_description_keeps_its_original_bytes() {
         .value;
     arrange_html_description(
         &harness,
-        created.id,
+        &created.combined_event_key,
         "<b>Slides</b>: <a href=\"https://example.com/s\">here</a>",
     );
-    let before = core.event(created.id).unwrap().description;
+    let before = core.event(&created.combined_event_key).unwrap().description;
 
     let mut unchanged = draft(home.id, "Talk, renamed", day);
     unchanged.description = before.text.clone();
-    core.edit_event(created.id, unchanged).unwrap();
+    core.edit_event(&created.combined_event_key, unchanged)
+        .unwrap();
 
-    let after = core.event(created.id).unwrap().description;
+    let after = core.event(&created.combined_event_key).unwrap().description;
     assert_eq!(after, before);
     assert_eq!(
         after.paragraphs,
@@ -593,14 +674,18 @@ fn an_edited_description_is_written_back_as_plain_text() {
         .create_event(draft(home.id, "Talk", day))
         .unwrap()
         .value;
-    arrange_html_description(&harness, created.id, "<b>Slides</b>");
+    arrange_html_description(&harness, &created.combined_event_key, "<b>Slides</b>");
 
     let mut edited = draft(home.id, "Talk", day);
     edited.description = "Slides <b>soon</b>".to_owned();
-    core.edit_event(created.id, edited).unwrap();
+    core.edit_event(&created.combined_event_key, edited)
+        .unwrap();
 
     assert_eq!(
-        core.event(created.id).unwrap().description.paragraphs,
+        core.event(&created.combined_event_key)
+            .unwrap()
+            .description
+            .paragraphs,
         vec![vec![Piece::Text {
             text: "Slides <b>soon</b>".to_owned()
         }]]
@@ -649,12 +734,12 @@ fn an_unreadable_stored_time_is_an_error_not_a_crash() {
         .unwrap()
         .value;
     harness.arrange_local_store(&format!(
-        "UPDATE event SET end_at = '2026-10-05T99:00' WHERE id = {}",
-        created.id.0
+        "UPDATE event SET end_at = '2026-10-05T99:00' WHERE {}",
+        support::event_row(&created.combined_event_key)
     ));
 
     assert!(matches!(
-        core.event(created.id),
+        core.event(&created.combined_event_key),
         Err(CoreError::UnreadableEventTime(_))
     ));
     assert!(matches!(
@@ -674,7 +759,7 @@ mod hostile {
         fixture()[name].as_str().unwrap().to_owned()
     }
 
-    fn create(core: &Core) -> EventId {
+    fn create(core: &Core) -> CombinedEventKey {
         let home = calendar(core, "Home");
         core.create_event(EventDraft {
             calendar_id: home.id,
@@ -686,7 +771,7 @@ mod hostile {
         })
         .unwrap()
         .value
-        .id
+        .combined_event_key
     }
 
     fn links(paragraphs: &[Vec<Piece>]) -> Vec<String> {
@@ -713,7 +798,7 @@ mod hostile {
 
         let id = create(&core);
 
-        let event = core.event(id).unwrap();
+        let event = core.event(&id).unwrap();
         assert_eq!(event.title, field("title"));
         assert_eq!(
             serde_json::to_value(&event.location).unwrap(),
@@ -739,9 +824,9 @@ mod hostile {
         let core = harness.open();
         let id = create(&core);
 
-        arrange_html_description(&harness, id, &field("description"));
+        arrange_html_description(&harness, &id, &field("description"));
 
-        let description = core.event(id).unwrap().description;
+        let description = core.event(&id).unwrap().description;
         assert_eq!(
             serde_json::to_value(&description).unwrap(),
             fixture()["expected"]["html"]
@@ -764,19 +849,19 @@ fn rescheduling_keeps_the_event_time_zone_and_an_html_description() {
         ))
         .unwrap()
         .value;
-    arrange_html_description(&harness, created.id, "<b>Agenda</b>");
-    let before = core.event(created.id).unwrap().description;
+    arrange_html_description(&harness, &created.combined_event_key, "<b>Agenda</b>");
+    let before = core.event(&created.combined_event_key).unwrap().description;
     harness.clock.set_time_zone("America/New_York");
 
     // A day later, as dragged in New York: 03:00 to 04:00 there.
     core.reschedule_event(
-        created.id,
+        &created.combined_event_key,
         timed("2026-10-06T03:00:00", "2026-10-06T04:00:00"),
     )
     .unwrap();
     harness.clock.set_time_zone("Europe/Berlin");
 
-    let after = core.event(created.id).unwrap();
+    let after = core.event(&created.combined_event_key).unwrap();
     assert_eq!(
         after.when,
         timed("2026-10-06T09:00:00", "2026-10-06T10:00:00")

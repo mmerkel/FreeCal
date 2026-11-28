@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use super::undo::{UndoTarget, undone_per_event};
 use super::{JournalEventModification, JournalTransactionId, TransactionOrigin};
-use crate::store::{Store, StoredJournalTransaction};
+use crate::store::{CombinedEventKey, Store, StoredJournalTransaction};
 use crate::{CalendarId, CoreError, EventId, Result};
 
 /// How many titles of its Events a listed Journal Transaction names.
@@ -67,7 +67,6 @@ pub struct ListedJournalEventModification {
     pub origin: TransactionOrigin,
     /// When its Journal Transaction was made, in Unix seconds.
     pub made_at: i64,
-    pub event_id: EventId,
     /// The Event's title as the change left it, or as it was before the
     /// change deleted it.
     pub title: String,
@@ -257,9 +256,7 @@ pub(crate) fn event_history(
     store: &Store,
     id: EventId,
 ) -> Result<Vec<ListedJournalEventModification>> {
-    let (uid, _) = store
-        .event_and_uid(id)?
-        .ok_or(CoreError::EventNotFound(id))?;
+    let (uid, _) = store.event_and_uid(id)?.ok_or(CoreError::EventNotFound)?;
     Ok(store
         .uid_journal_event_modifications(&uid)?
         .into_iter()
@@ -289,7 +286,11 @@ fn listed_journal_event_modification(
         if undone_per_event(modification.origin) {
             UndoTarget::Event {
                 journal_transaction: modification.journal_transaction,
-                event_id: modification.event_id,
+                combined_event_key: CombinedEventKey {
+                    calendar_id,
+                    uid: modification.uid.clone(),
+                    recurrence_id: None,
+                },
             }
         } else {
             UndoTarget::JournalTransaction {
@@ -301,7 +302,6 @@ fn listed_journal_event_modification(
         journal_transaction: modification.journal_transaction,
         origin: modification.origin,
         made_at: modification.made_at,
-        event_id: modification.event_id,
         title,
         calendar_id,
         kind,

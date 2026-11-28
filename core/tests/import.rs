@@ -144,8 +144,8 @@ fn events_whose_uid_the_calendar_has_count_as_existing() {
             .unwrap()
             .value;
         harness.arrange_local_store(&format!(
-            "UPDATE event SET uid = '{uid}' WHERE id = {}",
-            created.id.0
+            "UPDATE event SET uid = '{uid}' WHERE {}",
+            support::event_row(&created.combined_event_key)
         ));
     }
     let times = ("DTSTART:20261005T070000Z", "DTEND:20261005T080000Z");

@@ -15,7 +15,7 @@ import type {
 } from '../core/types';
 import hostile from '../../fixtures/hostile-event.json';
 import { dateChanged } from '../test/answers';
-import { calendarId, eventId, journalTransactionId } from '../test/ids';
+import { calendarId, combinedEventKey, journalTransactionId } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
 import { WindowDialogs } from './windowDialogs.svelte';
 import { WindowModel } from './windowModel.svelte';
@@ -52,7 +52,7 @@ async function editingOccurrence(repeat: Repeat | null = weekly) {
   const opened = started();
   const { core, dialogs } = await opened;
   core.answer('event', { ...sampleEvent, repeat });
-  dialogs.openDetails(eventId(3), recurrenceId);
+  dialogs.openDetails(combinedEventKey('event-3'), recurrenceId);
   await settled();
   dialogs.startEditing();
   core.calls.splice(0);
@@ -90,14 +90,14 @@ describe('the Scope Prompt of an edit', () => {
     dialogs.chooseScope({ scope: 'thisAndFollowing', exceptionsToo: true });
     await saved;
 
-    expect(core.callsOf('exceptionCounts')).toEqual([[eventId(3), recurrenceId]]);
+    expect(core.callsOf('exceptionCounts')).toEqual([[sampleEvent.combinedEventKey, recurrenceId]]);
     expect(core.callsOf('editOccurrence')).toEqual([
-      [eventId(3), recurrenceId, 'thisAndFollowing', true, draft],
+      [sampleEvent.combinedEventKey, recurrenceId, 'thisAndFollowing', true, draft],
     ]);
     expect(dialogs.scopePrompt).toBeUndefined();
     expect(dialogs.open).toEqual({
       kind: 'details',
-      id: eventId(recurring.eventId),
+      combinedEventKey: recurring.combinedEventKey,
       recurrenceId,
     });
   });
@@ -118,7 +118,7 @@ describe('the Scope Prompt of an edit', () => {
 
   test('an edit of a single Event asks nothing', async () => {
     const { core, dialogs } = await started();
-    dialogs.openDetails(eventId(3));
+    dialogs.openDetails(combinedEventKey('event-3'));
     await settled();
     dialogs.startEditing();
     const draft = draftOf(dialogs);
@@ -126,8 +126,27 @@ describe('the Scope Prompt of an edit', () => {
     await dialogs.save(draft);
 
     expect(core.callsOf('exceptionCounts')).toEqual([]);
-    expect(core.callsOf('editEvent')).toEqual([[eventId(3), draft]]);
+    expect(core.callsOf('editEvent')).toEqual([[sampleEvent.combinedEventKey, draft]]);
     expect(dialogs.open?.kind).toBe('details');
+  });
+
+  test('after an edit the details follow the key the core answers, as a move to another Calendar gives', async () => {
+    const { core, dialogs } = await started();
+    dialogs.openDetails(combinedEventKey('in-home'));
+    await settled();
+    dialogs.startEditing();
+    const moved = combinedEventKey('in-work');
+    core.answer('editEvent', {
+      ...changedEvent,
+      value: { ...sampleEvent, combinedEventKey: moved },
+    });
+    core.calls.splice(0);
+
+    await dialogs.save(draftOf(dialogs));
+    await settled();
+
+    expect(dialogs.open).toMatchObject({ kind: 'details', combinedEventKey: moved });
+    expect(core.callsOf('event')).toContainEqual([moved]);
   });
 });
 
@@ -145,7 +164,7 @@ describe('the Scope Prompt of a changed repeat', () => {
     await saved;
 
     expect(core.callsOf('editOccurrence')).toEqual([
-      [eventId(3), recurrenceId, 'all', false, draft],
+      [sampleEvent.combinedEventKey, recurrenceId, 'all', false, draft],
     ]);
   });
 
@@ -169,7 +188,7 @@ describe('the Scope Prompt of a drop', () => {
   test('asks which Occurrences move, and moves those chosen', async () => {
     const { core, dialogs } = await started();
 
-    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    const moved = dialogs.reschedule(combinedEventKey('event-3'), recurrenceId, when);
     await settled();
 
     expect(dialogs.scopePrompt?.change).toBe('move');
@@ -179,7 +198,7 @@ describe('the Scope Prompt of a drop', () => {
     await moved;
 
     expect(core.callsOf('rescheduleOccurrence')).toEqual([
-      [eventId(3), recurrenceId, 'this', false, when],
+      [combinedEventKey('event-3'), recurrenceId, 'this', false, when],
     ]);
     expect(dialogs.dropHeld).toBe(false);
   });
@@ -187,7 +206,7 @@ describe('the Scope Prompt of a drop', () => {
   test('Cancel rejects, so that the grid puts the Occurrence back, and moves nothing', async () => {
     const { core, dialogs } = await started();
 
-    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    const moved = dialogs.reschedule(combinedEventKey('event-3'), recurrenceId, when);
     await settled();
     dialogs.chooseScope(null);
 
@@ -200,7 +219,7 @@ describe('the Scope Prompt of a drop', () => {
     const { core, model, dialogs } = await started();
     const counts = core.pending('exceptionCounts');
 
-    const moved = dialogs.reschedule(eventId(3), recurrenceId, when);
+    const moved = dialogs.reschedule(combinedEventKey('event-3'), recurrenceId, when);
     dateChanged(core, '2026-10-06');
     counts.resolve();
     await settled();
@@ -216,22 +235,22 @@ describe('the Scope Prompt of a drop', () => {
   test('a single Event moves without asking', async () => {
     const { core, dialogs } = await started();
 
-    await dialogs.reschedule(eventId(3), null, when);
+    await dialogs.reschedule(combinedEventKey('event-3'), null, when);
 
     expect(core.callsOf('exceptionCounts')).toEqual([]);
-    expect(core.callsOf('rescheduleEvent')).toEqual([[eventId(3), when]]);
+    expect(core.callsOf('rescheduleEvent')).toEqual([[combinedEventKey('event-3'), when]]);
   });
 
   test('a failed move says why and rejects, until a move succeeds', async () => {
     const { core, dialogs } = await started();
     core.answer('rescheduleEvent', failure({ code: 'localStoreFailed' }));
 
-    await expect(dialogs.reschedule(eventId(3), null, when)).rejects.toBeDefined();
+    await expect(dialogs.reschedule(combinedEventKey('event-3'), null, when)).rejects.toBeDefined();
 
     expect(dialogs.rescheduleFailure).toBeTruthy();
 
     core.answer('rescheduleEvent', changedEvent);
-    await dialogs.reschedule(eventId(3), null, when);
+    await dialogs.reschedule(combinedEventKey('event-3'), null, when);
 
     expect(dialogs.rescheduleFailure).toBeUndefined();
   });
@@ -240,7 +259,7 @@ describe('the Scope Prompt of a drop', () => {
 describe('one dialog at a time', () => {
   test('opening one closes the one open, and the Window Model stops reading closed details', async () => {
     const { model, dialogs } = await started();
-    dialogs.openDetails(eventId(3));
+    dialogs.openDetails(combinedEventKey('event-3'));
     await settled();
 
     expect(model.opened).toBeDefined();
@@ -249,7 +268,7 @@ describe('one dialog at a time', () => {
 
     expect(dialogs.open).toEqual({ kind: 'settings' });
     expect(model.opened).toBeUndefined();
-    expect(dialogs.selectedEventId).toBeUndefined();
+    expect(dialogs.selectedEventKey).toBeUndefined();
   });
 
   test('a file picked while something else opened is let go', async () => {
@@ -272,7 +291,7 @@ describe('one dialog at a time', () => {
 
     const importing = dialogs.startImport();
     await settled();
-    void dialogs.reschedule(eventId(3), recurrenceId, when).catch(() => {});
+    void dialogs.reschedule(combinedEventKey('event-3'), recurrenceId, when).catch(() => {});
     await settled();
     picked.resolve(file);
     await importing;
@@ -285,7 +304,7 @@ describe('one dialog at a time', () => {
 
   test('details close once their Event is gone', async () => {
     const { core, dialogs } = await started();
-    dialogs.openDetails(eventId(3));
+    dialogs.openDetails(combinedEventKey('event-3'));
     await settled();
 
     core.answer('event', failure({ code: 'localStoreFailed' }));
@@ -323,12 +342,12 @@ describe('writes', () => {
   test('a failed delete says why and leaves the details open', async () => {
     const { core, dialogs } = await started();
     core.answer('deleteOccurrence', failure({ code: 'localStoreFailed' }));
-    dialogs.openDetails(eventId(3), recurrenceId);
+    dialogs.openDetails(combinedEventKey('event-3'), recurrenceId);
     await settled();
 
     await dialogs.removeOccurrence();
 
-    expect(core.callsOf('deleteOccurrence')).toEqual([[eventId(3), recurrenceId]]);
+    expect(core.callsOf('deleteOccurrence')).toEqual([[combinedEventKey('event-3'), recurrenceId]]);
     expect(dialogs.failure).toBeTruthy();
     expect(dialogs.open?.kind).toBe('details');
   });
@@ -339,7 +358,7 @@ describe('writes', () => {
     core.answer('listCalendars', [{ ...calendar, readOnly: true }]);
     const { dialogs } = await started(core);
 
-    dialogs.refuseDrag(recurring.eventId, recurrenceId);
+    dialogs.refuseDrag(recurring.combinedEventKey, recurrenceId);
 
     expect(dialogs.toast?.message).toContain(`its calendar “⁨${calendar.name}⁩” is read-only`);
     expect(dialogs.toast?.stays).toBe(true);
@@ -351,7 +370,7 @@ describe('writes', () => {
     const { dialogs } = await started();
     expect(recurring.hasGuests).toBe(true);
 
-    dialogs.refuseDrag(recurring.eventId, recurrenceId);
+    dialogs.refuseDrag(recurring.combinedEventKey, recurrenceId);
 
     expect(dialogs.toast?.message).toContain('has guests');
   });
@@ -610,7 +629,7 @@ describe('the Undo History', () => {
     { core, dialogs }: { core: FakeCore; dialogs: WindowDialogs },
     id: number,
   ) {
-    dialogs.openDetails(eventId(3), null);
+    dialogs.openDetails(combinedEventKey('event-3'), null);
     await settled();
     core.answer('deleteEvent', madeAs(id, null));
     await dialogs.remove();
@@ -858,7 +877,7 @@ describe('the Undo History', () => {
     const { core, dialogs, model } = await started();
     core.answer('rescheduleEvent', madeAs(1, sampleEvent));
     const [occurrence] = model.occurrences;
-    await dialogs.reschedule(occurrence.eventId, null, when);
+    await dialogs.reschedule(occurrence.combinedEventKey, null, when);
     expect(dialogs.toast?.message).toBe('Event moved');
 
     dialogs.startCreating(when);
@@ -866,7 +885,7 @@ describe('the Undo History', () => {
     await dialogs.save(draftOf(dialogs));
     expect(dialogs.toast?.message).toBe('Event created');
 
-    dialogs.openDetails(eventId(3), null);
+    dialogs.openDetails(combinedEventKey('event-3'), null);
     await settled();
     dialogs.startEditing();
     core.answer('editEvent', madeAs(3, sampleEvent));

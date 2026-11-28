@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AccountId, CalendarId, EventId, JournalTransactionId, KeyringError};
+use crate::{AccountId, CalendarId, JournalTransactionId, KeyringError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -18,16 +18,16 @@ pub enum CoreError {
     CalendarReadOnly(CalendarId),
     #[error("the Event has guests, so FreeCal doesn't change it")]
     EventHasGuests,
-    #[error("there is no Event {0:?}")]
-    EventNotFound(EventId),
+    #[error("there is no such Event")]
+    EventNotFound,
     #[error("an Event can't end before it starts")]
     EndBeforeStart,
     #[error(
         "a repeat rule needs an interval and a count of at least 1, and can't end before it starts"
     )]
     InvalidRepeat,
-    #[error("Event {0:?} has no such Occurrence")]
-    OccurrenceNotFound(EventId),
+    #[error("the Event has no such Occurrence")]
+    OccurrenceNotFound,
     #[error("the Local Store has an Event time FreeCal can't read: {0:?}")]
     UnreadableEventTime(String),
     /// The stored text of a Server Object, which was readable when it was
@@ -112,10 +112,10 @@ impl CoreError {
             CoreError::CalendarNotFound(_) => ErrorCode::CalendarNotFound,
             CoreError::CalendarReadOnly(_) => ErrorCode::CalendarReadOnly,
             CoreError::EventHasGuests => ErrorCode::EventHasGuests,
-            CoreError::EventNotFound(_) => ErrorCode::EventNotFound,
+            CoreError::EventNotFound => ErrorCode::EventNotFound,
             CoreError::EndBeforeStart => ErrorCode::EndBeforeStart,
             CoreError::InvalidRepeat => ErrorCode::InvalidRepeat,
-            CoreError::OccurrenceNotFound(_) => ErrorCode::OccurrenceNotFound,
+            CoreError::OccurrenceNotFound => ErrorCode::OccurrenceNotFound,
             CoreError::UnreadableEventTime(_) => ErrorCode::UnreadableEventTime,
             CoreError::UnreadableServerObject => ErrorCode::UnreadableServerObject,
             CoreError::EmptyCalendarName => ErrorCode::EmptyCalendarName,

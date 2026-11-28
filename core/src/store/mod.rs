@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::event::{EventFields, RecurrenceId};
 use crate::{CalendarId, EventId, Result};
@@ -65,13 +66,74 @@ pub enum Uid<'a> {
 }
 
 /// A Combined Event Key: a Calendar, a UID and a recurrence ID as the Event
-/// Row holds it (ADR 0015), what an Unsent Change is about.
+/// Row holds it (ADR 0015), what an Unsent Change is about and how the core
+/// interface names an Event (ADR 0018: its row ID changes with every edit).
+/// The window gets it as one opaque string, branded in TypeScript, and only
+/// compares it whole; the core reads it back untrusted, its UID being server
+/// data, and finds its Event by comparing by Occurrence
+/// ([`crate::event::Opened::load`]).
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(type = "string & { readonly __brand: \"CombinedEventKey\" }")
+)]
 pub struct CombinedEventKey {
-    pub calendar_id: CalendarId,
-    pub uid: String,
+    pub(crate) calendar_id: CalendarId,
+    pub(crate) uid: String,
     /// As obtained (ADR 0012): compared by Occurrence, never as text.
-    pub recurrence_id: Option<RecurrenceId>,
+    pub(crate) recurrence_id: Option<RecurrenceId>,
+}
+
+impl CombinedEventKey {
+    /// The key of the Event with `uid` and `fields` in `calendar_id`.
+    pub(crate) fn of(calendar_id: CalendarId, uid: &str, fields: &EventFields) -> Self {
+        Self {
+            calendar_id,
+            uid: uid.to_owned(),
+            recurrence_id: fields.recurrence_id.clone(),
+        }
+    }
+
+    /// Its parts as the window's string holds them.
+    fn parts(&self) -> (i64, &str, Option<&str>) {
+        (
+            self.calendar_id.0,
+            &self.uid,
+            self.recurrence_id.as_ref().map(RecurrenceId::as_obtained),
+        )
+    }
+}
+
+/// Keys are equal as the window compares them: whole, the recurrence ID as
+/// obtained. Whether two name the same Event is for
+/// [`crate::event::Opened::load`] to find, by Occurrence.
+impl PartialEq for CombinedEventKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.parts() == other.parts()
+    }
+}
+
+impl Eq for CombinedEventKey {}
+
+impl Serialize for CombinedEventKey {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let text = serde_json::to_string(&self.parts()).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&text)
+    }
+}
+
+impl<'de> Deserialize<'de> for CombinedEventKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
+            serde_json::from_str(&text).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            calendar_id: CalendarId(calendar_id),
+            uid,
+            recurrence_id: recurrence_id.map(RecurrenceId::obtained),
+        })
+    }
 }
 
 /// An Event with its Calendar and UID.
@@ -188,6 +250,23 @@ impl Deref for DatabaseTransaction<'_> {
 
 #[cfg(test)]
 mod tests {
+    /// The UID is server data: the key's string carries any text whole and
+    /// reads back as it was.
+    #[test]
+    fn a_combined_event_key_reads_back_from_its_string_whatever_its_uid() {
+        let key = super::CombinedEventKey {
+            calendar_id: crate::CalendarId(2),
+            uid: "a\"],[1,\"b\u{0}\n<script>".to_owned(),
+            recurrence_id: Some(crate::event::RecurrenceId::obtained("2026-10-05T9:0:0")),
+        };
+
+        let text = serde_json::to_string(&key).unwrap();
+        let back: super::CombinedEventKey = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(back, key);
+        assert!(serde_json::from_str::<super::CombinedEventKey>("\"[2,\\\"a\\\"]\"").is_err());
+    }
+
     use std::fs;
     use std::path::{Path, PathBuf};
 

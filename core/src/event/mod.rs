@@ -23,7 +23,9 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::JournalTransaction;
-use crate::store::{KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent};
+use crate::store::{
+    CombinedEventKey, KeptUnsentChange, RangeEvent, Store, StoredEvent, Uid, UidEvent,
+};
 use crate::sync::SendFailure;
 use crate::{CalendarId, CoreError, ImportedEvent, ImportedWhen, Result, StructuredText};
 
@@ -31,8 +33,9 @@ pub(crate) use recurrence_id::{NormalForm, RecurrenceId, in_normal_form};
 pub use rule::{Frequency, Repeat, RepeatEnd};
 pub(crate) use scope::{Edit, edit_event, edit_occurrence, exception_counts};
 pub use scope::{ExceptionCounts, Scope};
+pub(crate) use when::EventId;
 pub(crate) use when::{EventFields, StoredRange, StoredWhen, instant};
-pub use when::{EventId, ServerObject, When};
+pub use when::{ServerObject, When};
 
 /// What the user gives an Event when creating or editing it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,7 +59,7 @@ pub struct EventDraft {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
-    pub id: EventId,
+    pub combined_event_key: CombinedEventKey,
     pub calendar_id: CalendarId,
     pub title: String,
     pub when: When,
@@ -140,9 +143,9 @@ impl UnsentChange {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Occurrence {
-    /// The Event it belongs to: its Recurring Event, or the Exception that
-    /// changed it.
-    pub event_id: EventId,
+    /// The key of the Event it belongs to: its Recurring Event, or the
+    /// Exception that changed it.
+    pub combined_event_key: CombinedEventKey,
     pub calendar_id: CalendarId,
     pub title: String,
     pub when: When,
@@ -168,19 +171,20 @@ pub struct Occurrence {
 impl Occurrence {
     /// Orders Occurrences, each given with its derived UTC start, by the
     /// date they start on in the Display Time Zone and then by when they
-    /// happen, which differs from their wall time in the repeated hour.
-    fn ordered(mut occurrences: Vec<(i64, Occurrence)>) -> Vec<Occurrence> {
-        occurrences.sort_by(|(a_utc, a), (b_utc, b)| {
-            (a.when.start_date(), a_utc, a.event_id.0, &a.recurrence_id).cmp(&(
+    /// happen, which differs from their wall time in the repeated hour, then
+    /// by their Event Row's ID, given with each.
+    fn ordered(mut occurrences: Vec<(i64, EventId, Occurrence)>) -> Vec<Occurrence> {
+        occurrences.sort_by(|(a_utc, a_id, a), (b_utc, b_id, b)| {
+            (a.when.start_date(), a_utc, a_id, &a.recurrence_id).cmp(&(
                 b.when.start_date(),
                 b_utc,
-                b.event_id.0,
+                b_id,
                 &b.recurrence_id,
             ))
         });
         occurrences
             .into_iter()
-            .map(|(_, occurrence)| occurrence)
+            .map(|(_, _, occurrence)| occurrence)
             .collect()
     }
 }
@@ -626,7 +630,37 @@ pub(crate) struct Opened {
 }
 
 impl Opened {
-    pub fn load(source: &impl Source, id: EventId) -> Result<Self> {
+    /// The Event `key` names, as the window gives it: among the Events of its
+    /// Calendar and UID, the one that isn't an Exception, or the Exception
+    /// for the Occurrence its recurrence ID names, compared by Occurrence
+    /// against their Recurring Event (ADR 0012), the first by ID of several.
+    /// An Event deleted and created again under the key is the new one.
+    pub fn load(source: &impl Source, key: &CombinedEventKey) -> Result<Self> {
+        let events = source.events_with_uid(Uid::In(key.calendar_id, &key.uid))?;
+        let loaded = Loaded::sorted(key.calendar_id, key.uid.clone(), events);
+        let exception = match &key.recurrence_id {
+            None => {
+                loaded.event.as_ref().ok_or(CoreError::EventNotFound)?;
+                None
+            }
+            Some(named) => {
+                let rid = named.normal_form(loaded.recurring_when().as_ref());
+                let found = loaded.exceptions.iter().position(|exception| match &rid {
+                    Some(rid) => exception.rid.as_ref() == Some(rid),
+                    None => exception
+                        .fields
+                        .recurrence_id
+                        .as_ref()
+                        .is_some_and(|stored| stored.same_unreadable(named)),
+                });
+                Some(found.ok_or(CoreError::EventNotFound)?)
+            }
+        };
+        Ok(Self { loaded, exception })
+    }
+
+    /// The Event Row `id`, as the core finds an Event it has just written.
+    pub fn load_row(source: &impl Source, id: EventId) -> Result<Self> {
         Self::among(source.events_with_uid(Uid::Of(id))?, id)
     }
 
@@ -635,7 +669,7 @@ impl Opened {
         let opened = events
             .iter()
             .find(|event| event.id == id)
-            .ok_or(CoreError::EventNotFound(id))?;
+            .ok_or(CoreError::EventNotFound)?;
         let (calendar_id, uid) = (opened.calendar_id, opened.uid.clone());
         let loaded = Loaded::sorted(calendar_id, uid, events);
         let exception = loaded
@@ -661,7 +695,13 @@ impl Opened {
             .is_some_and(|exception| self.loaded.of_its_own(exception))
     }
 
-    fn id(&self) -> EventId {
+    /// The key the window names it by.
+    pub fn key(&self) -> CombinedEventKey {
+        CombinedEventKey::of(self.loaded.calendar_id, &self.loaded.uid, self.fields())
+    }
+
+    /// Its Event Row's ID, which stays inside the core.
+    pub fn id(&self) -> EventId {
         match self.exception() {
             Some(exception) => exception.id,
             None => self.event().0,
@@ -696,7 +736,7 @@ impl Opened {
         };
         let (repeat, custom_repeat) = rule::repeat_of(repeats);
         Ok(Event {
-            id: self.id(),
+            combined_event_key: self.key(),
             calendar_id: self.loaded.calendar_id,
             title: fields.title.clone(),
             when: fields.when.to_when(zone)?,
@@ -753,14 +793,15 @@ impl Opened {
 /// gone, is the Event.
 pub(crate) fn cancel_occurrence(
     journal_transaction: &mut JournalTransaction,
-    id: EventId,
+    key: &CombinedEventKey,
     recurrence_id: &str,
 ) -> Result<()> {
-    let opened = Opened::load(journal_transaction, id)?;
+    let opened = Opened::load(journal_transaction, key)?;
+    let id = opened.id();
     let cancelled = opened
         .loaded
         .rid_of(recurrence_id)
-        .ok_or(CoreError::OccurrenceNotFound(id))?;
+        .ok_or(CoreError::OccurrenceNotFound)?;
     match opened.loaded.recurring() {
         Some(_) => opened.loaded.cancel(journal_transaction, &cancelled),
         None => journal_transaction.delete(id),
@@ -856,7 +897,11 @@ pub(crate) fn occurrences(
         };
         let occurrence = |when: &StoredWhen, recurrence_id| -> Result<Occurrence> {
             Ok(Occurrence {
-                event_id: event.id,
+                combined_event_key: CombinedEventKey::of(
+                    event.calendar_id,
+                    &event.uid,
+                    &event.fields,
+                ),
                 calendar_id: event.calendar_id,
                 title: event.fields.title.clone(),
                 when: when.to_when(zone)?,
@@ -869,11 +914,16 @@ pub(crate) fn occurrences(
             Some(found) => {
                 for (recurrence_id, when) in found {
                     let start_utc = when.instants()?.0;
-                    occurrences.push((start_utc, occurrence(&when, Some(recurrence_id))?));
+                    occurrences.push((
+                        start_utc,
+                        event.id,
+                        occurrence(&when, Some(recurrence_id))?,
+                    ));
                 }
             }
             None => occurrences.push((
                 event.start_utc,
+                event.id,
                 occurrence(&event.fields.when, recurrence_id)?,
             )),
         }

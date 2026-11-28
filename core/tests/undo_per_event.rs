@@ -17,7 +17,7 @@ fn contents(core: &Core) -> Vec<Event> {
     core.occurrences(date("2000-01-01"), date("2100-01-01"))
         .unwrap()
         .into_iter()
-        .map(|occurrence| core.event(occurrence.event_id).unwrap())
+        .map(|occurrence| core.event(&occurrence.combined_event_key).unwrap())
         .collect()
 }
 
@@ -38,7 +38,7 @@ fn whole(id: JournalTransactionId) -> UndoTarget {
 fn one(journal_transaction: JournalTransactionId, event: &Event) -> UndoTarget {
     UndoTarget::Event {
         journal_transaction,
-        event_id: event.id,
+        combined_event_key: event.combined_event_key.clone(),
     }
 }
 
@@ -68,7 +68,7 @@ fn now(harness: &Harness) -> i64 {
 }
 
 fn the_event(core: &Core, day: &str) -> Event {
-    core.event(on(core, day).event_id).unwrap()
+    core.event(&on(core, day).combined_event_key).unwrap()
 }
 
 const MONDAY: (&str, &str) = ("DTSTART:20261005T070000Z", "DTEND:20261005T080000Z");
@@ -132,7 +132,7 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
             |core, _| {
                 let work = calendar(core, "Work");
                 let new = the_event(core, "2026-10-05");
-                core.edit_event(new.id, draft(work.id, "new", new.when))
+                core.edit_event(&new.combined_event_key, draft(work.id, "new", new.when))
                     .unwrap()
                     .journal_transaction
                     .unwrap()
@@ -146,7 +146,7 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
         cascades(
             |core, home| {
                 let kept = the_event(core, "2026-10-06");
-                core.edit_event(kept.id, draft(home.id, "Kept", kept.when))
+                core.edit_event(&kept.combined_event_key, draft(home.id, "Kept", kept.when))
                     .unwrap()
                     .journal_transaction
                     .unwrap()
@@ -159,7 +159,7 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
     fn an_updated_event_deleted() {
         cascades(
             |core, _| {
-                core.delete_event(the_event(core, "2026-10-06").id)
+                core.delete_event(&the_event(core, "2026-10-06").combined_event_key)
                     .unwrap()
                     .journal_transaction
                     .unwrap()
@@ -178,15 +178,15 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
         let imported = import(&core, home.id, &event("new", MONDAY.0, MONDAY.1));
         let new = the_event(&core, "2026-10-05");
         let renamed = core
-            .edit_event(new.id, draft(home.id, "Renamed", new.when))
+            .edit_event(&new.combined_event_key, draft(home.id, "Renamed", new.when))
             .unwrap();
         let moved = core
             .edit_event(
-                new.id,
+                &new.combined_event_key,
                 draft(home.id, "Renamed", the_event(&core, "2026-10-05").when),
             )
             .unwrap();
-        let deleted = core.delete_event(new.id).unwrap();
+        let deleted = core.delete_event(&new.combined_event_key).unwrap();
 
         let danger = danger(&core, whole(imported));
         core.undo(whole(imported), Some(&danger)).unwrap();
@@ -215,7 +215,7 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
         let imported = import(&core, home.id, &event("new", MONDAY.0, MONDAY.1));
         let new = the_event(&core, "2026-10-05");
         let renamed = core
-            .edit_event(new.id, draft(home.id, "Renamed", new.when))
+            .edit_event(&new.combined_event_key, draft(home.id, "Renamed", new.when))
             .unwrap();
         core.undo(whole(renamed.journal_transaction.unwrap()), None)
             .unwrap();
@@ -236,12 +236,12 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
         let imported = import(&core, home.id, &event("new", MONDAY.0, MONDAY.1));
         let new = the_event(&core, "2026-10-05");
         let one = core
-            .edit_event(new.id, draft(home.id, "One", new.when))
+            .edit_event(&new.combined_event_key, draft(home.id, "One", new.when))
             .unwrap()
             .journal_transaction
             .unwrap();
         let two = core
-            .edit_event(new.id, draft(home.id, "Two", new.when))
+            .edit_event(&new.combined_event_key, draft(home.id, "Two", new.when))
             .unwrap()
             .journal_transaction
             .unwrap();
@@ -269,11 +269,14 @@ mod an_event_changed_since_has_its_later_changes_undone_first {
         let home = calendar(&core, "Home");
         let imported = import(&core, home.id, &event("new", MONDAY.0, MONDAY.1));
         let new = the_event(&core, "2026-10-05");
-        core.edit_event(new.id, draft(home.id, "Renamed", new.when))
+        core.edit_event(&new.combined_event_key, draft(home.id, "Renamed", new.when))
             .unwrap();
         let approved = danger(&core, whole(imported));
-        core.edit_event(new.id, draft(home.id, "Renamed again", new.when))
-            .unwrap();
+        core.edit_event(
+            &new.combined_event_key,
+            draft(home.id, "Renamed again", new.when),
+        )
+        .unwrap();
 
         let asked = core.undo(whole(imported), Some(&approved)).unwrap();
 
@@ -299,7 +302,7 @@ mod a_split_by_this_and_following {
         let third = on(core, "2026-10-19");
         let split = core
             .reschedule_occurrence(
-                third.event_id,
+                &third.combined_event_key,
                 third.recurrence_id.as_deref().unwrap(),
                 Scope::ThisAndFollowing,
                 false,
@@ -310,7 +313,7 @@ mod a_split_by_this_and_following {
             .unwrap();
         let first = the_event(core, "2026-10-05");
         let following = the_event(core, "2026-10-19");
-        assert_ne!(first.id, following.id);
+        assert_ne!(first.combined_event_key, following.combined_event_key);
         (split, first, following)
     }
 
@@ -340,7 +343,7 @@ mod a_split_by_this_and_following {
             let third = on(&core, "2026-10-19");
             let split = core
                 .reschedule_occurrence(
-                    third.event_id,
+                    &third.combined_event_key,
                     third.recurrence_id.as_deref().unwrap(),
                     Scope::ThisAndFollowing,
                     false,
@@ -352,7 +355,7 @@ mod a_split_by_this_and_following {
             let half = the_event(&core, edited_half);
             let renamed = core
                 .edit_event(
-                    half.id,
+                    &half.combined_event_key,
                     freecal_core::EventDraft {
                         repeat: half.repeat,
                         ..draft(half.calendar_id, "Pilates", half.when)
@@ -386,7 +389,7 @@ mod a_split_by_this_and_following {
         let (split, first, following) = split(&core);
         let work = calendar(&core, "Work");
         core.edit_event(
-            following.id,
+            &following.combined_event_key,
             freecal_core::EventDraft {
                 repeat: following.repeat,
                 ..draft(work.id, "Yoga", following.when)
@@ -441,7 +444,7 @@ mod a_split_by_this_and_following {
         let third = on(&core, "2026-10-19");
         let split = core
             .reschedule_occurrence(
-                third.event_id,
+                &third.combined_event_key,
                 third.recurrence_id.as_deref().unwrap(),
                 Scope::ThisAndFollowing,
                 false,
@@ -546,7 +549,7 @@ mod one_event_of_an_import {
 
         assert!(matches!(
             core.undo(one(imported, &other), None),
-            Err(CoreError::EventNotFound(id)) if id == other.id
+            Err(CoreError::EventNotFound)
         ));
     }
 }
@@ -596,8 +599,11 @@ mod skipped {
         .concat();
         let imported = import(&core, home.id, &body);
         let moved = the_event(&core, "2026-10-05");
-        core.edit_event(moved.id, draft(work.id, "moved", moved.when))
-            .unwrap();
+        core.edit_event(
+            &moved.combined_event_key,
+            draft(work.id, "moved", moved.when),
+        )
+        .unwrap();
         core.set_calendar_read_only(work.id, true).unwrap();
 
         let ran = core.undo(whole(imported), None).unwrap();

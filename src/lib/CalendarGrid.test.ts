@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import hostile from '../../fixtures/hostile-event.json';
 import type { Calendar, Occurrence } from '../core/types';
-import { accountId, calendarId, eventId } from '../test/ids';
+import { accountId, calendarId, combinedEventKey } from '../test/ids';
 import CalendarGrid from './CalendarGrid.svelte';
 import { setClockHours } from './clock.svelte';
 import { OUTLINE_DELAY_MS } from './unsent';
@@ -30,7 +30,7 @@ const home: Calendar = {
 
 function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Occurrence {
   return {
-    eventId: eventId(1),
+    combinedEventKey: combinedEventKey('event-1'),
     calendarId: home.id,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' },
     recurrenceId: null,
@@ -43,7 +43,7 @@ function occurrence(fields: Partial<Occurrence> & Pick<Occurrence, 'title'>): Oc
 /** Occurrences of one Recurring Event on Monday and Tuesday at 9:00, titled after their day. */
 const recurring = ['05', '06'].map((day) =>
   occurrence({
-    eventId: eventId(7),
+    combinedEventKey: combinedEventKey('event-7'),
     title: `Yoga ${day}`,
     when: { kind: 'timed', start: `2026-10-${day}T09:00:00`, end: `2026-10-${day}T10:00:00` },
     recurrenceId: `2026-10-${day}T09:00:00`,
@@ -172,13 +172,13 @@ test('shows the Occurrences it is given in their Calendar’s colour', async () 
   render(CalendarGrid, {
     ...thisMonth,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Dentist' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Dentist' }),
       occurrence({
-        eventId: eventId(2),
+        combinedEventKey: combinedEventKey('event-2'),
         title: 'Holiday',
         when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' },
       }),
-      occurrence({ eventId: eventId(3), title: '' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-3'), title: '' }),
     ],
     calendars: [home],
   });
@@ -199,9 +199,9 @@ test('marks timed Events with a dot in their Calendar’s colour and fills all-d
   const shown = render(CalendarGrid, {
     ...thisMonth,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Dentist' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Dentist' }),
       occurrence({
-        eventId: eventId(2),
+        combinedEventKey: combinedEventKey('event-2'),
         title: 'Holiday',
         when: { kind: 'allDay', start: '2026-10-07', end: '2026-10-08' },
       }),
@@ -229,8 +229,13 @@ test('writes on a filled Event in whichever of dark or white is easier to read',
   render(CalendarGrid, {
     ...thisMonth,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Yellow', calendarId: work.id, when: allDay }),
-      occurrence({ eventId: eventId(2), title: 'Blue', when: allDay }),
+      occurrence({
+        combinedEventKey: combinedEventKey('event-1'),
+        title: 'Yellow',
+        calendarId: work.id,
+        when: allDay,
+      }),
+      occurrence({ combinedEventKey: combinedEventKey('event-2'), title: 'Blue', when: allDay }),
     ],
     calendars: [home, work],
   });
@@ -273,7 +278,7 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
   const onopenevent = vi.fn();
   render(CalendarGrid, {
     ...thisMonth,
-    occurrences: [occurrence({ eventId: eventId(7), title: 'Dentist' })],
+    occurrences: [occurrence({ combinedEventKey: combinedEventKey('event-7'), title: 'Dentist' })],
     calendars: [home],
     onopenevent,
   });
@@ -284,8 +289,8 @@ test('reports a click on an Occurrence, also with the keyboard', async () => {
   await user.keyboard('{Enter}');
 
   expect(onopenevent.mock.calls).toEqual([
-    [7, null],
-    [7, null],
+    [combinedEventKey('event-7'), null],
+    [combinedEventKey('event-7'), null],
   ]);
 });
 
@@ -297,7 +302,7 @@ test('reports which Occurrence of a Recurring Event was clicked', async () => {
 
   await user.click(chip('Yoga 06'));
 
-  expect(onopenevent.mock.calls).toEqual([[7, '2026-10-06T09:00:00']]);
+  expect(onopenevent.mock.calls).toEqual([[combinedEventKey('event-7'), '2026-10-06T09:00:00']]);
 });
 
 test('marks only the open Occurrence of a Recurring Event', async () => {
@@ -305,7 +310,7 @@ test('marks only the open Occurrence of a Recurring Event', async () => {
     ...thisMonth,
     occurrences: recurring,
     calendars: [home],
-    selectedEventId: eventId(7),
+    selectedEventKey: combinedEventKey('event-7'),
     selectedRecurrenceId: '2026-10-06T09:00:00',
   });
 
@@ -317,11 +322,11 @@ test('marks the selected Event', async () => {
   render(CalendarGrid, {
     ...thisMonth,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Chosen' }),
-      occurrence({ eventId: eventId(2), title: 'Other' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Chosen' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-2'), title: 'Other' }),
     ],
     calendars: [home],
-    selectedEventId: eventId(1),
+    selectedEventKey: combinedEventKey('event-1'),
   });
 
   await waitFor(() => expect(chip('Chosen')).toHaveClass('selected-event'));
@@ -330,14 +335,14 @@ test('marks the selected Event', async () => {
 
 test('marks the chips filled with their Calendar colour, for their hover effect', async () => {
   const occurrences = [
-    occurrence({ eventId: eventId(1), title: 'Meeting' }),
+    occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Meeting' }),
     occurrence({
-      eventId: eventId(2),
+      combinedEventKey: combinedEventKey('event-2'),
       title: 'Holiday',
       when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-07' },
     }),
     occurrence({
-      eventId: eventId(3),
+      combinedEventKey: combinedEventKey('event-3'),
       title: 'Trip',
       when: { kind: 'timed', start: '2026-10-07T09:00:00', end: '2026-10-09T18:00:00' },
     }),
@@ -386,9 +391,9 @@ test('lays out overlapping Events side by side in the week view', async () => {
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'First' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'First' }),
       occurrence({
-        eventId: eventId(2),
+        combinedEventKey: combinedEventKey('event-2'),
         title: 'Second',
         when: { kind: 'timed', start: '2026-10-05T09:30:00', end: '2026-10-05T10:30:00' },
       }),
@@ -407,14 +412,14 @@ test('shows all-day Events and timed Events of a day or more in the all-day area
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Meeting' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Meeting' }),
       occurrence({
-        eventId: eventId(2),
+        combinedEventKey: combinedEventKey('event-2'),
         title: 'Holiday',
         when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
       }),
       occurrence({
-        eventId: eventId(3),
+        combinedEventKey: combinedEventKey('event-3'),
         title: 'Conference',
         when: { kind: 'timed', start: '2026-10-07T18:00:00', end: '2026-10-09T12:00:00' },
       }),
@@ -439,16 +444,24 @@ test('offers a resize on both edges for Events of writable Calendars without gue
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Mine' }),
-      occurrence({ eventId: eventId(5), title: 'Meeting', hasGuests: true }),
-      occurrence({ eventId: eventId(2), title: 'Theirs', calendarId: shared.id }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Mine' }),
       occurrence({
-        eventId: eventId(3),
+        combinedEventKey: combinedEventKey('event-5'),
+        title: 'Meeting',
+        hasGuests: true,
+      }),
+      occurrence({
+        combinedEventKey: combinedEventKey('event-2'),
+        title: 'Theirs',
+        calendarId: shared.id,
+      }),
+      occurrence({
+        combinedEventKey: combinedEventKey('event-3'),
         title: 'Holiday',
         when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
       }),
       occurrence({
-        eventId: eventId(4),
+        combinedEventKey: combinedEventKey('event-4'),
         title: 'Their holiday',
         calendarId: shared.id,
         when: { kind: 'allDay', start: '2026-10-06', end: '2026-10-09' },
@@ -483,7 +496,9 @@ test('reports a drag of an Occurrence with guests in a writable Calendar', async
   fireEvent.mouseMove(window, { clientX: 100, clientY: 140 });
   fireEvent.mouseUp(window);
 
-  expect(onrefusedrag.mock.calls).toEqual([[eventId(7), recurring[0].recurrenceId]]);
+  expect(onrefusedrag.mock.calls).toEqual([
+    [combinedEventKey('event-7'), recurring[0].recurrenceId],
+  ]);
 });
 
 test('reports a drag of an Occurrence it doesn’t offer to move, once, without opening it', async () => {
@@ -493,7 +508,7 @@ test('reports a drag of an Occurrence it doesn’t offer to move, once, without 
   render(CalendarGrid, {
     ...thatWeek,
     occurrences: [
-      occurrence({ eventId: eventId(1), title: 'Mine' }),
+      occurrence({ combinedEventKey: combinedEventKey('event-1'), title: 'Mine' }),
       occurrence({ ...recurring[0], title: 'Theirs', calendarId: shared.id }),
     ],
     calendars: [home, shared],
@@ -515,7 +530,9 @@ test('reports a drag of an Occurrence it doesn’t offer to move, once, without 
   fireEvent.mouseUp(chip('Theirs'));
   fireEvent.click(chip('Theirs'));
 
-  expect(onrefusedrag.mock.calls).toEqual([[eventId(7), recurring[0].recurrenceId]]);
+  expect(onrefusedrag.mock.calls).toEqual([
+    [combinedEventKey('event-7'), recurring[0].recurrenceId],
+  ]);
   expect(onopenevent).not.toHaveBeenCalled();
 
   // The next click opens it again.

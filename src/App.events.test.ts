@@ -169,7 +169,7 @@ test('an Event’s details show its title, time, location, description and Calen
 
   const details = await openOccurrence(user, core, dentist);
 
-  expect(core.callsOf('event')).toEqual([[dentist.id]]);
+  expect(core.callsOf('event')).toEqual([[dentist.combinedEventKey]]);
   expect(details).toHaveTextContent('Monday, October 5, 2026');
   expect(details).toHaveTextContent('9:00');
   expect(details).toHaveTextContent('10:30');
@@ -340,7 +340,7 @@ test('editing an Event changes it and returns to its details', async () => {
 
   expect(await screen.findByRole('dialog', { name: 'Long lunch' })).toBeInTheDocument();
   expect(core.callsOf('editEvent')).toEqual([
-    [lunch.id, expect.objectContaining({ title: 'Long lunch', when: monday })],
+    [lunch.combinedEventKey, expect.objectContaining({ title: 'Long lunch', when: monday })],
   ]);
   expect(await within(grid).findByRole('button', { name: 'Long lunch' })).toBeInTheDocument();
 });
@@ -374,7 +374,7 @@ test('deleting an Event deletes it at once, and the toast’s Undo brings it bac
 
   expect(screen.queryByRole('alertdialog')).toBeNull();
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(core.callsOf('deleteEvent')).toEqual([[doomed.id]]);
+  expect(core.callsOf('deleteEvent')).toEqual([[doomed.combinedEventKey]]);
   occurrencesChanged(core, [home], [kept]);
   await waitFor(() => expect(within(grid).queryByRole('button', { name: 'Doomed' })).toBeNull());
   expect(within(grid).getByRole('button', { name: 'Kept' })).toBeInTheDocument();
@@ -499,7 +499,7 @@ test('an open editor’s draft survives a re-fetch', async () => {
   await user.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() =>
     expect(core.callsOf('editEvent')).toEqual([
-      [plan.id, expect.objectContaining({ title: 'My plan' })],
+      [plan.combinedEventKey, expect.objectContaining({ title: 'My plan' })],
     ]),
   );
 });
@@ -642,7 +642,7 @@ test('the hostile Event goes through the grid, its details and the editor as tex
   await screen.findByRole('dialog', { name: 'Hostile' });
   expect(core.callsOf('editEvent')).toEqual([
     [
-      hostileHtml.id,
+      hostileHtml.combinedEventKey,
       expect.objectContaining({
         title: 'Hostile',
         location: hostile.location,
@@ -661,9 +661,9 @@ test('dragging an Event to another time reschedules it through the core', async 
   const core = firstLaunch({ calendars: [home], events: [dentist] });
   await showApp(core);
 
-  await stubGrid.props!.onreschedule!(dentist.id, null, later);
+  await stubGrid.props!.onreschedule!(dentist.combinedEventKey, null, later);
 
-  expect(core.callsOf('rescheduleEvent')).toEqual([[dentist.id, later]]);
+  expect(core.callsOf('rescheduleEvent')).toEqual([[dentist.combinedEventKey, later]]);
   occurrencesChanged(core, [home], [{ ...dentist, when: later }]);
   await waitFor(() => expect(stubGrid.props!.occurrences[0]?.when).toEqual(later));
 });
@@ -674,7 +674,9 @@ test('a refused drag says why and tells the grid to put the Event back', async (
   await showApp(core);
   core.answer('rescheduleEvent', failure({ code: 'localStoreFailed' }));
 
-  await expect(stubGrid.props!.onreschedule!(dentist.id, null, later)).rejects.toBeDefined();
+  await expect(
+    stubGrid.props!.onreschedule!(dentist.combinedEventKey, null, later),
+  ).rejects.toBeDefined();
 
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'The event couldn’t be moved: FreeCal’s database couldn’t be read or written',
@@ -686,7 +688,7 @@ test('trying to drag an Event of a Read-only Calendar says why it can’t move',
   const core = firstLaunch({ calendars: [locked], events: [fixed] });
   await showApp(core);
 
-  stubGrid.props!.onrefusedrag!(fixed.id, null);
+  stubGrid.props!.onrefusedrag!(fixed.combinedEventKey, null);
 
   expect(await screen.findByRole('status')).toHaveTextContent(
     '“⁨Fixed⁩” can’t be changed: its calendar “⁨Holidays⁩” is read-only.',
@@ -699,7 +701,7 @@ test('trying to drag an Event with guests says why it can’t move', async () =>
   const core = firstLaunch({ calendars: [home], events: [meeting] });
   await showApp(core);
 
-  stubGrid.props!.onrefusedrag!(meeting.id, null);
+  stubGrid.props!.onrefusedrag!(meeting.combinedEventKey, null);
 
   expect(await screen.findByRole('status')).toHaveTextContent(
     '“⁨Meeting⁩” has guests, so it can’t be changed in FreeCal. Edit it in Google or on its server for now.',
@@ -711,7 +713,7 @@ test('a refused drag of an Event with guests names a hostile Event as text', asy
   const fixed = event({ calendarId: home.id, title: hostile.title, when: monday, hasGuests: true });
   await showApp(firstLaunch({ calendars: [home], events: [fixed] }));
 
-  stubGrid.props!.onrefusedrag!(fixed.id, null);
+  stubGrid.props!.onrefusedrag!(fixed.combinedEventKey, null);
 
   const toast = await screen.findByRole('status');
   expect(toast.querySelector('p')!.textContent).toBe(hostile.expected.hasGuestsDrag);
@@ -723,7 +725,7 @@ test('a refused drag names a hostile Event and Calendar as text', async () => {
   const fixed = event({ calendarId: hostileCalendar.id, title: hostile.title, when: monday });
   await showApp(firstLaunch({ calendars: [hostileCalendar], events: [fixed] }));
 
-  stubGrid.props!.onrefusedrag!(fixed.id, null);
+  stubGrid.props!.onrefusedrag!(fixed.combinedEventKey, null);
 
   const toast = await screen.findByRole('status');
   expect(toast.querySelector('p')!.textContent).toBe(hostile.expected.readOnlyDrag);
@@ -810,7 +812,9 @@ test('deleting an Occurrence asks, and “This event” deletes only that one', 
   await user.click(within(ask).getByRole('button', { name: 'This event' }));
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(core.callsOf('deleteOccurrence')).toEqual([[yoga.id, '2026-10-12T09:00:00']]);
+  expect(core.callsOf('deleteOccurrence')).toEqual([
+    [yoga.combinedEventKey, '2026-10-12T09:00:00'],
+  ]);
   expect(core.callsOf('deleteEvent')).toEqual([]);
   occurrencesChanged(core, [home], [yogaOccurrences[0], yogaOccurrences[2]]);
   await waitFor(() => expect(occurrencesTitled(grid, 'Yoga')).toHaveLength(2));
@@ -828,7 +832,7 @@ test('“All events” deletes the whole Recurring Event, and Cancel keeps it', 
     within(screen.getByRole('alertdialog')).getByRole('button', { name: 'All events' }),
   );
 
-  await waitFor(() => expect(core.callsOf('deleteEvent')).toEqual([[yoga.id]]));
+  await waitFor(() => expect(core.callsOf('deleteEvent')).toEqual([[yoga.combinedEventKey]]));
   expect(core.callsOf('deleteOccurrence')).toEqual([]);
 });
 
@@ -878,7 +882,7 @@ test('editing an Occurrence starts from its date and asks which events to change
 
   expect(core.callsOf('editOccurrence')).toEqual([
     [
-      yoga.id,
+      yoga.combinedEventKey,
       '2026-10-19T09:00:00',
       'thisAndFollowing',
       false,
@@ -896,7 +900,11 @@ test('dropping an Occurrence asks which events to move, and moves them through t
   await showApp(core);
   const moved: When = { kind: 'timed', start: '2026-10-13T14:00:00', end: '2026-10-13T15:30:00' };
 
-  const dropped = stubGrid.props!.onreschedule!(yoga.id, '2026-10-12T09:00:00', moved);
+  const dropped = stubGrid.props!.onreschedule!(
+    yoga.combinedEventKey,
+    '2026-10-12T09:00:00',
+    moved,
+  );
   const prompt = await screen.findByRole('dialog', { name: 'Change a recurring event' });
   expect(prompt).toHaveTextContent(
     'Move only this event, this and following events, or all events?',
@@ -905,7 +913,7 @@ test('dropping an Occurrence asks which events to move, and moves them through t
   await dropped;
 
   expect(core.callsOf('rescheduleOccurrence')).toEqual([
-    [yoga.id, '2026-10-12T09:00:00', 'this', false, moved],
+    [yoga.combinedEventKey, '2026-10-12T09:00:00', 'this', false, moved],
   ]);
   expect(core.callsOf('rescheduleEvent')).toEqual([]);
 });

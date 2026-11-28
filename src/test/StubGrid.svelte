@@ -9,6 +9,7 @@
   import type { ComponentProps } from 'svelte';
   import { untrack } from 'svelte';
   import type CalendarGrid from '../lib/CalendarGrid.svelte';
+  import { gridId } from '../lib/gridDrag';
   import { stubGrid } from './stubGrid';
 
   let props: ComponentProps<typeof CalendarGrid> = $props();
@@ -27,14 +28,14 @@
 </script>
 
 <ul aria-label="Grid">
-  {#each props.occurrences as occurrence (`${occurrence.eventId}/${occurrence.recurrenceId}`)}
+  {#each props.occurrences as occurrence (gridId(occurrence))}
     <li>
       <button
         type="button"
-        aria-current={occurrence.eventId === props.selectedEventId &&
+        aria-current={occurrence.combinedEventKey === props.selectedEventKey &&
           (props.selectedRecurrenceId === undefined ||
             occurrence.recurrenceId === props.selectedRecurrenceId)}
-        onclick={() => props.onopenevent?.(occurrence.eventId, occurrence.recurrenceId)}
+        onclick={() => props.onopenevent?.(occurrence.combinedEventKey, occurrence.recurrenceId)}
       >
         {occurrence.title}
       </button>

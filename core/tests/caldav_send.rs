@@ -9,8 +9,8 @@ mod support;
 use support::UndoApproved;
 
 use freecal_core::{
-    CalendarId, Changed, Core, ErrorCode, EventDraft, EventId, JournalTransactionId, Occurrence,
-    RepeatEnd, Scope, Signal, StartedBy, SyncStatus, When,
+    CalendarId, Changed, CombinedEventKey, Core, ErrorCode, EventDraft, JournalTransactionId,
+    Occurrence, RepeatEnd, Scope, Signal, StartedBy, SyncStatus, When,
 };
 use support::radicale::{NewCalendar, Radicale, RewritingProxy};
 use support::{
@@ -79,7 +79,7 @@ impl OnServer {
         let event = self.event(title);
         self.core
             .edit_event(
-                event.id,
+                &event.combined_event_key,
                 EventDraft {
                     title: new_title.to_owned(),
                     ..draft(calendar_id, "", event.when)
@@ -163,7 +163,7 @@ impl OnServer {
     }
 
     /// Yoga as [`yoga`] with `count` Occurrences, created in "Work" and sent.
-    fn with_yoga(count: u32) -> (Self, EventId) {
+    fn with_yoga(count: u32) -> (Self, CombinedEventKey) {
         let on_server = Self::writable_with(&[]);
         let id = yoga(&on_server.core, on_server.work, RepeatEnd::Count { count });
         on_server.sync();
@@ -174,10 +174,10 @@ impl OnServer {
     /// Renames the Occurrence on `date` to `title`, in `scope`.
     fn rename(&self, date: &str, scope: Scope, title: &str) -> Changed<Occurrence> {
         let occurrence = self.on(date);
-        let event = self.core.event(occurrence.event_id).unwrap();
+        let event = self.core.event(&occurrence.combined_event_key).unwrap();
         self.core
             .edit_occurrence(
-                occurrence.event_id,
+                &occurrence.combined_event_key,
                 rid(&occurrence),
                 scope,
                 false,
@@ -194,7 +194,13 @@ impl OnServer {
     fn reschedule(&self, date: &str, scope: Scope, when: When) -> Changed<Occurrence> {
         let occurrence = self.on(date);
         self.core
-            .reschedule_occurrence(occurrence.event_id, rid(&occurrence), scope, false, when)
+            .reschedule_occurrence(
+                &occurrence.combined_event_key,
+                rid(&occurrence),
+                scope,
+                false,
+                when,
+            )
             .unwrap()
     }
 
@@ -258,7 +264,7 @@ fn a_deleted_event_is_deleted_on_the_server() {
     let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
-        .delete_event(on_server.event("Standup").id)
+        .delete_event(&on_server.event("Standup").combined_event_key)
         .unwrap();
 
     on_server.sync();
@@ -339,7 +345,7 @@ fn a_delete_without_a_stored_etag_waits() {
     let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
-        .delete_event(on_server.event("Standup").id)
+        .delete_event(&on_server.event("Standup").combined_event_key)
         .unwrap();
     on_server
         .harness
@@ -381,7 +387,10 @@ fn an_unsent_change_matching_nothing_is_dropped() {
         .core
         .create_event(dentist(on_server.work))
         .unwrap();
-    on_server.core.delete_event(created.value.id).unwrap();
+    on_server
+        .core
+        .delete_event(&created.value.combined_event_key)
+        .unwrap();
     assert_eq!(on_server.unsent(on_server.work), 1);
 
     on_server.sync();
@@ -394,7 +403,7 @@ fn unsent_changes_made_before_the_user_marked_the_calendar_read_only_are_sent() 
     let on_server = OnServer::writable_with(&[("standup", standup("Standup"))]);
     on_server
         .core
-        .delete_event(on_server.event("Standup").id)
+        .delete_event(&on_server.event("Standup").combined_event_key)
         .unwrap();
     on_server
         .core
@@ -454,7 +463,7 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
     let edited = on_server
         .core
         .edit_event(
-            on_server.event("Standup").id,
+            &on_server.event("Standup").combined_event_key,
             EventDraft {
                 title: "Standup moved".to_owned(),
                 ..draft(on_server.work, "", on_server.event("Standup").when)
@@ -480,7 +489,7 @@ fn a_sent_edit_and_delete_are_in_the_change_journal() {
 
     let deleted = on_server
         .core
-        .delete_event(on_server.event("Standup").id)
+        .delete_event(&on_server.event("Standup").combined_event_key)
         .unwrap()
         .journal_transaction
         .unwrap();
@@ -509,7 +518,7 @@ fn a_delete_hands_its_uid_on_to_the_first_ignored_resource_holding_it() {
     assert_eq!(on_server.titles(), ["Standup A"]);
     on_server
         .core
-        .delete_event(on_server.event("Standup A").id)
+        .delete_event(&on_server.event("Standup A").combined_event_key)
         .unwrap();
 
     on_server.sync();
@@ -562,7 +571,7 @@ fn a_delete_with_no_readable_ignored_resource_holding_its_uid_leaves_no_event_ro
     assert_eq!(on_server.titles(), ["Standup A"]);
     on_server
         .core
-        .delete_event(on_server.event("Standup A").id)
+        .delete_event(&on_server.event("Standup A").combined_event_key)
         .unwrap();
 
     on_server.sync();
@@ -678,7 +687,7 @@ mod sent_as_made {
         on_server.launched();
         on_server
             .core
-            .delete_event(on_server.event("Standup A").id)
+            .delete_event(&on_server.event("Standup A").combined_event_key)
             .unwrap();
 
         on_server.run_scheduled_syncs();
@@ -811,7 +820,7 @@ mod recurrence {
         let third = on_server.on("2026-10-19");
         on_server
             .core
-            .delete_occurrence(third.event_id, rid(&third))
+            .delete_occurrence(&third.combined_event_key, rid(&third))
             .unwrap();
         on_server.sync();
 
@@ -829,7 +838,7 @@ mod recurrence {
         let exception = on_server.on("2026-10-12");
         on_server
             .core
-            .delete_occurrence(exception.event_id, rid(&exception))
+            .delete_occurrence(&exception.combined_event_key, rid(&exception))
             .unwrap();
         on_server.sync();
 
@@ -881,11 +890,11 @@ mod recurrence {
         on_server.sync();
 
         let first = on_server.on("2026-10-05");
-        let event = on_server.core.event(first.event_id).unwrap();
+        let event = on_server.core.event(&first.combined_event_key).unwrap();
         on_server
             .core
             .edit_occurrence(
-                first.event_id,
+                &first.combined_event_key,
                 rid(&first),
                 Scope::All,
                 false,
@@ -910,7 +919,7 @@ mod recurrence {
         on_server.rename("2026-10-12", Scope::This, "Yoga outside");
         on_server.sync();
 
-        on_server.core.delete_event(id).unwrap();
+        on_server.core.delete_event(&id).unwrap();
         on_server.sync();
 
         assert_eq!(on_server.names(&on_server.url), Vec::<String>::new());
@@ -979,12 +988,12 @@ mod recurrence {
         let late = on_server.on("2026-10-19");
         on_server
             .core
-            .delete_occurrence(late.event_id, rid(&late))
+            .delete_occurrence(&late.combined_event_key, rid(&late))
             .unwrap();
         let last = on_server.on("2026-10-26");
         on_server
             .core
-            .delete_occurrence(last.event_id, rid(&last))
+            .delete_occurrence(&last.combined_event_key, rid(&last))
             .unwrap();
         on_server.sync();
         let text = on_server.on_server("yoga");
@@ -1074,7 +1083,7 @@ mod undo {
         let second = on_server.on("2026-10-12");
         let cancelled = on_server
             .core
-            .delete_occurrence(second.event_id, rid(&second))
+            .delete_occurrence(&second.combined_event_key, rid(&second))
             .unwrap()
             .journal_transaction
             .unwrap();
@@ -1102,7 +1111,7 @@ mod undo {
         let on_server = OnServer::writable_with(&[("from-elsewhere", standup("Standup"))]);
         let deleted = on_server
             .core
-            .delete_event(on_server.event("Standup").id)
+            .delete_event(&on_server.event("Standup").combined_event_key)
             .unwrap()
             .journal_transaction
             .unwrap();

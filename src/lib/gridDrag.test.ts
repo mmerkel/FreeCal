@@ -1,19 +1,31 @@
 import { expect, test } from 'vitest';
 import type { When } from '../core/types';
 import type { Shift } from './when';
-import { idOf, rescheduleOfDrop, rescheduleOfResize, type GridEvent } from './gridDrag';
+import { event, occurrence } from '../test/answers';
+import { calendarId, combinedEventKey } from '../test/ids';
+import { gridId, rescheduleOfDrop, rescheduleOfResize, type GridEvent } from './gridDrag';
+
+const key = combinedEventKey('event-7');
 
 const still: Shift = { years: 0, months: 0, days: 0, milliseconds: 0 };
 const monday: When = { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T10:00:00' };
 
 /** An Occurrence as FullCalendar hands it back, made from `when` and shown where `allDay` says. */
 function gridEvent(when: When, allDay: boolean, start: Date, end: Date | null): GridEvent {
-  return { id: '7', allDay, start, end, extendedProps: { when } };
+  return { id: 'grid-7', allDay, start, end, extendedProps: { combinedEventKey: key, when } };
 }
 
-test('FullCalendar’s string ID is the Event’s ID again', () => {
-  expect(idOf({ id: '42' })).toBe(42);
-  expect(idOf({ id: '42/2026-10-05T09:00:00' })).toBe(42);
+test('FullCalendar’s string ID tells every Occurrence apart, whatever its key holds', () => {
+  const of = (key: string, recurrenceId: string | null) =>
+    gridId({
+      ...occurrence(event({ calendarId: calendarId(1), title: 'Yoga', when: monday })),
+      combinedEventKey: combinedEventKey(key),
+      recurrenceId,
+    });
+  const ids = [of('a', null), of('a', 'b'), of('a', 'c'), of('a/b', null), of('a', '/b')];
+
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(of('a', 'b')).toBe(of('a', 'b'));
 });
 
 test('a drop moves the Event’s start and end by the drag’s shift', () => {
@@ -22,7 +34,7 @@ test('a drop moves the Event’s start and end by the drag’s shift', () => {
   const event = gridEvent(monday, false, new Date(2026, 9, 7, 10), new Date(2026, 9, 7, 11));
 
   expect(rescheduleOfDrop({ event, oldEvent, delta: by })).toEqual({
-    id: 7,
+    combinedEventKey: key,
     recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-07T10:00:00', end: '2026-10-07T11:00:00' },
   });
@@ -30,17 +42,17 @@ test('a drop moves the Event’s start and end by the drag’s shift', () => {
 
 test('a drop of an Occurrence of a Recurring Event says which one it was', () => {
   const occurrence = (start: Date, end: Date): GridEvent => ({
-    id: '7/2026-10-05T09:00:00',
+    id: 'grid-7',
     allDay: false,
     start,
     end,
-    extendedProps: { when: monday, recurrenceId: '2026-10-05T09:00:00' },
+    extendedProps: { combinedEventKey: key, when: monday, recurrenceId: '2026-10-05T09:00:00' },
   });
   const oldEvent = occurrence(new Date(2026, 9, 5, 9), new Date(2026, 9, 5, 10));
   const event = occurrence(new Date(2026, 9, 6, 9), new Date(2026, 9, 6, 10));
 
   expect(rescheduleOfDrop({ event, oldEvent, delta: { ...still, days: 1 } })).toEqual({
-    id: 7,
+    combinedEventKey: key,
     recurrenceId: '2026-10-05T09:00:00',
     when: { kind: 'timed', start: '2026-10-06T09:00:00', end: '2026-10-06T10:00:00' },
   });
@@ -58,7 +70,7 @@ test('a resize moves each edge by its own shift', () => {
       endDelta: { ...still, milliseconds: 5_400_000 },
     }),
   ).toEqual({
-    id: 7,
+    combinedEventKey: key,
     recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-05T09:00:00', end: '2026-10-05T11:30:00' },
   });
@@ -76,7 +88,7 @@ test('a resize from the start keeps the end', () => {
       endDelta: still,
     }),
   ).toEqual({
-    id: 7,
+    combinedEventKey: key,
     recurrenceId: null,
     when: { kind: 'timed', start: '2026-10-05T08:30:00', end: '2026-10-05T10:00:00' },
   });

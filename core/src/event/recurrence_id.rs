@@ -53,6 +53,13 @@ impl RecurrenceId {
         &self.obtained
     }
 
+    /// Whether both can't be read and are the same text. An unreadable one
+    /// names no Occurrence, so this alone tells which Exception a Combined
+    /// Event Key with one names; nothing else compares recurrence IDs as text.
+    pub fn same_unreadable(&self, other: &RecurrenceId) -> bool {
+        self.parsed.is_none() && other.parsed.is_none() && self.obtained == other.obtained
+    }
+
     /// The original start of the Occurrence it names, as obtained; none
     /// when the text can't be read.
     pub fn original(&self) -> Option<&Time> {

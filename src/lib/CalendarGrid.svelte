@@ -15,7 +15,14 @@
   import 'fullcalendar/themes/classic/theme.css';
   import 'fullcalendar/themes/classic/palette.css';
   import { onDestroy, untrack } from 'svelte';
-  import type { AccountId, Calendar, EventId, Occurrence, View, When } from '../core/types';
+  import type {
+    AccountId,
+    Calendar,
+    CombinedEventKey,
+    Occurrence,
+    View,
+    When,
+  } from '../core/types';
   import { t } from '../i18n';
   import { gridTimeFormat } from './clock.svelte';
   import { textColourOn } from './palette';
@@ -24,8 +31,7 @@
   import { canEdit, whyReadOnly } from './windowModel.svelte';
   import {
     gridId,
-    idOf,
-    occurrenceOf,
+    keyOf,
     recurrenceIdOf,
     rescheduleOfDrop,
     rescheduleOfResize,
@@ -43,7 +49,7 @@
     /** For the colours of the Occurrences. */
     calendars: Calendar[];
     /** The Event that is open, which the grid marks. */
-    selectedEventId?: EventId;
+    selectedEventKey?: CombinedEventKey;
     /**
      * Which Occurrence of the open Event is open, if it is one of a Recurring
      * Event; without it, all its Occurrences are marked.
@@ -54,7 +60,7 @@
     /** The user clicked an empty slot or dragged across a range. */
     onselectslot?: (when: When) => void;
     /** The user clicked an Occurrence: its Event and its `recurrenceId`. */
-    onopenevent?: (id: EventId, recurrenceId: string | null) => void;
+    onopenevent?: (key: CombinedEventKey, recurrenceId: string | null) => void;
     /** The user clicked a day number or a day's heading. */
     onopenday?: (date: Temporal.PlainDate) => void;
     /**
@@ -62,13 +68,17 @@
      * its Event, its `recurrenceId` and its new time. If the promise
      * rejects, the Occurrence goes back to where it was.
      */
-    onreschedule?: (id: EventId, recurrenceId: string | null, when: When) => Promise<void>;
+    onreschedule?: (
+      key: CombinedEventKey,
+      recurrenceId: string | null,
+      when: When,
+    ) => Promise<void>;
     /**
      * The user tried to drag an Occurrence, or its edge, that the grid
      * doesn't offer to move: its Event and its `recurrenceId`. It is
      * reported once per press, and the press doesn't open it.
      */
-    onrefusedrag?: (id: EventId, recurrenceId: string | null) => void;
+    onrefusedrag?: (key: CombinedEventKey, recurrenceId: string | null) => void;
     /**
      * The user started (`true`) or ended (`false`) pressing on the grid, as
      * for a drag, a resize or a drag-to-create. Meanwhile the grid holds back
@@ -97,7 +107,7 @@
     today,
     occurrences,
     calendars,
-    selectedEventId,
+    selectedEventKey,
     selectedRecurrenceId,
     onrangechange,
     onselectslot,
@@ -169,10 +179,11 @@
     if (!fixedPress) return;
     const distance = Math.hypot(moved.clientX - fixedPress.x, moved.clientY - fixedPress.y);
     if (distance < DRAG_DISTANCE) return;
-    const { id, recurrenceId } = occurrenceOf(fixedPress.id);
+    const pressedId = fixedPress.id;
+    const occurrence = occurrences.find((occurrence) => gridId(occurrence) === pressedId);
     fixedPress = undefined;
     refused = true;
-    onrefusedrag?.(id, recurrenceId);
+    if (occurrence) onrefusedrag?.(occurrence.combinedEventKey, occurrence.recurrenceId);
   }
 
   function release() {
@@ -183,10 +194,10 @@
   /** Counts drags the owner refused, so that the Occurrences are drawn again. */
   let redraws = $state(0);
 
-  function reschedule({ id, recurrenceId, when }: Reschedule) {
+  function reschedule({ combinedEventKey, recurrenceId, when }: Reschedule) {
     // The grid may be a new one by the time the core answers, so the
     // Occurrences are drawn again rather than the drag reverted.
-    onreschedule?.(id, recurrenceId, when).catch(() => redraws++);
+    onreschedule?.(combinedEventKey, recurrenceId, when).catch(() => redraws++);
   }
 
   // FullCalendar reads `now` only when it is created, so a new today, once a
@@ -236,7 +247,7 @@
       eventClick: (clicked) => {
         clicked.jsEvent.preventDefault();
         if (refused) return;
-        onopenevent?.(idOf(clicked.event), recurrenceIdOf(clicked.event));
+        onopenevent?.(keyOf(clicked.event), recurrenceIdOf(clicked.event));
       },
       // For a refused drag, which FullCalendar doesn't report.
       eventDidMount: (mounted) => (mounted.el.dataset.occurrence = mounted.event.id),
@@ -317,7 +328,7 @@
       // it doesn't cover the time grid.
       const span = timeGrid ? allDaySpan(occurrence.when) : undefined;
       const selected =
-        occurrence.eventId === selectedEventId &&
+        occurrence.combinedEventKey === selectedEventKey &&
         (selectedRecurrenceId === undefined || occurrence.recurrenceId === selectedRecurrenceId);
       const editable = movable && canEdit(calendar, occurrence.hasGuests);
       // Dragging it says why it can't move (spec: "Event details").
@@ -330,7 +341,11 @@
         end: span?.end ?? occurrence.when.end,
         allDay: span !== undefined || occurrence.when.kind === 'allDay',
         editable,
-        extendedProps: { when: occurrence.when, recurrenceId: occurrence.recurrenceId },
+        extendedProps: {
+          combinedEventKey: occurrence.combinedEventKey,
+          when: occurrence.when,
+          recurrenceId: occurrence.recurrenceId,
+        },
         color: colour,
         contrastColor: colour && textColourOn(colour),
         className: [selected && 'selected-event', fixed && 'fixed-event', unsent && 'unsent-event']

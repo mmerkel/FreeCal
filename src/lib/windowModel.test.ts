@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { samples } from '../core/samples.generated';
 import type { Account, Event, Occurrence, Signal, SyncStatuses } from '../core/types';
 import { calendar, dateChanged } from '../test/answers';
-import { eventId } from '../test/ids';
+import { combinedEventKey } from '../test/ids';
 import { branded, failure, FakeCore, first, settled } from '../test/fakeCore';
 import { DEFAULT_SETTINGS } from './settings';
 import { canEdit, whyReadOnly, WindowModel } from './windowModel.svelte';
@@ -148,7 +148,7 @@ describe('an older read never overwrites a newer one', () => {
     const { core, model } = await started();
     const older = core.pending('event');
     const newer = core.pending('event');
-    model.openDetails(eventId(3), () => {});
+    model.openDetails(combinedEventKey('event-3'), () => {});
     core.emit(signal('occurrencesChanged'));
 
     newer.resolve({ ...sampleEvent, title: 'Newer' });
@@ -203,7 +203,7 @@ describe('Signals', () => {
   ] as const)('$kind re-reads $reads', async ({ kind, reads }) => {
     const { core, model } = await started();
     model.showRange(range);
-    model.openDetails(eventId(3), () => {});
+    model.openDetails(combinedEventKey('event-3'), () => {});
     await settled();
     core.calls.splice(0);
 
@@ -215,7 +215,7 @@ describe('Signals', () => {
 
   test('the Event of closed details is not read again', async () => {
     const { core, model } = await started();
-    model.openDetails(eventId(3), () => {});
+    model.openDetails(combinedEventKey('event-3'), () => {});
     model.closeDetails();
     await settled();
     core.calls.splice(0);
@@ -230,7 +230,7 @@ describe('Signals', () => {
   test('an Event that cannot be read any more says its details are gone', async () => {
     const { core, model } = await started();
     const ongone = vi.fn();
-    model.openDetails(eventId(3), ongone);
+    model.openDetails(combinedEventKey('event-3'), ongone);
     await settled();
 
     core.answer('event', failure({ code: 'eventNotFound' }));

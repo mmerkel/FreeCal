@@ -17,7 +17,7 @@ fn contents(core: &Core) -> Vec<Event> {
     core.occurrences(date("2000-01-01"), date("2100-01-01"))
         .unwrap()
         .into_iter()
-        .map(|occurrence| core.event(occurrence.event_id).unwrap())
+        .map(|occurrence| core.event(&occurrence.combined_event_key).unwrap())
         .collect()
 }
 
@@ -123,7 +123,7 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
         let mut edit = draft(home.id, "Orthodontist", dentist.when);
         edit.location = "Main Street 1".to_owned();
 
-        let edited = core.edit_event(dentist.id, edit).unwrap();
+        let edited = core.edit_event(&dentist.combined_event_key, edit).unwrap();
 
         undoes_exactly(
             &harness,
@@ -142,7 +142,10 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
         let before = contents(&core);
 
         let rescheduled = core
-            .reschedule_event(dentist.id, all_day("2026-10-07", "2026-10-08"))
+            .reschedule_event(
+                &dentist.combined_event_key,
+                all_day("2026-10-07", "2026-10-08"),
+            )
             .unwrap();
 
         undoes_exactly(
@@ -161,7 +164,7 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
         let (home, dentist) = home_with_dentist(&harness, &core);
         let before = contents(&core);
 
-        let deleted = core.delete_event(dentist.id).unwrap();
+        let deleted = core.delete_event(&dentist.combined_event_key).unwrap();
 
         undoes_exactly(
             &harness,
@@ -170,7 +173,7 @@ mod every_change_is_a_unit_that_undo_reverses_exactly {
             &before,
             &[home.id],
         );
-        assert_eq!(core.event(dentist.id).unwrap(), dentist);
+        assert_eq!(core.event(&dentist.combined_event_key).unwrap(), dentist);
     }
 
     #[test]
@@ -208,7 +211,10 @@ fn an_edit_moving_an_event_to_another_calendar_is_undone_into_the_first() {
     let before = contents(&core);
 
     let moved = core
-        .edit_event(dentist.id, draft(work.id, "Dentist", dentist.when))
+        .edit_event(
+            &dentist.combined_event_key,
+            draft(work.id, "Dentist", dentist.when),
+        )
         .unwrap();
 
     assert_eq!(the_one(&core, "Dentist").calendar_id, work.id);
@@ -235,9 +241,14 @@ fn a_change_that_changes_nothing_is_no_journal_transaction_and_sends_no_signal()
     harness.signals.clear();
 
     let edited = core
-        .edit_event(dentist.id, draft(home.id, "Dentist", dentist.when))
+        .edit_event(
+            &dentist.combined_event_key,
+            draft(home.id, "Dentist", dentist.when),
+        )
         .unwrap();
-    let rescheduled = core.reschedule_event(dentist.id, dentist.when).unwrap();
+    let rescheduled = core
+        .reschedule_event(&dentist.combined_event_key, dentist.when)
+        .unwrap();
     let preview = core
         .preview_import(
             &ImportFile::new("events.ics", ics(&event("kept", MONDAY.0, MONDAY.1))),
@@ -259,7 +270,7 @@ fn undoing_the_undo_redoes_and_an_undone_journal_transaction_is_undone_once() {
     let core = harness.open_without_starting_calendars();
     let (home, dentist) = home_with_dentist(&harness, &core);
     let deleted = core
-        .delete_event(dentist.id)
+        .delete_event(&dentist.combined_event_key)
         .unwrap()
         .journal_transaction
         .unwrap();
@@ -297,7 +308,7 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
     let first = on(&core, "2026-10-05");
     let moved = core
         .reschedule_occurrence(
-            yoga,
+            &yoga,
             first.recurrence_id.as_deref().unwrap(),
             Scope::This,
             false,
@@ -305,16 +316,19 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
         )
         .unwrap()
         .value;
-    let exception = core.event(moved.event_id).unwrap();
+    let exception = core.event(&moved.combined_event_key).unwrap();
     let deleted = core
-        .delete_occurrence(moved.event_id, moved.recurrence_id.as_deref().unwrap())
+        .delete_occurrence(
+            &moved.combined_event_key,
+            moved.recurrence_id.as_deref().unwrap(),
+        )
         .unwrap()
         .journal_transaction
         .unwrap();
     let second = on(&core, "2026-10-12");
     let made_since = core
         .reschedule_occurrence(
-            yoga,
+            &yoga,
             second.recurrence_id.as_deref().unwrap(),
             Scope::This,
             false,
@@ -322,14 +336,23 @@ fn a_deleted_exception_comes_back_under_its_id_beside_one_made_since() {
         )
         .unwrap()
         .value;
-    assert_ne!(made_since.event_id, exception.id);
-    let made_since = core.event(made_since.event_id).unwrap();
+    assert_ne!(made_since.combined_event_key, exception.combined_event_key);
+    let made_since = core.event(&made_since.combined_event_key).unwrap();
 
     core.undo_approved(deleted).unwrap();
 
-    assert_eq!(core.event(exception.id).unwrap(), exception);
-    assert_eq!(core.event(made_since.id).unwrap(), made_since);
-    assert_eq!(on(&core, "2026-10-05").event_id, exception.id);
+    assert_eq!(
+        core.event(&exception.combined_event_key).unwrap(),
+        exception
+    );
+    assert_eq!(
+        core.event(&made_since.combined_event_key).unwrap(),
+        made_since
+    );
+    assert_eq!(
+        on(&core, "2026-10-05").combined_event_key,
+        exception.combined_event_key
+    );
 }
 
 #[test]
@@ -372,16 +395,22 @@ fn deleting_a_calendar_removes_the_journal_event_modifications_putting_events_ba
     let dentist = created.value;
     let work = calendar(&core, "Work");
     let moved = core
-        .edit_event(dentist.id, draft(work.id, "Dentist", dentist.when))
+        .edit_event(
+            &dentist.combined_event_key,
+            draft(work.id, "Dentist", dentist.when),
+        )
         .unwrap();
     let renamed = core
-        .edit_event(dentist.id, draft(work.id, "Orthodontist", dentist.when))
+        .edit_event(
+            &moved.value.combined_event_key,
+            draft(work.id, "Orthodontist", dentist.when),
+        )
         .unwrap();
     let gone = core
         .create_event(draft(home.id, "Gone", all_day("2026-10-07", "2026-10-08")))
         .unwrap()
         .value;
-    let deleted = core.delete_event(gone.id).unwrap();
+    let deleted = core.delete_event(&gone.combined_event_key).unwrap();
     core.delete_calendar(home.id).unwrap();
     harness.signals.clear();
 

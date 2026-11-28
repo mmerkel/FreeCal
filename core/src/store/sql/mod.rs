@@ -374,7 +374,7 @@ impl Store {
     pub fn server_object_of_event(&self, id: EventId) -> Result<Option<ServerObject>> {
         match self.event_and_uid(id)? {
             Some((uid, event)) => self.server_object(event.calendar_id, &uid),
-            None => Err(CoreError::EventNotFound(id)),
+            None => Err(CoreError::EventNotFound),
         }
     }
 
@@ -411,7 +411,7 @@ impl Store {
                 },
             )
             .optional()?
-            .ok_or(CoreError::EventNotFound(id))
+            .ok_or(CoreError::EventNotFound)
     }
 
     /// Every Event of a Calendar with a UID, Exceptions too, in the order

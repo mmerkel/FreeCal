@@ -1,7 +1,7 @@
 mod support;
 
 use freecal_core::{
-    Calendar, CalendarId, Core, CoreError, Event, EventId, ExistingEvents, ImportFile,
+    Calendar, CalendarId, CombinedEventKey, Core, CoreError, Event, ExistingEvents, ImportFile,
     ImportOutcome, ImportPreview, Signal, link_allowed,
 };
 use support::{Harness, calendar, date, event, ics, timed};
@@ -26,7 +26,7 @@ fn contents(core: &Core) -> Vec<Event> {
     core.occurrences(date("2000-01-01"), date("2100-01-01"))
         .unwrap()
         .into_iter()
-        .map(|occurrence| core.event(occurrence.event_id).unwrap())
+        .map(|occurrence| core.event(&occurrence.combined_event_key).unwrap())
         .collect()
 }
 
@@ -126,7 +126,7 @@ fn update_changes_events_the_calendar_has_and_adds_the_others() {
         (1, 1, 0)
     );
     let updated = the_one(&core, "kept");
-    assert_eq!(updated.id, kept.id);
+    assert_eq!(updated.combined_event_key, kept.combined_event_key);
     assert_eq!(
         updated.when,
         timed("2026-10-06T09:00:00", "2026-10-06T10:00:00")
@@ -167,8 +167,11 @@ fn copy_adds_events_the_calendar_has_as_new_events_beside_them() {
     let both = titled(&core, "kept");
     assert_eq!(both.len(), 2);
     assert!(both.contains(&kept));
-    assert!(both.iter().any(|copy| copy.id != kept.id
-        && copy.when == timed("2026-10-06T09:00:00", "2026-10-06T10:00:00")));
+    assert!(
+        both.iter()
+            .any(|copy| copy.combined_event_key != kept.combined_event_key
+                && copy.when == timed("2026-10-06T09:00:00", "2026-10-06T10:00:00"))
+    );
 }
 
 #[test]
@@ -253,7 +256,7 @@ mod pinned_zones {
 
     const FLOATING: (&str, &str) = ("DTSTART:20261005T090000", "DTEND:20261005T100000");
 
-    fn pinned_event(core: &Core) -> (Calendar, EventId) {
+    fn pinned_event(core: &Core) -> (Calendar, CombinedEventKey) {
         let home = calendar(core, "Home");
         import(
             core,
@@ -261,7 +264,7 @@ mod pinned_zones {
             ics(&event("floating", FLOATING.0, FLOATING.1)),
             ExistingEvents::Skip,
         );
-        (home, the_one(core, "floating").id)
+        (home, the_one(core, "floating").combined_event_key)
     }
 
     #[test]
@@ -271,7 +274,7 @@ mod pinned_zones {
 
         let (_, id) = pinned_event(&core);
 
-        let event = core.event(id).unwrap();
+        let event = core.event(&id).unwrap();
         assert_eq!(event.pinned_zone.as_deref(), Some("Europe/Berlin"));
         assert_eq!(
             event.when,
@@ -291,22 +294,22 @@ mod pinned_zones {
             ExistingEvents::Skip,
         );
         assert_eq!(other.imported, 1);
-        let rescheduled = the_one(&core, "rescheduled").id;
-        let when = core.event(renamed).unwrap().when;
+        let rescheduled = the_one(&core, "rescheduled").combined_event_key;
+        let when = core.event(&renamed).unwrap().when;
 
-        core.edit_event(renamed, support::draft(home.id, "Renamed", when))
+        core.edit_event(&renamed, support::draft(home.id, "Renamed", when))
             .unwrap();
         core.reschedule_event(
-            rescheduled,
+            &rescheduled,
             timed("2026-10-05T11:00:00", "2026-10-05T12:00:00"),
         )
         .unwrap();
 
         assert_eq!(
-            core.event(renamed).unwrap().pinned_zone.as_deref(),
+            core.event(&renamed).unwrap().pinned_zone.as_deref(),
             Some("Europe/Berlin")
         );
-        assert_eq!(core.event(rescheduled).unwrap().pinned_zone, None);
+        assert_eq!(core.event(&rescheduled).unwrap().pinned_zone, None);
     }
 
     #[test]
@@ -327,7 +330,7 @@ mod pinned_zones {
             ExistingEvents::Update,
         );
 
-        let event = core.event(id).unwrap();
+        let event = core.event(&id).unwrap();
         assert_eq!(event.pinned_zone.as_deref(), Some("Europe/Berlin"));
         // 11:00 in Berlin is 5:00 in New York.
         assert_eq!(
@@ -354,7 +357,7 @@ mod pinned_zones {
             ExistingEvents::Update,
         );
 
-        let event = core.event(id).unwrap();
+        let event = core.event(&id).unwrap();
         assert_eq!(event.pinned_zone.as_deref(), Some("America/New_York"));
         assert_eq!(
             event.when,
@@ -379,7 +382,7 @@ mod pinned_zones {
             ExistingEvents::Update,
         );
 
-        let event = core.event(id).unwrap();
+        let event = core.event(&id).unwrap();
         assert_eq!(event.pinned_zone, None);
         assert_eq!(
             event.when,

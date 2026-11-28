@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { samples } from '../core/samples.generated';
 import { tauriCore } from '../core/tauriCore';
 import type { Calendar, Changed, EventDraft, Signal, UndoOutcome } from '../core/types';
-import { accountId, calendarId, eventId, journalTransactionId } from './ids';
+import { accountId, calendarId, combinedEventKey, journalTransactionId } from './ids';
 import { failure, FakeCore, first, settled } from './fakeCore';
 
 const draft = first<EventDraft>(samples.EventDraft);
@@ -12,10 +12,12 @@ describe('a call nobody scripted', () => {
     const core = new FakeCore();
 
     expect(await core.listCalendars()).toEqual(samples.Calendar);
-    expect(await core.event(eventId(3))).toEqual(samples.Event[0]);
+    expect(await core.event(combinedEventKey('event-3'))).toEqual(samples.Event[0]);
     expect(await core.settings()).toEqual(samples.Settings[0]);
     expect(await core.createEvent(draft)).toEqual(samples.Changed[0]);
-    expect(await core.editOccurrence(eventId(3), 'r', 'this', false, draft)).toEqual({
+    expect(
+      await core.editOccurrence(combinedEventKey('event-3'), 'r', 'this', false, draft),
+    ).toEqual({
       journalTransaction: samples.Changed[0].journalTransaction,
       value: samples.Occurrence[0],
     });
@@ -70,7 +72,9 @@ describe('a scripted answer', () => {
     const core = new FakeCore();
     core.answer('event', failure({ code: 'eventNotFound' }));
 
-    await expect(core.event(eventId(3))).rejects.toEqual({ code: 'eventNotFound' });
+    await expect(core.event(combinedEventKey('event-3'))).rejects.toEqual({
+      code: 'eventNotFound',
+    });
   });
 
   test('tells an error code answered as a value from one to fail with', async () => {
@@ -223,9 +227,9 @@ describe('the recorded calls', () => {
     const core = new FakeCore();
     core.pending('event');
 
-    void core.event(eventId(3));
+    void core.event(combinedEventKey('event-3'));
 
-    expect(core.callsOf('event')).toEqual([[eventId(3)]]);
+    expect(core.callsOf('event')).toEqual([[combinedEventKey('event-3')]]);
   });
 });
 

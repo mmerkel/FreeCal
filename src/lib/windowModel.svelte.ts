@@ -3,9 +3,9 @@ import type { CoreApi } from '../core/CoreApi';
 import type {
   Account,
   Calendar,
+  CombinedEventKey,
   ErrorCode,
   Event,
-  EventId,
   Occurrence,
   Settings,
   SettingsUpdate,
@@ -54,7 +54,7 @@ interface Directory {
 
 /** The Event whose details are open, as the window told the model (Open Details, new term). */
 interface OpenDetails {
-  id: EventId;
+  combinedEventKey: CombinedEventKey;
   /** Runs when the Event can't be read any more, as when it was deleted. */
   ongone: () => void;
 }
@@ -265,11 +265,11 @@ export class WindowModel {
   }
 
   /**
-   * The details of Event `id` are open: reads it now and again on each
+   * The details of the Event with key `combinedEventKey` are open: reads it now and again on each
    * change. `ongone` runs when it can't be read any more.
    */
-  openDetails(id: EventId, ongone: () => void) {
-    this.#details = { id, ongone };
+  openDetails(combinedEventKey: CombinedEventKey, ongone: () => void) {
+    this.#details = { combinedEventKey, ongone };
     this.#opened = undefined;
     void this.#readOpenedEvent();
   }
@@ -386,7 +386,7 @@ export class WindowModel {
     if (!details) return;
     try {
       await this.#eventRead.run(
-        () => this.#core.event(details.id),
+        () => this.#core.event(details.combinedEventKey),
         (event) => {
           if (this.#details === details) this.#opened = event;
         },

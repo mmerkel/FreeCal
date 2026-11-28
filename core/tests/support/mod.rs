@@ -14,7 +14,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use freecal_core::{
     AccountId, AccountSyncStatus, CalDavLogin, Calendar, CalendarId, CalendarSyncStatus, Clock,
-    Colour, Core, CoreError, Event, EventDraft, EventId, Frequency, Keyring, KeyringError,
+    Colour, CombinedEventKey, Core, CoreError, Event, EventDraft, Frequency, Keyring, KeyringError,
     Occurrence, Repeat, RepeatEnd, ServerObject, Signal, SignalSink, SyncStatus, When,
 };
 use freecal_core::{Changed, JournalTransactionId, UndoOutcome, UndoTarget};
@@ -301,8 +301,23 @@ pub fn weekly(end: RepeatEnd) -> Repeat {
     }
 }
 
+/// An SQL condition on the `event` table that picks the Event Row `key`
+/// names, for arranging the Local Store. Only test support reads a key's
+/// parts, from its serialized form; the window treats it as opaque.
+pub fn event_row(key: &CombinedEventKey) -> String {
+    let text = serde_json::to_value(key).unwrap();
+    let (calendar_id, uid, recurrence_id): (i64, String, Option<String>) =
+        serde_json::from_str(text.as_str().unwrap()).unwrap();
+    let quoted = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    format!(
+        "calendar_id = {calendar_id} AND uid = {} AND recurrence_id IS {}",
+        quoted(&uid),
+        recurrence_id.as_deref().map_or("NULL".to_owned(), quoted),
+    )
+}
+
 /// Yoga on Mondays from 5 October 2026, 18:00 to 19:00 in Berlin.
-pub fn yoga(core: &Core, calendar_id: CalendarId, end: RepeatEnd) -> EventId {
+pub fn yoga(core: &Core, calendar_id: CalendarId, end: RepeatEnd) -> CombinedEventKey {
     let draft = EventDraft {
         repeat: Some(weekly(end)),
         ..draft(
@@ -311,7 +326,7 @@ pub fn yoga(core: &Core, calendar_id: CalendarId, end: RepeatEnd) -> EventId {
             timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
         )
     };
-    core.create_event(draft).unwrap().value.id
+    core.create_event(draft).unwrap().value.combined_event_key
 }
 
 /// The one Occurrence of a shown Calendar on `date`.
@@ -516,13 +531,13 @@ impl OnServer {
             .into_iter()
             .find(|occurrence| occurrence.title == title)
             .unwrap_or_else(|| panic!("an Event titled {title:?}"));
-        self.core.event(occurrence.event_id).unwrap()
+        self.core.event(&occurrence.combined_event_key).unwrap()
     }
 
     /// The Server Object the Event titled `title` is in, as FreeCal holds it.
     pub fn held(&self, title: &str) -> Option<ServerObject> {
         self.core
-            .original_server_data(self.event(title).id)
+            .original_server_data(&self.event(title).combined_event_key)
             .unwrap()
     }
 
@@ -572,7 +587,7 @@ pub trait UndoApproved {
 impl UndoApproved for Core {
     fn undo_approved(&self, id: JournalTransactionId) -> Result<Changed<UndoOutcome>, CoreError> {
         let target = UndoTarget::JournalTransaction { id };
-        let undone = self.undo(target, None)?;
+        let undone = self.undo(target.clone(), None)?;
         match &undone.value {
             UndoOutcome::Dangerous { danger, .. } => self.undo(target, Some(danger)),
             UndoOutcome::Undone { .. } => Ok(undone),

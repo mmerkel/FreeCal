@@ -85,8 +85,9 @@ export const samples = {
       "serverReadOnly": false
     }
   ],
-  EventId: [
-    3
+  CombinedEventKey: [
+    "[2,\"dentist@example.org\",null]",
+    "[2,\"dentist@example.org\",\"2026-10-19T09:30:00[Europe/Berlin]\"]"
   ],
   When: [
     {
@@ -123,7 +124,7 @@ export const samples = {
   ],
   Event: [
     {
-      "id": 3,
+      "combinedEventKey": "[2,\"dentist@example.org\",null]",
       "calendarId": 2,
       "title": "Dentist",
       "when": {
@@ -173,7 +174,7 @@ export const samples = {
       "unsentChange": null
     },
     {
-      "id": 4,
+      "combinedEventKey": "[2,\"dentist@example.org\",\"2026-10-19T09:30:00[Europe/Berlin]\"]",
       "calendarId": 2,
       "title": "Dentist",
       "when": {
@@ -230,7 +231,7 @@ export const samples = {
   ],
   Occurrence: [
     {
-      "eventId": 3,
+      "combinedEventKey": "[2,\"dentist@example.org\",null]",
       "calendarId": 2,
       "title": "Holiday",
       "when": {
@@ -243,7 +244,7 @@ export const samples = {
       "unsentSince": null
     },
     {
-      "eventId": 3,
+      "combinedEventKey": "[2,\"dentist@example.org\",\"2026-10-19T09:30:00[Europe/Berlin]\"]",
       "calendarId": 2,
       "title": "Dentist",
       "when": {
@@ -634,7 +635,7 @@ export const samples = {
     {
       "journalTransaction": 4,
       "value": {
-        "id": 3,
+        "combinedEventKey": "[2,\"dentist@example.org\",null]",
         "calendarId": 2,
         "title": "Dentist",
         "when": {
@@ -687,7 +688,7 @@ export const samples = {
     {
       "journalTransaction": null,
       "value": {
-        "id": 3,
+        "combinedEventKey": "[2,\"dentist@example.org\",null]",
         "calendarId": 2,
         "title": "Dentist",
         "when": {
@@ -746,7 +747,7 @@ export const samples = {
     {
       "kind": "event",
       "journalTransaction": 4,
-      "eventId": 3
+      "combinedEventKey": "[2,\"dentist@example.org\",null]"
     },
     {
       "kind": "calendarSince",
@@ -850,7 +851,6 @@ export const samples = {
         "kind": "incomingSync"
       },
       "madeAt": 1791100800,
-      "eventId": 3,
       "title": "Standup",
       "calendarId": 2,
       "kind": "edited",
@@ -858,7 +858,7 @@ export const samples = {
       "undo": {
         "kind": "event",
         "journalTransaction": 5,
-        "eventId": 3
+        "combinedEventKey": "[2,\"dentist@example.org\",null]"
       }
     },
     {
@@ -868,7 +868,6 @@ export const samples = {
         "action": "deleted"
       },
       "madeAt": 1791100700,
-      "eventId": 3,
       "title": "Standup",
       "calendarId": 2,
       "kind": "deleted",
@@ -1173,7 +1172,7 @@ type Samples = {
   CalendarId: Unbranded<T.CalendarId>[];
   Colour: Unbranded<T.Colour>[];
   Calendar: Unbranded<T.Calendar>[];
-  EventId: Unbranded<T.EventId>[];
+  CombinedEventKey: Unbranded<T.CombinedEventKey>[];
   When: Unbranded<T.When>[];
   EventDraft: Unbranded<T.EventDraft>[];
   Event: Unbranded<T.Event>[];

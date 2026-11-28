@@ -41,7 +41,7 @@ pub use calendar::{AvailableCalendar, Calendar, CalendarId, Colour};
 pub use clock::{Clock, SystemClock};
 pub use error::{CoreError, ErrorCode};
 pub use event::{
-    Event, EventDraft, EventId, ExceptionCounts, Frequency, Occurrence, Repeat, RepeatEnd, Scope,
+    Event, EventDraft, ExceptionCounts, Frequency, Occurrence, Repeat, RepeatEnd, Scope,
     ServerObject, UnsentChange, When,
 };
 pub use import::{
@@ -69,9 +69,11 @@ pub use sync_status::{
 pub use view::View;
 
 use calendar::calendar_name;
+use event::EventId;
 use event::{Edit, Opened};
 use journal::JournalTransaction;
 use remote::Remote;
+pub use store::CombinedEventKey;
 use store::{CalendarToSync, Store};
 use sync_scheduler::SyncScheduler;
 use sync_status::{RunningSync, RunningSyncs, SyncStatusKeeper};
@@ -807,17 +809,19 @@ impl Core {
     }
 
     /// An Event with everything its details and editor show.
-    pub fn event(&self, id: EventId) -> Result<Event> {
+    pub fn event(&self, key: &CombinedEventKey) -> Result<Event> {
         let store = self.store();
-        Opened::load(&*store, id)?.to_event(&store, self.clock.time_zone())
+        Opened::load(&*store, key)?.to_event(&store, self.clock.time_zone())
     }
 
     /// The Server Object an Event belongs to (ADR 0015), as the server last
     /// gave it: the object holding its UID in its Calendar, for an
     /// Exception too. None for an Event no object holds, such as one not on
     /// a server yet.
-    pub fn original_server_data(&self, id: EventId) -> Result<Option<ServerObject>> {
-        self.store().server_object_of_event(id)
+    pub fn original_server_data(&self, key: &CombinedEventKey) -> Result<Option<ServerObject>> {
+        let store = self.store();
+        let id = Opened::load(&*store, key)?.id();
+        store.server_object_of_event(id)
     }
 
     /// Creates an Event in a writable Calendar, a Recurring Event when the
@@ -837,22 +841,22 @@ impl Core {
     /// unchanged repeat rule its stored rule. A Recurring Event changes with
     /// all its Occurrences, from its first date, and an Exception alone (see
     /// [`Core::edit_occurrence`]).
-    pub fn edit_event(&self, id: EventId, draft: EventDraft) -> Result<Changed<Event>> {
-        self.edit_whole(id, Edit::Draft(draft))
+    pub fn edit_event(&self, key: &CombinedEventKey, draft: EventDraft) -> Result<Changed<Event>> {
+        self.edit_whole(key, Edit::Draft(draft))
     }
 
     /// Moves an Event to another time, as a drag or a resize in the grid
     /// does, and leaves everything else as stored. `when` is in the Display
     /// Time Zone; a timed Event keeps its Event Time Zones. A Recurring Event
     /// moves with all its Occurrences, and an Exception alone.
-    pub fn reschedule_event(&self, id: EventId, when: When) -> Result<Changed<Event>> {
-        self.edit_whole(id, Edit::Reschedule(when))
+    pub fn reschedule_event(&self, key: &CombinedEventKey, when: When) -> Result<Changed<Event>> {
+        self.edit_whole(key, Edit::Reschedule(when))
     }
 
-    fn edit_whole(&self, id: EventId, edit: Edit) -> Result<Changed<Event>> {
+    fn edit_whole(&self, key: &CombinedEventKey, edit: Edit) -> Result<Changed<Event>> {
         let zone = self.clock.time_zone();
         let edited = self.record(edit.user_action(), |journal_transaction| {
-            event::edit_event(journal_transaction, zone, id, edit)
+            event::edit_event(journal_transaction, zone, key, edit)
         })?;
         self.changed_event(Changed {
             journal_transaction: edited.journal_transaction,
@@ -870,27 +874,33 @@ impl Core {
     /// Occurrence as it is now.
     pub fn edit_occurrence(
         &self,
-        id: EventId,
+        key: &CombinedEventKey,
         recurrence_id: &str,
         scope: Scope,
         exceptions_too: bool,
         draft: EventDraft,
     ) -> Result<Changed<Occurrence>> {
-        self.edit_in_scope(id, recurrence_id, scope, exceptions_too, Edit::Draft(draft))
+        self.edit_in_scope(
+            key,
+            recurrence_id,
+            scope,
+            exceptions_too,
+            Edit::Draft(draft),
+        )
     }
 
     /// Moves one Occurrence of a Recurring Event to another time in `scope`,
     /// as a drag or a resize in the grid does (see [`Core::edit_occurrence`]).
     pub fn reschedule_occurrence(
         &self,
-        id: EventId,
+        key: &CombinedEventKey,
         recurrence_id: &str,
         scope: Scope,
         exceptions_too: bool,
         when: When,
     ) -> Result<Changed<Occurrence>> {
         self.edit_in_scope(
-            id,
+            key,
             recurrence_id,
             scope,
             exceptions_too,
@@ -904,13 +914,17 @@ impl Core {
     /// in "all events", besides the Occurrence itself: those whose title,
     /// location, description or time differs from what the Recurring Event
     /// gives them.
-    pub fn exception_counts(&self, id: EventId, recurrence_id: &str) -> Result<ExceptionCounts> {
-        event::exception_counts(&*self.store(), id, recurrence_id)
+    pub fn exception_counts(
+        &self,
+        key: &CombinedEventKey,
+        recurrence_id: &str,
+    ) -> Result<ExceptionCounts> {
+        event::exception_counts(&*self.store(), key, recurrence_id)
     }
 
     fn edit_in_scope(
         &self,
-        id: EventId,
+        key: &CombinedEventKey,
         recurrence_id: &str,
         scope: Scope,
         exceptions_too: bool,
@@ -921,7 +935,7 @@ impl Core {
             event::edit_occurrence(
                 journal_transaction,
                 zone,
-                id,
+                key,
                 recurrence_id,
                 scope,
                 exceptions_too,
@@ -929,14 +943,15 @@ impl Core {
             )
         })?;
         let occurrence = edited.value;
-        let unsent_change = {
+        let (combined_event_key, unsent_change) = {
             let store = self.store();
-            Opened::load(&*store, occurrence.id)?.unsent_change(&store)?
+            let opened = Opened::load_row(&*store, occurrence.id)?;
+            (opened.key(), opened.unsent_change(&store)?)
         };
         Ok(Changed {
             journal_transaction: edited.journal_transaction,
             value: Occurrence {
-                event_id: occurrence.id,
+                combined_event_key,
                 calendar_id: occurrence.calendar_id,
                 title: occurrence.title,
                 when: occurrence.when.to_when(zone)?,
@@ -951,9 +966,9 @@ impl Core {
     /// Deletes an Event from a writable Calendar. For a Recurring Event or
     /// one of its Exceptions, that is the whole Recurring Event with all its
     /// Exceptions.
-    pub fn delete_event(&self, id: EventId) -> Result<Changed<()>> {
+    pub fn delete_event(&self, key: &CombinedEventKey) -> Result<Changed<()>> {
         self.record(user_action(UserAction::Deleted), |journal_transaction| {
-            Opened::load(journal_transaction, id)?.delete(journal_transaction)
+            Opened::load(journal_transaction, key)?.delete(journal_transaction)
         })
     }
 
@@ -962,9 +977,13 @@ impl Core {
     /// Recurring Event in place: the Occurrence becomes a cancelled
     /// Exception, and an Exception that changed it is deleted. The only
     /// Occurrence of a single Event is the Event.
-    pub fn delete_occurrence(&self, id: EventId, recurrence_id: &str) -> Result<Changed<()>> {
+    pub fn delete_occurrence(
+        &self,
+        key: &CombinedEventKey,
+        recurrence_id: &str,
+    ) -> Result<Changed<()>> {
         self.record(user_action(UserAction::Deleted), |journal_transaction| {
-            event::cancel_occurrence(journal_transaction, id, recurrence_id)
+            event::cancel_occurrence(journal_transaction, key, recurrence_id)
         })
     }
 
@@ -1040,8 +1059,13 @@ impl Core {
 
     /// The History of the Event `id`: the changes to it, a Recurring Event
     /// with its Exceptions, newest first, each with what its Undo undoes.
-    pub fn event_history(&self, id: EventId) -> Result<Vec<ListedJournalEventModification>> {
-        journal::event_history(&self.store(), id)
+    pub fn event_history(
+        &self,
+        key: &CombinedEventKey,
+    ) -> Result<Vec<ListedJournalEventModification>> {
+        let store = self.store();
+        let id = Opened::load(&*store, key)?.id();
+        journal::event_history(&store, id)
     }
 
     /// What Ctrl+Z undoes and Ctrl+Shift+Z redoes next, from the Undo
@@ -1108,7 +1132,11 @@ impl Core {
     }
 
     fn changed_event(&self, changed: Changed<EventId>) -> Result<Changed<Event>> {
-        self.event(changed.value).map(|value| Changed {
+        let event = {
+            let store = self.store();
+            Opened::load_row(&*store, changed.value)?.to_event(&store, self.clock.time_zone())
+        };
+        event.map(|value| Changed {
             journal_transaction: changed.journal_transaction,
             value,
         })

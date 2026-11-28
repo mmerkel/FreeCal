@@ -468,7 +468,10 @@ fn several_accounts_side_by_side_each_keep_their_own_password_and_calendars() {
     assert!(accounts.contains(&bobs) && !accounts.contains(&alices));
     assert_eq!(harness.keyring.secrets(), vec![bob.password.clone()]);
     assert_eq!(core.list_calendars().unwrap(), vec![bobs_calendar]);
-    assert_eq!(core.event(stand_up.value.id).unwrap(), stand_up.value);
+    assert_eq!(
+        core.event(&stand_up.value.combined_event_key).unwrap(),
+        stand_up.value
+    );
     core.undo_approved(stand_up.journal_transaction.unwrap())
         .unwrap();
     // Bob's password still logs in.

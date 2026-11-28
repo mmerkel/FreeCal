@@ -96,20 +96,20 @@ fn an_event_with_an_attendee_other_than_the_user_has_guests() {
 fn the_core_refuses_edits_moves_and_deletes_of_an_event_with_guests() {
     let server = OnServer::writable_with(&[("meeting", meeting("meeting", GUEST))]);
     let core = &server.core;
-    let id = server.event("meeting").id;
+    let id = server.event("meeting").combined_event_key;
     let when = timed("2026-10-13T09:00:00", "2026-10-13T10:00:00");
-    refused_for_guests(core.edit_event(id, draft(server.work, "renamed", when)));
-    refused_for_guests(core.reschedule_event(id, when));
-    refused_for_guests(core.delete_event(id));
+    refused_for_guests(core.edit_event(&id, draft(server.work, "renamed", when)));
+    refused_for_guests(core.reschedule_event(&id, when));
+    refused_for_guests(core.delete_event(&id));
     // Moving it to another Calendar is an edit too.
     let local = core.list_accounts().unwrap()[0].id;
     let home = core
         .create_calendar(local, "Home", Colour::parse("#ad1457").unwrap())
         .unwrap()
         .id;
-    refused_for_guests(core.edit_event(id, draft(home, "meeting", when)));
+    refused_for_guests(core.edit_event(&id, draft(home, "meeting", when)));
     assert_eq!(on(core, "2026-10-12").title, "meeting");
-    assert!(core.event(id).unwrap().has_guests);
+    assert!(core.event(&id).unwrap().has_guests);
 }
 
 #[test]
@@ -139,23 +139,23 @@ fn guests_of_one_exception_make_its_whole_recurring_event_read_only() {
     let recurrence_id = first.recurrence_id.as_deref().unwrap();
     let when = timed("2026-10-05T10:00:00", "2026-10-05T11:00:00");
     refused_for_guests(core.reschedule_occurrence(
-        first.event_id,
+        &first.combined_event_key,
         recurrence_id,
         Scope::This,
         false,
         when,
     ));
-    refused_for_guests(core.delete_occurrence(first.event_id, recurrence_id));
+    refused_for_guests(core.delete_occurrence(&first.combined_event_key, recurrence_id));
 }
 
 /// Asserts that the Event "mine" has no guests and can be changed.
 fn mine_is_writable(server: &OnServer) {
     assert!(!server.has_guests("mine"));
-    let id = server.event("mine").id;
+    let id = server.event("mine").combined_event_key;
     let when = timed("2026-10-12T09:00:00", "2026-10-12T10:00:00");
     server
         .core
-        .edit_event(id, draft(server.work, "renamed", when))
+        .edit_event(&id, draft(server.work, "renamed", when))
         .unwrap();
 }
 
@@ -206,7 +206,8 @@ fn undoing_a_sync_skips_an_event_with_guests() {
     let target = UndoTarget::JournalTransaction {
         id: synced[0].journal_transaction.unwrap(),
     };
-    let UndoOutcome::Dangerous { danger, .. } = server.core.undo(target, None).unwrap().value
+    let UndoOutcome::Dangerous { danger, .. } =
+        server.core.undo(target.clone(), None).unwrap().value
     else {
         panic!("an undo of a sync is a Dangerous Undo");
     };
@@ -251,8 +252,8 @@ fn an_incoming_sync_still_changes_an_event_with_guests() {
         .put_event(&server.user, &server.url, "meeting", meeting("meeting", ""));
     server.sync();
     assert!(!server.has_guests("meeting"));
-    let id = server.event("meeting").id;
-    server.core.delete_event(id).unwrap();
+    let id = server.event("meeting").combined_event_key;
+    server.core.delete_event(&id).unwrap();
 }
 
 /// The hostile test Event: its title holds `\r\nATTENDEE:…`, which is text
@@ -280,5 +281,11 @@ fn the_hostile_event_s_title_names_no_guest() {
     let server = OnServer::writable_with(&[("hostile", hostile)]);
     let occurrence = on(&server.core, "2026-10-12");
     assert!(!occurrence.has_guests);
-    assert!(!server.core.event(occurrence.event_id).unwrap().has_guests);
+    assert!(
+        !server
+            .core
+            .event(&occurrence.combined_event_key)
+            .unwrap()
+            .has_guests
+    );
 }

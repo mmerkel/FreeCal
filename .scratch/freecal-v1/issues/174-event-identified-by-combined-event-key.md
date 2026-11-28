@@ -12,12 +12,24 @@ Spec: "Core application interface"; "Untrusted content". ADRs 0012, 0018. Layout
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Effort:** M
 
-- [ ] No type of the core interface holds an Event Row's ID; `EventId` is gone from `src/core/types.generated.ts`
-- [ ] Every operation that names an Event or an Occurrence takes the key
-- [ ] The window holds keys only; one function derives FullCalendar's string ID
-- [ ] `core/tests/support/` helpers (`yoga()` among them) return keys; the tests through the core interface and the window's tests pass with keys, changed only mechanically
-- [ ] A test edits an Event twice through the key it got at creation
+- [x] No type of the core interface holds an Event Row's ID; `EventId` is gone from `src/core/types.generated.ts`
+- [x] Every operation that names an Event or an Occurrence takes the key
+- [x] The window holds keys only; one function derives FullCalendar's string ID
+- [x] `core/tests/support/` helpers (`yoga()` among them) return keys; the tests through the core interface and the window's tests pass with keys, changed only mechanically
+- [x] A test edits an Event twice through the key it got at creation
+
+## Comments
+
+- 2026-11-28: Started at commit `219b694` (opens P1).
+- 2026-11-28: Done. The core interface, the shell and the window name Events by their Combined Event Key; the Event Row's ID is `pub(crate)` in `core/src/event/when.rs`. New tests: `an_event_is_edited_twice_through_the_key_it_got_at_creation` and `a_key_whose_event_was_deleted_and_made_again_names_the_new_event` (`core/tests/events.rs`), `an_exception_with_an_unreadable_recurrence_id_is_found_by_its_key` (`core/tests/recurrence_scopes.rs`), the key's string form with a hostile UID (`store/mod.rs` unit test), FullCalendar's ID telling Occurrences apart (`src/lib/gridDrag.test.ts`), and the details following the key an edit answers (`src/lib/windowDialogs.test.ts`).
+  - **Decision, for review: a key's Calendar and recurrence ID are part of its identity, so some changes give an Event a new key.** Moving an Event to another Calendar answers a new key; the window now reopens the details with the key the edit answers (before, it reopened with the ID it had). An Exception whose recurrence ID the core rewrites (a sync joins it to its Recurring Event in another written form, or a change to the Recurring Event moves it with its Occurrence) gets a new key too; the old one still finds it where the Occurrence is the same by Normal Form, else answers "no such Event". Strongest con: a window holding an old key (an open details pane during a sync) loses its Event, where the row ID would also have changed (ADR 0018), but the user may see the details close.
+  - **Decision, for review: the key is one opaque string on the wire**, the JSON array `[calendar, uid, recurrence ID as obtained]`, and the window compares whole keys with `===` only (marking the open Event, finding an Occurrence in view). Strongest con: the core parses a string the window hands back; it reads it as untrusted and refuses a malformed one.
+  - **Decision, for review: a key whose recurrence ID can't be read finds the Exception stored with the same text**, so such an Exception (shown as an Event of its own) still opens. Strongest con: one narrow place compares recurrence IDs by text rather than Normal Form (`RecurrenceId::same_unreadable`).
+  - **Decision, for review: undo per Event in the Change Journal's listings carries a key without a recurrence ID**, since that undo takes every row of the UID. Strongest con: the key there may not name the exact Exception that was changed; only its UID counts.
+  - **Decision, for review: `ListedJournalEventModification` drops its Event ID instead of carrying a key**; the window never used it. `CoreError::EventNotFound` and `OccurrenceNotFound` drop their IDs. Strongest con: a later History feature that opens the Event from a listing has to add the key back.
+  - Tests not changed only mechanically: four tests that edit again after moving an Event to another Calendar take the key the move answered (`change_journal.rs`, `recurrence_scopes.rs`); two `caldav_sync.rs` tests and one `recurring_events.rs` test asserted that an Exception keeps its row ID when its recurrence ID is rewritten, and now assert the old key still finds it, or drop that assertion where the Occurrence moved (see the first decision); two `events.rs` tests make their deleted Event before counting signals. `Unbranded` (`src/core/types.ts`) now unbrands branded strings for the samples.
+  - Departures recorded in the layout plan, P1, 174. No switched-off tests. No new terms (`support::event_row` is a test helper).

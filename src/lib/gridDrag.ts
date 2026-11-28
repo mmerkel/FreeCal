@@ -2,7 +2,7 @@
  * What FullCalendar reports when the user drops or resizes an Occurrence, as
  * the Occurrence and the `When` to reschedule it to.
  */
-import type { EventId, Occurrence, When } from '../core/types';
+import type { CombinedEventKey, Occurrence, When } from '../core/types';
 import { whenAfterDrag, type Shift } from './when';
 
 /** The parts of FullCalendar's `EventApi` that a drop or resize needs. */
@@ -11,41 +11,29 @@ export interface GridEvent {
   allDay: boolean;
   start: Date | null;
   end: Date | null;
-  /** The grid gives each Occurrence its `when` here. */
+  /** The grid gives each Occurrence its key, `recurrenceId` and `when` here. */
   extendedProps: Record<string, unknown>;
 }
 
 export interface Reschedule {
-  id: EventId;
+  combinedEventKey: CombinedEventKey;
   /** Which Occurrence of a Recurring Event it is; `null` for a single Event. */
   recurrenceId: string | null;
   when: When;
 }
 
 /**
- * The ID FullCalendar keeps for an Occurrence: its Event's, followed by its
- * recurrence ID for one of a Recurring Event, so that each is told apart.
+ * The ID FullCalendar keeps for an Occurrence: its Event's key with its
+ * recurrence ID, so that each Occurrence is told apart. The only place the
+ * window makes a string of a key; nothing reads it back.
  */
 export function gridId(occurrence: Occurrence): string {
-  const id = String(occurrence.eventId);
-  return occurrence.recurrenceId === null ? id : `${id}/${occurrence.recurrenceId}`;
+  return JSON.stringify([occurrence.combinedEventKey, occurrence.recurrenceId]);
 }
 
-/** The Event of an Occurrence, from the ID FullCalendar keeps (see `gridId`). */
-export function idOf(event: Pick<GridEvent, 'id'>): EventId {
-  return Number.parseInt(event.id, 10) as EventId;
-}
-
-/**
- * The Event of an Occurrence and which Occurrence it is, from the ID
- * FullCalendar keeps (see `gridId`).
- */
-export function occurrenceOf(id: string): { id: EventId; recurrenceId: string | null } {
-  const slash = id.indexOf('/');
-  return {
-    id: idOf({ id }),
-    recurrenceId: slash === -1 ? null : id.slice(slash + 1),
-  };
+/** The Event of an Occurrence; the grid gives its key in `extendedProps`. */
+export function keyOf(event: Pick<GridEvent, 'extendedProps'>): CombinedEventKey {
+  return event.extendedProps.combinedEventKey as CombinedEventKey;
 }
 
 /** Which Occurrence of a Recurring Event this is; the grid gives it in `extendedProps`. */
@@ -82,5 +70,5 @@ function reschedule(event: GridEvent, oldEvent: GridEvent, startBy: Shift, endBy
     startBy,
     endBy,
   });
-  return { id: idOf(event), recurrenceId: recurrenceIdOf(event), when };
+  return { combinedEventKey: keyOf(event), recurrenceId: recurrenceIdOf(event), when };
 }

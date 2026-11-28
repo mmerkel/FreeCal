@@ -20,7 +20,7 @@ use super::{
     rule,
 };
 use crate::journal::{JournalTransaction, TransactionOrigin, UserAction};
-use crate::store::StoredEvent;
+use crate::store::{CombinedEventKey, StoredEvent};
 use crate::{CalendarId, CoreError, EventId, Repeat, Result, When};
 
 /// Which Occurrences of a Recurring Event a change to one of them changes.
@@ -50,22 +50,22 @@ pub struct ExceptionCounts {
     pub all: u32,
 }
 
-/// The [`ExceptionCounts`] of the Occurrence of the Event `id` with the
+/// The [`ExceptionCounts`] of the Occurrence of the Event `key` with the
 /// recurrence ID `recurrence_id`, as its [`crate::Occurrence`] has them.
 pub(crate) fn exception_counts(
     source: &impl Source,
-    id: EventId,
+    key: &CombinedEventKey,
     recurrence_id: &str,
 ) -> Result<ExceptionCounts> {
-    let opened = Opened::load(source, id)?;
+    let opened = Opened::load(source, key)?;
     let loaded = &opened.loaded;
     let rid = loaded
         .rid_of(recurrence_id)
-        .ok_or(CoreError::OccurrenceNotFound(id))?;
+        .ok_or(CoreError::OccurrenceNotFound)?;
     let changing = match opened.exception() {
         // As for a change, an Exception gives only its own Occurrence.
         Some(own) if own.rid.as_ref() != Some(&rid) => {
-            return Err(CoreError::OccurrenceNotFound(id));
+            return Err(CoreError::OccurrenceNotFound);
         }
         Some(own) => Some(own.id),
         None => loaded.exception_at(&rid).map(|exception| exception.id),
@@ -119,7 +119,7 @@ pub(crate) struct Edited {
     pub recurrence_id: Option<String>,
 }
 
-/// Changes the Occurrence of the Event `id` with the recurrence ID
+/// Changes the Occurrence of the Event `key` with the recurrence ID
 /// `recurrence_id`, as its [`crate::Occurrence`] has them, in `scope`, and
 /// with `exceptions_too` the Exceptions with values of their own in it too
 /// (see [`ExceptionCounts`]). Times in `change` are in the Display Time Zone
@@ -127,17 +127,17 @@ pub(crate) struct Edited {
 pub(crate) fn edit_occurrence(
     journal_transaction: &mut JournalTransaction,
     zone: Tz,
-    id: EventId,
+    key: &CombinedEventKey,
     recurrence_id: &str,
     scope: Scope,
     exceptions_too: bool,
     change: Edit,
 ) -> Result<Edited> {
-    let opened = Opened::load(journal_transaction, id)?;
+    let opened = Opened::load(journal_transaction, key)?;
     let rid = opened
         .loaded
         .rid_of(recurrence_id)
-        .ok_or(CoreError::OccurrenceNotFound(id))?;
+        .ok_or(CoreError::OccurrenceNotFound)?;
     edit_opened(
         journal_transaction,
         zone,
@@ -160,7 +160,7 @@ fn edit_opened(
     exceptions_too: bool,
     change: Edit,
 ) -> Result<Edited> {
-    let not_found = || CoreError::OccurrenceNotFound(opened.id());
+    let not_found = || CoreError::OccurrenceNotFound;
     let exception = match opened.exception() {
         Some(own) if own.rid.as_ref() != Some(&rid) => return Err(not_found()),
         Some(own) => Some(own),
@@ -218,12 +218,13 @@ fn edit_opened(
 pub(crate) fn edit_event(
     journal_transaction: &mut JournalTransaction,
     zone: Tz,
-    id: EventId,
+    key: &CombinedEventKey,
     change: Edit,
 ) -> Result<Edited> {
-    let opened = Opened::load(journal_transaction, id)?;
+    let opened = Opened::load(journal_transaction, key)?;
+    let id = opened.id();
     if let Some(own) = opened.exception() {
-        let rid = own.rid.clone().ok_or(CoreError::OccurrenceNotFound(id))?;
+        let rid = own.rid.clone().ok_or(CoreError::OccurrenceNotFound)?;
         return edit_opened(
             journal_transaction,
             zone,
@@ -557,7 +558,7 @@ fn following(
     change: Edit,
 ) -> Result<Edited> {
     let (id, recurring) = loaded.recurring_event();
-    let not_found = || CoreError::OccurrenceNotFound(*id);
+    let not_found = || CoreError::OccurrenceNotFound;
     let slot = changing.slot.as_ref().ok_or_else(not_found)?;
     let Some(ended) = rule::rule_until(recurring, rid.as_str()) else {
         return all(

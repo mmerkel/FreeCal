@@ -13,7 +13,7 @@ import type {
   SyncStatuses,
 } from '../core/types';
 import { DEFAULT_SETTINGS } from '../lib/settings';
-import { accountId, calendarId, eventId } from './ids';
+import { accountId, calendarId, combinedEventKey } from './ids';
 import { FakeCore } from './fakeCore';
 
 /** The Local Account, as every Local Store has it. */
@@ -90,7 +90,7 @@ export function event(
 ): Event {
   const { location = '', description = '', ...rest } = fields;
   return {
-    id: eventId(nextId++),
+    combinedEventKey: combinedEventKey(`event-${nextId++}`),
     pinnedZone: null,
     repeat: null,
     customRepeat: false,
@@ -120,7 +120,7 @@ export function plainText(text: string): StructuredText {
  */
 export function occurrence(of: Event, fields: Partial<Occurrence> = {}): Occurrence {
   return {
-    eventId: of.id,
+    combinedEventKey: of.combinedEventKey,
     calendarId: of.calendarId,
     title: of.title,
     when: of.when,
@@ -138,7 +138,7 @@ export function scriptWindow(core: FakeCore, { accounts, calendars, events }: Sc
   if (events) {
     core.answer(
       'listOccurrences',
-      events.map((shown) => ('eventId' in shown ? shown : occurrence(shown))),
+      events.map((shown) => ('unsentSince' in shown ? shown : occurrence(shown))),
     );
   }
 }

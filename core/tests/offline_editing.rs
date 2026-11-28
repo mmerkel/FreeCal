@@ -96,7 +96,7 @@ fn an_occurrence_says_since_when_it_has_unsent_changes() {
     on_server
         .core
         .reschedule_event(
-            dentist.event_id,
+            &dentist.combined_event_key,
             timed("2026-10-05T11:00:00", "2026-10-05T12:00:00"),
         )
         .unwrap();
@@ -150,13 +150,17 @@ fn only_the_changed_occurrence_of_a_recurring_event_has_unsent_changes() {
     let changed = on_server
         .core
         .edit_occurrence(
-            second.event_id,
+            &second.combined_event_key,
             second.recurrence_id.as_deref().unwrap(),
             Scope::This,
             false,
             EventDraft {
                 title: "Yoga outside".to_owned(),
-                repeat: on_server.core.event(second.event_id).unwrap().repeat,
+                repeat: on_server
+                    .core
+                    .event(&second.combined_event_key)
+                    .unwrap()
+                    .repeat,
                 ..draft(on_server.work, "", second.when)
             },
         )
@@ -200,7 +204,7 @@ fn an_event_says_since_when_it_has_unsent_changes_and_why_the_last_send_failed()
     on_server
         .core
         .edit_event(
-            standup.id,
+            &standup.combined_event_key,
             EventDraft {
                 title: "Standup moved".to_owned(),
                 ..draft(on_server.work, "", standup.when)
@@ -225,9 +229,9 @@ fn an_event_says_since_when_it_has_unsent_changes_and_why_the_last_send_failed()
         .unwrap();
 
     // The Incoming Sync after it may bring in the server's version.
-    let event_id = on(&on_server.core, "2026-10-05").event_id;
+    let event_id = on(&on_server.core, "2026-10-05").combined_event_key;
     assert_eq!(
-        on_server.core.event(event_id).unwrap().unsent_change,
+        on_server.core.event(&event_id).unwrap().unsent_change,
         Some(UnsentChange {
             since: at(LAUNCH),
             send_failure: Some(SendFailure::WaitingForServerVersion),

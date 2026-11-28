@@ -4,7 +4,7 @@ import type {
   CalendarId,
   DangerousUndo,
   EventDraft,
-  EventId,
+  CombinedEventKey,
   ExceptionCounts,
   ExistingEvents,
   JournalTransactionId,
@@ -24,10 +24,10 @@ import { canEdit, whyReadOnly, type WindowModel } from './windowModel.svelte';
  * which Occurrence of a Recurring Event was opened, none for the whole.
  */
 type Open =
-  | { kind: 'details'; id: EventId; recurrenceId: string | null }
+  | { kind: 'details'; combinedEventKey: CombinedEventKey; recurrenceId: string | null }
   | {
       kind: 'editing';
-      id: EventId;
+      combinedEventKey: CombinedEventKey;
       recurrenceId: string | null;
       draft: EventDraft;
       customRepeat: boolean;
@@ -186,9 +186,9 @@ export class WindowDialogs {
     return this.#writableCalendars;
   }
   /** The Event whose details or editor are open, which the grid marks. */
-  get selectedEventId() {
+  get selectedEventKey() {
     const open = this.#open;
-    return open?.kind === 'details' || open?.kind === 'editing' ? open.id : undefined;
+    return open?.kind === 'details' || open?.kind === 'editing' ? open.combinedEventKey : undefined;
   }
   get selectedRecurrenceId() {
     const open = this.#open;
@@ -200,12 +200,14 @@ export class WindowDialogs {
   get openedOccurrence() {
     const open = this.#open;
     if (open?.kind !== 'details' || open.recurrenceId === null) return undefined;
-    return this.#occurrence(open.id, open.recurrenceId);
+    return this.#occurrence(open.combinedEventKey, open.recurrenceId);
   }
-  /** The Occurrence in view of the Event `id` with `recurrenceId`. */
-  #occurrence(id: EventId, recurrenceId: string | null) {
+  /** The Occurrence in view of the Event with key `combinedEventKey` with `recurrenceId`. */
+  #occurrence(combinedEventKey: CombinedEventKey, recurrenceId: string | null) {
     return this.#model.occurrences.find(
-      (occurrence) => occurrence.eventId === id && occurrence.recurrenceId === recurrenceId,
+      (occurrence) =>
+        occurrence.combinedEventKey === combinedEventKey &&
+        occurrence.recurrenceId === recurrenceId,
     );
   }
   /**
@@ -246,11 +248,11 @@ export class WindowDialogs {
     });
   }
 
-  /** Opens the details of Event `id`, or of its Occurrence `recurrenceId`. */
-  openDetails(id: EventId, recurrenceId: string | null = null) {
+  /** Opens the details of the Event with key `combinedEventKey`, or of its Occurrence `recurrenceId`. */
+  openDetails(combinedEventKey: CombinedEventKey, recurrenceId: string | null = null) {
     this.#failure = undefined;
-    this.#show({ kind: 'details', id, recurrenceId });
-    this.#model.openDetails(id, () => this.close());
+    this.#show({ kind: 'details', combinedEventKey, recurrenceId });
+    this.#model.openDetails(combinedEventKey, () => this.close());
   }
 
   /**
@@ -265,7 +267,7 @@ export class WindowDialogs {
     this.#editorSession++;
     this.#show({
       kind: 'editing',
-      id: event.id,
+      combinedEventKey: event.combinedEventKey,
       recurrenceId,
       draft: {
         calendarId: event.calendarId,
@@ -297,31 +299,32 @@ export class WindowDialogs {
       return;
     }
     if (editor?.kind !== 'editing') return;
-    const { id, recurrenceId } = editor;
+    const { combinedEventKey, recurrenceId } = editor;
     if (recurrenceId === null) {
-      const { journalTransaction, value } = await this.#core.editEvent(id, draft);
-      this.openDetails(id, value.recurrenceId);
+      const { journalTransaction, value } = await this.#core.editEvent(combinedEventKey, draft);
+      this.openDetails(value.combinedEventKey, value.recurrenceId);
       this.#recorded(journalTransaction, t('undo.done.edited'), actionText('edited', title));
       return;
     }
     const change = sameRepeat(draft.repeat, editor.draft.repeat) ? 'edit' : 'editRepeat';
-    const choice = await this.#askScope(change, id, recurrenceId);
+    const choice = await this.#askScope(change, combinedEventKey, recurrenceId);
     if (choice === null) return;
     const { scope, exceptionsToo } = choice;
     const { journalTransaction, value } = await this.#core.editOccurrence(
-      id,
+      combinedEventKey,
       recurrenceId,
       scope,
       exceptionsToo,
       draft,
     );
-    this.openDetails(value.eventId, value.recurrenceId);
+    this.openDetails(value.combinedEventKey, value.recurrenceId);
     this.#recorded(journalTransaction, t('undo.done.edited'), actionText('edited', title));
   }
 
   /** Leaves the editor: back to the details of an existing Event, else closed. */
   cancelEditing() {
-    if (this.#open?.kind === 'editing') this.openDetails(this.#open.id, this.#open.recurrenceId);
+    if (this.#open?.kind === 'editing')
+      this.openDetails(this.#open.combinedEventKey, this.#open.recurrenceId);
     else this.close();
   }
 
@@ -335,16 +338,17 @@ export class WindowDialogs {
    * asks which Occurrences move first. Rejects when the user cancels or the
    * core fails, and the grid puts the Occurrence back.
    */
-  async reschedule(id: EventId, recurrenceId: string | null, when: When) {
-    const title = this.#occurrence(id, recurrenceId)?.title ?? '';
+  async reschedule(combinedEventKey: CombinedEventKey, recurrenceId: string | null, when: When) {
+    const title = this.#occurrence(combinedEventKey, recurrenceId)?.title ?? '';
     let write: () => Promise<{ journalTransaction: JournalTransactionId | null }>;
     if (recurrenceId === null) {
-      write = () => this.#core.rescheduleEvent(id, when);
+      write = () => this.#core.rescheduleEvent(combinedEventKey, when);
     } else {
-      const choice = await this.#askScope('move', id, recurrenceId);
+      const choice = await this.#askScope('move', combinedEventKey, recurrenceId);
       if (choice === null) throw new Error('The move was cancelled.');
       const { scope, exceptionsToo } = choice;
-      write = () => this.#core.rescheduleOccurrence(id, recurrenceId, scope, exceptionsToo, when);
+      write = () =>
+        this.#core.rescheduleOccurrence(combinedEventKey, recurrenceId, scope, exceptionsToo, when);
     }
     try {
       const { journalTransaction } = await write();
@@ -360,8 +364,8 @@ export class WindowDialogs {
    * A drag the grid refused, because the Occurrence's Calendar is read-only
    * or its Event has guests, as `whyReadOnly` says.
    */
-  refuseDrag(id: EventId, recurrenceId: string | null) {
-    const dragged = this.#occurrence(id, recurrenceId);
+  refuseDrag(combinedEventKey: CombinedEventKey, recurrenceId: string | null) {
+    const dragged = this.#occurrence(combinedEventKey, recurrenceId);
     const calendar = this.#model.directory?.calendars.find(
       (found) => found.id === dragged?.calendarId,
     );
@@ -381,15 +385,15 @@ export class WindowDialogs {
   /** Deletes the Event whose details are open, all its Occurrences. */
   async remove() {
     if (this.#open?.kind !== 'details') return;
-    const { id } = this.#open;
-    await this.#deleting(() => this.#core.deleteEvent(id));
+    const { combinedEventKey } = this.#open;
+    await this.#deleting(() => this.#core.deleteEvent(combinedEventKey));
   }
 
   /** Deletes the Occurrence of a Recurring Event whose details are open. */
   async removeOccurrence() {
     if (this.#open?.kind !== 'details' || this.#open.recurrenceId === null) return;
-    const { id, recurrenceId } = this.#open;
-    await this.#deleting(() => this.#core.deleteOccurrence(id, recurrenceId));
+    const { combinedEventKey, recurrenceId } = this.#open;
+    await this.#deleting(() => this.#core.deleteOccurrence(combinedEventKey, recurrenceId));
   }
 
   /** Opens a link of the open details or About in the system browser. */
@@ -733,14 +737,14 @@ export class WindowDialogs {
    */
   async #askScope(
     change: ScopeChange,
-    id: EventId,
+    combinedEventKey: CombinedEventKey,
     recurrenceId: string,
   ): Promise<ScopeChoice | null> {
     // Open while the counts load too, so that a drop is held from the start.
     this.#scopePrompt = { change };
     const release = change === 'move' ? this.#model.hold() : undefined;
     try {
-      const counts = await this.#core.exceptionCounts(id, recurrenceId);
+      const counts = await this.#core.exceptionCounts(combinedEventKey, recurrenceId);
       return await new Promise((choose) => {
         this.#chooseScope = choose;
         this.#scopePrompt = { change, counts };

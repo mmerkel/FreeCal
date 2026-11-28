@@ -13,7 +13,7 @@ import type {
   When,
 } from './core/types';
 import { calendar, event, firstLaunch } from './test/answers';
-import { eventId, journalTransactionId } from './test/ids';
+import { combinedEventKey, journalTransactionId } from './test/ids';
 import { failure, type FakeCore } from './test/fakeCore';
 import { showApp } from './test/showApp';
 
@@ -57,23 +57,25 @@ const sync = listed(5, {
   undonePerEvent: true,
 });
 
-/** A Journal Event Modification of Journal Transaction `of`, as listed. */
+/**
+ * A Journal Event Modification of Journal Transaction `of`, as listed, of the
+ * Event with key `key`.
+ */
 function modification(
   of: ListedJournalTransaction,
   fields: Partial<ListedJournalEventModification> = {},
+  key = combinedEventKey('event-30'),
 ): ListedJournalEventModification {
-  const eventIdOf = fields.eventId ?? eventId(30);
   return {
     journalTransaction: of.id,
     origin: of.origin,
     madeAt: of.madeAt,
-    eventId: eventIdOf,
     title: 'Standup',
     calendarId: home.id,
     kind: 'edited',
     undone: false,
     undo: of.undonePerEvent
-      ? { kind: 'event', journalTransaction: of.id, eventId: eventIdOf }
+      ? { kind: 'event', journalTransaction: of.id, combinedEventKey: key }
       : { kind: 'journalTransaction', id: of.id },
     ...fields,
   };
@@ -145,7 +147,7 @@ test('a user action expands into its Events, undone only whole', async () => {
 
 test('a sync’s Event is undone alone, and the list is read again', async () => {
   const { core, user } = await withJournal();
-  const standup = modification(sync, { eventId: eventId(31) });
+  const standup = modification(sync, {}, combinedEventKey('event-31'));
   core.answer('journalTransactionEvents', [
     standup,
     modification(sync, { title: 'Yoga', undone: true, undo: null }),
@@ -270,7 +272,12 @@ test('the list names a hostile Event as text', async () => {
 
 /** Opens the details of `opened`, Dentist in Home, with its History `history`. */
 async function openHistory(core: FakeCore, user: User, history: ListedJournalEventModification[]) {
-  const dentist = event({ id: eventId(30), calendarId: home.id, title: 'Dentist', when: monday });
+  const dentist = event({
+    combinedEventKey: combinedEventKey('event-30'),
+    calendarId: home.id,
+    title: 'Dentist',
+    when: monday,
+  });
   core.answer('event', dentist);
   core.answer('eventHistory', history);
   const grid = screen.getByRole('list', { name: 'Grid' });
@@ -283,7 +290,14 @@ async function openHistory(core: FakeCore, user: User, history: ListedJournalEve
 test('the History in an Event’s details lists its changes, each with Undo', async () => {
   const core = firstLaunch({
     calendars: [home],
-    events: [event({ id: eventId(30), calendarId: home.id, title: 'Dentist', when: monday })],
+    events: [
+      event({
+        combinedEventKey: combinedEventKey('event-30'),
+        calendarId: home.id,
+        title: 'Dentist',
+        when: monday,
+      }),
+    ],
   });
   const { user } = await showApp(core);
   const changes = [
@@ -293,7 +307,7 @@ test('the History in an Event’s details lists its changes, each with Undo', as
 
   const history = await openHistory(core, user, changes);
 
-  expect(core.callsOf('eventHistory')).toEqual([[eventId(30)]]);
+  expect(core.callsOf('eventHistory')).toEqual([[combinedEventKey('event-30')]]);
   const rows = within(history).getAllByRole('listitem');
   expect(rows[0]).toHaveTextContent('Changed “\u2068Dentist\u2069”');
   expect(rows[0]).toHaveTextContent('on the server');
@@ -312,7 +326,14 @@ test('the History in an Event’s details lists its changes, each with Undo', as
 test('a user action in the History undoes its whole Journal Transaction', async () => {
   const core = firstLaunch({
     calendars: [home],
-    events: [event({ id: eventId(30), calendarId: home.id, title: 'Dentist', when: monday })],
+    events: [
+      event({
+        combinedEventKey: combinedEventKey('event-30'),
+        calendarId: home.id,
+        title: 'Dentist',
+        when: monday,
+      }),
+    ],
   });
   const { user } = await showApp(core);
 

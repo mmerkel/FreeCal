@@ -446,7 +446,7 @@ impl JournalTransaction<'_> {
     fn previous(&self, id: EventId) -> Result<(String, StoredEvent)> {
         self.database_transaction
             .event_and_uid(id)?
-            .ok_or(CoreError::EventNotFound(id))
+            .ok_or(CoreError::EventNotFound)
     }
 
     /// Refuses writes into a missing Calendar, and into a Read-only one for
@@ -626,7 +626,7 @@ mod tests {
         made_at: i64,
     ) -> Result<Recorded<UndoOutcome>> {
         let target = UndoTarget::JournalTransaction { id };
-        let undone = undo(store, target, None, made_at)?;
+        let undone = undo(store, target.clone(), None, made_at)?;
         match &undone.value {
             UndoOutcome::Dangerous { danger, .. } => undo(store, target, Some(danger), made_at),
             UndoOutcome::Undone { .. } => Ok(undone),

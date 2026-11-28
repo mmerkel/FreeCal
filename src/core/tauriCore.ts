@@ -43,17 +43,17 @@ export const tauriCore: CoreApi = {
   showOnlyCalendar: (id) => invoke('show_only_calendar', { id }),
   listOccurrences: (from, to) =>
     invoke('list_occurrences', { from: from.toString(), to: to.toString() }),
-  event: (id) => invoke('event', { id }),
+  event: (key) => invoke('event', { key }),
   createEvent: (draft) => invoke('create_event', { draft }),
-  editEvent: (id, draft) => invoke('edit_event', { id, draft }),
-  rescheduleEvent: (id, when) => invoke('reschedule_event', { id, when }),
-  editOccurrence: (id, recurrenceId, scope, exceptionsToo, draft) =>
-    invoke('edit_occurrence', { id, recurrenceId, scope, exceptionsToo, draft }),
-  rescheduleOccurrence: (id, recurrenceId, scope, exceptionsToo, when) =>
-    invoke('reschedule_occurrence', { id, recurrenceId, scope, exceptionsToo, when }),
-  exceptionCounts: (id, recurrenceId) => invoke('exception_counts', { id, recurrenceId }),
-  deleteEvent: (id) => invoke('delete_event', { id }),
-  deleteOccurrence: (id, recurrenceId) => invoke('delete_occurrence', { id, recurrenceId }),
+  editEvent: (key, draft) => invoke('edit_event', { key, draft }),
+  rescheduleEvent: (key, when) => invoke('reschedule_event', { key, when }),
+  editOccurrence: (key, recurrenceId, scope, exceptionsToo, draft) =>
+    invoke('edit_occurrence', { key, recurrenceId, scope, exceptionsToo, draft }),
+  rescheduleOccurrence: (key, recurrenceId, scope, exceptionsToo, when) =>
+    invoke('reschedule_occurrence', { key, recurrenceId, scope, exceptionsToo, when }),
+  exceptionCounts: (key, recurrenceId) => invoke('exception_counts', { key, recurrenceId }),
+  deleteEvent: (key) => invoke('delete_event', { key }),
+  deleteOccurrence: (key, recurrenceId) => invoke('delete_occurrence', { key, recurrenceId }),
   pickImportFile: (title, filter) => invoke('pick_import_file', { title, filter }),
   previewImport: (calendarId) => invoke('preview_import', { calendarId }),
   runImport: (calendarId, existing) => invoke('run_import', { calendarId, existing }),
@@ -61,7 +61,7 @@ export const tauriCore: CoreApi = {
   undo: (target, approved) => invoke('undo', { target, approved }),
   changeJournal: () => invoke('change_journal'),
   journalTransactionEvents: (id) => invoke('journal_transaction_events', { id }),
-  eventHistory: (id) => invoke('event_history', { id }),
+  eventHistory: (key) => invoke('event_history', { key }),
   undoHistory: () => invoke('undo_history'),
   openLink: (url) => invoke('open_link', { url }),
   version: () => invoke('version'),

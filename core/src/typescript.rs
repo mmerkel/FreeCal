@@ -13,12 +13,14 @@ use chrono::NaiveDate;
 use serde::Serialize;
 use ts_rs::{Config, TS, TypeVisitor};
 
+use crate::event::RecurrenceId;
+
 use crate::{
     Account, AccountId, AddedAccount, Appearance, AvailableCalendar, Calendar, CalendarId, Changed,
-    Colour, ErrorCode, Event, EventDraft, EventId, ExceptionCounts, ExistingEvents, Frequency,
-    ImportOutcome, ImportSummary, JournalTransactionId, Occurrence, Piece, PinnedZone, Provider,
-    Repeat, RepeatEnd, Scope, SendFailure, ServerLogin, Settings, SettingsUpdate, SidebarState,
-    Signal, StructuredText, UnsentChange, View, When,
+    Colour, CombinedEventKey, ErrorCode, Event, EventDraft, ExceptionCounts, ExistingEvents,
+    Frequency, ImportOutcome, ImportSummary, JournalTransactionId, Occurrence, Piece, PinnedZone,
+    Provider, Repeat, RepeatEnd, Scope, SendFailure, ServerLogin, Settings, SettingsUpdate,
+    SidebarState, Signal, StructuredText, UnsentChange, View, When,
 };
 use crate::{
     AccountSyncStatus, CalendarSyncStatus, FinishedSync, OverallState, OverallStatus, SyncOutcome,
@@ -183,8 +185,17 @@ fn samples_file() -> (String, Vec<String>) {
         interval: 2,
         end: RepeatEnd::Until { date: date(31) },
     };
+    let key = CombinedEventKey {
+        calendar_id: CalendarId(2),
+        uid: "dentist@example.org".to_owned(),
+        recurrence_id: None,
+    };
+    let exception_key = CombinedEventKey {
+        recurrence_id: Some(RecurrenceId::obtained("2026-10-19T09:30:00[Europe/Berlin]")),
+        ..key.clone()
+    };
     let event = Event {
-        id: EventId(3),
+        combined_event_key: key.clone(),
         calendar_id: CalendarId(2),
         title: "Dentist".to_owned(),
         when: timed,
@@ -203,7 +214,7 @@ fn samples_file() -> (String, Vec<String>) {
         send_failure: Some(SendFailure::ServerChanged),
     };
     let exception = Event {
-        id: EventId(4),
+        combined_event_key: exception_key.clone(),
         recurrence_id: Some("2026-10-19T09:30:00".to_owned()),
         has_guests: true,
         unsent_change: Some(unsent_change.clone()),
@@ -284,7 +295,7 @@ fn samples_file() -> (String, Vec<String>) {
         samples(&[CalendarId(2)]),
         samples(std::slice::from_ref(&calendar.colour)),
         samples(&[calendar]),
-        samples(&[EventId(3)]),
+        samples(&[key.clone(), exception_key.clone()]),
         samples(&[all_day, timed]),
         samples(&[EventDraft {
             calendar_id: CalendarId(2),
@@ -297,7 +308,7 @@ fn samples_file() -> (String, Vec<String>) {
         samples(&[event.clone(), exception]),
         samples(&[
             Occurrence {
-                event_id: EventId(3),
+                combined_event_key: key.clone(),
                 calendar_id: CalendarId(2),
                 title: "Holiday".to_owned(),
                 when: all_day,
@@ -306,7 +317,7 @@ fn samples_file() -> (String, Vec<String>) {
                 unsent_since: None,
             },
             Occurrence {
-                event_id: EventId(3),
+                combined_event_key: exception_key.clone(),
                 calendar_id: CalendarId(2),
                 title: "Dentist".to_owned(),
                 when: timed,
@@ -455,7 +466,7 @@ fn samples_file() -> (String, Vec<String>) {
             },
             UndoTarget::Event {
                 journal_transaction: JournalTransactionId(4),
-                event_id: EventId(3),
+                combined_event_key: key.clone(),
             },
             UndoTarget::CalendarSince {
                 calendar_id: CalendarId(2),
@@ -514,14 +525,13 @@ fn samples_file() -> (String, Vec<String>) {
                 journal_transaction: JournalTransactionId(5),
                 origin: TransactionOrigin::IncomingSync,
                 made_at: 1_791_100_800,
-                event_id: EventId(3),
                 title: "Standup".to_owned(),
                 calendar_id: CalendarId(2),
                 kind: JournalEventModificationKind::Edited,
                 undone: false,
                 undo: Some(UndoTarget::Event {
                     journal_transaction: JournalTransactionId(5),
-                    event_id: EventId(3),
+                    combined_event_key: key.clone(),
                 }),
             },
             ListedJournalEventModification {
@@ -530,7 +540,6 @@ fn samples_file() -> (String, Vec<String>) {
                     action: UserAction::Deleted,
                 },
                 made_at: 1_791_100_700,
-                event_id: EventId(3),
                 title: "Standup".to_owned(),
                 calendar_id: CalendarId(2),
                 kind: JournalEventModificationKind::Deleted,

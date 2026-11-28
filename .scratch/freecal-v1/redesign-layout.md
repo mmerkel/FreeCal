@@ -21,7 +21,7 @@ Approved by the user on 2026-11-28, with their renames: Event Version Content, E
 |---|---|---|
 | Core interface `Core` | `lib.rs:90`, `impl` :112; events :805–973, undo and journal :1013–1057, `record` :1058, `after_local_change` :1099 | throughout |
 | Interface types for TypeScript | each module's `#[cfg_attr(test, derive(ts_rs::TS))]`; collected in `typescript.rs:33` | 174, 180–182, 187, 190, 194 |
-| `EventId` | `event/when.rs:18`; 21 files (13 in `core/src`, 7 in `core/tests`, `src-tauri/src/main.rs`) | 174 (interface), 178 (inside) |
+| `EventId` | `event/when.rs:14`, `pub(crate)` since 174; 11 files in `core/src` and `src-tauri/src` name it | 174 (interface), 178 (inside) |
 | Managed fields | `EventFields` `event/when.rs:249` (no `PartialEq`); `StoredEvent` `store/mod.rs:32`; `RecurrenceId` `event/recurrence_id.rs:22`, compared through `NormalForm` :92 | 177 (`EventVersionContent`) |
 | Change Journal | `journal/mod.rs` (1337): `record` :202, `JournalTransaction` :338 (`create` :369, `replace` :384, `delete` :403, `put_back` :418, `writable` :458), `record_journal_event_modification` :486, `hash` :579; `TransactionOrigin` :98, `UserAction` :119 | 178–182 |
 | Undo per Event, Dangerous Undo | `journal/undo.rs` (664): `undo` :145, `Plan` :214, `danger` :281, `Planner` :505 | 180–182 |
@@ -144,6 +144,11 @@ These files stay green from 173 to 214 with at most mechanical changes (174's ke
 ### P1
 
 **174.** `Core`'s event functions (`lib.rs:805–973`) take and return `CombinedEventKey` (glossary; today in the store, `store/mod.rs`) in place of `EventId`; `Event` (`event/mod.rs:58`) carries its key. `EventId` stays as `pub(crate)` inside `event/` and `store/` until 178 makes it the Event Version's row ID. `src-tauri/src/main.rs` and `src/core/*` follow; `src/test/ids.ts` makes keys. `original_server_data` (`lib.rs:819`) takes the key too, until 187 removes it.
+  - The key is one opaque string on the wire, the JSON array `[calendar_id, uid, recurrence_id_as_obtained]`, branded `CombinedEventKey` in TypeScript (`store/mod.rs:81`, its own `Serialize`/`Deserialize`); the core reads it back as untrusted. Two keys are equal when their parts are, the recurrence ID as obtained. (changed in ticket 174: the plan left the wire form open; one string keeps it opaque to the window, which compares whole keys only.)
+  - `Opened::load` (`event/mod.rs:638`) finds the Event of a key: the Recurring Event or single Event for no recurrence ID, else the Exception on the same Occurrence by Normal Form, or, when the key's recurrence ID can't be read, the Exception with the same text. `Opened::load_row` (`:663`) stays for the core's own row IDs until 178. (changed in ticket 174: the plan named no lookup.)
+  - `Occurrence` carries `combined_event_key` in place of `event_id` (`event/mod.rs:148`). `ListedJournalEventModification` loses its `event_id`: the window doesn't use it. `UndoTarget::Event` carries a key without a recurrence ID, since undo per Event takes every row of the UID. `CoreError::EventNotFound` and `OccurrenceNotFound` carry no ID. (changed in ticket 174: the plan didn't cover the listings, the undo target or the errors.)
+  - In the window, `gridId` (`src/lib/gridDrag.ts:30`) is the one function making FullCalendar's ID, from the key and the Occurrence's recurrence ID; the grid hands the key back in `extendedProps`, and a refused drag finds its Occurrence by `gridId`. The shell's commands take the key as `key`.
+  - Tests find an Event's row with `support::event_row(&key)`, an SQL condition, in place of `WHERE id = …`. (changed in ticket 174: the row ID no longer reaches the tests.)
 
 **175.** New `unimplemented.rs`: `UnimplementedFields` (a tree of named entries, serde, canonical form with sorted entries), prefixes per Provider. New `ical/read.rs`: the CalDAV reader, built from `import/mod.rs:402` (`read_events`), returning `ImportedEvent`s with their `UnimplementedFields`; the import reads through it too, so `.ics` files keep `ical:` entries. Its precise rules and what they drop on purpose are listed beside them (ADR 0017). Pure; tests in `ical/read.rs`.
 

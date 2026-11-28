@@ -7,15 +7,11 @@ use serde::{Deserialize, Serialize};
 use super::RecurrenceId;
 use crate::{CoreError, ImportedWhen, Result, StructuredText};
 
-/// Branded in TypeScript, so that it can't be mixed up with other IDs.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    test,
-    derive(ts_rs::TS),
-    ts(type = "number & { readonly __brand: \"EventId\" }")
-)]
-#[serde(transparent)]
-pub struct EventId(pub i64);
+/// An Event Row's ID. It changes with every edit (ADR 0018), so it stays
+/// inside the core: the core interface names an Event by its
+/// [`crate::CombinedEventKey`].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash)]
+pub(crate) struct EventId(pub i64);
 
 /// When an Event takes place. Times are wall-clock times in the Display Time
 /// Zone; ends are exclusive, so a one-day all-day Event ends the next day.

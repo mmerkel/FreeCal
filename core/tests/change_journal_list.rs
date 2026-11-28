@@ -10,7 +10,7 @@ use freecal_core::{
     ListedJournalEventModification, ListedJournalTransaction, RepeatEnd, Scope, Signal,
     TransactionOrigin, UndoHistoryStep, UndoOutcome, UndoTarget, UserAction,
 };
-use support::{Harness, UndoApproved, calendar, date, dentist, draft, event, ics, timed, yoga};
+use support::{Harness, UndoApproved, calendar, date, dentist, draft, event, ics, on, timed, yoga};
 
 fn import(core: &Core, calendar_id: freecal_core::CalendarId, body: &str) -> JournalTransactionId {
     let preview = core
@@ -41,10 +41,13 @@ fn titles(core: &Core) -> Vec<String> {
 }
 
 fn renamed(core: &Core, event: &Event, title: &str) -> JournalTransactionId {
-    core.edit_event(event.id, draft(event.calendar_id, title, event.when))
-        .unwrap()
-        .journal_transaction
-        .unwrap()
+    core.edit_event(
+        &event.combined_event_key,
+        draft(event.calendar_id, title, event.when),
+    )
+    .unwrap()
+    .journal_transaction
+    .unwrap()
 }
 
 const MONDAY: (&str, &str) = ("DTSTART:20261005T070000Z", "DTEND:20261005T080000Z");
@@ -150,7 +153,10 @@ mod the_timeline {
         let dentist = core.create_event(dentist(home.id)).unwrap().value;
 
         let moved = core
-            .edit_event(dentist.id, draft(work.id, "Dentist", dentist.when))
+            .edit_event(
+                &dentist.combined_event_key,
+                draft(work.id, "Dentist", dentist.when),
+            )
             .unwrap()
             .journal_transaction
             .unwrap();
@@ -175,12 +181,12 @@ mod the_timeline {
                 event("b", TUESDAY.0, TUESDAY.1)
             ),
         );
-        let listed = core.journal_transaction_events(imported).unwrap();
-        let a = listed[0].event_id;
+        let a = on(&core, "2026-10-05").combined_event_key;
+        let b = on(&core, "2026-10-06").combined_event_key;
         core.undo(
             UndoTarget::Event {
                 journal_transaction: imported,
-                event_id: a,
+                combined_event_key: a.clone(),
             },
             None,
         )
@@ -188,19 +194,17 @@ mod the_timeline {
 
         let listed = core.journal_transaction_events(imported).unwrap();
 
-        let b = listed[1].event_id;
-        let expected = |event_id, title: &str, undone| ListedJournalEventModification {
+        let expected = |combined_event_key, title: &str, undone| ListedJournalEventModification {
             journal_transaction: imported,
             origin: TransactionOrigin::Import,
             made_at: made,
-            event_id,
             title: title.to_owned(),
             calendar_id: home.id,
             kind: JournalEventModificationKind::Created,
             undone,
             undo: (!undone).then_some(UndoTarget::Event {
                 journal_transaction: imported,
-                event_id,
+                combined_event_key,
             }),
         };
         assert_eq!(
@@ -217,7 +221,7 @@ mod the_timeline {
         let dentist = core.create_event(dentist(home.id)).unwrap().value;
 
         let deleted = core
-            .delete_event(dentist.id)
+            .delete_event(&dentist.combined_event_key)
             .unwrap()
             .journal_transaction
             .unwrap();
@@ -265,7 +269,7 @@ mod an_events_history {
         .unwrap();
         let edited = renamed(&core, &dentist, "Dentist at 9");
 
-        let history = core.event_history(dentist.id).unwrap();
+        let history = core.event_history(&dentist.combined_event_key).unwrap();
 
         let kinds: Vec<_> = history
             .iter()
@@ -299,7 +303,7 @@ mod an_events_history {
             .remove(0);
         let moved = core
             .reschedule_occurrence(
-                yoga,
+                &yoga,
                 &occurrence.recurrence_id.clone().unwrap(),
                 Scope::This,
                 false,
@@ -309,7 +313,7 @@ mod an_events_history {
             .journal_transaction
             .unwrap();
 
-        let history = core.event_history(yoga).unwrap();
+        let history = core.event_history(&yoga).unwrap();
 
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].journal_transaction, moved);
@@ -324,17 +328,20 @@ mod an_events_history {
         renamed(&core, &dentist, "Dentist at 9");
         harness.signals.clear();
 
-        let edit = core.event_history(dentist.id).unwrap().remove(0);
+        let edit = core
+            .event_history(&dentist.combined_event_key)
+            .unwrap()
+            .remove(0);
         core.undo(edit.undo.unwrap(), None).unwrap();
 
-        assert_eq!(core.event(dentist.id).unwrap(), dentist);
+        assert_eq!(core.event(&dentist.combined_event_key).unwrap(), dentist);
         assert_eq!(
             harness.signals.received_but_sync_status(),
             vec![Signal::OccurrencesChanged {
                 calendar_ids: vec![home.id]
             }]
         );
-        let history = core.event_history(dentist.id).unwrap();
+        let history = core.event_history(&dentist.combined_event_key).unwrap();
         assert_eq!(history[0].origin, TransactionOrigin::Undo);
         assert!(history[1].undone);
         assert_eq!(history[1].undo, None);
@@ -400,8 +407,11 @@ mod undoing_a_calendar_since_a_given_time {
         let dentist = core.create_event(dentist(home.id)).unwrap().value;
         harness.clock.set("2026-10-03T13:00:00+02:00");
         let since = now(&harness);
-        core.edit_event(dentist.id, draft(work.id, "Dentist", dentist.when))
-            .unwrap();
+        core.edit_event(
+            &dentist.combined_event_key,
+            draft(work.id, "Dentist", dentist.when),
+        )
+        .unwrap();
 
         core.undo(
             UndoTarget::CalendarSince {
@@ -412,7 +422,7 @@ mod undoing_a_calendar_since_a_given_time {
         )
         .unwrap();
 
-        assert_eq!(core.event(dentist.id).unwrap(), dentist);
+        assert_eq!(core.event(&dentist.combined_event_key).unwrap(), dentist);
     }
 
     #[test]
@@ -461,7 +471,7 @@ mod undoing_a_calendar_since_a_given_time {
             since,
         };
 
-        let asked = core.undo(target, None).unwrap();
+        let asked = core.undo(target.clone(), None).unwrap();
 
         let UndoOutcome::Dangerous { danger, .. } = asked.value else {
             panic!("expected a Dangerous Undo, got {asked:?}");
@@ -535,13 +545,13 @@ mod the_undo_history {
         assert_eq!(action(&core), UserAction::Edited);
 
         core.reschedule_event(
-            created.id,
+            &created.combined_event_key,
             timed("2026-10-05T12:00:00", "2026-10-05T13:00:00"),
         )
         .unwrap();
         assert_eq!(action(&core), UserAction::Moved);
 
-        core.delete_event(created.id).unwrap();
+        core.delete_event(&created.combined_event_key).unwrap();
         assert_eq!(action(&core), UserAction::Deleted);
     }
 
@@ -631,7 +641,10 @@ mod the_undo_history {
         let created = created.journal_transaction.unwrap();
         let edited = renamed(&core, &dentist, "Dentist at 9");
 
-        let edit = core.event_history(dentist.id).unwrap().remove(0);
+        let edit = core
+            .event_history(&dentist.combined_event_key)
+            .unwrap()
+            .remove(0);
         let undone = core
             .undo(edit.undo.unwrap(), None)
             .unwrap()
@@ -655,18 +668,11 @@ mod the_undo_history {
                 event("b", TUESDAY.0, TUESDAY.1)
             ),
         );
-        let a = core.journal_transaction_events(imported).unwrap()[0].event_id;
-        let undid_a = core
-            .undo(
-                UndoTarget::Event {
-                    journal_transaction: imported,
-                    event_id: a,
-                },
-                None,
-            )
-            .unwrap()
-            .journal_transaction
+        let a = core.journal_transaction_events(imported).unwrap()[0]
+            .undo
+            .clone()
             .unwrap();
+        let undid_a = core.undo(a, None).unwrap().journal_transaction.unwrap();
 
         assert_eq!(
             steps(&core),

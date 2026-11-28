@@ -5,7 +5,8 @@ use support::UndoApproved;
 use std::sync::{Arc, Mutex, Weak};
 
 use freecal_core::{
-    CalendarId, Colour, Core, EventId, FIRST_SYNC_PAGE, Piece, Signal, SyncStatus, link_allowed,
+    CalendarId, Colour, CombinedEventKey, Core, FIRST_SYNC_PAGE, Piece, Signal, SyncStatus,
+    link_allowed,
 };
 use support::radicale::{NewCalendar, Radicale, User};
 use support::{Harness, add_account, all_day, date, draft, event, ics, timed, titles};
@@ -69,14 +70,14 @@ fn adding_a_calendar_pulls_its_events() {
         .occurrences(date("2026-10-01"), date("2026-11-01"))
         .unwrap();
     assert_eq!(occurrences.len(), 2);
-    let standup = core.event(occurrences[0].event_id).unwrap();
+    let standup = core.event(&occurrences[0].combined_event_key).unwrap();
     assert_eq!(standup.calendar_id, added[0].id);
     assert_eq!(standup.title, "standup");
     assert_eq!(
         standup.when,
         timed("2026-10-05T09:00:00", "2026-10-05T09:30:00")
     );
-    let offsite = core.event(occurrences[1].event_id).unwrap();
+    let offsite = core.event(&occurrences[1].combined_event_key).unwrap();
     assert_eq!(offsite.when, all_day("2026-10-07", "2026-10-09"));
 }
 
@@ -111,7 +112,7 @@ fn a_recurring_event_comes_with_its_exceptions() {
         .unwrap();
     let (_, served) = radicale.get_event(&user, &work, "weekly");
     let held = |occurrence: usize| {
-        core.original_server_data(occurrences[occurrence].event_id)
+        core.original_server_data(&occurrences[occurrence].combined_event_key)
             .unwrap()
             .map(|server| server.data)
     };
@@ -151,10 +152,11 @@ fn pulled_standup() -> (Harness, Core, CalendarId, CalendarId) {
 mod original_server_data {
     use super::*;
 
-    fn standup(core: &Core) -> EventId {
+    fn standup(core: &Core) -> CombinedEventKey {
         core.occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap()[0]
-            .event_id
+            .combined_event_key
+            .clone()
     }
 
     #[test]
@@ -170,7 +172,10 @@ mod original_server_data {
                 ))
                 .unwrap()
                 .value;
-            assert_eq!(core.original_server_data(made.id).unwrap(), None);
+            assert_eq!(
+                core.original_server_data(&made.combined_event_key).unwrap(),
+                None
+            );
         }
     }
 
@@ -178,10 +183,10 @@ mod original_server_data {
     fn stays_through_an_edit() {
         let (_harness, core, work, _) = pulled_standup();
         let id = standup(&core);
-        let pulled = core.original_server_data(id).unwrap();
+        let pulled = core.original_server_data(&id).unwrap();
 
         core.edit_event(
-            id,
+            &id,
             draft(
                 work,
                 "Standup, longer",
@@ -191,18 +196,18 @@ mod original_server_data {
         .unwrap();
 
         assert!(pulled.is_some());
-        assert_eq!(core.original_server_data(id).unwrap(), pulled);
+        assert_eq!(core.original_server_data(&id).unwrap(), pulled);
     }
 
     #[test]
     fn goes_with_a_move_to_another_calendar_and_comes_back_with_its_undo() {
         let (_harness, core, _, home) = pulled_standup();
         let id = standup(&core);
-        let pulled = core.original_server_data(id).unwrap();
+        let pulled = core.original_server_data(&id).unwrap();
 
         let moved = core
             .edit_event(
-                id,
+                &id,
                 draft(
                     home,
                     "standup",
@@ -210,26 +215,30 @@ mod original_server_data {
                 ),
             )
             .unwrap();
-        assert_eq!(core.original_server_data(moved.value.id).unwrap(), None);
+        assert_eq!(
+            core.original_server_data(&moved.value.combined_event_key)
+                .unwrap(),
+            None
+        );
         core.undo_approved(moved.journal_transaction.unwrap())
             .unwrap();
 
         assert!(pulled.is_some());
-        assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);
+        assert_eq!(core.original_server_data(&standup(&core)).unwrap(), pulled);
     }
 
     #[test]
     fn comes_back_with_the_undo_of_a_delete() {
         let (_harness, core, _, _) = pulled_standup();
         let id = standup(&core);
-        let pulled = core.original_server_data(id).unwrap();
+        let pulled = core.original_server_data(&id).unwrap();
 
-        let deleted = core.delete_event(id).unwrap();
+        let deleted = core.delete_event(&id).unwrap();
         core.undo_approved(deleted.journal_transaction.unwrap())
             .unwrap();
 
         assert!(pulled.is_some());
-        assert_eq!(core.original_server_data(standup(&core)).unwrap(), pulled);
+        assert_eq!(core.original_server_data(&standup(&core)).unwrap(), pulled);
     }
 }
 
@@ -453,7 +462,7 @@ mod floating_times {
         let occurrences = core
             .occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap();
-        let standup = core.event(occurrences[0].event_id).unwrap();
+        let standup = core.event(&occurrences[0].combined_event_key).unwrap();
         assert_eq!(standup.pinned_zone.as_deref(), Some("America/New_York"));
         assert_eq!(
             standup.when,
@@ -477,7 +486,7 @@ mod floating_times {
         let occurrences = core
             .occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap();
-        let standup = core.event(occurrences[0].event_id).unwrap();
+        let standup = core.event(&occurrences[0].combined_event_key).unwrap();
         assert_eq!(standup.pinned_zone.as_deref(), Some("Asia/Tokyo"));
         assert_eq!(
             standup.when,
@@ -535,7 +544,7 @@ mod hostile {
         let occurrences = core
             .occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap();
-        let event = core.event(occurrences[0].event_id).unwrap();
+        let event = core.event(&occurrences[0].combined_event_key).unwrap();
         // CalDAV's XML turns line breaks into `\n` (XML 1.0, 2.11).
         assert_eq!(event.title, field("title").replace("\r\n", "\n"));
         assert_eq!(event.location.text, field("location"));
@@ -575,7 +584,7 @@ mod hostile {
             .occurrences(date("2026-10-05"), date("2026-10-06"))
             .unwrap();
         let stored = core
-            .original_server_data(occurrences[0].event_id)
+            .original_server_data(&occurrences[0].combined_event_key)
             .unwrap()
             .unwrap();
         let (etag, served) = radicale.get_event(&user, &work, "hostile");

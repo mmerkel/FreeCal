@@ -275,18 +275,18 @@ fn a_sync_replaces_a_changed_occurrence_whose_recurrence_id_is_written_different
         ))
     };
     let synced = OnServer::with(&[("weekly", weekly("Moved"))]);
-    let id = synced.event("Moved").id;
+    let id = synced.event("Moved").combined_event_key;
     // Another form of the same time, as a stored field may have it.
     synced.harness.arrange_local_store(&format!(
-        "UPDATE event SET recurrence_id = '2026-10-12T8:0:0' WHERE id = {}",
-        id.0
+        "UPDATE event SET recurrence_id = '2026-10-12T8:0:0' WHERE {}",
+        support::event_row(&id)
     ));
     synced.put("weekly", weekly("Moved again"));
 
     synced.sync();
 
     assert_eq!(synced.titles(), ["Weekly", "Moved again", "Weekly"]);
-    assert_eq!(synced.event("Moved again").id, id);
+    assert_eq!(synced.event("Moved again").combined_event_key, id);
 }
 
 #[test]
@@ -613,7 +613,7 @@ mod undo {
         let synced = OnServer::writable_with(&[("standup", standup("Standup"))]);
         let deleted = synced
             .core
-            .delete_event(synced.event("Standup").id)
+            .delete_event(&synced.event("Standup").combined_event_key)
             .unwrap();
         synced.delete("standup");
         synced.sync();
@@ -623,8 +623,8 @@ mod undo {
             .undo_approved(deleted.journal_transaction.unwrap())
             .unwrap();
 
-        let id = synced.event("Standup").id;
-        assert_eq!(synced.core.original_server_data(id).unwrap(), None);
+        let id = synced.event("Standup").combined_event_key;
+        assert_eq!(synced.core.original_server_data(&id).unwrap(), None);
     }
 
     #[test]
@@ -665,7 +665,7 @@ mod undo {
             id: journal_transaction,
         };
 
-        let asked = synced.core.undo(target, None).unwrap();
+        let asked = synced.core.undo(target.clone(), None).unwrap();
         let UndoOutcome::Dangerous { danger, skipped } = asked.value else {
             panic!("expected a Dangerous Undo, got {:?}", asked.value);
         };
@@ -703,9 +703,10 @@ mod undo {
         let review = synced.event("review");
         let target = UndoTarget::Event {
             journal_transaction,
-            event_id: review.id,
+            combined_event_key: review.combined_event_key,
         };
-        let UndoOutcome::Dangerous { danger, .. } = synced.core.undo(target, None).unwrap().value
+        let UndoOutcome::Dangerous { danger, .. } =
+            synced.core.undo(target.clone(), None).unwrap().value
         else {
             panic!("an undo of a server change is a Dangerous Undo");
         };
@@ -871,15 +872,15 @@ fn the_local_account_has_nothing_to_sync() {
 #[test]
 fn an_event_whose_object_moved_to_another_address_stays_the_same_event() {
     let synced = OnServer::with(&[("standup", standup("Standup"))]);
-    let id = synced.event("Standup").id;
+    let id = synced.event("Standup").combined_event_key;
     synced.delete("standup");
     synced.put("standup-moved", standup("Standup moved"));
 
     synced.sync();
 
     let moved = synced.event("Standup moved");
-    assert_eq!(moved.id, id);
-    let server = synced.core.original_server_data(id).unwrap().unwrap();
+    assert_eq!(moved.combined_event_key, id);
+    let server = synced.core.original_server_data(&id).unwrap().unwrap();
     assert!(
         server.href.ends_with("/standup-moved.ics"),
         "{}",
@@ -1012,13 +1013,13 @@ mod server_objects {
             if !tokens {
                 synced.without_sync_tokens();
             }
-            let id = synced.event("Standup A").id;
+            let id = synced.event("Standup A").combined_event_key;
             synced.write("a-standup", titled("review", "Review", "20261006"));
 
             synced.sync();
 
             assert_eq!(synced.titles(), ["Standup B", "Review"], "tokens: {tokens}");
-            assert_eq!(synced.event("Standup B").id, id);
+            assert_eq!(synced.event("Standup B").combined_event_key, id);
             assert!(synced.href("Standup B").ends_with("/b-standup.ics"));
         }
     }
@@ -1094,14 +1095,14 @@ mod server_objects {
     #[test]
     fn the_kept_resource_changed_beside_an_ignored_resource_keeps_the_uid() {
         let synced = OnServer::with_files(&two_standups());
-        let id = synced.event("Standup A").id;
+        let id = synced.event("Standup A").combined_event_key;
         synced.write("a-standup", standup("Standup A changed"));
         synced.write("b-standup", standup("Standup B changed"));
 
         synced.sync();
 
         assert_eq!(synced.titles(), ["Standup A changed"]);
-        assert_eq!(synced.event("Standup A changed").id, id);
+        assert_eq!(synced.event("Standup A changed").combined_event_key, id);
     }
 
     /// ADR 0015's amendment for ticket 108: a CalDAV Server Object is its
@@ -1125,14 +1126,14 @@ mod server_objects {
             if !tokens {
                 synced.without_sync_tokens();
             }
-            let id = synced.event("Standup A").id;
+            let id = synced.event("Standup A").combined_event_key;
             synced.delete("a-standup");
             synced.write(to, standup("Standup moved"));
 
             synced.sync();
 
             assert_eq!(synced.titles(), [title], "tokens: {tokens}, to {to}");
-            assert_eq!(synced.event(title).id, id);
+            assert_eq!(synced.event(title).combined_event_key, id);
             assert!(synced.href(title).ends_with(&format!("/{kept}.ics")));
             assert_eq!(synced.sync(), None, "tokens: {tokens}, to {to}");
         }
@@ -1159,14 +1160,14 @@ mod server_objects {
                 if !tokens {
                     synced.without_sync_tokens();
                 }
-                let id = synced.event("Standup A").id;
+                let id = synced.event("Standup A").combined_event_key;
                 synced.write("a-standup", holds.clone());
                 let multigets = proxy.requests_holding("calendar-multiget");
 
                 synced.sync();
 
                 assert_eq!(synced.titles(), *titles, "tokens: {tokens}");
-                assert_eq!(synced.event("Standup B").id, id);
+                assert_eq!(synced.event("Standup B").combined_event_key, id);
                 assert_eq!(
                     proxy.requests_holding("calendar-multiget") - multigets,
                     1,
@@ -1236,14 +1237,14 @@ mod server_objects {
     #[test]
     fn a_kept_resource_that_becomes_unreadable_keeps_the_uid_beside_an_ignored_resource() {
         let synced = OnServer::with_files(&two_standups());
-        let id = synced.event("Standup A").id;
+        let id = synced.event("Standup A").combined_event_key;
         synced.write("a-standup", unreadable_standup("Standup A moved"));
         synced.write("b-standup", standup("Standup B changed"));
 
         assert_eq!(synced.sync(), None);
 
         assert_eq!(synced.titles(), ["Standup A"]);
-        assert_eq!(synced.event("Standup A").id, id);
+        assert_eq!(synced.event("Standup A").combined_event_key, id);
         assert!(synced.href("Standup A").ends_with("/a-standup.ics"));
         assert_eq!(synced.held_etag("Standup A"), None, "fetched again");
     }
@@ -1306,7 +1307,7 @@ mod server_objects {
         let moved = synced
             .core
             .reschedule_occurrence(
-                second.event_id,
+                &second.combined_event_key,
                 second.recurrence_id.as_deref().unwrap(),
                 freecal_core::Scope::This,
                 false,
@@ -1315,8 +1316,14 @@ mod server_objects {
             .unwrap()
             .value;
 
-        assert_ne!(moved.event_id, second.event_id, "an Exception");
-        let held = synced.core.original_server_data(moved.event_id).unwrap();
+        assert_ne!(
+            moved.combined_event_key, second.combined_event_key,
+            "an Exception"
+        );
+        let held = synced
+            .core
+            .original_server_data(&moved.combined_event_key)
+            .unwrap();
         assert!(held.is_some());
         assert_eq!(held, synced.held("Weekly"));
     }
@@ -1336,15 +1343,15 @@ mod server_objects {
         assert_eq!(synced.sync(), None);
 
         assert_eq!(synced.titles(), ["Standup"]);
-        let id = synced.event("Standup").id;
-        let kept = synced.core.original_server_data(id).unwrap().unwrap();
+        let id = synced.event("Standup").combined_event_key;
+        let kept = synced.core.original_server_data(&id).unwrap().unwrap();
         let held = held.unwrap();
         assert_eq!((kept.href, kept.data), (held.href, held.data));
         assert_eq!(kept.etag, None, "fetched again");
         synced.put("standup", standup("Standup moved"));
         synced.sync();
         assert_eq!(synced.titles(), ["Standup moved"]);
-        assert_eq!(synced.event("Standup moved").id, id);
+        assert_eq!(synced.event("Standup moved").combined_event_key, id);
     }
 
     /// Exceptions without their Recurring Event, such as an invitation to
@@ -1427,7 +1434,10 @@ mod server_objects {
             );
             synced.write("weekly-moved", ics(&moved_in_new_york("Moved again")));
             synced.sync();
-            assert_eq!(synced.event("Moved again").id, moved.id);
+            assert_eq!(
+                synced.event("Moved again").combined_event_key,
+                moved.combined_event_key
+            );
         }
 
         /// ADR 0012: with its Recurring Event, it changes the Occurrence it
@@ -1436,14 +1446,14 @@ mod server_objects {
         fn joins_its_recurring_event_when_its_object_comes_to_hold_it() {
             for again in [moved_in_new_york("Moved again"), moved("Moved again")] {
                 let synced = OnServer::with_files(&[("weekly", ics(&moved_in_new_york("Moved")))]);
-                let id = synced.event("Moved").id;
+                let id = synced.event("Moved").combined_event_key;
                 synced.write("weekly", ics(&format!("{}{again}", recurring("Weekly"))));
 
                 synced.sync();
 
                 assert_eq!(shown(&synced), weekly_with("Moved again"), "{again}");
                 let joined = synced.event("Moved again");
-                assert_eq!(joined.id, id);
+                assert_eq!(synced.core.event(&id).unwrap(), joined);
                 assert_eq!(joined.recurrence_id.as_deref(), Some("2026-10-12T08:00:00"));
             }
         }
@@ -1453,7 +1463,7 @@ mod server_objects {
         #[test]
         fn undoing_the_sync_that_brought_its_recurring_event_leaves_it_alone() {
             let synced = OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
-            let id = synced.event("Moved").id;
+            let id = synced.event("Moved").combined_event_key;
             synced.write(
                 "weekly",
                 ics(&format!(
@@ -1467,7 +1477,7 @@ mod server_objects {
             synced.core.undo_approved(journal_transaction).unwrap();
 
             assert_eq!(shown(&synced), alone("Moved"));
-            assert_eq!(synced.event("Moved").id, id);
+            assert_eq!(synced.event("Moved").combined_event_key, id);
         }
 
         /// Imports the `.ics` file holding `body` into the Calendar,
@@ -1491,12 +1501,12 @@ mod server_objects {
             ] {
                 let synced =
                     OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
-                let id = synced.event("Moved").id;
+                let id = synced.event("Moved").combined_event_key;
 
                 import(&synced, &body);
 
                 assert_eq!(shown(&synced), weekly_with("Moved"), "{body}");
-                assert_eq!(synced.event("Moved").id, id);
+                assert_eq!(synced.event("Moved").combined_event_key, id);
             }
         }
 
@@ -1507,10 +1517,9 @@ mod server_objects {
             for (hours, recurrence_id) in [(0, "2026-10-12T08:00:00"), (1, "2026-10-12T09:00:00")] {
                 let synced =
                     OnServer::writable_with(&[("weekly", ics(&moved_in_new_york("Moved")))]);
-                let id = synced.event("Moved").id;
                 import(&synced, &recurring("Weekly"));
                 let first = support::on(&synced.core, "2026-10-05");
-                let event = synced.core.event(first.event_id).unwrap();
+                let event = synced.core.event(&first.combined_event_key).unwrap();
                 let freecal_core::When::Timed { start, end } = event.when else {
                     panic!("a timed Event");
                 };
@@ -1527,7 +1536,7 @@ mod server_objects {
                 synced
                     .core
                     .edit_occurrence(
-                        first.event_id,
+                        &first.combined_event_key,
                         first.recurrence_id.as_deref().unwrap(),
                         freecal_core::Scope::All,
                         false,
@@ -1541,7 +1550,6 @@ mod server_objects {
                     "{hours} hours"
                 );
                 let moved = synced.event("Moved");
-                assert_eq!(moved.id, id);
                 assert_eq!(moved.recurrence_id.as_deref(), Some(recurrence_id));
             }
         }
@@ -1552,13 +1560,13 @@ mod server_objects {
                 "weekly",
                 ics(&format!("{}{}", recurring("Weekly"), moved("Moved"))),
             )]);
-            let id = synced.event("Moved").id;
+            let id = synced.event("Moved").combined_event_key;
             synced.write("weekly", ics(&moved("Moved again")));
 
             synced.sync();
 
             assert_eq!(shown(&synced), alone("Moved again"));
-            assert_eq!(synced.event("Moved again").id, id);
+            assert_eq!(synced.event("Moved again").combined_event_key, id);
         }
 
         #[test]
@@ -1687,7 +1695,7 @@ mod ignored_resources {
             if !tokens {
                 synced.without_sync_tokens();
             }
-            let id = synced.event("Standup A").id;
+            let id = synced.event("Standup A").combined_event_key;
             let several = ics(&format!(
                 "BEGIN:VEVENT\nUID:standup\nSUMMARY:Standup A\nDTSTART:20261005T070000Z\n\
                  DTEND:20261005T073000Z\n{MARKER}\nEND:VEVENT\n"
@@ -1697,7 +1705,7 @@ mod ignored_resources {
             synced.sync();
 
             assert_eq!(synced.titles(), ["Standup B"], "tokens: {tokens}");
-            assert_eq!(synced.event("Standup B").id, id);
+            assert_eq!(synced.event("Standup B").combined_event_key, id);
         }
     }
 
@@ -1843,20 +1851,20 @@ mod ignored_resources {
                 let sync = || sync_and_count(&synced, &proxy, "late", tokens);
                 synced.put("late", titled("late", "Late", "20261007"));
                 assert_eq!(sync(), (1, 0), "tokens: {tokens}");
-                let id = synced.event("Late").id;
+                let id = synced.event("Late").combined_event_key;
                 let text = synced.held("Late").unwrap().data;
 
                 synced.put("late", late("late", "Late moved"));
                 assert_eq!(sync(), (1, 1), "tokens: {tokens}");
                 assert_eq!(sync(), (1, 0), "tokens: {tokens}");
                 assert_eq!(synced.titles(), ["Standup", "Late"]);
-                assert_eq!(synced.event("Late").id, id);
+                assert_eq!(synced.event("Late").combined_event_key, id);
                 assert_eq!(synced.held("Late").unwrap().data, text);
 
                 proxy.stop_rewriting();
                 assert_eq!(sync(), (1, 0), "tokens: {tokens}");
                 assert_eq!(synced.titles(), ["Standup", "Late moved"]);
-                assert_eq!(synced.event("Late moved").id, id);
+                assert_eq!(synced.event("Late moved").combined_event_key, id);
                 assert_eq!(sync(), (0, 0), "tokens: {tokens}");
             }
         }

@@ -1,7 +1,7 @@
 import { emit } from '@tauri-apps/api/event';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { afterEach, expect, test } from 'vitest';
-import { accountId, calendarId, eventId, journalTransactionId } from '../test/ids';
+import { accountId, calendarId, combinedEventKey, journalTransactionId } from '../test/ids';
 import { tauriCore } from './tauriCore';
 
 afterEach(() => clearMocks());
@@ -115,46 +115,61 @@ test('the Event commands pass their arguments under the names the shell expects'
     Temporal.PlainDate.from('2026-09-28'),
     Temporal.PlainDate.from('2026-11-09'),
   );
-  await tauriCore.event(eventId(7));
+  await tauriCore.event(combinedEventKey('event-7'));
   await tauriCore.createEvent(draft);
-  await tauriCore.editEvent(eventId(7), draft);
-  await tauriCore.rescheduleEvent(eventId(7), draft.when);
-  await tauriCore.editOccurrence(eventId(7), '2026-10-12T09:00:00', 'all', true, draft);
+  await tauriCore.editEvent(combinedEventKey('event-7'), draft);
+  await tauriCore.rescheduleEvent(combinedEventKey('event-7'), draft.when);
+  await tauriCore.editOccurrence(
+    combinedEventKey('event-7'),
+    '2026-10-12T09:00:00',
+    'all',
+    true,
+    draft,
+  );
   await tauriCore.rescheduleOccurrence(
-    eventId(7),
+    combinedEventKey('event-7'),
     '2026-10-12T09:00:00',
     'this',
     false,
     draft.when,
   );
-  await tauriCore.exceptionCounts(eventId(7), '2026-10-12T09:00:00');
-  await tauriCore.deleteEvent(eventId(7));
-  await tauriCore.deleteOccurrence(eventId(7), '2026-10-12T09:00:00');
+  await tauriCore.exceptionCounts(combinedEventKey('event-7'), '2026-10-12T09:00:00');
+  await tauriCore.deleteEvent(combinedEventKey('event-7'));
+  await tauriCore.deleteOccurrence(combinedEventKey('event-7'), '2026-10-12T09:00:00');
   await tauriCore.openLink('https://example.com');
 
   expect(invoked).toEqual([
     ['list_occurrences', { from: '2026-09-28', to: '2026-11-09' }],
-    ['event', { id: 7 }],
+    ['event', { key: combinedEventKey('event-7') }],
     ['create_event', { draft }],
-    ['edit_event', { id: 7, draft }],
-    ['reschedule_event', { id: 7, when: draft.when }],
+    ['edit_event', { key: combinedEventKey('event-7'), draft }],
+    ['reschedule_event', { key: combinedEventKey('event-7'), when: draft.when }],
     [
       'edit_occurrence',
-      { id: 7, recurrenceId: '2026-10-12T09:00:00', scope: 'all', exceptionsToo: true, draft },
+      {
+        key: combinedEventKey('event-7'),
+        recurrenceId: '2026-10-12T09:00:00',
+        scope: 'all',
+        exceptionsToo: true,
+        draft,
+      },
     ],
     [
       'reschedule_occurrence',
       {
-        id: 7,
+        key: combinedEventKey('event-7'),
         recurrenceId: '2026-10-12T09:00:00',
         scope: 'this',
         exceptionsToo: false,
         when: draft.when,
       },
     ],
-    ['exception_counts', { id: 7, recurrenceId: '2026-10-12T09:00:00' }],
-    ['delete_event', { id: 7 }],
-    ['delete_occurrence', { id: 7, recurrenceId: '2026-10-12T09:00:00' }],
+    ['exception_counts', { key: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' }],
+    ['delete_event', { key: combinedEventKey('event-7') }],
+    [
+      'delete_occurrence',
+      { key: combinedEventKey('event-7'), recurrenceId: '2026-10-12T09:00:00' },
+    ],
     ['open_link', { url: 'https://example.com' }],
   ]);
 });
@@ -173,7 +188,7 @@ test('the import commands pass their arguments under the names the shell expects
   await tauriCore.undo({ kind: 'journalTransaction', id: journalTransactionId(4) }, null);
   await tauriCore.changeJournal();
   await tauriCore.journalTransactionEvents(journalTransactionId(4));
-  await tauriCore.eventHistory(eventId(3));
+  await tauriCore.eventHistory(combinedEventKey('event-3'));
   await tauriCore.undoHistory();
 
   expect(invoked).toEqual([
@@ -184,7 +199,7 @@ test('the import commands pass their arguments under the names the shell expects
     ['undo', { target: { kind: 'journalTransaction', id: 4 }, approved: null }],
     ['change_journal', {}],
     ['journal_transaction_events', { id: 4 }],
-    ['event_history', { id: 3 }],
+    ['event_history', { key: combinedEventKey('event-3') }],
     ['undo_history', {}],
   ]);
 });

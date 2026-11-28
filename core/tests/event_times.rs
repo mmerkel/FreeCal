@@ -45,8 +45,8 @@ fn utc_instants_from_other_time_zone_rules_are_recomputed_on_opening() {
     drop(core);
     harness.arrange_local_store(&format!(
         "UPDATE app_state SET time_zone_rules = '2020a';
-         UPDATE event SET start_utc = 0, end_utc = 60 WHERE id = {};",
-        call.id.0
+         UPDATE event SET start_utc = 0, end_utc = 60 WHERE {};",
+        support::event_row(&call.combined_event_key)
     ));
 
     let core = harness.open();
@@ -76,7 +76,7 @@ fn a_time_the_clocks_skip_happens_shifted_by_the_gap() {
     harness.clock.set_time_zone("UTC");
 
     assert_eq!(
-        core.event(gap.id).unwrap().when,
+        core.event(&gap.combined_event_key).unwrap().when,
         timed("2026-03-29T01:30:00", "2026-03-29T02:00:00")
     );
 }
@@ -90,13 +90,16 @@ fn a_time_the_clocks_repeat_is_the_first_one_and_round_trips() {
     let when = timed("2026-10-25T02:30:00", "2026-10-25T03:30:00");
 
     let repeated = core.create_event(draft(home, "Twice", when)).unwrap().value;
-    core.edit_event(repeated.id, draft(home, "Twice, renamed", when))
-        .unwrap();
+    core.edit_event(
+        &repeated.combined_event_key,
+        draft(home, "Twice, renamed", when),
+    )
+    .unwrap();
 
-    assert_eq!(core.event(repeated.id).unwrap().when, when);
+    assert_eq!(core.event(&repeated.combined_event_key).unwrap().when, when);
     harness.clock.set_time_zone("UTC");
     assert_eq!(
-        core.event(repeated.id).unwrap().when,
+        core.event(&repeated.combined_event_key).unwrap().when,
         timed("2026-10-25T00:30:00", "2026-10-25T02:30:00")
     );
 }
@@ -159,10 +162,10 @@ fn start_and_end_in_different_time_zones_are_shown_in_the_display_time_zone() {
     );
     assert!(shown(&core, "2026-10-07", "2026-10-08").is_empty());
 
-    let id = core
+    let id = &core
         .occurrences(date("2026-10-05"), date("2026-10-06"))
         .unwrap()[0]
-        .event_id;
+        .combined_event_key;
     let later = timed("2026-10-05T23:00:00", "2026-10-06T02:30:00");
     core.edit_event(id, draft(home, "Flight", later)).unwrap();
     harness.clock.set_time_zone("Europe/London");

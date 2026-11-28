@@ -3,8 +3,8 @@ mod support;
 use support::UndoApproved;
 
 use freecal_core::{
-    CalendarId, Core, CoreError, EventDraft, EventId, ExistingEvents, Frequency, ImportFile,
-    Occurrence, Repeat, RepeatEnd, Scope, Signal, When,
+    CalendarId, CombinedEventKey, Core, CoreError, EventDraft, ExistingEvents, Frequency,
+    ImportFile, Occurrence, Repeat, RepeatEnd, Scope, Signal, When,
 };
 use support::{Harness, all_day, calendar, date, draft, event, ics, timed};
 
@@ -31,8 +31,8 @@ fn recurring(calendar_id: CalendarId, title: &str, when: When, repeat: Repeat) -
     }
 }
 
-fn create(core: &Core, draft: EventDraft) -> EventId {
-    core.create_event(draft).unwrap().value.id
+fn create(core: &Core, draft: EventDraft) -> CombinedEventKey {
+    core.create_event(draft).unwrap().value.combined_event_key
 }
 
 fn occurrences(core: &Core, from: &str, to: &str) -> Vec<Occurrence> {
@@ -78,19 +78,19 @@ fn a_recurring_event_has_an_occurrence_on_every_date_it_falls_on() {
         found
             .iter()
             .map(|occurrence| (
-                occurrence.event_id,
+                occurrence.combined_event_key.clone(),
                 occurrence.when,
                 occurrence.title.as_str()
             ))
             .collect::<Vec<_>>(),
         [
             (
-                id,
+                id.clone(),
                 timed("2026-10-05T18:00:00", "2026-10-05T19:00:00"),
                 "Yoga"
             ),
             (
-                id,
+                id.clone(),
                 timed("2026-10-12T18:00:00", "2026-10-12T19:00:00"),
                 "Yoga"
             ),
@@ -310,7 +310,7 @@ fn the_repeat_rule_reads_back_and_an_edit_of_other_fields_keeps_it() {
 
     let edited = core
         .edit_event(
-            created.id,
+            &created.combined_event_key,
             recurring(
                 home.id,
                 "Yin yoga",
@@ -341,13 +341,13 @@ fn an_edit_can_change_or_remove_the_repeat_rule() {
     );
 
     let daily = repeat(Frequency::Daily, 1, count(2));
-    core.edit_event(id, recurring(home.id, "Yoga", when, daily))
+    core.edit_event(&id, recurring(home.id, "Yoga", when, daily))
         .unwrap();
-    assert_eq!(core.event(id).unwrap().repeat, Some(daily));
+    assert_eq!(core.event(&id).unwrap().repeat, Some(daily));
     assert_eq!(starts(&core, "2026-10-01", "2026-11-01").len(), 2);
 
-    core.edit_event(id, draft(home.id, "Yoga", when)).unwrap();
-    assert_eq!(core.event(id).unwrap().repeat, None);
+    core.edit_event(&id, draft(home.id, "Yoga", when)).unwrap();
+    assert_eq!(core.event(&id).unwrap().repeat, None);
     assert_eq!(starts(&core, "2026-10-01", "2026-11-01").len(), 1);
 }
 
@@ -392,14 +392,14 @@ fn deleting_one_occurrence_cancels_it_and_leaves_the_rest_and_can_be_undone() {
     harness.signals.clear();
 
     let deleted = core
-        .delete_occurrence(id, second.recurrence_id.as_deref().unwrap())
+        .delete_occurrence(&id, second.recurrence_id.as_deref().unwrap())
         .unwrap();
 
     assert_eq!(
         starts(&core, "2026-10-01", "2026-11-01"),
         ["2026-10-05 18:00:00", "2026-10-19 18:00:00"]
     );
-    assert!(core.event(id).unwrap().repeat.is_some());
+    assert!(core.event(&id).unwrap().repeat.is_some());
     assert_eq!(
         harness.signals.received(),
         [Signal::OccurrencesChanged {
@@ -428,8 +428,8 @@ fn deleting_an_occurrence_with_a_recurrence_id_the_event_doesnt_have_is_refused(
     );
 
     assert!(matches!(
-        core.delete_occurrence(id, "<script>"),
-        Err(CoreError::OccurrenceNotFound(_))
+        core.delete_occurrence(&id, "<script>"),
+        Err(CoreError::OccurrenceNotFound)
     ));
     assert_eq!(starts(&core, "2026-10-01", "2026-11-01").len(), 3);
 }
@@ -449,7 +449,7 @@ fn deleting_a_recurring_event_deletes_all_its_occurrences() {
         ),
     );
 
-    core.delete_event(id).unwrap();
+    core.delete_event(&id).unwrap();
 
     assert!(starts(&core, "2026-10-01", "2027-11-01").is_empty());
 }
@@ -490,7 +490,7 @@ fn an_import_carries_the_rule_the_cancelled_occurrences_and_the_changed_ones() {
             ("Team", timed("2026-11-02T09:00:00", "2026-11-02T10:00:00")),
         ]
     );
-    let moved = core.event(found[2].event_id).unwrap();
+    let moved = core.event(&found[2].combined_event_key).unwrap();
     // An Exception shows the repeat rule of its Recurring Event.
     assert_eq!(
         moved.repeat,
@@ -499,7 +499,7 @@ fn an_import_carries_the_rule_the_cancelled_occurrences_and_the_changed_ones() {
     assert_eq!(moved.recurrence_id, found[2].recurrence_id);
     assert!(moved.recurrence_id.is_some());
     assert_eq!(
-        core.event(found[0].event_id).unwrap().repeat,
+        core.event(&found[0].combined_event_key).unwrap().repeat,
         Some(repeat(Frequency::Weekly, 1, until("2026-11-02")))
     );
 }
@@ -538,8 +538,11 @@ fn deleting_a_changed_occurrence_doesnt_bring_back_the_original() {
     import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
     let moved = occurrences(&core, "2026-10-26", "2026-10-27").remove(0);
 
-    core.delete_occurrence(moved.event_id, moved.recurrence_id.as_deref().unwrap())
-        .unwrap();
+    core.delete_occurrence(
+        &moved.combined_event_key,
+        moved.recurrence_id.as_deref().unwrap(),
+    )
+    .unwrap();
 
     assert!(starts(&core, "2026-10-26", "2026-10-27").is_empty());
     assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 3);
@@ -553,7 +556,7 @@ fn deleting_the_whole_recurring_event_from_a_changed_occurrence_deletes_it_all()
     import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
     let moved = occurrences(&core, "2026-10-26", "2026-10-27").remove(0);
 
-    core.delete_event(moved.event_id).unwrap();
+    core.delete_event(&moved.combined_event_key).unwrap();
 
     assert!(starts(&core, "2026-10-01", "2026-11-30").is_empty());
 }
@@ -604,19 +607,19 @@ fn an_import_update_replaces_a_changed_occurrence_whose_recurrence_id_is_written
     let moved = occurrences(&core, "2026-10-26", "2026-10-27").remove(0);
     // Another form of the same time, as a stored field may have it.
     harness.arrange_local_store(&format!(
-        "UPDATE event SET recurrence_id = '2026-10-26T9:0:0' WHERE id = {}",
-        moved.event_id.0
+        "UPDATE event SET recurrence_id = '2026-10-26T9:0:0' WHERE {}",
+        support::event_row(&moved.combined_event_key)
     ));
     let again = WEEKLY_FROM_A_FILE.replace("Team (moved)", "Team (moved again)");
 
     import(&core, home.id, &again, ExistingEvents::Update);
 
     let now = occurrences(&core, "2026-10-26", "2026-10-27");
+    assert_eq!(now.len(), 1);
+    assert_eq!(now[0].title, "Team (moved again)");
     assert_eq!(
-        now.iter()
-            .map(|occurrence| (occurrence.title.as_str(), occurrence.event_id))
-            .collect::<Vec<_>>(),
-        [("Team (moved again)", moved.event_id)]
+        core.event(&moved.combined_event_key).unwrap(),
+        core.event(&now[0].combined_event_key).unwrap()
     );
     assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
 }
@@ -634,7 +637,7 @@ fn a_custom_rule_from_a_file_keeps_its_weekdays_while_its_frequency_stays() {
          RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,TU;WKST=SU\nEND:VEVENT\n",
         ExistingEvents::Update,
     );
-    let id = occurrences(&core, "2026-10-04", "2026-10-05")[0].event_id;
+    let id = &occurrences(&core, "2026-10-04", "2026-10-05")[0].combined_event_key;
     let event = core.event(id).unwrap();
     assert_eq!(
         event.repeat,
@@ -684,7 +687,10 @@ fn a_rule_freecal_cant_read_leaves_the_event_as_its_first_occurrence() {
 
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].recurrence_id, None);
-    assert_eq!(core.event(found[0].event_id).unwrap().repeat, None);
+    assert_eq!(
+        core.event(&found[0].combined_event_key).unwrap().repeat,
+        None
+    );
 }
 
 #[test]
@@ -774,7 +780,7 @@ mod exceptions_alone {
 
         let when = timed("2026-10-12T13:00:00", "2026-10-12T14:00:00");
         assert_eq!(shown(&core), [("Team (invited)".to_owned(), when, false)]);
-        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let id = &occurrences(&core, "2026-10-12", "2026-10-13")[0].combined_event_key;
         let invited = core.event(id).unwrap();
         // With no Recurring Event to take the zone from, it keeps its own.
         assert_eq!(
@@ -795,7 +801,7 @@ mod exceptions_alone {
         let core = harness.open();
         let home = calendar(&core, "Home");
         import(&core, home.id, INVITATION, ExistingEvents::Update);
-        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let id = &occurrences(&core, "2026-10-12", "2026-10-13")[0].combined_event_key;
 
         import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
 
@@ -831,13 +837,13 @@ mod exceptions_alone {
         let core = harness.open();
         let home = calendar(&core, "Home");
         import(&core, home.id, INVITATION, ExistingEvents::Update);
-        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let id = &occurrences(&core, "2026-10-12", "2026-10-13")[0].combined_event_key;
         import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
         let invited = occurrences(&core, "2026-10-12", "2026-10-13").remove(0);
         let rid = invited.recurrence_id.unwrap();
         assert_eq!(
-            (invited.event_id, rid.as_str()),
-            (id, "2026-10-12T09:00:00")
+            (invited.combined_event_key, rid.as_str()),
+            (id.clone(), "2026-10-12T09:00:00")
         );
 
         let when = timed("2026-10-12T15:00:00", "2026-10-12T16:00:00");
@@ -849,12 +855,12 @@ mod exceptions_alone {
             moved
                 .iter()
                 .map(|occurrence| (
-                    occurrence.event_id,
+                    occurrence.combined_event_key.clone(),
                     occurrence.when,
                     occurrence.recurrence_id.as_deref()
                 ))
                 .collect::<Vec<_>>(),
-            [(id, when, Some(rid.as_str()))]
+            [(id.clone(), when, Some(rid.as_str()))]
         );
         assert_eq!(starts(&core, "2026-10-01", "2026-11-30").len(), 4);
         core.delete_occurrence(id, &rid).unwrap();
@@ -874,7 +880,9 @@ mod exceptions_alone {
             &MOVED.replace("Team (moved)", "Team (invited)"),
             ExistingEvents::Update,
         );
-        let id = occurrences(&core, "2026-10-26", "2026-10-27")[0].event_id;
+        let id = occurrences(&core, "2026-10-26", "2026-10-27")
+            .remove(0)
+            .combined_event_key;
 
         import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
 
@@ -882,7 +890,10 @@ mod exceptions_alone {
         assert_eq!(
             moved
                 .iter()
-                .map(|occurrence| (occurrence.title.as_str(), occurrence.event_id))
+                .map(|occurrence| (
+                    occurrence.title.as_str(),
+                    occurrence.combined_event_key.clone()
+                ))
                 .collect::<Vec<_>>(),
             [("Team (moved)", id)]
         );
@@ -908,7 +919,7 @@ mod exceptions_alone {
             false,
         );
         assert_eq!(shown(&core)[2], invited);
-        let id = occurrences(&core, "2026-10-19", "2026-10-20")[0].event_id;
+        let id = &occurrences(&core, "2026-10-19", "2026-10-20")[0].combined_event_key;
         assert_eq!(core.event(id).unwrap().repeat, None);
         // Another import of the Recurring Event leaves it.
         import(&core, home.id, WEEKLY_FROM_A_FILE, ExistingEvents::Update);
@@ -930,7 +941,7 @@ mod exceptions_alone {
              RECURRENCE-ID;VALUE=DATE:20261006\nDTSTART;VALUE=DATE:20261006\n\
              DTEND;VALUE=DATE:20261007\nEND:VEVENT\n";
         import(&core, home.id, changed, ExistingEvents::Update);
-        let id = occurrences(&core, "2026-10-06", "2026-10-07")[0].event_id;
+        let id = &occurrences(&core, "2026-10-06", "2026-10-07")[0].combined_event_key;
         assert_eq!(
             core.event(id).unwrap().recurrence_id.as_deref(),
             Some("2026-10-06")
@@ -964,7 +975,7 @@ mod exceptions_alone {
             &format!("{INVITATION}{MOVED}"),
             ExistingEvents::Update,
         );
-        let id = occurrences(&core, "2026-10-12", "2026-10-13")[0].event_id;
+        let id = &occurrences(&core, "2026-10-12", "2026-10-13")[0].combined_event_key;
         let file = ImportFile::new(
             "invitation.ics",
             ics(&INVITATION.replace("Team (invited)", "Team (updated)")),
@@ -976,7 +987,7 @@ mod exceptions_alone {
 
         let titles: Vec<_> = occurrences(&core, "2026-10-01", "2026-11-30")
             .into_iter()
-            .map(|occurrence| (occurrence.title, occurrence.event_id == id))
+            .map(|occurrence| (occurrence.title, occurrence.combined_event_key == *id))
             .collect();
         assert_eq!(
             titles,

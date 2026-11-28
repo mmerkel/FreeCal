@@ -94,6 +94,17 @@ export type Changed<T> = { journalTransaction: JournalTransactionId | null, valu
 export type Colour = string;
 
 /**
+ * A Combined Event Key: a Calendar, a UID and a recurrence ID as the Event
+ * Row holds it (ADR 0015), what an Unsent Change is about and how the core
+ * interface names an Event (ADR 0018: its row ID changes with every edit).
+ * The window gets it as one opaque string, branded in TypeScript, and only
+ * compares it whole; the core reads it back untrusted, its UID being server
+ * data, and finds its Event by comparing by Occurrence
+ * ([`crate::event::Opened::load`]).
+ */
+export type CombinedEventKey = string & { readonly __brand: "CombinedEventKey" };
+
+/**
  * Why an undo is a Dangerous Undo, which runs only once the user approved
  * it.
  */
@@ -128,7 +139,7 @@ export type ErrorCode = { "code": "localStoreFailed" } | { "code": "dataDirector
 /**
  * An Event with everything its details and editor show.
  */
-export type Event = { id: EventId, calendarId: CalendarId, title: string, when: When, location: StructuredText, description: StructuredText,
+export type Event = { combinedEventKey: CombinedEventKey, calendarId: CalendarId, title: string, when: When, location: StructuredText, description: StructuredText,
 /**
  * The zone FreeCal gave the Event when it arrived with a time of day but
  * no time zone (ADR 0007), which its details mention.
@@ -177,11 +188,6 @@ description: string,
  * equals an Event's `repeat`, its stored rule is kept as it is.
  */
 repeat: Repeat | null, };
-
-/**
- * Branded in TypeScript, so that it can't be mixed up with other IDs.
- */
-export type EventId = number & { readonly __brand: "EventId" };
 
 /**
  * How many Exceptions with values of their own a change to an Occurrence
@@ -259,7 +265,7 @@ export type ListedJournalEventModification = { journalTransaction: JournalTransa
 /**
  * When its Journal Transaction was made, in Unix seconds.
  */
-madeAt: number, eventId: EventId,
+madeAt: number,
 /**
  * The Event's title as the change left it, or as it was before the
  * change deleted it.
@@ -325,10 +331,10 @@ undoChangedNothing: boolean, };
  */
 export type Occurrence = {
 /**
- * The Event it belongs to: its Recurring Event, or the Exception that
- * changed it.
+ * The key of the Event it belongs to: its Recurring Event, or the
+ * Exception that changed it.
  */
-eventId: EventId, calendarId: CalendarId, title: string, when: When,
+combinedEventKey: CombinedEventKey, calendarId: CalendarId, title: string, when: When,
 /**
  * Which Occurrence of a Recurring Event this is: its original start in
  * the Normal Form (ADR 0012), as text that only the core reads. The
@@ -561,7 +567,7 @@ export type UndoOutcome = { "kind": "undone", skipped: Array<SkippedEvent>, } | 
 /**
  * What an undo picks (new term: Undo Target).
  */
-export type UndoTarget = { "kind": "journalTransaction", id: JournalTransactionId, } | { "kind": "event", journalTransaction: JournalTransactionId, eventId: EventId, } | { "kind": "calendarSince", calendarId: CalendarId, since: number, };
+export type UndoTarget = { "kind": "journalTransaction", id: JournalTransactionId, } | { "kind": "event", journalTransaction: JournalTransactionId, combinedEventKey: CombinedEventKey, } | { "kind": "calendarSince", calendarId: CalendarId, since: number, };
 
 /**
  * The Unsent Change of an Event as the window gets it: since when it
