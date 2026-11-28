@@ -57,3 +57,4 @@ Spec: "Calendar History"; "Sync engine". ADRs 0017 ("Part of the version"), 0019
   - Follow-up: 218, an edited description drops its HTML (122's rule lives only in the patching writer, which 187 deletes).
   - New terms, besides Occurrence Outcome and By Group above: **Grouped** (new term, `Grouped`), the managed fields split by Field Group; **Times** (new term, `Times`), the managed fields of the times group; **Description** (new term, the struct `Description`), the description text with whether it is HTML; **Entry Group** (new term, `entry_group`), the Field Group of one entry of the Unimplemented Fields. "Canonical form" of an Event Version Content is the layout plan's and ADR 0018's; `GLOSSARY.md` avoids it only as a name for the Normal Form.
   - Conformance Breaches: none added or ended by the review.
+- 2026-11-28: The user approved decisions 1 to 6 of the build (decision 6 until 217 replaces it).

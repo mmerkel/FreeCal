@@ -9,7 +9,7 @@ Spec: "Untrusted content"; "Sync engine". ADRs 0017 ("Part of the version"). Lay
 
 **Blocked by:** 186, 187
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Effort:** S
 

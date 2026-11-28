@@ -59,7 +59,7 @@ Tickets that reviews found outside their ticket, with the review that found them
 - 215, every recurrence ID is readable: from the review of 174. Blocked by none. Done.
 - 216, the Store Check reads every Event Version; the writer reads its own text back: from the conformance discussion of 2026-11-28 (`conformance.md`). Blocked by 179; runs after 179 and before 180, out of number order. 186 is blocked by it.
 - 217, an Exception created on both sides is compared with its Occurrence: from the build of 177 (with the user). Blocked by 198.
-- 218, an edited description drops its HTML: from the review of 177. Blocked by 186, 187.
+- 218, an edited description drops its HTML: from the review of 177. Blocked by 186, 187. Ready for an agent.
 
 ## Ticket plan
 
