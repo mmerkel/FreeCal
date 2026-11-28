@@ -583,3 +583,14 @@ fn the_canonical_form_ignores_the_order_of_entries() {
     let other = with(with(event(), title_parameter("calm")), alarm("-PT5M"));
     assert_eq!(one.canonical(), other.canonical());
 }
+
+#[test]
+fn excluded_dates_compare_as_a_set() {
+    let one = excluding("2026-10-13T09:00:00,2026-10-14T09:00:00");
+    let other = excluding(" 2026-10-14T09:00:00,2026-10-13T09:00:00,2026-10-14T09:00:00,");
+    assert_eq!(one.canonical(), other.canonical());
+    assert_ne!(
+        one.canonical(),
+        excluding("2026-10-13T09:00:00").canonical()
+    );
+}

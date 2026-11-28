@@ -33,6 +33,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 
+use crate::event::rule::exdates_of;
 use crate::event::{EventFields, NormalForm, RecurrenceId, StoredWhen};
 use crate::unimplemented::{ICAL, UnimplementedFields};
 
@@ -427,6 +428,14 @@ impl Times {
         let recurrence_id = recurrence_id
             .as_ref()
             .map(|id| id.normal_form(None).into_string());
+        // A set: their order and repeats in the stored text mean nothing.
+        let exdates = exdates_of(
+            exdates
+                .split(',')
+                .map(str::trim)
+                .filter(|exdate| !exdate.is_empty())
+                .map(str::to_owned),
+        );
         json!([
             all_day,
             start,
